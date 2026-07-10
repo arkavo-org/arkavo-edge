@@ -46,7 +46,9 @@ impl From<&ModelPricingEntry> for arkavo_budget::PricingEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("SK-096")]
     #[test]
     fn pricing_entry_parses_glm_rates() {
         let json = r#"{
@@ -65,6 +67,7 @@ mod tests {
         assert_eq!(entry.cache_write_cents_per_mtok, None);
     }
 
+    #[spec("SK-096")]
     #[test]
     fn pricing_entry_cache_fields_optional() {
         // Minimal entry (no cache rates) must parse — cache discount is optional.
@@ -81,6 +84,7 @@ mod tests {
         assert!(!round.contains("cached_input_cents_per_mtok"));
     }
 
+    #[spec("SK-096")]
     #[test]
     fn manifest_entry_converts_to_budget_pricing_entry() {
         // Regression for #635: the manifest→budget conversion is lossless on
@@ -118,6 +122,7 @@ mod tests {
         assert_eq!(pricing_entry.max_output_tokens, None);
     }
 
+    #[spec("SK-096")]
     #[test]
     fn manifest_entry_converts_then_loads_into_provider_pricing() {
         // The full send-side path: manifest entry → PricingEntry → registry,

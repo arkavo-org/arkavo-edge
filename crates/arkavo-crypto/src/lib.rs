@@ -761,6 +761,33 @@ mod tests {
         }
     }
 
+    /// Second test for CRYPTO-007 - P-256 signature is DER-encoded
+    #[spec("CRYPTO-007")]
+    #[test]
+    fn test_p256_signature_is_valid_der() {
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+        let message = b"ios ecdsaSignatureMessageX962SHA256 compatible";
+
+        let signature = keypair.sign(message);
+
+        // DER-encoded ECDSA signatures begin with ASN.1 SEQUENCE marker 0x30
+        assert_eq!(
+            signature[0], 0x30,
+            "signature must start with DER SEQUENCE marker"
+        );
+
+        // DER format is variable-length and longer than the raw 64-byte fixed encoding
+        assert!(
+            signature.len() > 64,
+            "DER P-256 signature should exceed 64 bytes, got {}",
+            signature.len()
+        );
+
+        // The produced signature verifies with the corresponding public key
+        assert!(public_key.verify(message, &signature).is_ok());
+    }
+
     /// Second test for CRYPTO-009: SEC1 encoding consistency
     #[spec("CRYPTO-009")]
     #[test]

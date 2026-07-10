@@ -494,10 +494,10 @@ mod tests {
     #[spec("SRV-009")]
     #[test]
     fn test_parse_lesson_pattern() {
-        let content = r#"{"condition": "sector_4", "action": "slow", "confidence": 0.9, "expected_outcome": "safe"}"#;
+        let content = r#"{"condition": "sector_4", "action": "avoid", "confidence": 0.9, "expected_outcome": "safe"}"#;
         let result = parse_lesson_pattern(content).unwrap();
         assert_eq!(result.0, "sector_4");
-        assert_eq!(result.1, "slow");
+        assert_eq!(result.1, "avoid");
         assert_eq!(result.2, 0.9);
         assert_eq!(result.3, "safe");
     }
@@ -535,11 +535,7 @@ mod tests {
     #[test]
     fn test_parse_lesson_pattern_missing_all_fields() {
         let content = r#"{}"#;
-        let result = parse_lesson_pattern(content).unwrap();
-        assert_eq!(result.0, "unknown");
-        assert_eq!(result.1, "slow");
-        assert_eq!(result.2, 0.5);
-        assert_eq!(result.3, "improved_outcome");
+        assert!(parse_lesson_pattern(content).is_err());
     }
 
     #[spec("SRV-009")]

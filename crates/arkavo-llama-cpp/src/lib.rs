@@ -2341,6 +2341,23 @@ mod tests {
         assert!(glm_config.is_enabled());
     }
 
+    #[spec("LLAMA-007")]
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn test_tool_choice_respected_defaults() {
+        // ToolChoice drives whether the grammar forces, permits, or forbids tool calls.
+        assert_eq!(ToolChoice::Auto as i32, 0);
+        assert_eq!(ToolChoice::Required as i32, 1);
+        assert_eq!(ToolChoice::None as i32, 2);
+        assert_eq!(ToolChoice::default(), ToolChoice::Auto);
+
+        let inputs = ChatInputs::default();
+        assert_eq!(inputs.tool_choice, ToolChoice::Auto);
+        // Default false caps tool calls to one per inference, avoiding runaway batches.
+        assert!(!inputs.parallel_tool_calls);
+        assert!(inputs.tools.is_empty());
+    }
+
     #[spec("LLAMA-002")]
     #[cfg(not(target_env = "musl"))]
     #[test]
@@ -2350,6 +2367,19 @@ mod tests {
         assert_eq!(gpu_status(), GpuStatus::Unavailable);
 
         // Reset should restore to Unknown (allowing retry)
+        reset_gpu_status();
+        assert_eq!(gpu_status(), GpuStatus::Unknown);
+    }
+
+    #[spec("LLAMA-002")]
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn test_gpu_status_available_then_reset() {
+        // After a successful GPU load the status is Available.
+        GPU_STATUS.store(1, Ordering::Relaxed);
+        assert_eq!(gpu_status(), GpuStatus::Available);
+
+        // Reset allows the next model load to rediscover acceleration or fallback.
         reset_gpu_status();
         assert_eq!(gpu_status(), GpuStatus::Unknown);
     }

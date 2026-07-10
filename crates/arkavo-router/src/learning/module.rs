@@ -496,6 +496,7 @@ impl Default for LearningModule {
 mod tests {
     use super::*;
     use crate::learning::AgentContribution;
+    use arkavo_test_macros::spec;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -686,6 +687,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-018")]
     #[tokio::test]
     async fn test_rank_agents_cost_aware_favors_cheaper_equal_quality() {
         let module = LearningModule::new();
@@ -720,6 +722,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-018")]
     #[tokio::test]
     async fn test_rank_agents_cost_aware_quality_dominates_at_zero_sensitivity() {
         let config = LearningConfig {
@@ -763,6 +766,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-018")]
     #[tokio::test]
     async fn test_rank_agents_cost_aware_clamps_out_of_range_sensitivity() {
         // Regression: cost_sensitivity is clamped to [0,1] at the point of use,
@@ -849,6 +853,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-018")]
     #[tokio::test]
     async fn test_rank_agents_cost_aware_cold_start_band() {
         // Regression for the reviewer's hazard: a cheap, under-observed arm must
@@ -908,6 +913,7 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-018")]
     #[tokio::test]
     async fn test_rank_agents_cost_aware_local_not_infinitely_favored() {
         // Pins COST_FLOOR: a low-quality local (free) model must NOT beat a

@@ -723,7 +723,7 @@ mod tests {
         );
     }
 
-    #[spec("ROUTER-001")]
+    #[spec("ROUTER-018")]
     #[tokio::test]
     async fn test_select_adaptive_prefers_cheaper_at_equal_quality() {
         // Isolate the cost signal across two 3.5 Flash tiers with very different

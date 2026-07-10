@@ -22,4 +22,6 @@ tracing = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"

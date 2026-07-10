@@ -273,6 +273,50 @@ mod tests {
     use super::*;
     use crate::PolicyBuilder;
     use arkavo_test_macros::spec;
+    use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+
+    #[spec("TDF-001")]
+    #[tokio::test]
+    async fn tdf_001_encrypt_data_with_policy() {
+        let service = OpenTdfService::with_kas_url("https://kas.example.com");
+        let policy = PolicyBuilder::new()
+            .attribute("https://arkavo.net/attr/role", &["admin"])
+            .build()
+            .unwrap();
+        let plaintext = b"TDF-001 secret payload";
+
+        let manifest = service.encrypt(plaintext, &policy).await.unwrap();
+
+        assert_eq!(
+            manifest.encryption_information.method.algorithm,
+            "AES-256-GCM"
+        );
+        assert!(!manifest.encryption_information.key_access.is_empty());
+
+        let key_access = &manifest.encryption_information.key_access[0];
+        assert_eq!(key_access.access_type, "wrapped");
+        assert_eq!(key_access.protocol, "kas");
+        assert!(!key_access.wrapped_key.is_empty());
+        assert!(!key_access.policy_binding.hash.is_empty());
+        assert_eq!(key_access.policy_binding.alg, "HS256");
+
+        assert_eq!(manifest.payload.payload_type, "inline");
+        assert!(!manifest.payload.value.is_empty());
+        let ciphertext = BASE64
+            .decode(&manifest.payload.value)
+            .expect("payload is base64");
+        assert_ne!(ciphertext, plaintext.to_vec());
+
+        let policy_json = BASE64
+            .decode(&manifest.encryption_information.policy)
+            .expect("policy is base64");
+        let embedded_policy: serde_json::Value =
+            serde_json::from_slice(&policy_json).expect("policy is JSON");
+        let policy_str = embedded_policy.to_string();
+        assert!(policy_str.contains("arkavo.net"));
+        assert!(policy_str.contains("role"));
+        assert!(policy_str.contains("admin"));
+    }
 
     #[spec("TDFS-001")]
     #[tokio::test]

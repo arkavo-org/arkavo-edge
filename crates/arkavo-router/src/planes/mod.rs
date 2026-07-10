@@ -154,6 +154,7 @@ pub fn augment_exclusions_for_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn healthy_stats() -> RuntimeStats {
         RuntimeStats {
@@ -166,6 +167,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-021")]
     #[test]
     fn healthy_runtime_runs_local() {
         assert_eq!(plan_local(&healthy_stats()), LocalPlan::RunLocal);
@@ -202,6 +204,7 @@ mod tests {
         assert_eq!(offer, UpgradeOffer::None);
     }
 
+    #[spec("ROUTER-022")]
     #[test]
     fn collapse_offers_cloud_upgrade() {
         let offer = upgrade_offer(
@@ -225,6 +228,7 @@ mod tests {
         assert_eq!(offer, UpgradeOffer::Offer(CloudSpendReason::UserRequested));
     }
 
+    #[spec("ROUTER-022")]
     #[test]
     fn local_only_never_offers_even_on_collapse() {
         let offer = upgrade_offer(
@@ -268,6 +272,7 @@ mod tests {
 
     // The plane separation in the routing loop: a feasibility/quality re-route
     // excludes all cloud arms unless the policy permits silent cloud.
+    #[spec("ROUTER-021")]
     #[test]
     fn reroute_excludes_cloud_unless_policy_permits() {
         use crate::decision::ModelChoice;

@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use arkavo_budget::provider_costs::PricingEntry;
 use arkavo_protocol::AgentSpecializationBundle;
 use arkavo_protocol::agent_specialization::{
     AgentPersona, ArpDocument, McpToolGrant, RoleContext, unwrap_bundle, wrap_bundle,
@@ -30,6 +31,7 @@ use arkavo_server::server::config_helpers::{AgentMetadata, RoleSpecializationSto
 use arkavo_server::server::handlers::specialization::{BundleDecryptor, handle_agent_specialize};
 use arkavo_tdf::TdfManifest;
 use arkavo_tdf::testing::MockTdfService;
+use arkavo_test_macros::spec;
 use async_trait::async_trait;
 use base64::Engine;
 
@@ -117,6 +119,7 @@ fn no_event_tx() -> Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<Agen
     Arc::new(tokio::sync::Mutex::new(None))
 }
 
+#[spec("SK-071")]
 #[tokio::test]
 async fn bundle_round_trips_orchestrator_to_agent() {
     let did = "did:web:agent-7.arkavo.net";
@@ -184,6 +187,7 @@ async fn bundle_round_trips_orchestrator_to_agent() {
     assert_eq!(stored.kit_id, "kit:demo:0.1.0");
 }
 
+#[spec("SK-072")]
 #[tokio::test]
 async fn bundle_for_other_agent_is_rejected_at_unwrap() {
     let bundle = build_bundle("analyst", "did:web:agent-A.arkavo.net");
@@ -236,6 +240,7 @@ async fn bundle_for_other_agent_is_rejected_at_unwrap() {
 /// bundle on one Iroh node; a *different* node fetches it by ticket and
 /// `unwrap_bundle`s it. This crosses the same boundary the production
 /// IrohBundleShipper + agent.specialize handler cross, minus the A2A hop.
+#[spec("SK-097")]
 #[tokio::test]
 async fn bundle_round_trips_across_two_iroh_nodes() {
     use arkavo_tdf_iroh::{IrohNode, IrohTransport};
@@ -273,4 +278,46 @@ async fn bundle_round_trips_across_two_iroh_nodes() {
 
     node_a.stop().await.ok();
     node_b.stop().await.ok();
+}
+
+#[spec("SK-097")]
+#[tokio::test]
+async fn bundle_manifest_pricing_round_trips_through_tdf() {
+    let did = "did:web:agent-7.arkavo.net";
+    let svc = MockTdfService::default();
+    let mut bundle = build_bundle("analyst", did);
+    bundle.manifest_pricing = vec![
+        PricingEntry {
+            model_id: "gemma-4-9b".into(),
+            provider: "arkavo".into(),
+            input_cents_per_mtok: 50,
+            output_cents_per_mtok: 150,
+            cached_input_cents_per_mtok: None,
+            cache_write_cents_per_mtok: None,
+            context_window: None,
+            max_output_tokens: None,
+        },
+        PricingEntry {
+            model_id: "glm-5.2".into(),
+            provider: "zhipu".into(),
+            input_cents_per_mtok: 140,
+            output_cents_per_mtok: 440,
+            cached_input_cents_per_mtok: Some(26),
+            cache_write_cents_per_mtok: None,
+            context_window: Some(128_000),
+            max_output_tokens: Some(8_192),
+        },
+    ];
+
+    let tdf = wrap_bundle(&bundle, &svc, did).await.expect("wrap");
+    let recovered = unwrap_bundle(&tdf, &svc, did).await.expect("unwrap");
+
+    assert_eq!(recovered.manifest_pricing.len(), 2);
+    assert_eq!(recovered.manifest_pricing[0].model_id, "gemma-4-9b");
+    assert_eq!(recovered.manifest_pricing[0].input_cents_per_mtok, 50);
+    assert_eq!(recovered.manifest_pricing[1].provider, "zhipu");
+    assert_eq!(
+        recovered.manifest_pricing[1].cached_input_cents_per_mtok,
+        Some(26)
+    );
 }

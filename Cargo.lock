@@ -515,6 +515,7 @@ name = "arkavo-agent-auth"
 version = "0.87.0"
 dependencies = [
  "arkavo-crypto",
+ "arkavo-test-macros",
  "base64 0.22.1",
  "chrono",
  "dirs 6.0.0",
@@ -525,6 +526,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]
@@ -615,6 +617,7 @@ name = "arkavo-attestation"
 version = "0.87.0"
 dependencies = [
  "arkavo-device-identity",
+ "arkavo-test-macros",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -624,6 +627,7 @@ dependencies = [
 name = "arkavo-authorization"
 version = "0.87.0"
 dependencies = [
+ "arkavo-test-macros",
  "base64 0.22.1",
  "chrono",
  "lru 0.16.4",
@@ -684,6 +688,7 @@ version = "0.87.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
+ "arkavo-test-macros",
  "async-stream",
  "async-trait",
  "chrono",
@@ -1182,6 +1187,7 @@ dependencies = [
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-qwen",
+ "arkavo-router",
  "arkavo-snpe",
  "arkavo-test-macros",
  "async-trait",
@@ -1365,6 +1371,7 @@ dependencies = [
  "arkavo-llm",
  "arkavo-mcp",
  "arkavo-memory",
+ "arkavo-test-macros",
  "arkavo-validation",
  "async-trait",
  "chrono",
@@ -1394,6 +1401,7 @@ dependencies = [
  "arkavo-observability",
  "arkavo-tdf",
  "arkavo-tdf-iroh",
+ "arkavo-test-macros",
  "arkavo-validation",
  "async-recursion",
  "async-trait",

@@ -1009,6 +1009,109 @@ mod tests {
         assert_eq!(manager.current_session_id(), Some(id_a));
     }
 
+    #[tokio::test]
+    #[spec("CHAT-014")]
+    async fn test_conversation_manager_shares_storage() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager_a = ConversationManager::new(storage.clone()).unwrap();
+        let mut manager_b = ConversationManager::new(storage.clone()).unwrap();
+
+        let session_id = manager_a.start_session("shared-model").await.unwrap();
+        let restored = manager_b.restore_last_session().await.unwrap();
+        assert_eq!(restored, Some(session_id));
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-015")]
+    async fn test_start_session_metadata_persisted() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+
+        let session_id = manager
+            .start_session_with_metadata(
+                "test-model-v2",
+                Some("template-a"),
+                Some("prompt-a"),
+                Some("7B".to_string()),
+            )
+            .await
+            .unwrap();
+
+        let sessions = manager.list_sessions().await.unwrap();
+        let session = sessions
+            .into_iter()
+            .find(|s| s.id == session_id)
+            .expect("session listed");
+        assert_eq!(session.model, "test-model-v2");
+        assert_eq!(
+            session.chat_template_hash,
+            Some(ConversationManager::calculate_hash("template-a"))
+        );
+        assert_eq!(
+            session.system_prompt_hash,
+            Some(ConversationManager::calculate_hash("prompt-a"))
+        );
+        assert_eq!(session.model_size_hint, Some("7B".to_string()));
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-016")]
+    async fn test_restore_last_session_with_no_sessions_returns_none() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+
+        let restored = manager
+            .restore_last_session_with_compatibility(None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(restored, None);
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-017")]
+    async fn test_add_message_without_session_fails() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let manager = ConversationManager::new(storage).unwrap();
+
+        let result = manager.add_message_str("user", "Hello").await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No active conversation session")
+        );
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-018")]
+    async fn test_get_context_messages_respects_token_budget() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+        manager.start_session("test-model").await.unwrap();
+
+        // Seed many long messages that exceed the token budget.
+        for _ in 0..20 {
+            manager
+                .add_message_str("user", &"token ".repeat(200))
+                .await
+                .unwrap();
+        }
+
+        let context = manager
+            .get_context_messages_with_limits(None, None)
+            .await
+            .unwrap();
+        let total_tokens: usize = context
+            .iter()
+            .map(|m| manager.count_tokens(&m.content))
+            .sum();
+        assert!(
+            total_tokens <= MAX_CONTEXT_TOKENS,
+            "context must stay within token budget"
+        );
+    }
+
     #[test]
     fn test_debug_flag() {
         set_debug(true);

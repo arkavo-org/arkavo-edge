@@ -1486,6 +1486,7 @@ mod tests {
     /// back to the static per-model estimate when the arm is absent. Proves
     /// "editing a model rate in the authored config changes the cost the live
     /// budget gate uses."
+    #[spec("BUDGET-010")]
     #[tokio::test]
     async fn projected_cloud_cost_uses_authored_pricing_over_static() {
         use arkavo_budget::provider_costs::{PricingEntry, ProviderPricing};
@@ -1555,6 +1556,7 @@ mod tests {
 
     /// #635: `apply_manifest_pricing` updates the live gate in place on a
     /// shared `&Arc<Router>` (the path the specialization handler uses).
+    #[spec("ROUTER-023")]
     #[tokio::test]
     async fn apply_manifest_pricing_updates_live_gate() {
         use arkavo_budget::provider_costs::{PricingEntry, ProviderPricing};
@@ -1606,6 +1608,76 @@ mod tests {
             after.as_cents(),
             15,
             "after live apply the gate must use the authored 15-cent rate"
+        );
+    }
+
+    /// #635: a populated registry that omits the cloud arm falls back to the
+    /// static estimate with a non-zero cost, and an empty registry falls back
+    /// silently (backward-compatible zero-static path). Exercises ROUTER-023
+    /// from the missing-model/empty-registry angle.
+    #[spec("ROUTER-023")]
+    #[tokio::test]
+    async fn manifest_pricing_missing_model_falls_back_to_static() {
+        use arkavo_budget::provider_costs::{PricingEntry, ProviderPricing};
+
+        let router = Arc::new(match Router::new_offline().await {
+            Ok(r) => r,
+            Err(_) => {
+                eprintln!("Skipping: Router::new_offline requires llama-cpp");
+                return;
+            }
+        });
+        // Use a model whose static estimate is non-zero (ClaudeSonnet) but do
+        // NOT register it in the authored registry. The fallback to static must
+        // still produce the same value as the empty-registry baseline.
+        let decision = RoutingDecision {
+            recommended_model: ModelChoice::ClaudeSonnet,
+            fallback_chain: vec![ModelChoice::ClaudeSonnet],
+            confidence: 0.9,
+            reasoning: String::new(),
+            estimated_cost_usd: 0.0,
+            estimated_time: std::time::Duration::ZERO,
+            task_category: TaskCategory::CodeGeneration,
+            should_compress: false,
+            compression_target: None,
+            use_spec_decoding: false,
+            trace: arkavo_router_learning_default_trace(),
+        };
+
+        let empty_registry_cost = router.projected_cloud_cost(&decision);
+
+        // Populate the registry with a different model so the arm is missing.
+        let mut pricing = ProviderPricing::new();
+        pricing.register(&PricingEntry {
+            model_id: "gemini-flash-latest".to_string(),
+            provider: "google".to_string(),
+            input_cents_per_mtok: 10000,
+            output_cents_per_mtok: 5000,
+            cached_input_cents_per_mtok: None,
+            cache_write_cents_per_mtok: None,
+            context_window: None,
+            max_output_tokens: None,
+        });
+        router.apply_manifest_pricing(pricing);
+
+        let populated_registry_cost = router.projected_cloud_cost(&decision);
+        assert_eq!(
+            empty_registry_cost.as_cents(),
+            populated_registry_cost.as_cents(),
+            "missing model in populated registry must fall back to static estimate"
+        );
+        assert!(
+            populated_registry_cost.as_cents() > 0,
+            "ClaudeSonnet static estimate for CodeGeneration must be non-zero"
+        );
+
+        // Empty registry path: replacing with empty pricing reverts to the same static.
+        router.apply_manifest_pricing(ProviderPricing::new());
+        let reverted_cost = router.projected_cloud_cost(&decision);
+        assert_eq!(
+            reverted_cost.as_cents(),
+            empty_registry_cost.as_cents(),
+            "empty registry must fall back silently to static estimate"
         );
     }
 

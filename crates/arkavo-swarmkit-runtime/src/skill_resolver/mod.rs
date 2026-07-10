@@ -403,6 +403,17 @@ mod tests {
         assert!(resolved.verified);
     }
 
+    #[spec("SK-090")]
+    #[test]
+    fn t1b_optional_mode_accepts_missing_signature() {
+        let content = sample_content();
+        let skill = skill_with_inline_payload(&content, None);
+        let mock = MockPublicKeyResolver::new();
+        let resolved = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Optional, mock)).unwrap();
+        assert_eq!(resolved.content, content);
+        assert!(!resolved.verified);
+    }
+
     #[spec("SK-091")]
     #[test]
     fn t2_tampered_payload_fails_verify() {
@@ -415,6 +426,29 @@ mod tests {
         let mock = MockPublicKeyResolver::new().with_key(did, key.verifying_key());
         let err = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Required, mock)).unwrap_err();
         assert!(matches!(err, ResolveError::SignatureInvalid { .. }));
+    }
+
+    #[spec("SK-091")]
+    #[test]
+    fn t2b_tampered_signer_did_fails_verify() {
+        let (key, did) = deterministic_test_signer();
+        let attacker_key = SigningKey::from_bytes(&[7u8; 32]);
+        let content = sample_content();
+        let signed = sign_skill_content(&content, did, &key);
+        let skill = Skill {
+            signed_by: Some("did:web:attacker.example".into()),
+            ..skill_with_inline_payload(&content, Some(signed))
+        };
+        let mock = MockPublicKeyResolver::new()
+            .with_key(did, key.verifying_key())
+            .with_key("did:web:attacker.example", attacker_key.verifying_key());
+        let err = resolve_skill(&skill, &cfg_with_mock(VerifyMode::Required, mock)).unwrap_err();
+        match err {
+            ResolveError::SignatureInvalid { signer_did, .. } => {
+                assert_eq!(signer_did, "did:web:attacker.example");
+            }
+            other => panic!("expected SignatureInvalid, got {other:?}"),
+        }
     }
 
     #[test]
@@ -515,6 +549,37 @@ mod tests {
         let resolved = resolve_skill(&skill, &cfg).unwrap();
         assert_eq!(resolved.content, content);
         assert!(resolved.verified);
+    }
+
+    #[spec("SK-092")]
+    #[test]
+    fn t8b_registry_cache_miss_reports_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill = Skill {
+            id: "blake3:definitely_missing".into(),
+            version: "0.1.0".into(),
+            source: SkillSource::Registry,
+            payload: None,
+            signature: None,
+            signed_by: None,
+        };
+        let cfg = ResolverConfig {
+            registry_cache: dir.path().to_path_buf(),
+            verify: VerifyMode::Optional,
+            public_key_resolver: Arc::new(MockPublicKeyResolver::new()),
+        };
+        let err = resolve_skill(&skill, &cfg).unwrap_err();
+        match err {
+            ResolveError::RegistryMiss {
+                id,
+                cache_path,
+                version: _,
+            } => {
+                assert_eq!(id, "blake3:definitely_missing");
+                assert_eq!(cache_path, dir.path().join("definitely_missing.skill.json"));
+            }
+            other => panic!("expected RegistryMiss, got {other:?}"),
+        }
     }
 
     #[test]

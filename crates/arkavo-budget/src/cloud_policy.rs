@@ -175,6 +175,7 @@ pub fn authorize_cloud_spend(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn caps(remaining_dollars: f64, per_request_dollars: Option<f64>) -> SpendCaps {
         SpendCaps {
@@ -228,6 +229,7 @@ mod tests {
         assert!(CloudPolicy::CloudWithinCap.permits_silent_cloud());
     }
 
+    #[spec("BUDGET-011")]
     #[test]
     fn local_only_always_denies_even_when_confirmed_and_within_budget() {
         let decision =
@@ -253,6 +255,7 @@ mod tests {
         );
     }
 
+    #[spec("BUDGET-011")]
     #[test]
     fn ask_before_cloud_authorizes_once_confirmed() {
         let decision = authorize_cloud_spend(

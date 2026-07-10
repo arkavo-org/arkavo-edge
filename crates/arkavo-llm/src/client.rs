@@ -219,3 +219,131 @@ impl LlmClient {
         self.stream(vec![message]).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ChatRequest, Error, Message, Provider, Result, StreamResponse};
+    use arkavo_test_macros::spec;
+    use async_trait::async_trait;
+    use futures::StreamExt;
+    use std::sync::Mutex;
+    use tokio_stream::Stream;
+
+    struct MockProvider {
+        response: String,
+        stream_chunks: Mutex<Option<Vec<Result<StreamResponse>>>>,
+    }
+
+    impl MockProvider {
+        fn new(response: impl Into<String>) -> Self {
+            Self {
+                response: response.into(),
+                stream_chunks: Mutex::new(None),
+            }
+        }
+
+        fn with_stream(stream_chunks: Vec<Result<StreamResponse>>) -> Self {
+            Self {
+                response: String::new(),
+                stream_chunks: Mutex::new(Some(stream_chunks)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Provider for MockProvider {
+        async fn complete_with_options(
+            &self,
+            _messages: Vec<Message>,
+            _max_tokens: Option<usize>,
+        ) -> Result<String> {
+            Ok(self.response.clone())
+        }
+
+        async fn stream(
+            &self,
+            _messages: Vec<Message>,
+        ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
+            let chunks = self
+                .stream_chunks
+                .lock()
+                .expect("mock stream mutex poisoned")
+                .take()
+                .unwrap_or_default();
+            Ok(Box::new(tokio_stream::iter(chunks)))
+        }
+
+        fn name(&self) -> &str {
+            "mock"
+        }
+    }
+
+    #[spec("LLM-001")]
+    #[tokio::test]
+    async fn chat_sends_request_to_provider_and_returns_response() {
+        let provider = MockProvider::new("Hello from mock provider");
+        let client = LlmClient::new(Box::new(provider));
+        let request = ChatRequest::new("Say hello");
+
+        let response = client.chat(request).await.expect("chat should succeed");
+
+        assert_eq!(response, "Hello from mock provider");
+    }
+
+    #[spec("LLM-002")]
+    #[tokio::test]
+    async fn chat_stream_receives_deltas_and_handles_errors() {
+        let chunks = vec![
+            Ok(StreamResponse {
+                content: "Hel".to_string(),
+                reasoning_content: None,
+                done: false,
+                inference_timing: None,
+            }),
+            Err(Error::Stream("mid-stream failure".to_string())),
+            Ok(StreamResponse {
+                content: "lo".to_string(),
+                reasoning_content: None,
+                done: false,
+                inference_timing: None,
+            }),
+            Ok(StreamResponse {
+                content: String::new(),
+                reasoning_content: None,
+                done: true,
+                inference_timing: None,
+            }),
+        ];
+        let provider = MockProvider::with_stream(chunks);
+        let client = LlmClient::new(Box::new(provider));
+        let request = ChatRequest::new("Stream hello");
+
+        let mut stream = client
+            .chat_stream(request)
+            .await
+            .expect("chat_stream should return a stream");
+
+        let mut content = String::new();
+        let mut error_seen = false;
+        let mut done_seen = false;
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(response) => {
+                    content.push_str(&response.content);
+                    if response.done {
+                        done_seen = true;
+                    }
+                }
+                Err(err) => {
+                    assert!(matches!(err, Error::Stream(_)));
+                    error_seen = true;
+                }
+            }
+        }
+
+        assert_eq!(content, "Hello");
+        assert!(error_seen, "stream should propagate a mid-stream error");
+        assert!(done_seen, "stream should end with a done response");
+    }
+}

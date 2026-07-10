@@ -267,4 +267,42 @@ mod tests {
         let result = evaluator.evaluate(&entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Permit);
     }
+
+    #[spec("TDF-004")]
+    #[test]
+    fn tdf_004_abac_evaluation_permit_and_deny() {
+        let evaluator = AbacEvaluator::new();
+        let policy = Policy {
+            id: Some("tdf-004-policy".to_string()),
+            attributes: vec![
+                Attribute::new("https://arkavo.net/attr/role", &["admin"]),
+                Attribute::new("https://arkavo.net/attr/clearance", &["secret"]),
+            ],
+            dissemination: vec![],
+        };
+
+        let entitlements = vec![
+            "https://arkavo.net/attr/role/value/admin".to_string(),
+            "https://arkavo.net/attr/clearance/value/secret".to_string(),
+        ];
+        assert_eq!(
+            evaluator.evaluate(&entitlements, &policy).unwrap(),
+            Decision::Permit
+        );
+
+        let entitlements = vec!["https://arkavo.net/attr/role/value/admin".to_string()];
+        assert_eq!(
+            evaluator.evaluate(&entitlements, &policy).unwrap(),
+            Decision::Deny
+        );
+
+        let entitlements = vec![
+            "https://arkavo.net/attr/role/value/user".to_string(),
+            "https://arkavo.net/attr/clearance/value/secret".to_string(),
+        ];
+        assert_eq!(
+            evaluator.evaluate(&entitlements, &policy).unwrap(),
+            Decision::Deny
+        );
+    }
 }

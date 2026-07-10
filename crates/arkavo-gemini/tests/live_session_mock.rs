@@ -219,3 +219,70 @@ async fn live_ignores_empty_tool_call() {
 
     server.await.unwrap();
 }
+
+#[spec("GEM-004")]
+#[tokio::test]
+async fn live_handshake_honors_setup_config() {
+    let (port, server) = start_mock_ws(|mut ws| async move {
+        let setup = ws.next().await.unwrap().unwrap();
+        let setup_text = setup.to_text().unwrap();
+        let setup_value: Value = serde_json::from_str(setup_text).unwrap();
+
+        assert!(
+            setup_value.get("setup").is_some(),
+            "first client message must be the setup frame"
+        );
+        assert_eq!(
+            setup_value["setup"]["model"],
+            "models/gemini-2.5-flash-native-audio-latest"
+        );
+        assert_eq!(
+            setup_value["setup"]["generationConfig"]["responseModalities"][0],
+            "TEXT"
+        );
+        assert!(
+            setup_value["setup"].get("tools").is_none(),
+            "setup frame must omit tools when none are registered"
+        );
+
+        ws.send(Message::Text(r#"{"setupComplete":{}}"#.to_string()))
+            .await
+            .unwrap();
+
+        // Drain until the client closes the socket.
+        while let Some(Ok(msg)) = ws.next().await {
+            if msg.is_close() {
+                break;
+            }
+        }
+    })
+    .await;
+
+    let client = LiveSessionClient::new_with_tools(
+        "test_api_key",
+        "gemini-2.5-flash-native-audio-latest",
+        vec![],
+    )
+    .with_modality(LiveModality::Text)
+    .with_endpoint_url(format!("ws://127.0.0.1:{port}/ws"));
+
+    timeout(Duration::from_secs(5), client.connect())
+        .await
+        .expect("connect timed out")
+        .expect("connect failed");
+    assert!(
+        client.is_connected(),
+        "client must be connected after successful handshake"
+    );
+
+    timeout(Duration::from_secs(5), client.close())
+        .await
+        .expect("close timed out")
+        .expect("close failed");
+    assert!(
+        !client.is_connected(),
+        "client must be disconnected after close"
+    );
+
+    server.await.unwrap();
+}

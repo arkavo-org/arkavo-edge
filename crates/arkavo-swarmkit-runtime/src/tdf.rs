@@ -602,6 +602,24 @@ provenance:
         );
     }
 
+    #[spec("SK-051")]
+    #[tokio::test]
+    async fn unwrap_rejects_non_utf8_plaintext() {
+        // Replace the ciphertext with bytes that XOR-decrypt to invalid UTF-8.
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0x22);
+        let pol = policy();
+
+        let mut tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+        // Encrypted bytes are base64(XOR(plaintext, 0x22)). Build a payload
+        // whose decoded bytes are all 0xFF — XOR with 0x22 yields 0xDD,
+        // which is never valid UTF-8 when repeated.
+        tdf.payload.value = B64.encode(vec![0xDDu8; 64]);
+
+        let err = unwrap_manifest(&tdf, &svc).await.unwrap_err();
+        assert!(matches!(err, TdfEnvelopeError::Utf8(_)));
+    }
+
     #[spec("SK-052")]
     #[test]
     fn orchestrator_policy_has_required_attributes() {
@@ -837,6 +855,31 @@ provenance:
         assert_eq!(manifest, recovered);
     }
 
+    #[spec("SK-059")]
+    #[tokio::test]
+    async fn unwrap_manifest_kas_gated_requires_all_attributes() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0xD4);
+        let pol =
+            swarmkit_orchestrator_policy(Some("internal"), Some("did:web:orchestrator.arkavo.net"))
+                .unwrap();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let kas = MockKasClient::new();
+        let recovered = unwrap_manifest_kas_gated(
+            &tdf,
+            &svc,
+            &kas,
+            &[
+                "https://attr.arkavo.com/role",
+                "https://attr.arkavo.com/clearance",
+            ],
+        )
+        .await
+        .expect("both required attributes present");
+        assert_eq!(manifest, recovered);
+    }
+
     #[spec("SK-060")]
     #[tokio::test]
     async fn unwrap_manifest_kas_gated_fails_fast_when_kas_unhealthy() {
@@ -889,6 +932,22 @@ provenance:
         assert_eq!(a, b);
     }
 
+    #[spec("SK-055")]
+    #[tokio::test]
+    async fn write_kit_tdf_produces_valid_json_with_top_level_keys() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0x34);
+        let pol = policy();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let mut buf: Vec<u8> = Vec::new();
+        write_kit_tdf(&tdf, &mut buf).expect("write");
+        let value: serde_json::Value = serde_json::from_slice(&buf).expect("valid JSON");
+        assert!(value.get("payload").is_some());
+        assert!(value.get("encryptionInformation").is_some());
+        assert!(value["payload"]["value"].as_str().is_some());
+    }
+
     #[spec("SK-056")]
     #[tokio::test]
     async fn wrap_unwrap_via_path_round_trips_manifest() {
@@ -907,6 +966,29 @@ provenance:
             .expect("unwrap from path");
 
         assert_eq!(manifest, recovered);
+    }
+
+    #[spec("SK-056")]
+    #[tokio::test]
+    async fn wrap_to_path_can_be_read_back_as_tdf_manifest() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0x78);
+        let pol = policy();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kit.swarmkit.tdf");
+
+        wrap_manifest_to_path(&manifest, &svc, &pol, &path)
+            .await
+            .expect("wrap to path");
+        assert!(path.exists());
+
+        // Read the file directly as a TdfManifest (not unwrapping), then
+        // compare serde values with the wrapped manifest.
+        let from_file = read_kit_tdf_from_path(&path).expect("read TdfManifest from path");
+        let a = serde_json::to_value(&wrap_manifest(&manifest, &svc, &pol).await.unwrap()).unwrap();
+        let b = serde_json::to_value(&from_file).unwrap();
+        assert_eq!(a, b);
     }
 
     #[spec("SK-057")]

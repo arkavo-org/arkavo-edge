@@ -71,6 +71,9 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 arkavo-gossip = { path = "../arkavo-gossip" }
 # Used only by the gated GLM cost e2e to reconcile real usage -> cost -> budget.
 arkavo-budget = { path = "../arkavo-budget" }
+# Used only by the gated co-resident harness to drive each model with the
+# canonical per-model tuning (ModelChoice) and classification primitives.
+arkavo-router = { path = "../arkavo-router" }
 
 [[bench]]
 name = "concurrent_inference_benchmark"

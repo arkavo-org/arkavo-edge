@@ -423,6 +423,24 @@ mod tests {
         ));
     }
 
+    #[spec("SK-002")]
+    #[test]
+    fn budget_wallclock_overflow_caught() {
+        let mut m = minimal_manifest();
+        m.roles[0].agent_provisioning.budget = Some(Budget {
+            max_wallclock_ms: Some(120_000),
+            ..Default::default()
+        });
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::BudgetExceedsGlobal {
+                field: "max_wallclock_ms",
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn network_egress_denied() {
         let mut m = minimal_manifest();
@@ -493,6 +511,37 @@ mod tests {
             err,
             ValidationError::RubricWeightsDoNotSumToOne { .. }
         ));
+    }
+
+    #[spec("SK-005")]
+    #[test]
+    fn rubric_weights_exactly_one_accepted() {
+        let mut m = minimal_manifest();
+        m.evaluation = Some(EvaluationSpec {
+            rubric: EvaluationRubric {
+                reference: None,
+                dimensions: vec![
+                    EvaluationDimension {
+                        name: "precision".into(),
+                        weight: 0.333_333,
+                        threshold: 0.5,
+                    },
+                    EvaluationDimension {
+                        name: "recall".into(),
+                        weight: 0.333_333,
+                        threshold: 0.5,
+                    },
+                    EvaluationDimension {
+                        name: "f1".into(),
+                        weight: 0.333_334,
+                        threshold: 0.5,
+                    },
+                ],
+            },
+            critic_role: "r1".into(),
+            sample_size: None,
+        });
+        validate(&m).expect("weights within 1e-6 of 1.0 should validate");
     }
 
     #[spec("SK-004")]

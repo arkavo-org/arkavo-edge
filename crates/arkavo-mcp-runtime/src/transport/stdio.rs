@@ -17,6 +17,7 @@ pub struct StdioTransport {
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
     request_id: AtomicU64,
     connected: AtomicBool,
+    timeout: std::time::Duration,
 }
 
 impl StdioTransport {
@@ -66,6 +67,7 @@ impl StdioTransport {
             pending: pending.clone(),
             request_id: AtomicU64::new(1),
             connected,
+            timeout: std::time::Duration::from_secs(30),
         };
 
         // Spawn reader task
@@ -134,7 +136,7 @@ impl Transport for StdioTransport {
         }
 
         // Wait for response with timeout
-        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+        match tokio::time::timeout(self.timeout, rx).await {
             Ok(Ok(response)) => {
                 if let Some(error) = response.get("error") {
                     Err(TransportError::ProtocolError(error.to_string()))
@@ -193,5 +195,47 @@ impl Transport for StdioTransport {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+impl StdioTransport {
+    /// Override the request timeout for tests.
+    pub fn set_timeout(&mut self, timeout: std::time::Duration) {
+        self.timeout = timeout;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::disallowed_methods)]
+
+    use super::*;
+    use arkavo_test_macros::spec;
+    use std::time::Duration;
+
+    #[spec("MCPR-003")]
+    #[tokio::test]
+    #[cfg(unix)] // relies on the `sleep` command to simulate a hung server
+    async fn send_request_returns_timeout_when_server_hangs() {
+        let mut transport = StdioTransport::new(
+            "sleep".to_string(),
+            vec!["100".to_string()],
+            None,
+            HashMap::new(),
+        )
+        .await
+        .expect("failed to spawn sleep stub");
+
+        transport.set_timeout(Duration::from_millis(50));
+
+        let result = transport.send_request("tools/call", Some(json!({}))).await;
+
+        assert!(
+            matches!(result, Err(TransportError::Timeout)),
+            "expected timeout error, got {result:?}"
+        );
+
+        transport.close().await.unwrap();
     }
 }
