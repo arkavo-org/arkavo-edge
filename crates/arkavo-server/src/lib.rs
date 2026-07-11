@@ -11,6 +11,7 @@
 pub mod server;
 pub mod spend_plane;
 
+#[allow(deprecated)]
 pub use spend_plane::{
     cloud_policy_from_agents_md, cloud_policy_from_config, cloud_policy_from_kit,
 };
