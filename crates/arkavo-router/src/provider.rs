@@ -45,12 +45,18 @@ impl super::Router {
     }
 
     /// Get a Gemini provider for complex planning/thinking tasks
+    #[cfg(feature = "gemini")]
     pub fn get_planning_provider(&self) -> Option<arkavo_llm::GeminiProvider> {
         arkavo_llm::GeminiProvider::new().ok()
     }
 
+    #[cfg(not(feature = "gemini"))]
+    pub fn get_planning_provider(&self) -> Option<()> {
+        None
+    }
+
     pub fn is_gemini_available(&self) -> bool {
-        std::env::var("GEMINI_API_KEY").is_ok()
+        cfg!(feature = "gemini") && std::env::var("GEMINI_API_KEY").is_ok()
     }
 
     pub fn is_anthropic_available(&self) -> bool {

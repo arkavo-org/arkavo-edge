@@ -73,7 +73,8 @@ arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-budget = { path = "../arkavo-budget" }
 # Used only by the gated co-resident harness to drive each model with the
 # canonical per-model tuning (ModelChoice) and classification primitives.
-arkavo-router = { path = "../arkavo-router" }
+# default-features off so feature-isolated CI (kimi) does not need vendor/llama.cpp.
+arkavo-router = { path = "../arkavo-router", default-features = false }
 
 [[bench]]
 name = "concurrent_inference_benchmark"

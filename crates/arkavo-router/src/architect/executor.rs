@@ -247,14 +247,23 @@ impl ArchitectExecutor {
                     })
             }
             ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash | ModelChoice::GeminiPro => {
-                arkavo_llm::GeminiProvider::new()
-                    .map(|p| Box::new(p) as Box<dyn Provider>)
-                    .map_err(|e| {
-                        Error::ModelExecution(format!("Failed to create Gemini provider: {e}"))
-                    })
+                #[cfg(feature = "gemini")]
+                {
+                    arkavo_llm::GeminiProvider::new()
+                        .map(|p| Box::new(p) as Box<dyn Provider>)
+                        .map_err(|e| {
+                            Error::ModelExecution(format!("Failed to create Gemini provider: {e}"))
+                        })
+                }
+                #[cfg(not(feature = "gemini"))]
+                {
+                    Err(Error::ModelExecution(
+                        "Gemini feature not enabled".to_string(),
+                    ))
+                }
             }
             _ => {
-                // For local models, use Gemini as fallback if available
+                #[cfg(feature = "gemini")]
                 if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
                     return Ok(Box::new(provider));
                 }
