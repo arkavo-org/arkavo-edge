@@ -6,6 +6,7 @@
 
 # Generated reports
 docs/traceability.html
+traceability.json
 
 # IDE files
 .idea/
