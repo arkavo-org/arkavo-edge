@@ -681,7 +681,6 @@ impl A2aRpcServer for A2aRpcImpl {
         request: AgentConfigUpdateRequest,
     ) -> RpcResult<AgentConfigUpdateResponse> {
         let agent_metadata = self.agent_metadata.clone();
-        let has_llm_adapter = self.llm_adapter.is_some();
         let mcp_registry = self.mcp_registry.clone();
 
         handlers::config::handle_config_update(
@@ -689,13 +688,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.rate_limiter,
             request,
             |content| async move {
-                handlers::config::reload_configuration(
-                    &content,
-                    &agent_metadata,
-                    has_llm_adapter,
-                    &mcp_registry,
-                )
-                .await
+                config_helpers::apply_kit_reload(&content, &agent_metadata, &mcp_registry).await
             },
         )
         .await

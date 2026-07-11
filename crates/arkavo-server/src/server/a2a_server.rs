@@ -282,74 +282,6 @@ impl A2aServer {
         metadata.api_keys = api_keys;
     }
 
-    #[allow(dead_code)]
-    async fn reload_configuration_from_content(&self, content: &str) -> Result<()> {
-        use arkavo_protocol::agent_config::parse_agents_config;
-
-        let configs = parse_agents_config(content)
-            .map_err(|e| A2aError::Configuration(format!("Failed to parse config: {e}")))?;
-
-        let current_name = {
-            let metadata = self.agent_metadata.read().await;
-            metadata.name.clone()
-        };
-
-        let new_config = configs
-            .iter()
-            .find(|c| c.name == current_name)
-            .ok_or_else(|| {
-                A2aError::Configuration(format!(
-                    "Agent '{current_name}' not found in updated configuration"
-                ))
-            })?;
-
-        info!(
-            "Updating agent metadata: name={}, purpose={}, model={}",
-            new_config.name, new_config.purpose, new_config.model
-        );
-
-        let (model_changed, existing_did) = {
-            let metadata = self.agent_metadata.read().await;
-            (metadata.model != new_config.model, metadata.did.clone())
-        };
-
-        self.set_agent_metadata(
-            new_config.name.clone(),
-            new_config.purpose.clone(),
-            new_config.model.clone(),
-            new_config.mode.clone(),
-            existing_did,
-        )
-        .await;
-
-        if !new_config.api_keys.is_empty() {
-            info!("Updating API keys");
-            self.set_api_keys(new_config.api_keys.clone()).await;
-        }
-
-        if model_changed {
-            info!("Model changed, LLM adapter recreated");
-        }
-
-        if !new_config.mcp_servers.is_empty() {
-            warn!(
-                "MCP server configuration changes detected. Full hot-reload for MCP servers will be implemented in Phase 3."
-            );
-            warn!("For now, MCP server changes require agent restart to take effect.");
-        }
-
-        let current_listen = format!("{}:{}", self.config.bind_address, self.config.port);
-        if new_config.listen != current_listen && new_config.listen != "0.0.0.0:0" {
-            warn!(
-                "Listen address changes require agent restart to take effect (current: {}, new: {})",
-                current_listen, new_config.listen
-            );
-        }
-
-        info!("Configuration reloaded successfully");
-        Ok(())
-    }
-
     pub async fn initialize_event_writer(&self) -> Result<()> {
         use arkavo_events::writer::EventWriterBuilder;
         use std::time::Duration;
@@ -770,12 +702,8 @@ impl A2aServer {
 
         self.stop_file_watcher().await;
 
-        let config_path = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
-            std::path::Path::new(".arkavo/AGENTS.md")
-        } else if std::path::Path::new("AGENTS.md").exists() {
-            std::path::Path::new("AGENTS.md")
-        } else {
-            info!("AGENTS.md not found, skipping file watcher setup");
+        let Some(config_path) = super::config_helpers::resolve_kit_path() else {
+            info!("No SwarmKit kit found, skipping file watcher setup");
             return Ok(());
         };
 
@@ -784,13 +712,14 @@ impl A2aServer {
             .map_err(|e| A2aError::Internal(format!("Failed to create file watcher: {e}")))?;
 
         watcher
-            .watch(config_path, RecursiveMode::NonRecursive)
-            .map_err(|e| A2aError::Internal(format!("Failed to watch AGENTS.md: {e}")))?;
+            .watch(&config_path, RecursiveMode::NonRecursive)
+            .map_err(|e| A2aError::Internal(format!("Failed to watch kit file: {e}")))?;
 
         info!("File watcher started for {:?}", config_path);
 
         let agent_metadata = self.agent_metadata.clone();
         let mcp_registry = self.mcp_registry.clone();
+        let watch_path = config_path.clone();
 
         let handle = tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Handle::current();
@@ -803,21 +732,15 @@ impl A2aServer {
                         kind: EventKind::Modify(_),
                         ..
                     })) if last_reload.elapsed() > Duration::from_secs(1) => {
-                        info!("AGENTS.md modified, triggering hot-reload");
+                        info!("Kit file modified, triggering hot-reload");
 
                         let agent_metadata_clone = agent_metadata.clone();
                         let mcp_registry_clone = mcp_registry.clone();
+                        let path_clone = watch_path.clone();
 
                         #[allow(clippy::disallowed_methods)]
                         rt.block_on(async move {
-                            let config_content =
-                                if std::path::Path::new(".arkavo/AGENTS.md").exists() {
-                                    tokio::fs::read_to_string(".arkavo/AGENTS.md").await
-                                } else {
-                                    tokio::fs::read_to_string("AGENTS.md").await
-                                };
-
-                            match config_content {
+                            match tokio::fs::read_to_string(&path_clone).await {
                                 Ok(content) => {
                                     match reload_configuration_for_watcher(
                                         &content,
@@ -839,7 +762,7 @@ impl A2aServer {
                                         }
                                     }
                                 }
-                                Err(e) => error!("Failed to read AGENTS.md for hot-reload: {}", e),
+                                Err(e) => error!("Failed to read kit file for hot-reload: {}", e),
                             }
                         });
                         last_reload = std::time::Instant::now();

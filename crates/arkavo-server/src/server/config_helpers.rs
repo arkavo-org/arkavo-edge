@@ -1,7 +1,7 @@
-use arkavo_protocol::agent_config::parse_agents_config;
 use arkavo_protocol::agent_specialization::RoleContext;
 use arkavo_protocol::error::{A2aError, Result};
 use arkavo_protocol::mcp_registry::McpRegistry;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
@@ -66,150 +66,88 @@ pub struct AgentMetadata {
     pub manifest_pricing: Vec<arkavo_budget::provider_costs::PricingEntry>,
 }
 
-/// Simple agent configuration structure for validation
-#[derive(Debug)]
-struct SimpleAgentConfig {
-    #[allow(dead_code)]
-    name: String,
-    purpose: String,
-    model: String,
-    #[allow(dead_code)]
-    listen: String,
+/// Default location for a newly created kit file when the server starts
+/// with no kit configured yet. Mirrors the historical default write
+/// location of `.arkavo/AGENTS.md`.
+pub(super) const DEFAULT_KIT_PATH: &str = ".arkavo/agent.swarmkit.yaml";
+
+/// Resolve the server's SwarmKit kit file path using the same discovery
+/// order the boot path uses (`arkavo_router::load_agent_config` →
+/// `arkavo_swarmkit::load_discovered_kit`): `ARKAVO_SWARMKIT_PATH`, then
+/// `.arkavo/*.swarmkit.yaml`, then cwd. Returns `None` when no kit exists
+/// yet (fresh install), or discovery is ambiguous/unsupported (multiple
+/// kits, AGENTS.md-only) — callers decide the missing-kit policy (`get`
+/// errors, `update` creates at [`DEFAULT_KIT_PATH`]).
+pub(super) fn resolve_kit_path() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    resolve_kit_path_in(&cwd)
 }
 
-/// Validate agent configuration content
-pub(super) fn validate_agent_config(content: &str) -> std::result::Result<(), String> {
-    match parse_simple_agents_config(content) {
-        Ok(agents) if agents.is_empty() => Err("No agent configurations found".to_string()),
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("Parse error: {e}")),
-    }
+/// [`resolve_kit_path`] with an explicit working directory, so callers
+/// (tests included) don't depend on the process's current directory.
+pub(super) fn resolve_kit_path_in(cwd: &Path) -> Option<PathBuf> {
+    arkavo_swarmkit::discover_kit_path(cwd).ok()
 }
 
-/// Basic parser for agent configuration validation
-fn parse_simple_agents_config(
+/// Basename of a resolved kit path, used as the backup-file naming prefix
+/// (`<kit_filename>.<timestamp>.backup`).
+pub(super) fn kit_filename_of(kit_path: &Path) -> String {
+    kit_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "kit".to_string())
+}
+
+/// Validate configuration content as a SwarmKit kit manifest.
+pub(super) fn validate_kit_yaml(content: &str) -> std::result::Result<(), String> {
+    arkavo_swarmkit::parse_yaml(content)
+        .map(|_| ())
+        .map_err(|e| format!("Kit parse error: {e}"))
+}
+
+/// Update [`AgentMetadata`] from a SwarmKit kit's primary role, then handle
+/// the kit-level MCP server list the same way the legacy AGENTS.md reload
+/// did (clear stale connections, log servers needing a restart).
+///
+/// Shared by the `agent.config.update` RPC path and the kit file watcher —
+/// both hot-reload the same file, just from different triggers. Does not
+/// touch the filesystem: callers supply already-read file content.
+pub(super) async fn apply_kit_reload(
     content: &str,
-) -> std::result::Result<Vec<SimpleAgentConfig>, String> {
-    let mut agents = Vec::new();
-    let mut current_agent: Option<SimpleAgentConfig> = None;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Check for agent section header
-        if trimmed.starts_with("## ") {
-            // Save previous agent if exists
-            if let Some(agent) = current_agent.take() {
-                agents.push(agent);
-            }
-
-            let name = trimmed.strip_prefix("## ").unwrap_or("").trim().to_string();
-            current_agent = Some(SimpleAgentConfig {
-                name,
-                purpose: String::new(),
-                model: String::new(),
-                listen: String::new(),
-            });
-        } else if let Some(ref mut agent) = current_agent {
-            // Parse agent properties
-            if let Some((key, value)) = trimmed.split_once(':') {
-                let key = key.trim();
-                let value = value.trim();
-
-                match key {
-                    "purpose" => agent.purpose = value.to_string(),
-                    "model" => agent.model = value.to_string(),
-                    "listen" => agent.listen = value.to_string(),
-                    _ => {} // Ignore other fields
-                }
-            }
-        }
-    }
-
-    // Save last agent if exists
-    if let Some(agent) = current_agent {
-        agents.push(agent);
-    }
-
-    Ok(agents)
-}
-
-/// Reload configuration from file watcher
-pub(super) async fn reload_configuration_for_watcher(
-    content: &str,
-    agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
-    mcp_registry: Arc<McpRegistry>,
+    agent_metadata: &Arc<RwLock<AgentMetadata>>,
+    mcp_registry: &McpRegistry,
 ) -> Result<()> {
-    // Validate configuration before applying
     if content.trim().is_empty() {
+        return Err(A2aError::Configuration("Kit file is empty".to_string()));
+    }
+
+    let manifest = arkavo_swarmkit::parse_yaml(content)
+        .map_err(|e| A2aError::Configuration(format!("Failed to parse kit: {e}")))?;
+    let runtime_config = arkavo_swarmkit::agent_runtime_config_from_manifest(&manifest);
+
+    if runtime_config.objective_goal.trim().is_empty() {
         return Err(A2aError::Configuration(
-            "Configuration file is empty".to_string(),
+            "Kit objective.goal cannot be empty".to_string(),
         ));
     }
 
-    // Parse the new configuration
-    let agents = parse_agents_config(content)
-        .map_err(|e| A2aError::Configuration(format!("Failed to parse configuration: {e}")))?;
-
-    if agents.is_empty() {
-        return Err(A2aError::Configuration(
-            "No agent configurations found".to_string(),
-        ));
-    }
-
-    // Find our agent's configuration
-    let our_agent_name = agent_metadata.read().await.name.clone();
-
-    let new_config = agents
-        .iter()
-        .find(|a| a.name == our_agent_name)
-        .ok_or_else(|| {
-            A2aError::Configuration(format!(
-                "Agent '{our_agent_name}' not found in new configuration"
-            ))
-        })?;
-
-    // Validate required fields
-    if new_config.purpose.is_empty() {
-        return Err(A2aError::Configuration(
-            "Agent purpose cannot be empty".to_string(),
-        ));
-    }
-    if new_config.model.is_empty() {
-        return Err(A2aError::Configuration(
-            "Agent model cannot be empty".to_string(),
-        ));
-    }
-
-    // Update metadata
     {
         let mut metadata = agent_metadata.write().await;
-        metadata.purpose.clone_from(&new_config.purpose);
-        metadata.endpoint.clone_from(&new_config.listen);
-        metadata.api_keys.clone_from(&new_config.api_keys);
+        metadata.purpose = runtime_config.purpose_text();
+        if let Some(listen) = &runtime_config.runtime.listen {
+            metadata.endpoint.clone_from(listen);
+        }
 
         info!("Updated agent metadata for '{}'", metadata.name);
         info!("  Purpose: {}", metadata.purpose);
         info!("  Endpoint: {}", metadata.endpoint);
-        info!("  API keys updated: {}", metadata.api_keys.len());
     }
 
-    // Handle model changes
-    if new_config.model != agent_metadata.read().await.model {
-        warn!("Model change detected, but LLM adapter recreation not yet implemented");
-        let mut metadata = agent_metadata.write().await;
-        metadata.model.clone_from(&new_config.model);
-    }
-
-    // Handle MCP server changes
-    if !new_config.mcp_servers.is_empty() {
+    if !runtime_config.runtime.mcp_servers.is_empty() {
         info!("MCP server configuration changed, clearing existing connections");
-
-        // Clear existing MCP connections
         mcp_registry.clear_connections().await;
 
-        // Log the MCP servers that need to be restarted
-        for mcp_server in &new_config.mcp_servers {
+        for mcp_server in &runtime_config.runtime.mcp_servers {
             info!("MCP server '{}' needs restart:", mcp_server.name);
             if let Some(cmd) = &mcp_server.command {
                 info!("  Command: {} {:?}", cmd, mcp_server.args);
@@ -218,25 +156,38 @@ pub(super) async fn reload_configuration_for_watcher(
             }
         }
 
-        warn!(
-            "MCP servers cleared. Manual restart required or use agent restart for full MCP reload"
-        );
+        warn!("MCP servers cleared. Manual restart required for full MCP reload");
     }
 
+    info!("Kit hot-reload completed successfully");
     Ok(())
 }
 
-/// Clean up old configuration backups
-pub(super) async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count: usize) {
+/// Reload configuration from the kit file watcher.
+pub(super) async fn reload_configuration_for_watcher(
+    content: &str,
+    agent_metadata: Arc<RwLock<AgentMetadata>>,
+    mcp_registry: Arc<McpRegistry>,
+) -> Result<()> {
+    apply_kit_reload(content, &agent_metadata, &mcp_registry).await
+}
+
+/// Clean up old configuration backups for the given kit filename.
+pub(super) async fn cleanup_old_backups(
+    backup_dir: &std::path::Path,
+    keep_count: usize,
+    kit_filename: &str,
+) {
     if let Ok(mut entries) = tokio::fs::read_dir(backup_dir).await {
         let mut backups = Vec::new();
+        let prefix = format!("{kit_filename}.");
 
         while let Ok(Some(entry)) = entries.next_entry().await {
             if let Ok(metadata) = entry.metadata().await
                 && metadata.is_file()
             {
                 let filename = entry.file_name().to_string_lossy().to_string();
-                if filename.starts_with("AGENTS.md.") && filename.ends_with(".backup") {
+                if filename.starts_with(&prefix) && filename.ends_with(".backup") {
                     backups.push((entry.path(), metadata.modified().ok()));
                 }
             }
@@ -249,5 +200,121 @@ pub(super) async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count
         for (path, _) in backups.iter().skip(keep_count) {
             let _ = tokio::fs::remove_file(path).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINIMAL_KIT_YAML: &str = r#"
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "hello"
+  version: "0.1.0"
+  authors:
+    - did: "did:web:example.com"
+  created: "2026-04-29T00:00:00Z"
+  expires: "2026-05-29T00:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+objective:
+  goal: "say hello"
+roles:
+  - id: agent
+    role_type: operator
+    agent_provisioning: {}
+    skills: []
+    mcp_tools: []
+    handoffs: []
+coordination:
+  topology: hub-spoke
+  protocol: a2a-jsonrpc-2.0
+  routing:
+    strategy: static
+constraints:
+  global_budget:
+    max_wallclock_seconds: 60
+    max_total_tokens: 8000
+    max_cost_usd: 0.01
+  data_classifications: ["public"]
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+completion:
+  rules: ["done"]
+  on_failure: abort
+  max_retries: 0
+provenance:
+  signatures:
+    - signer_did: "did:web:example.com"
+      algorithm: ed25519
+      signature: "AAA"
+"#;
+
+    #[test]
+    fn validate_kit_yaml_accepts_valid_kit() {
+        assert!(validate_kit_yaml(MINIMAL_KIT_YAML).is_ok());
+    }
+
+    #[test]
+    fn validate_kit_yaml_rejects_invalid_yaml() {
+        let err = validate_kit_yaml("not: valid: yaml: at: all:").unwrap_err();
+        assert!(err.contains("Kit parse error"));
+    }
+
+    #[test]
+    fn resolve_kit_path_in_finds_single_kit_in_arkavo_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let arkavo_dir = dir.path().join(".arkavo");
+        std::fs::create_dir_all(&arkavo_dir).unwrap();
+        std::fs::write(arkavo_dir.join("agent.swarmkit.yaml"), MINIMAL_KIT_YAML).unwrap();
+
+        let path = resolve_kit_path_in(dir.path()).expect("kit should be discovered");
+        assert!(path.ends_with("agent.swarmkit.yaml"));
+    }
+
+    #[test]
+    fn resolve_kit_path_in_returns_none_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(resolve_kit_path_in(dir.path()).is_none());
+    }
+
+    #[tokio::test]
+    async fn apply_kit_reload_updates_purpose_from_kit() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+            name: "agent".to_string(),
+            ..Default::default()
+        }));
+        let mcp_registry = McpRegistry::new();
+
+        apply_kit_reload(MINIMAL_KIT_YAML, &agent_metadata, &mcp_registry)
+            .await
+            .expect("valid kit should reload");
+
+        let metadata = agent_metadata.read().await;
+        assert_eq!(metadata.purpose, "say hello");
+    }
+
+    #[tokio::test]
+    async fn apply_kit_reload_rejects_empty_content() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata::default()));
+        let mcp_registry = McpRegistry::new();
+
+        let err = apply_kit_reload("   ", &agent_metadata, &mcp_registry)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("empty"));
+    }
+
+    #[tokio::test]
+    async fn apply_kit_reload_rejects_invalid_yaml() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata::default()));
+        let mcp_registry = McpRegistry::new();
+
+        let err = apply_kit_reload("not: valid: yaml: at: all:", &agent_metadata, &mcp_registry)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Failed to parse kit"));
     }
 }
