@@ -10,13 +10,13 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use arkavo_protocol::agent_config::AgentMode;
-use arkavo_router::ModelChoice;
 use arkavo_swarmkit::{
     AgentProvisioning, AuthMode, KitRuntimeConfig, McpToolGrant, Model, Objective, RoleSpec,
     RuntimeMcpServer, RuntimeMode, validate,
 };
 
 use crate::commands::agent::{self, AgentConfig, McpServerConfig};
+use crate::commands::kit::model_map::hint_to_kit_model;
 
 /// Result of a `migrate-from-agents-md` run.
 ///
@@ -228,36 +228,13 @@ fn slugify(input: &str) -> String {
     }
 }
 
-/// Best-effort `model:` hint → kit `Model` mapping (brief item 4). Reuses
-/// `arkavo_router::ModelChoice::from_name` to recognize known aliases, but
-/// re-derives family/size in the kit's own vocabulary (e.g. `"ministral"`,
-/// not the router's generic vendor family `"mistral"`) rather than calling
-/// `ModelChoice::family()`, which serves a different purpose (routing/prompt
-/// lookups) and would produce the wrong string here.
-///
-/// Only covers the locally-hosted edge models this CLI actually provisions
-/// (see CLAUDE.md's "Local Edge Models" section); cloud model hints (Claude,
-/// Gemini, Grok, ...) are intentionally left unmapped since `agent_provisioning.model`
-/// describes a local backend, not a cloud API id.
+/// Best-effort `model:` hint → kit `Model` mapping (brief item 4). Thin
+/// wrapper over the shared `kit::model_map` table — the single source of
+/// truth for this direction and its inverse (`model_map::kit_model_to_hint`,
+/// used by the `arkavo agent -c <kit>` run path in `agent_kit.rs`) — so the
+/// two CLI surfaces can never drift onto separate vocabularies.
 fn map_model_hint(hint: &str) -> Option<Model> {
-    let (family, size) = match ModelChoice::from_name(hint)? {
-        ModelChoice::LocalMinistral3B => ("ministral", "3B"),
-        ModelChoice::LocalMinistral8B => ("ministral", "8B"),
-        ModelChoice::LocalGemma4E2B => ("gemma", "E2B"),
-        ModelChoice::LocalGemma4E4B => ("gemma", "E4B"),
-        ModelChoice::LocalGemma4_12B => ("gemma", "12B"),
-        ModelChoice::LocalQwen3 => ("qwen", "0.8B"),
-        ModelChoice::LocalQwen35_9B => ("qwen", "9B"),
-        ModelChoice::LocalQwen35_27B => ("qwen", "27B"),
-        _ => return None,
-    };
-    Some(Model {
-        family: family.to_string(),
-        size: Some(size.to_string()),
-        quantization: None,
-        backend: Some("llama.cpp".to_string()),
-        fallback: None,
-    })
+    hint_to_kit_model(hint)
 }
 
 fn to_runtime_mode(mode: &AgentMode) -> RuntimeMode {

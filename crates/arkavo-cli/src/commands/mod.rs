@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_kit;
 pub mod chat;
 pub mod dataflow;
 pub mod kit;

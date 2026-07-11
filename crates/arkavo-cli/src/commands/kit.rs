@@ -20,7 +20,9 @@ use arkavo_swarmkit::{
 };
 
 mod kit_build;
+mod model_map;
 pub use kit_build::{MigrateReport, migrate_from_agents_md};
+pub(crate) use model_map::kit_model_to_hint;
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.is_empty() {
@@ -218,11 +220,9 @@ pub fn validate_kit(path: &Path) -> Result<KitValidateReport, Box<dyn std::error
     })
 }
 
-/// Default single-role goal text, shared with `kit_build` as the fallback
-/// `objective.goal` when a migrated AGENTS.md has no usable `purpose`.
+/// Default single-role goal text; shared fallback `objective.goal` for `kit_build`.
 const DEFAULT_GOAL: &str = "Introduce yourself and assist with the tasks the user brings to you";
-/// Default identity-skill instructions, shared with `kit_build` as the
-/// fallback per-role instructions when a migrated agent has no `purpose`.
+/// Default identity-skill instructions; shared fallback per-role instructions for `kit_build`.
 const DEFAULT_IDENTITY_INSTRUCTIONS: &str =
     "You are a helpful agent. Introduce yourself and assist with the tasks the user brings to you.";
 

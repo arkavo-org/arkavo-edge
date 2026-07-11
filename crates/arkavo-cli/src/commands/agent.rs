@@ -124,19 +124,23 @@ fn print_usage() {
     println!();
     println!("OPTIONS:");
     println!(
-        "    -c, --config <FILE> Specify config file (default: .arkavo/AGENTS.md or AGENTS.md)"
+        "    -c, --config <FILE> SwarmKit manifest path (default: discover .arkavo/*.swarmkit.yaml or ./*.swarmkit.yaml)"
     );
     println!("    -p, --port <PORT>   Override the listen port (default: random available port)");
-    println!("    -n, --name <NAME>   Override the agent name");
+    println!(
+        "    -n, --name <NAME>   Select a role by id from a multi-role kit (default: the first role)"
+    );
     println!("    -v, --verbose       Show startup messages and status");
     println!("    --trust             Show the agent authorization QR code (DID:key) on startup,");
     println!("                        for scanning to authorize/trust this agent");
     println!();
     println!("EXAMPLES:");
     println!("    arkavo agent                           # Run with auto-discovery");
-    println!("    arkavo agent --config AGENTS.md        # Run with specific config");
+    println!("    arkavo agent --config agent.swarmkit.yaml  # Run with a specific kit");
     println!("    arkavo agent --port 8343 -v            # Run on specific port with verbose");
-    println!("    arkavo agent -n my-agent -p 8343       # Run with custom name and port");
+    println!(
+        "    arkavo agent -c team.swarmkit.yaml -n worker -p 8343  # Run one role of a multi-role kit"
+    );
     println!("    arkavo agent run --trust               # Show the QR code to trust this agent");
 }
 
@@ -175,6 +179,31 @@ pub fn deprecated_init(
     crate::commands::kit::init_kit(base_dir, name)
 }
 
+/// Generate the zero-config default agent name: `<hostname>-<folder>`, e.g.
+/// `macbook-arkavo-edge`. Shared by the SwarmKit-kit resolution path
+/// (`agent_kit::resolve_agent_configs`, used when no kit is found anywhere
+/// in the resolution order) and this module's own "listen address turned
+/// out invalid at runtime" recovery fallback below.
+pub(crate) fn default_agent_name() -> String {
+    use std::process::Command;
+
+    // Get machine hostname (strip .local suffix if present)
+    let hostname = Command::new("hostname")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|s| s.trim().trim_end_matches(".local").to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Get current folder name
+    let folder_name = std::env::current_dir()
+        .ok()
+        .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    format!("{hostname}-{folder_name}")
+}
+
 #[allow(clippy::disallowed_methods)]
 fn run_agent_with_options(
     config_file: Option<&str>,
@@ -184,116 +213,24 @@ fn run_agent_with_options(
     override_name: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
+    use crate::commands::agent_kit::resolve_agent_configs;
 
-    // Determine config path: explicit arg > .arkavo/AGENTS.md > AGENTS.md
-    let config_path = if let Some(explicit_path) = config_file {
-        Path::new(explicit_path).to_path_buf()
-    } else if Path::new(".arkavo/AGENTS.md").exists() {
-        Path::new(".arkavo/AGENTS.md").to_path_buf()
-    } else {
-        Path::new("AGENTS.md").to_path_buf()
-    };
+    let cwd = std::env::current_dir()?;
+    let cli_config_path = config_file.map(Path::new);
 
-    // If AGENTS.md doesn't exist, use default configuration
-    let agents = if !config_path.exists() && config_file.is_none() {
-        use std::process::Command;
-
-        // Get machine hostname (strip .local suffix if present)
-        let hostname = Command::new("hostname")
-            .output()
-            .ok()
-            .and_then(|output| String::from_utf8(output.stdout).ok())
-            .map(|s| s.trim().trim_end_matches(".local").to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-
-        // Get current folder name
-        let folder_name = std::env::current_dir()
-            .ok()
-            .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
-            .unwrap_or_else(|| "unknown".to_string());
-
-        let agent_name = format!("{hostname}-{folder_name}");
-
-        vec![AgentConfig {
-            name: agent_name,
-            purpose: "A general-purpose AI agent".to_string(),
-            model: String::new(), // Empty model - let arkavo-router decide
-            mode: arkavo_protocol::agent_config::AgentMode::default(),
-            listen: "0.0.0.0:0".to_string(), // Dynamic port - OS assigns available port
-            mdns_enabled: true,
-            mcp_servers: Vec::new(),
-            api_keys: std::collections::HashMap::new(),
-            quiet: true,
-            peers: Vec::new(),
-            a2a_enabled: true,
-            a2a_service_type: None,
-            swarm: None,
-        }]
-    } else {
-        let config_content = fs::read_to_string(&config_path)?;
-        match agent::parse_agents_config(&config_content) {
-            Ok(agents) if !agents.is_empty() => agents,
-            _ => {
-                if verbose {
-                    eprintln!(
-                        "Warning: Could not parse {}, using default configuration",
-                        config_path.display()
-                    );
-                }
-
-                // Fall back to default config
-                use std::process::Command;
-
-                // Get machine hostname (strip .local suffix if present)
-                let hostname = Command::new("hostname")
-                    .output()
-                    .ok()
-                    .and_then(|output| String::from_utf8(output.stdout).ok())
-                    .map(|s| s.trim().trim_end_matches(".local").to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                // Get current folder name
-                let folder_name = std::env::current_dir()
-                    .ok()
-                    .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                let agent_name = format!("{hostname}-{folder_name}");
-
-                vec![AgentConfig {
-                    name: agent_name,
-                    purpose: "A general-purpose AI agent".to_string(),
-                    model: String::new(),
-                    mode: arkavo_protocol::agent_config::AgentMode::default(),
-                    listen: "0.0.0.0:0".to_string(), // Dynamic port
-                    mdns_enabled: true,
-                    mcp_servers: Vec::new(),
-                    api_keys: std::collections::HashMap::new(),
-                    quiet: true,
-                    peers: Vec::new(),
-                    a2a_enabled: true,
-                    a2a_service_type: None,
-                    swarm: None,
-                }]
-            }
-        }
-    };
-
-    // Run the first agent (or fall back to single agent if only one)
-    let mut agent_config = agents
-        .into_iter()
-        .next()
-        .ok_or("No agent configuration available")?;
-
-    // Apply command-line overrides
-    if let Some(port) = override_port {
-        // Parse the current listen address to get the host part
-        let host = agent_config.listen.split(':').next().unwrap_or("0.0.0.0");
-        agent_config.listen = format!("{host}:{port}");
-    }
-    if let Some(name) = override_name {
-        agent_config.name = name;
-    }
+    // Resolve config from a SwarmKit kit: -c/--config > discovery > the
+    // zero-config default. AGENTS.md is never read on this path (S6).
+    // Mirrors legacy multi-agent behavior by only ever starting the first
+    // resolved entry, unless -n/--name narrowed the result to one role.
+    let mut agent_config = resolve_agent_configs(
+        cli_config_path,
+        override_name.as_deref(),
+        override_port,
+        &cwd,
+    )?
+    .into_iter()
+    .next()
+    .ok_or("No agent configuration available")?;
 
     // Set verbose mode - default is quiet (verbose = false)
     agent_config.quiet = !verbose;
@@ -322,24 +259,8 @@ fn run_agent_with_options(
             }
 
             // Create default config
-            use std::process::Command;
-
-            // Get machine hostname (strip .local suffix if present)
-            let hostname = Command::new("hostname")
-                .output()
-                .ok()
-                .and_then(|output| String::from_utf8(output.stdout).ok())
-                .map(|s| s.trim().trim_end_matches(".local").to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-
-            // Get current folder name
-            let folder_name = std::env::current_dir()
-                .ok()
-                .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
-                .unwrap_or_else(|| "unknown".to_string());
-
             let default_config = AgentConfig {
-                name: format!("{hostname}-{folder_name}"),
+                name: default_agent_name(),
                 purpose: "A general-purpose AI agent".to_string(),
                 model: String::new(),
                 mode: arkavo_protocol::agent_config::AgentMode::default(),
