@@ -84,7 +84,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     match subcommand {
         Some("init") => {
             if let Some(name) = init_name {
-                init_agent(&name)
+                let report = deprecated_init(Path::new("."), &name)?;
+                println!("Wrote {}", report.path.display());
+                println!("kit.id: {}", report.kit_id);
+                Ok(())
             } else {
                 eprintln!("Error: Agent name required");
                 eprintln!("Usage: arkavo agent init <agent-name>");
@@ -113,7 +116,9 @@ fn print_usage() {
     println!("    arkavo agent init <name>");
     println!();
     println!("SUBCOMMANDS:");
-    println!("    init <name>         Create a new .arkavo/AGENTS.md configuration file");
+    println!(
+        "    init <name>         [DEPRECATED] alias for 'arkavo kit init <name>'; writes .arkavo/<name>.swarmkit.yaml"
+    );
     println!("    run                 Run an agent (alias for default behavior)");
     println!("    help                Print this help message");
     println!();
@@ -153,133 +158,21 @@ pub fn extract_agent_role() -> Option<String> {
     None
 }
 
-fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Create .arkavo directory if it doesn't exist
-    let arkavo_dir = Path::new(".arkavo");
-    if !arkavo_dir.exists() {
-        fs::create_dir_all(arkavo_dir)?;
-    }
-
-    let agents_path = arkavo_dir.join("AGENTS.md");
-
-    if agents_path.exists() {
-        return Err(".arkavo/AGENTS.md already exists. Please rename or remove it first.".into());
-    }
-
-    println!("Creating .arkavo/AGENTS.md configuration for agent '{name}'...");
-
-    // Create a comprehensive template that matches the expected format
-    let template = format!(
-        r#"# AGENTS.md — {name}
-
-## Agent Identity
-
-- **Name:** {name}
-- **Mission:** "An AI agent that assists with specific tasks and capabilities"
-
-## Runtime Configuration
-
-```yaml
-listen: 0.0.0.0:8342
-mdns: true
-```
-
-## Capabilities
-
-Define what this agent can do:
-
-- [ ] Code review and analysis
-- [ ] Documentation generation
-- [ ] Test creation
-- [ ] Bug fixing
-- [ ] Performance optimization
-- [ ] Data analysis
-- [ ] System design
-- [ ] Security analysis
-
-## Tool Requirements
-
-Specify which tools this agent needs:
-
-- [ ] Git tools (version control operations)
-- [ ] Filesystem access (read/write files)
-- [ ] Terminal/Shell (execute commands)
-- [ ] Code analysis tools
-- [ ] Database access
-- [ ] Web APIs
-- [ ] Docker/Container management
-
-## MCP Servers
-
-Configure MCP servers that this agent should use:
-
-```yaml
-mcp_servers:
-  - name: filesystem
-    command: mcp-filesystem
-    args: []
-  - name: git
-    command: mcp-git
-    args: []
-```
-
-## Agent Configuration
-
-Customize the following values for your agent:
-
-```yaml
-purpose: "Describe your agent's primary purpose and goals here"
-listen: 0.0.0.0:8342
-mdns: true
-```
-
-## API Keys (Optional)
-
-If your agent needs to access external services, add API keys here:
-
-```yaml
-# OPENAI_API_KEY: sk-xxx
-# MOONSHOT_API_KEY: sk-xxx
-# DEEPSEEK_API_KEY: sk-xxx
-```
-
-## Notes
-
-1. Edit the **Mission** field to describe what your agent does
-2. Check the capabilities your agent should have
-3. Select the tools your agent needs access to
-4. Configure MCP servers for additional functionality
-5. Update the model if you want to use a different LLM
-6. Change the listen address if needed (default: 0.0.0.0:8342)
-7. Set mdns to false if you don't want network discovery
-
-## Running Your Agent
-
-Once configured, run your agent with:
-
-```bash
-arkavo agent
-```
-
-Or specify the config file explicitly:
-
-```bash
-arkavo agent --config AGENTS.md
-```
-
-Your agent will start and be available at the configured address."#
+/// Deprecated: `arkavo agent init` no longer writes AGENTS.md.
+///
+/// It now prints a deprecation warning and delegates entirely to the same
+/// manifest writer `kit init` uses, so the two commands can never drift in
+/// what they produce. `base_dir` is exposed (rather than hardcoded to `.`)
+/// so tests can drive this without touching the process's current
+/// directory; the CLI arm always passes `.`.
+pub fn deprecated_init(
+    base_dir: &Path,
+    name: &str,
+) -> Result<crate::commands::kit::KitInitReport, Box<dyn std::error::Error>> {
+    eprintln!(
+        "warning: 'arkavo agent init' is deprecated; use 'arkavo kit init <name>'. Writing a SwarmKit manifest."
     );
-
-    fs::write(&agents_path, template)?;
-    println!("✓ Created .arkavo/AGENTS.md template for agent '{name}'");
-    println!();
-    println!("Next steps:");
-    println!("1. Edit .arkavo/AGENTS.md to customize your agent's purpose and capabilities");
-    println!("2. Configure the model and listen address as needed");
-    println!("3. Add any required API keys");
-    println!("4. Run your agent with: arkavo agent");
-
-    Ok(())
+    crate::commands::kit::init_kit(base_dir, name)
 }
 
 #[allow(clippy::disallowed_methods)]

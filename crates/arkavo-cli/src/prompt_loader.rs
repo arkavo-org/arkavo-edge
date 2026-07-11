@@ -6,7 +6,6 @@ const CHAT_SYSTEM_PROMPT: &str = include_str!("../../../assets/prompts/chat_syst
 const TERMINAL_SYSTEM_PROMPT: &str =
     include_str!("../../../assets/prompts/terminal_system.prompt.md");
 const AGENT_SYSTEM_PROMPT: &str = include_str!("../../../assets/prompts/agent_system.prompt.md");
-const AGENTS_MD_PROMPT: &str = include_str!("../../../assets/prompts/agents_md.prompt.md");
 
 /// Load a prompt template with override support
 ///
@@ -29,7 +28,6 @@ pub fn load_prompt(prompt_name: &str, default: &str) -> String {
         "chat_system" => CHAT_SYSTEM_PROMPT,
         "terminal_system" => TERMINAL_SYSTEM_PROMPT,
         "agent_system" => AGENT_SYSTEM_PROMPT,
-        "agents_md" => AGENTS_MD_PROMPT,
         _ => return default.to_string(),
     };
 
@@ -379,7 +377,6 @@ Place your custom prompt overrides here to replace the built-in prompts.
 - `chat_system.prompt.md` - System prompt for chat command
 - `terminal_system.prompt.md` - System prompt for terminal UI
 - `agent_system.prompt.md` - System prompt for agents
-- `agents_md.prompt.md` - Template for generating AGENTS.md files
 
 ## How to Override
 

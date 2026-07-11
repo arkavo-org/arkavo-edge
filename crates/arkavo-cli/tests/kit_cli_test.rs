@@ -3,6 +3,7 @@
 //! Exercises the pure `commands::kit` functions directly (no process spawn)
 //! against a temp directory, per the Task 1 brief.
 
+use arkavo_cli::commands::agent::deprecated_init;
 use arkavo_cli::commands::kit::{init_kit, validate_kit};
 use std::fs;
 
@@ -98,4 +99,39 @@ fn validate_fails_on_invalid_yaml() {
 
     let result = validate_kit(&path);
     assert!(result.is_err(), "invalid YAML must fail validation");
+}
+
+/// `arkavo agent init` is a deprecated alias of `kit init` (Phase S4). It must
+/// no longer write AGENTS.md at all — it delegates entirely to the same
+/// manifest writer `kit init` uses, so the two commands can never drift.
+#[test]
+fn agent_init_deprecated_alias_writes_swarmkit_manifest_not_agents_md() {
+    let dir = tempdir();
+    let report =
+        deprecated_init(dir.path(), "legacy-agent").expect("deprecated_init should succeed");
+
+    assert!(
+        report.path.exists(),
+        "deprecated agent init must still write a manifest file"
+    );
+    assert!(
+        report
+            .path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .ends_with(".swarmkit.yaml"),
+        "deprecated agent init must write a .swarmkit.yaml file, got {:?}",
+        report.path
+    );
+    assert!(
+        !dir.path().join(".arkavo").join("AGENTS.md").exists(),
+        "deprecated agent init must not write AGENTS.md"
+    );
+
+    let validated = validate_kit(&report.path)
+        .expect("manifest written by deprecated agent init must validate");
+    assert_eq!(validated.kit_name, "legacy-agent");
+    assert_eq!(validated.kit_id, report.kit_id);
+    assert!(validated.id_matches);
 }
