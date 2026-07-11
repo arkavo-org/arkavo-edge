@@ -14,6 +14,10 @@ Three subsystems:
 - **Runtime** (`arkavo-swarmkit-runtime` crate) — `SwarmFlight::launch` builds per-role ARP runtimes, isolates DecisionTrace + PolicyCache, optionally resolves and verifies skill signatures via the `PublicKeyResolver` trait. Production resolver: `DidWebPublicKeyResolver` (`did:web` only in this MVP, sync via `ureq`).
 - **Gateway integration** (`arkavo-agui` crate) — `ARKAVO_SWARMKIT_PATH` env var auto-launches a kit at gateway boot; the AG-UI panel surfaces every role under `flight:<flight_id>:<role_id>`.
 
+## A single agent is a one-role kit
+
+There is no separate single-agent config format — running one agent means authoring a kit with exactly one entry in `roles`. `arkavo agent -c <kit> [-p <port>]` runs it directly; multi-role kits add `-n <role-id>` to pick which role a given process runs. `arkavo kit init <name>` scaffolds this minimal shape; see `examples/01-hello-world/hello-agent.swarmkit.yaml` for a complete single-role kit.
+
 Four shipped kits in `examples/`, each with its own README:
 
 | Kit | Domain | Roles |

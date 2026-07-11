@@ -55,7 +55,7 @@ Progress from simple to complex, building skills incrementally.
 
 | Level | Examples | What You'll Learn | Time |
 |-------|----------|-------------------|------|
-| **01-hello-world** | Minimal agent | Agent basics, AGENTS.md config | 5 min |
+| **01-hello-world** | Minimal agent | Agent basics, SwarmKit config | 5 min |
 | **02-single-agent** | Claude, Gemini, secure | LLM backends, API keys, policies | 30 min |
 | **03-multi-agent-basics** | Dev team, orchestrator | Agent collaboration, A2A protocol | 1 hr |
 | **04-advanced-patterns** | HRM, fleet, hyperforum | Orchestration, learning, discourse | 2 hr |
@@ -119,7 +119,7 @@ Special capabilities.
 Read [CONCEPTS.md](CONCEPTS.md) to understand:
 
 - **Agent Architecture** - What agents are and how they work
-- **AGENTS.md** - Configuration format
+- **SwarmKit Configuration** - Kit manifest format (`*.swarmkit.yaml`)
 - **mDNS Discovery** - Zero-config agent discovery
 - **A2A Protocol** - Agent-to-agent communication
 - **HRM Pattern** - Hierarchical orchestration
@@ -216,22 +216,24 @@ Each example follows this structure:
 
 ```
 example-name/
-├── README.md        # Overview and quick start
-├── RUNBOOK.md       # Step-by-step guide
-├── AGENTS.md        # Agent config (single) or agents/ (multi)
-├── tasks.json       # Demo tasks
-├── launch.sh        # Start the example
-└── stop.sh          # Stop the example
+├── README.md               # Overview and quick start
+├── RUNBOOK.md              # Step-by-step guide
+├── example-name.swarmkit.yaml  # SwarmKit manifest (single-role or multi-role kit)
+├── tasks.json              # Demo tasks
+├── launch.sh                # Start the example
+└── stop.sh                  # Stop the example
 ```
 
 ## Creating New Examples
 
 1. Copy `01-hello-world` as a template
-2. Update `AGENTS.md` with your agent config
+2. Write `<name>.swarmkit.yaml` — start from `arkavo kit init <name>` (single role) or hand-author a multi-role kit modeled on `campaign-kit/campaign-kit.swarmkit.yaml`; validate with `arkavo kit validate <path>`
 3. Add tasks to `tasks.json`
 4. Write `README.md` and `RUNBOOK.md`
 5. Create `launch.sh` and `stop.sh`
 6. Add to this README
+
+Converting a legacy AGENTS.md into a starting-point kit: `arkavo kit migrate-from-agents-md --in <file> --out <kit>` (best-effort — hand-finish preflight/KAS/budget fields it can't map).
 
 ## Troubleshooting
 

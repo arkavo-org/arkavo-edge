@@ -5,7 +5,7 @@ This guide explains the fundamental concepts behind Arkavo's agent system. Under
 ## Table of Contents
 
 - [Agent Architecture](#agent-architecture)
-- [AGENTS.md Configuration](#agentsmd-configuration)
+- [SwarmKit Configuration](#swarmkit-configuration)
 - [mDNS Discovery](#mdns-discovery)
 - [A2A Protocol](#a2a-protocol)
 - [HRM Pattern](#hrm-pattern)
@@ -40,63 +40,78 @@ Start → Bind Port → Advertise via mDNS → Accept Connections → Process Ta
 
 ---
 
-## AGENTS.md Configuration
+## SwarmKit Configuration
 
-Every agent is configured via an `AGENTS.md` file in its directory. This markdown file defines the agent's identity and behavior.
+Every agent or mesh is configured by a **SwarmKit manifest** — a `*.swarmkit.yaml` file that declares one or more **roles**, each with its own identity, model provisioning, and tool grants. A single agent is simply a one-role kit; a mesh is a multi-role kit with a `coordination` block wiring the roles together. This section covers the concepts you need to read and edit a kit; see [docs/SWARMKIT.md](../docs/SWARMKIT.md) for the full manifest schema.
 
 ### Minimal Configuration
 
-```markdown
-## my-agent
-purpose: "Answer questions about code"
-model: ministral-3b
-```
+Scaffold a starting-point kit with `arkavo kit init my-agent` (writes `.arkavo/my-agent.swarmkit.yaml`), then edit it. An abbreviated single-role kit — see `01-hello-world/hello-agent.swarmkit.yaml` for the complete file:
 
-### Full Configuration
+```yaml
+spec_version: "1.0.0"
+kit:
+  id: ""            # computed (BLAKE3) and filled in at publish
+  name: "hello-agent"
+  version: "0.1.0"
 
-```markdown
-## code-reviewer
-purpose: |
-  Review code for bugs, security issues, and style.
-  Provide actionable feedback with line references.
+objective:
+  goal: "Introduce yourself and answer basic questions helpfully"
 
-model: gemini-2.0-flash
-listen: 0.0.0.0:8342
-mdns: true
+roles:
+  - id: "agent"
+    role_type: "operator"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+    skills:
+      - id: "skill:identity"
+        source: "inline"
+        payload:
+          instructions: >-
+            You are a friendly agent that introduces itself and
+            answers basic questions.
 
-a2a:
-  enabled: true
-  peers:
-    - "http://localhost:8343"
-
-mcp_servers:
-  - name: code-search
-    command: /path/to/mcp-code-search
-    args: ["--repo", "."]
+runtime:
+  mode: orchestrator
+  mdns: true
+  local_dev: true
 ```
 
 ### Configuration Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | Yes (from header) | Agent identifier |
-| `purpose` | Yes | What this agent does (shown to other agents) |
-| `model` | Yes | LLM to use (see Model Providers below) |
-| `listen` | No | Bind address (default: `0.0.0.0:0` for dynamic) |
-| `mdns` | No | Enable mDNS discovery (default: true) |
-| `a2a.enabled` | No | Enable A2A protocol (default: true) |
-| `a2a.peers` | No | Static peer list (optional with mDNS) |
-| `mcp_servers` | No | MCP tool servers to connect |
+| `roles[].id` | Yes | Role identifier (the agent's name) |
+| `objective.goal` | Yes | The kit's overall purpose; the primary role's identity skill carries the same purpose in more detail |
+| `roles[].skills[].payload.instructions` | Yes | The role's system prompt / identity — what it does, shown to other agents |
+| `roles[].agent_provisioning.model` | No | LLM family/size/backend to provision (see Model Providers below); omit to accept the router default |
+| `runtime.listen` | No | Bind address (default: a dynamic port) |
+| `runtime.mdns` | No | Enable mDNS discovery (default: true) |
+| `runtime.mcp_servers` + `roles[].mcp_tools` | No | MCP tool servers to connect, and per-role grants against them |
 
 ### Model Providers
 
+`agent_provisioning.model.family`/`size` name a locally-hosted edge model; omit `model` entirely to let cloud/router hints (set via env, not the kit) decide:
+
 ```
-ministral-3b          # Local Ministral (edge-optimized)
-gemma-3-270m          # Local Gemma (very small)
-ollama://host/model   # Ollama server
-claude-3-5-sonnet     # Anthropic Claude (requires ANTHROPIC_API_KEY)
-gemini-2.0-flash      # Google Gemini (requires GEMINI_API_KEY)
+family: ministral, size: 3B / 8B     # Local Ministral (edge-optimized)
+family: gemma,     size: E2B / E4B / 12B   # Local Gemma 4
+family: qwen,      size: 0.8B / 9B / 27B   # Local Qwen 3.5
 ```
+
+Cloud providers (Claude, Gemini, ...) are configured via API keys in the environment, never in the kit — see the per-example READMEs for `code-agent-claude` / `code-agent-gemini`.
+
+### Validating and Running
+
+```bash
+arkavo kit validate <path/to/kit.swarmkit.yaml>
+arkavo agent -c <path/to/kit.swarmkit.yaml> [-n <role-id>] [-p <port>]
+```
+
+`-n` selects a role from a multi-role kit (default: the first role); `-p` overrides the listen port. Converting a legacy AGENTS.md into a starting-point kit: `arkavo kit migrate-from-agents-md --in <file> --out <kit>` (best-effort — hand-finish anything it can't map).
 
 ---
 
@@ -339,17 +354,25 @@ See `04-advanced-patterns/fleet-immunity/` for a complete gossip learning implem
 
 ### Configuring MCP Servers
 
-In AGENTS.md:
+In the kit's `runtime.mcp_servers` (the process to launch) plus a per-role `mcp_tools` grant (who may call it):
 
 ```yaml
-mcp_servers:
-  - name: code-search
-    command: /usr/local/bin/mcp-code-search
-    args: ["--repo", "/path/to/repo"]
+runtime:
+  mcp_servers:
+    - name: code-search
+      command: /usr/local/bin/mcp-code-search
+      args: ["--repo", "/path/to/repo"]
 
-  - name: web-browser
-    command: npx
-    args: ["-y", "@anthropic/mcp-browser"]
+    - name: web-browser
+      command: npx
+      args: ["-y", "@anthropic/mcp-browser"]
+
+roles:
+  - id: "agent"
+    mcp_tools:
+      - server: "code-search"
+        auth: "delegated"
+        tools: []
 ```
 
 ### Available Tool Servers
@@ -386,18 +409,18 @@ See the MCP specification for details.
 
 ### Policy Configuration
 
-In AGENTS.md:
+In the kit's `runtime.preflight.policies`:
 
 ```yaml
-preflight:
-  enabled: true
-  policies:
-    - name: no-harmful-content
-      deny:
-        - pattern: "how to (hack|exploit|attack)"
-          reason: "Security policy violation"
-    - name: rate-limit
-      max_requests_per_minute: 60
+runtime:
+  preflight:
+    policies:
+      - id: "block_pii"
+        features:
+          - "InputContainsPII"
+        action: block
+        description: "Blocks SSN, credit card numbers, and email addresses"
+        enabled: true
 ```
 
 ### Policy Types
