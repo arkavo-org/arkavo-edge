@@ -453,7 +453,7 @@ impl A2aServer {
             info!("Initializing router for dynamic model selection");
         }
 
-        // Use cached AGENTS.md config for preflight, budget, KAS
+        // Use cached SwarmKit-derived config for preflight, budget, KAS
         let agent_config = self.agent_config.read().await.clone();
 
         // Build the budget manager up front so the router can both enforce the
@@ -494,12 +494,12 @@ impl A2aServer {
                     router
                 };
 
-                // Wire preflight from AGENTS.md
+                // Wire preflight from SwarmKit runtime.preflight
                 let router = if let Some(ref pf) = agent_config.preflight {
                     let moderator = arkavo_router::build_moderator_from_config(pf);
                     let count = moderator.len();
                     if count > 0 {
-                        info!("Preflight: {} policies loaded from AGENTS.md", count);
+                        info!("Preflight: {} policies loaded from SwarmKit", count);
                     }
                     router.with_preflight(moderator)
                 } else {
@@ -515,7 +515,7 @@ impl A2aServer {
                     None => router,
                 };
 
-                // Wire TDF audit encryption from AGENTS.md
+                // Wire TDF audit encryption from SwarmKit runtime.kas
                 #[cfg(feature = "kas")]
                 let router = if let Some(ref kas) = agent_config.kas {
                     if kas.enabled {
@@ -566,7 +566,7 @@ impl A2aServer {
                                 model = hint.name(),
                                 hint_mb = hint_bytes / (1024 * 1024),
                                 budget_mb = cap / (1024 * 1024),
-                                "Router model budget set from AGENTS.md hint"
+                                "Router model budget set from kit model hint"
                             );
                         }
                     }
@@ -582,7 +582,7 @@ impl A2aServer {
                 // router above for live-cap spend enforcement).
                 if let Some(manager) = budget_manager {
                     *self.budget_manager.write().await = Some(manager);
-                    info!("Budget enforcement loaded from AGENTS.md");
+                    info!("Budget enforcement loaded from SwarmKit runtime");
                 }
 
                 // Set router on learning bus for LLM-based synthesis
@@ -590,14 +590,12 @@ impl A2aServer {
                     bus.set_router(router.clone()).await;
                     info!("✓ Router configured for learning synthesis");
 
-                    // Load AGENTS.md lessons into policy cache at startup
-                    if let Some(ref name) = agent_config.name {
-                        // Use the purpose field as AGENTS.md content if available
-                        let agents_md_content = Self::read_agents_md_content().await;
-                        if !agents_md_content.is_empty() {
-                            bus.load_agents_md_lessons(&agents_md_content).await;
+                    // Load kit identity / skill text into policy cache at startup
+                    if agent_config.name.is_some() {
+                        let kit_lessons = Self::read_kit_lesson_content().await;
+                        if !kit_lessons.is_empty() {
+                            bus.load_agents_md_lessons(&kit_lessons).await;
                         }
-                        let _ = name; // used for agent_config context
                     }
                 }
 
@@ -612,16 +610,16 @@ impl A2aServer {
         }
     }
 
-    /// Read AGENTS.md content from disk for teaching lesson injection.
-    async fn read_agents_md_content() -> String {
-        let path = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
-            ".arkavo/AGENTS.md"
-        } else if std::path::Path::new("AGENTS.md").exists() {
-            "AGENTS.md"
-        } else {
-            return String::new();
+    /// Read kit purpose + skill instructions for teaching lesson injection.
+    async fn read_kit_lesson_content() -> String {
+        let cwd = match std::env::current_dir() {
+            Ok(p) => p,
+            Err(_) => return String::new(),
         };
-        tokio::fs::read_to_string(path).await.unwrap_or_default()
+        match arkavo_swarmkit::load_discovered_kit(&cwd) {
+            Ok(discovered) => discovered.config.purpose_text(),
+            Err(_) => String::new(),
+        }
     }
 
     /// Create the advisor state store alongside the workspace memory DB.

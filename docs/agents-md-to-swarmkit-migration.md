@@ -1,7 +1,7 @@
 # AGENTS.md → SwarmKit-Only Config Migration
 
 **Date:** 2026-07-11  
-**Status:** In progress (S0 locked, S1+S2 loader landed on branch)  
+**Status:** In progress (S0–S3: schema, discovery, router/server/CLI load path wired)  
 **Execution mode:** Local branch, targeted tests, checkpoints; **one final GitHub PR** (see [`agent-harness-local-workflow.md`](agent-harness-local-workflow.md))  
 **Branch:** `feature/swarmkit-only-config`
 

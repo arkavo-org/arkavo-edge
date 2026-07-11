@@ -1,7 +1,9 @@
 //! Runtime policy configuration for preflight moderation
 //!
-//! Policies are loaded from agent AGENTS.md files at runtime, not hardcoded.
-//! Each agent defines its own preflight policies in its configuration.
+//! Policies are loaded from the kit-level SwarmKit `runtime.preflight` block.
+//! Product AGENTS.md is no longer read for process config (migrate to
+//! `*.swarmkit.yaml`). Legacy AGENTS.md helpers remain for unit tests and the
+//! migrate CLI only.
 
 use super::features::PreflightFeature;
 use super::moderator::{PolicyId, PreflightModerator};
@@ -151,10 +153,13 @@ fn build_allow_circuit(num_inputs: usize) -> Graph {
     }
 }
 
-/// AGENTS.md configuration with preflight, budget, and KAS policies
+/// Process agent configuration (preflight, budget, KAS).
+///
+/// Loaded from SwarmKit `runtime` via [`load_agent_config`]. Field names keep
+/// historical serde shapes for tests and migrate tooling.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentConfig {
-    /// Agent name
+    /// Agent / kit name
     #[serde(default)]
     pub name: Option<String>,
     /// Preflight policies
@@ -168,7 +173,7 @@ pub struct AgentConfig {
     pub kas: Option<KasYamlConfig>,
 }
 
-/// Budget section in AGENTS.md YAML frontmatter
+/// Budget / spend section (kit `runtime` or legacy YAML).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BudgetYamlConfig {
     /// Maximum token cost per session in dollars
@@ -181,7 +186,7 @@ pub struct BudgetYamlConfig {
     pub cloud_policy: Option<String>,
 }
 
-/// KAS section in AGENTS.md YAML frontmatter
+/// KAS section for TDF encryption enablement.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KasYamlConfig {
     /// Whether KAS is enabled
@@ -193,7 +198,7 @@ pub struct KasYamlConfig {
     pub algorithm: Option<String>,
 }
 
-/// Preflight section in AGENTS.md
+/// Preflight section
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightConfig {
     /// List of policies
@@ -201,30 +206,23 @@ pub struct PreflightConfig {
     pub policies: Vec<PolicyConfig>,
 }
 
-/// Load policies from an agent's AGENTS.md file
-///
-/// Searches for AGENTS.md in the current directory and parent directories.
-/// Returns an empty moderator if no AGENTS.md is found or no policies defined.
+/// Load preflight policies from the discovered SwarmKit (or empty).
 pub fn load_policies_from_config() -> Result<PreflightModerator, Box<dyn std::error::Error>> {
-    // Search for AGENTS.md starting from current directory
-    let mut current = std::env::current_dir()?;
-
-    loop {
-        let agents_md = current.join("AGENTS.md");
-        if agents_md.exists() {
-            return load_policies_from_agents_md(&agents_md);
-        }
-
-        if !current.pop() {
-            break;
+    let config = load_agent_config()?;
+    match config.preflight {
+        Some(preflight) => Ok(build_moderator_from_config(&preflight)),
+        None => {
+            tracing::debug!("No preflight policies in SwarmKit runtime; empty moderator");
+            Ok(PreflightModerator::new())
         }
     }
-
-    tracing::debug!("No AGENTS.md found, using empty moderator");
-    Ok(PreflightModerator::new())
 }
 
-/// Load policies from a specific AGENTS.md file
+/// Load policies from a legacy AGENTS.md file (tests / migrate only).
+#[deprecated(
+    since = "0.89.0",
+    note = "use load_policies_from_config / SwarmKit runtime.preflight"
+)]
 pub fn load_policies_from_agents_md(
     path: &Path,
 ) -> Result<PreflightModerator, Box<dyn std::error::Error>> {
@@ -309,29 +307,102 @@ pub fn load_policies_from_agents_md(
     Ok(moderator)
 }
 
-/// Load full agent config from AGENTS.md (includes preflight, budget, KAS)
+/// Load full agent config from the discovered SwarmKit kit.
 ///
-/// Searches for AGENTS.md in the current directory and parent directories.
-/// Returns default config if no AGENTS.md is found.
+/// Discovery order: `ARKAVO_SWARMKIT_PATH`, `.arkavo/*.swarmkit.yaml`, cwd kits.
+/// Product AGENTS.md is **not** loaded. If only AGENTS.md is present, logs a
+/// migrate error and returns defaults so process boot is non-fatal.
 pub fn load_agent_config() -> Result<AgentConfig, Box<dyn std::error::Error>> {
-    let mut current = std::env::current_dir()?;
-
-    loop {
-        let agents_md = current.join("AGENTS.md");
-        if agents_md.exists() {
-            return load_agent_config_from_agents_md(&agents_md);
+    let cwd = std::env::current_dir()?;
+    match arkavo_swarmkit::load_discovered_kit(&cwd) {
+        Ok(discovered) => {
+            let config = agent_config_from_runtime(&discovered.config);
+            tracing::info!(
+                path = %discovered.path.display(),
+                kit = %discovered.config.kit_name,
+                has_preflight = config.preflight.is_some(),
+                has_budget = config.budget.is_some(),
+                has_kas = config.kas.is_some(),
+                "Loaded agent config from SwarmKit"
+            );
+            Ok(config)
         }
-
-        if !current.pop() {
-            break;
+        Err(arkavo_swarmkit::DiscoverError::NotFound) => {
+            tracing::debug!("No SwarmKit found, using default agent config");
+            Ok(AgentConfig::default())
+        }
+        Err(arkavo_swarmkit::DiscoverError::AgentsMdUnsupported { path }) => {
+            tracing::error!(
+                path = %path.display(),
+                "AGENTS.md is no longer supported as agent configuration. \
+                 Convert with: arkavo kit migrate-from-agents-md --in {} --out agent.swarmkit.yaml",
+                path.display()
+            );
+            Ok(AgentConfig::default())
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "SwarmKit discovery failed; using default agent config"
+            );
+            Ok(AgentConfig::default())
         }
     }
-
-    tracing::debug!("No AGENTS.md found, using default agent config");
-    Ok(AgentConfig::default())
 }
 
-/// Load full agent config from a specific AGENTS.md file
+/// Map SwarmKit [`AgentRuntimeConfig`] into the router [`AgentConfig`] DTO.
+pub fn agent_config_from_runtime(runtime_cfg: &arkavo_swarmkit::AgentRuntimeConfig) -> AgentConfig {
+    use arkavo_swarmkit::{CloudPolicyKind, PreflightAction};
+
+    let rt = &runtime_cfg.runtime;
+    let cloud_policy = match rt.cloud_policy_or_default() {
+        CloudPolicyKind::LocalOnly => "local_only",
+        CloudPolicyKind::AskBeforeCloud => "ask_before_cloud",
+        CloudPolicyKind::CloudWithinCap => "cloud_within_cap",
+    };
+
+    let preflight = rt.preflight.as_ref().map(|pf| PreflightConfig {
+        policies: pf
+            .policies
+            .iter()
+            .map(|p| PolicyConfig {
+                id: p.id.clone(),
+                features: p.features.clone(),
+                action: match p.action {
+                    PreflightAction::Block => PolicyAction::Block,
+                    PreflightAction::Allow => PolicyAction::Allow,
+                },
+                description: p.description.clone(),
+                enabled: p.enabled,
+            })
+            .collect(),
+    });
+
+    let budget = Some(BudgetYamlConfig {
+        max_cost_per_session: rt.max_cost_per_session,
+        max_cost_per_day: rt.max_cost_per_day,
+        cloud_policy: Some(cloud_policy.to_string()),
+    });
+
+    let kas = rt.kas.as_ref().map(|k| KasYamlConfig {
+        enabled: k.enabled,
+        key_id: k.key_id.clone(),
+        algorithm: k.algorithm.clone(),
+    });
+
+    AgentConfig {
+        name: Some(runtime_cfg.kit_name.clone()),
+        preflight,
+        budget,
+        kas,
+    }
+}
+
+/// Load full agent config from a legacy AGENTS.md file (migrate / tests only).
+#[deprecated(
+    since = "0.89.0",
+    note = "use SwarmKit load_agent_config / agent_config_from_runtime"
+)]
 pub fn load_agent_config_from_agents_md(
     path: &Path,
 ) -> Result<AgentConfig, Box<dyn std::error::Error>> {
@@ -347,12 +418,9 @@ pub fn load_agent_config_from_agents_md(
     let yaml_content = extract_yaml_from_markdown(&content);
     let config: AgentConfig = serde_yaml::from_str(&yaml_content).unwrap_or_default();
 
-    tracing::info!(
+    tracing::warn!(
         path = %path.display(),
-        has_preflight = config.preflight.is_some(),
-        has_budget = config.budget.is_some(),
-        has_kas = config.kas.is_some(),
-        "Loaded agent config from AGENTS.md"
+        "Loaded agent config from deprecated AGENTS.md; migrate to SwarmKit"
     );
 
     Ok(config)
@@ -450,6 +518,7 @@ fn extract_yaml_from_markdown(content: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use std::io::Write;
@@ -493,6 +562,7 @@ preflight:
         .unwrap();
 
         let path = file.path().to_path_buf();
+        #[allow(deprecated)]
         let moderator = load_policies_from_agents_md(&path).unwrap();
         assert_eq!(moderator.len(), 1);
 
@@ -529,9 +599,58 @@ preflight:
         .unwrap();
 
         let path = file.path().to_path_buf();
+        #[allow(deprecated)]
         let moderator = load_policies_from_agents_md(&path).unwrap();
         // Only 2 policies loaded (one is disabled)
         assert_eq!(moderator.len(), 2);
+    }
+
+    #[test]
+    fn agent_config_from_swarmkit_runtime_maps_cloud_and_preflight() {
+        use arkavo_swarmkit::{
+            AgentRuntimeConfig, CloudPolicyKind, KitRuntimeConfig, PreflightAction,
+            PreflightPolicySpec, RoleRuntimeView, RuntimePreflight,
+        };
+
+        let runtime_cfg = AgentRuntimeConfig {
+            kit_id: "blake3:test".into(),
+            kit_name: "secure-kit".into(),
+            objective_goal: "stay safe".into(),
+            runtime: KitRuntimeConfig {
+                cloud_policy: Some(CloudPolicyKind::LocalOnly),
+                max_cost_per_session: Some(1.0),
+                preflight: Some(RuntimePreflight {
+                    policies: vec![PreflightPolicySpec {
+                        id: "block_pii".into(),
+                        features: vec!["InputContainsPII".into()],
+                        action: PreflightAction::Block,
+                        description: None,
+                        enabled: true,
+                    }],
+                }),
+                ..Default::default()
+            },
+            roles: vec![RoleRuntimeView {
+                role_id: "agent".into(),
+                role_type: "operator".into(),
+                description: None,
+                model_family: Some("ministral".into()),
+                model_size: Some("3B".into()),
+                model_backend: None,
+                skill_instructions: String::new(),
+                mcp_tool_grants: vec![],
+            }],
+        };
+
+        let config = agent_config_from_runtime(&runtime_cfg);
+        assert_eq!(config.name.as_deref(), Some("secure-kit"));
+        assert_eq!(
+            config.budget.as_ref().unwrap().cloud_policy.as_deref(),
+            Some("local_only")
+        );
+        let moderator = build_moderator_from_config(config.preflight.as_ref().unwrap());
+        assert_eq!(moderator.len(), 1);
+        assert!(moderator.check("SSN 123-45-6789").is_blocked());
     }
 
     #[test]
