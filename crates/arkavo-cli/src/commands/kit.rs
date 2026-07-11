@@ -156,6 +156,7 @@ pub struct KitInitReport {
 /// `<base_dir>/.arkavo/<name>.swarmkit.yaml`. Fails without touching the
 /// filesystem further if the target file already exists.
 pub fn init_kit(base_dir: &Path, name: &str) -> Result<KitInitReport, Box<dyn std::error::Error>> {
+    kit_build::validate_kit_name(name)?;
     let arkavo_dir = base_dir.join(ARKAVO_DIR);
     std::fs::create_dir_all(&arkavo_dir)?;
 

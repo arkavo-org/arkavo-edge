@@ -101,6 +101,52 @@ fn validate_fails_on_invalid_yaml() {
     assert!(result.is_err(), "invalid YAML must fail validation");
 }
 
+/// Regression for finding 3: `kit init` must reject a name that could
+/// escape `.arkavo/` rather than writing outside it.
+#[test]
+fn init_rejects_name_with_path_separator_and_writes_nothing() {
+    let dir = tempdir();
+
+    let result = init_kit(dir.path(), "../evil");
+    assert!(result.is_err(), "a name containing '/' must be rejected");
+
+    // Nothing should have been written anywhere under or above the tempdir.
+    let arkavo_dir = dir.path().join(".arkavo");
+    if arkavo_dir.exists() {
+        let entries: Vec<_> = fs::read_dir(&arkavo_dir).unwrap().collect();
+        assert!(
+            entries.is_empty(),
+            "no file should have been written into .arkavo/"
+        );
+    }
+    assert!(
+        !dir.path()
+            .parent()
+            .unwrap()
+            .join("evil.swarmkit.yaml")
+            .exists(),
+        "nothing should have been written outside the tempdir"
+    );
+}
+
+/// Companion to the above: a bare `..` name must also be rejected.
+#[test]
+fn init_rejects_dotdot_name_and_writes_nothing() {
+    let dir = tempdir();
+
+    let result = init_kit(dir.path(), "..");
+    assert!(result.is_err(), "a name of '..' must be rejected");
+
+    let arkavo_dir = dir.path().join(".arkavo");
+    if arkavo_dir.exists() {
+        let entries: Vec<_> = fs::read_dir(&arkavo_dir).unwrap().collect();
+        assert!(
+            entries.is_empty(),
+            "no file should have been written into .arkavo/"
+        );
+    }
+}
+
 /// `arkavo agent init` is a deprecated alias of `kit init` (Phase S4). It must
 /// no longer write AGENTS.md at all — it delegates entirely to the same
 /// manifest writer `kit init` uses, so the two commands can never drift.

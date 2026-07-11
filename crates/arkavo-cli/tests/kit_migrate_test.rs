@@ -339,6 +339,213 @@ fn existing_out_path_errors_without_modifying_it() {
     );
 }
 
+/// Regression for finding 1: a kit has exactly one `runtime` block, built
+/// from the first AGENTS.md agent section. A second section that declares a
+/// different `listen`/`mode`/`mdns` must not vanish silently — it has to
+/// show up as `unmapped:` lines so `kit::execute` exits non-zero.
+#[test]
+fn divergent_runtime_settings_across_agents_are_reported_unmapped() {
+    let dir = tempdir();
+    let in_path = dir.path().join("AGENTS.md");
+    fs::write(
+        &in_path,
+        r#"# AGENTS.md
+
+## primary
+
+purpose: Handles inbound requests
+listen: 0.0.0.0:8342
+mode: orchestrator
+mdns: true
+
+## worker
+
+purpose: Handles background jobs
+listen: 0.0.0.0:9100
+mode: specialist
+mdns: false
+"#,
+    )
+    .unwrap();
+    let out_path = dir.path().join("agent.swarmkit.yaml");
+
+    let report = migrate_from_agents_md(&in_path, &out_path)
+        .expect("kit should still be written despite the divergence");
+    assert!(out_path.exists(), "kit file must still be written");
+
+    for expected in [
+        "unmapped: listen (agent 'worker' differs from kit-level runtime.listen)",
+        "unmapped: mode (agent 'worker' differs from kit-level runtime.mode)",
+        "unmapped: mdns (agent 'worker' differs from kit-level runtime.mdns)",
+    ] {
+        assert!(
+            report.unmapped.iter().any(|l| l == expected),
+            "expected {expected:?} in unmapped, got {:?}",
+            report.unmapped
+        );
+    }
+
+    // The CLI-level command must exit non-zero when a divergence exists.
+    let out_path_2 = dir.path().join("agent2.swarmkit.yaml");
+    let args = vec![
+        "migrate-from-agents-md".to_string(),
+        "--in".to_string(),
+        in_path.to_string_lossy().to_string(),
+        "--out".to_string(),
+        out_path_2.to_string_lossy().to_string(),
+    ];
+    let result = kit::execute(&args);
+    assert!(
+        result.is_err(),
+        "divergent runtime settings must cause a non-zero exit"
+    );
+}
+
+/// Companion to the above: identical `listen`/`mode`/`mdns` across every
+/// section must not be reported unmapped, and the command must exit 0.
+#[test]
+fn identical_runtime_settings_across_agents_exit_zero() {
+    let dir = tempdir();
+    let in_path = dir.path().join("AGENTS.md");
+    fs::write(
+        &in_path,
+        r#"# AGENTS.md
+
+## primary
+
+purpose: Handles inbound requests
+listen: 0.0.0.0:8342
+mode: orchestrator
+mdns: true
+
+## worker
+
+purpose: Handles background jobs
+listen: 0.0.0.0:8342
+mode: orchestrator
+mdns: true
+"#,
+    )
+    .unwrap();
+    let out_path = dir.path().join("agent.swarmkit.yaml");
+
+    let report = migrate_from_agents_md(&in_path, &out_path).expect("migration should succeed");
+    assert!(
+        report.unmapped.is_empty(),
+        "identical runtime settings must not be reported unmapped: {:?}",
+        report.unmapped
+    );
+
+    let args = vec![
+        "migrate-from-agents-md".to_string(),
+        "--in".to_string(),
+        in_path.to_string_lossy().to_string(),
+        "--out".to_string(),
+        dir.path()
+            .join("agent2.swarmkit.yaml")
+            .to_string_lossy()
+            .to_string(),
+    ];
+    assert!(
+        kit::execute(&args).is_ok(),
+        "identical runtime settings must exit zero"
+    );
+}
+
+/// Regression for finding 2: two agent sections that both define an MCP
+/// server named `foo` but with different commands must not silently keep
+/// the first definition — the conflict has to surface as `unmapped:`.
+#[test]
+fn conflicting_same_name_mcp_servers_are_reported_unmapped() {
+    let dir = tempdir();
+    let in_path = dir.path().join("AGENTS.md");
+    fs::write(
+        &in_path,
+        r#"# AGENTS.md
+
+## primary
+
+purpose: Handles inbound requests
+mcp_servers:
+  - name: foo
+    command: mcp-foo-v1
+
+## worker
+
+purpose: Handles background jobs
+mcp_servers:
+  - name: foo
+    command: mcp-foo-v2
+"#,
+    )
+    .unwrap();
+    let out_path = dir.path().join("agent.swarmkit.yaml");
+
+    let report = migrate_from_agents_md(&in_path, &out_path)
+        .expect("kit should still be written despite the conflict");
+
+    assert!(
+        report.unmapped.iter().any(|l| l
+            == "unmapped: mcp_server 'foo' (conflicting definitions across agents; kept first)"),
+        "expected mcp_server conflict in unmapped, got {:?}",
+        report.unmapped
+    );
+
+    let content = fs::read_to_string(&report.path).unwrap();
+    let manifest = arkavo_swarmkit::parse_yaml(&content).expect("migrated kit must validate");
+    let runtime = manifest.runtime.expect("runtime block required");
+    assert_eq!(
+        runtime.mcp_servers.len(),
+        1,
+        "conflicting definitions must still collapse to one entry (first wins)"
+    );
+    assert_eq!(
+        runtime.mcp_servers[0].command.as_deref(),
+        Some("mcp-foo-v1")
+    );
+}
+
+/// Companion to the above: identical duplicate MCP server definitions
+/// across sections must stay silent (not reported unmapped).
+#[test]
+fn identical_duplicate_mcp_servers_stay_silent() {
+    let dir = tempdir();
+    let in_path = dir.path().join("AGENTS.md");
+    fs::write(
+        &in_path,
+        r#"# AGENTS.md
+
+## primary
+
+purpose: Handles inbound requests
+mcp_servers:
+  - name: foo
+    command: mcp-foo
+
+## worker
+
+purpose: Handles background jobs
+mcp_servers:
+  - name: foo
+    command: mcp-foo
+"#,
+    )
+    .unwrap();
+    let out_path = dir.path().join("agent.swarmkit.yaml");
+
+    let report = migrate_from_agents_md(&in_path, &out_path).expect("migration should succeed");
+    assert!(
+        report.unmapped.is_empty(),
+        "identical duplicate mcp_server definitions must not be reported unmapped: {:?}",
+        report.unmapped
+    );
+
+    let content = fs::read_to_string(&report.path).unwrap();
+    let manifest = arkavo_swarmkit::parse_yaml(&content).expect("migrated kit must validate");
+    let runtime = manifest.runtime.expect("runtime block required");
+    assert_eq!(runtime.mcp_servers.len(), 1);
+}
+
 #[test]
 fn migrates_hello_world_example_fixture() {
     let dir = tempdir();

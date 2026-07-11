@@ -71,7 +71,7 @@ pub fn migrate_from_agents_md(
 
     let mut used_ids = HashSet::new();
     let mut mcp_servers: Vec<RuntimeMcpServer> = Vec::new();
-    let mut seen_server_names = HashSet::new();
+    let mut mcp_conflicts: Vec<String> = Vec::new();
     let mut unmapped_models: Vec<(String, String)> = Vec::new();
 
     let roles: Vec<RoleSpec> = agents
@@ -82,8 +82,14 @@ pub fn migrate_from_agents_md(
                 unmapped_models.push((role.id.clone(), hint));
             }
             for server in &a.mcp_servers {
-                if seen_server_names.insert(server.name.clone()) {
-                    mcp_servers.push(to_runtime_mcp_server(server));
+                let candidate = to_runtime_mcp_server(server);
+                match mcp_servers.iter().find(|s| s.name == server.name) {
+                    // Same name, same config: harmless duplicate, stay silent.
+                    Some(existing) if *existing == candidate => {}
+                    // Same name, different config: first wins, but the
+                    // divergence must be reported (brief item 2).
+                    Some(_) => mcp_conflicts.push(server.name.clone()),
+                    None => mcp_servers.push(candidate),
                 }
             }
             role
@@ -122,7 +128,8 @@ pub fn migrate_from_agents_md(
     let yaml = serde_yaml::to_string(&manifest)?;
     std::fs::write(out_path, yaml)?;
 
-    let unmapped = unmapped_lines(&agents, &content, &unmapped_models);
+    let mut unmapped = unmapped_lines(&agents, &content, &unmapped_models, &mcp_conflicts);
+    unmapped.extend(runtime_divergence_lines(&agents));
 
     Ok(MigrateReport {
         path: out_path.to_path_buf(),
@@ -269,6 +276,48 @@ fn to_runtime_mcp_server(s: &McpServerConfig) -> RuntimeMcpServer {
     }
 }
 
+/// A kit has exactly one `runtime` block, built from `agents[0]` only. If a
+/// later AGENTS.md section declares a different `listen`, `mode`, or
+/// `mdns`, that setting has nowhere to go and must be reported rather than
+/// silently dropped (finding 1).
+fn runtime_divergence_lines(agents: &[AgentConfig]) -> Vec<String> {
+    let Some(first) = agents.first() else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    for agent in agents.iter().skip(1) {
+        if agent.listen != first.listen {
+            lines.push(format!(
+                "unmapped: listen (agent '{}' differs from kit-level runtime.listen)",
+                agent.name
+            ));
+        }
+        if agent.mode != first.mode {
+            lines.push(format!(
+                "unmapped: mode (agent '{}' differs from kit-level runtime.mode)",
+                agent.name
+            ));
+        }
+        if agent.mdns_enabled != first.mdns_enabled {
+            lines.push(format!(
+                "unmapped: mdns (agent '{}' differs from kit-level runtime.mdns)",
+                agent.name
+            ));
+        }
+    }
+    lines
+}
+
+/// Reject a `kit init`/`agent init` name that could escape `.arkavo/` —
+/// path separators or `..` turn the "kit slug" into a path (finding 3).
+pub(super) fn validate_kit_name(name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed.contains(['/', '\\']) || trimmed.contains("..") {
+        return Err(format!("invalid kit name {name:?}: no '/', '\\', '..', or empty").into());
+    }
+    Ok(())
+}
+
 /// Fields the legacy parser captures that have no SwarmKit home (brief item
 /// 7). Reported once per field kind across the whole file, not once per
 /// agent section, so a multi-agent migration doesn't spam duplicate lines.
@@ -276,8 +325,18 @@ fn unmapped_lines(
     agents: &[AgentConfig],
     raw_content: &str,
     unmapped_models: &[(String, String)],
+    mcp_conflicts: &[String],
 ) -> Vec<String> {
     let mut lines = Vec::new();
+
+    let mut conflict_names = mcp_conflicts.to_vec();
+    conflict_names.sort_unstable();
+    conflict_names.dedup();
+    for name in &conflict_names {
+        lines.push(format!(
+            "unmapped: mcp_server '{name}' (conflicting definitions across agents; kept first)"
+        ));
+    }
 
     let mut key_names: Vec<&str> = agents
         .iter()
