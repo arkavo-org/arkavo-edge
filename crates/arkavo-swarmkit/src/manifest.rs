@@ -7,6 +7,7 @@ use crate::coordination::{
 };
 use crate::governance::ProposalGovernanceSpec;
 use crate::role::RoleSpec;
+use crate::runtime_config::KitRuntimeConfig;
 
 /// Top-level SwarmKit manifest. Cleartext document inside the TDF payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -33,6 +34,10 @@ pub struct Manifest {
     /// derived proposal policy (roles ingest nothing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposal_governance: Option<ProposalGovernanceSpec>,
+    /// Process/network/spend/preflight config (replaces product AGENTS.md).
+    /// Optional: omitted kits keep historical kit.id hashes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<KitRuntimeConfig>,
     pub completion: CompletionSpec,
     pub provenance: ProvenanceSpec,
 }
