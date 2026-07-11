@@ -4,6 +4,7 @@
 spec_version: "1.0.0"
 kit:
   id: ""
+  # Authored empty; populated at publish
   name: "secure-agent"
   version: "0.1.0"
   description: "Demonstrates preflight policy configuration for input moderation"

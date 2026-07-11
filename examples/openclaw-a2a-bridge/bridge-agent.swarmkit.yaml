@@ -5,6 +5,7 @@
 spec_version: "1.0.0"
 kit:
   id: ""
+  # Authored empty; populated at publish
   name: "arkavo-bridge-agent"
   version: "0.1.0"
   description: "A2A protocol bridge demonstrating TDF encryption, budget enforcement, and preflight policies"

@@ -1,6 +1,7 @@
 spec_version: "1.0.0"
 kit:
   id: ""
+  # Authored empty; populated at publish
   name: "Shadow Teacher Kit"
   version: "0.1.0"
   description: >-
@@ -29,7 +30,7 @@ roles:
     description: "Reviews sample source files for security and quality issues using filesystem tools."
     agent_provisioning:
       model:
-        family: "gemma-4"
+        family: "gemma"
         size: "E4B"
         backend: "llama.cpp"
       budget:
@@ -66,7 +67,7 @@ roles:
     description: "Generates unit tests for sample source files using filesystem tools."
     agent_provisioning:
       model:
-        family: "gemma-4"
+        family: "gemma"
         size: "E4B"
         backend: "llama.cpp"
       budget:

@@ -5,6 +5,7 @@
 spec_version: "1.0.0"
 kit:
   id: ""
+  # Authored empty; populated at publish
   name: "orchestrator-agent"
   version: "0.1.0"
   description: "Intelligent task routing and coordination for the Arkavo agent mesh"
@@ -16,7 +17,7 @@ kit:
   nonce: "vpk8FE0sNc3byPRxcdSsRA"
 
 objective:
-  goal: "Receive human requests and delegate work to the best-matched specialist agents on the mesh"
+  goal: "Intelligent task routing and coordination for the Arkavo agent mesh"
   success_criteria:
     - "routing decisions are explained briefly so humans understand which agents handled their request"
     - "complex requests are decomposed and results aggregated into a coherent response"

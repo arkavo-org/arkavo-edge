@@ -2,6 +2,7 @@
 spec_version: "1.0.0"
 kit:
   id: ""
+  # Authored empty; populated at publish
   name: "evofabric-agent"
   version: "0.1.0"
   description: "Propose and verify AST-level code modifications using typed operations"

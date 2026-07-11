@@ -15,6 +15,7 @@
 spec_version: "1.0.0"
 kit:
   id: ""
+  # Authored empty; populated at publish
   name: "secure-data-plane"
   version: "0.1.0"
   description: "Encrypted interagent data sharing: TDF encryption over an Iroh P2P data plane, with KAS key rewrap over the A2A control plane."
