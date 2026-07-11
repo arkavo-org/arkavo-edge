@@ -56,7 +56,7 @@ arkavo ui
 1. **Start all agents:**
 ```bash
 cd examples/software-development-simple
-./launch_agents.sh
+./launch.sh
 ```
 
 2. **Run the demo scenarios:**
@@ -190,16 +190,14 @@ curl http://localhost:8344/.well-known/agent.json
 
 ```
 software-development-simple/
+├── software-development-simple.swarmkit.yaml  # All 3 agent roles (single kit)
 ├── project-manager/
-│   ├── AGENTS.md          # PM agent configuration
 │   └── workspace/          # Working directory
 ├── coding-agent/
-│   ├── AGENTS.md          # Coding agent configuration
 │   └── workspace/          # Code output directory
 ├── testing-agent/
-│   ├── AGENTS.md          # Testing agent configuration
 │   └── test-results/       # Test reports
-├── launch_agents.sh        # Start/stop all agents
+├── launch.sh               # Start/stop all agents
 ├── run_scenarios.sh        # Run demo scenarios
 ├── logs/                   # Agent log files
 └── README.md              # This file
@@ -220,7 +218,7 @@ tail -f logs/testing-agent.log
 
 ### Check Agent Status
 ```bash
-./launch_agents.sh status
+./launch.sh status
 ```
 
 ### AGUI Dashboard
@@ -236,44 +234,52 @@ Access at: http://localhost:3000
 
 ### Start Agents
 ```bash
-./launch_agents.sh start
+./launch.sh start
 ```
 
 ### Stop Agents
 ```bash
-./launch_agents.sh stop
+./launch.sh stop
 ```
 
 ### Restart Agents
 ```bash
-./launch_agents.sh restart
+./launch.sh restart
 ```
 
 ### View Log Locations
 ```bash
-./launch_agents.sh logs
+./launch.sh logs
 ```
 
 ## Customization
 
 ### Modify Agent Behavior
-Edit the AGENTS.md files in each agent directory to:
-- Change the LLM model
-- Adjust listening ports
-- Add MCP servers
-- Configure capabilities
+Edit the corresponding role in `software-development-simple.swarmkit.yaml` to:
+- Change the LLM model (`agent_provisioning.model`)
+- Adjust listening ports (pass a different `-p` in `launch.sh`)
+- Add MCP tool grants (`mcp_tools`)
+- Configure capabilities (the role's `skill:identity` instructions)
 
 ### Add New Agents
-1. Create a new directory with AGENTS.md
-2. Configure unique port and capabilities
-3. Update launch_agents.sh to include the new agent
+1. Add a new entry under `roles:` in `software-development-simple.swarmkit.yaml`
+2. Configure a unique port and its `skill:identity` capabilities
+3. Update `launch.sh` to include the new agent
 4. Add communication patterns in run_scenarios.sh
 
 ### Change Models
-Update the `model` field in AGENTS.md:
+Update the role's `agent_provisioning.model` in
+`software-development-simple.swarmkit.yaml`:
 ```yaml
-model: ollama://127.0.0.1:11434/your-model:tag
+agent_provisioning:
+  model:
+    family: "ministral"
+    size: "3B"
+    backend: "llama.cpp"
 ```
+(`project-manager` and `testing-agent` shipped with `gemma-3-270m`, which
+predates this repo's local-edge-model vocabulary — see the kit file's header
+comment. `coding-agent` ran with no model hint, i.e. router default.)
 
 ## Troubleshooting
 
@@ -283,8 +289,8 @@ model: ollama://127.0.0.1:11434/your-model:tag
 - Check binary exists: `ls ../../target/debug/arkavo`
 
 ### Communication Failures
-- Verify all agents are healthy: `./launch_agents.sh status`
-- Check mDNS is enabled in AGENTS.md files
+- Verify all agents are healthy: `./launch.sh status`
+- Check `runtime.mdns: true` is set in `software-development-simple.swarmkit.yaml`
 - Review logs for connection errors
 
 ### Performance Issues

@@ -1,0 +1,94 @@
+# Single-role SwarmKit replacing the deprecated AGENTS.md for claude-code-agent.
+#
+# Claude models are cloud, not local-edge — model_map.rs
+# (crates/arkavo-cli/src/commands/kit/model_map.rs) intentionally has no
+# Claude entries, so `agent_provisioning.model` is omitted; the model this
+# role actually runs is selected by the `claude_code` capability itself
+# (OAuth session or ANTHROPIC_MODEL), not by SwarmKit model provisioning.
+# `max_budget_usd: 5.0` -> `runtime.max_cost_per_session: 5.0`.
+# `budget_tokens: 200000` -> `agent_provisioning.budget.max_total_tokens`.
+# Everything else in the old `claude_code:` block (use_oauth,
+# use_bidirectional, workspace_root, permission_mode, tools, allow_globs,
+# deny_globs, allowed_tools, disallowed_tools) has no RoleSpec equivalent —
+# see README.md's "Configuration not yet modeled in SwarmKit" section for
+# where that operational intent now lives.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "code-agent-claude"
+  version: "0.1.0"
+  description: "Agent using the native Claude Agent SDK with bidirectional sessions, budget tracking, and MCP tool integration."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "codeAgentClaudeNonce1"
+
+objective:
+  goal: "Agent using the native Claude Agent SDK with bidirectional sessions, budget tracking, and MCP tool integration."
+  success_criteria:
+    - "coding tasks are completed using the claude_code capability's MCP tools"
+    - "session cost stays within runtime.max_cost_per_session"
+
+roles:
+  - id: "claude-code-agent"
+    role_type: "coding"
+    description: "Agent using the native Claude Agent SDK with bidirectional sessions, budget tracking, and MCP tool integration."
+    agent_provisioning:
+      budget:
+        max_total_tokens: 200000
+      isolation:
+        sandbox: "process"
+        network_egress: true
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Agent using the native Claude Agent SDK with bidirectional
+            sessions, budget tracking, and MCP tool integration.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 3600
+    max_total_tokens: 200000
+    max_cost_usd: 5.00
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: true
+    egress_allowlist:
+      - "api.anthropic.com"
+
+completion:
+  rules:
+    - "coding task completed within budget"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  max_cost_per_session: 5.0
+  local_dev: true
