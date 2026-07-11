@@ -612,30 +612,35 @@ impl Provider for ResponsesProvider {
         tokio::spawn(async move {
             let mut buffer = String::new();
             let mut stream = response.bytes_stream();
+            let mut terminal_sent = false;
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
                         buffer.push_str(&String::from_utf8_lossy(&bytes));
-                        let lines: Vec<String> = buffer
-                            .lines()
-                            .map(std::string::ToString::to_string)
-                            .collect();
+                        // Only parse newline-terminated lines so a partial
+                        // trailing line is not emitted twice across chunks.
+                        let Some(last_newline) = buffer.rfind('\n') else {
+                            continue;
+                        };
+                        let complete: String = buffer.drain(..=last_newline).collect();
 
-                        for line in &lines {
+                        for line in complete.lines() {
                             let Some(data) = line.strip_prefix("data: ") else {
                                 continue;
                             };
                             if data == "[DONE]" {
-                                let _ = tx
-                                    .send(Ok(StreamResponse {
-                                        content: String::new(),
-                                        reasoning_content: None,
-                                        done: true,
-                                        inference_timing: None,
-                                    }))
-                                    .await;
-                                continue;
+                                if !terminal_sent {
+                                    let _ = tx
+                                        .send(Ok(StreamResponse {
+                                            content: String::new(),
+                                            reasoning_content: None,
+                                            done: true,
+                                            inference_timing: None,
+                                        }))
+                                        .await;
+                                }
+                                return;
                             }
                             let Ok(event) = serde_json::from_str::<Value>(data) else {
                                 continue;
@@ -686,17 +691,20 @@ impl Provider for ResponsesProvider {
                                             serde_json::from_value(u.clone()).ok()?;
                                         Some(ResponsesProvider::timing_from_usage(&usage))
                                     });
-                                    if tx
-                                        .send(Ok(StreamResponse {
-                                            content: String::new(),
-                                            reasoning_content: None,
-                                            done: true,
-                                            inference_timing: timing,
-                                        }))
-                                        .await
-                                        .is_err()
-                                    {
-                                        return;
+                                    if !terminal_sent {
+                                        if tx
+                                            .send(Ok(StreamResponse {
+                                                content: String::new(),
+                                                reasoning_content: None,
+                                                done: true,
+                                                inference_timing: timing,
+                                            }))
+                                            .await
+                                            .is_err()
+                                        {
+                                            return;
+                                        }
+                                        terminal_sent = true;
                                     }
                                 }
                                 "response.failed" => {
@@ -709,10 +717,6 @@ impl Provider for ResponsesProvider {
                                 }
                                 _ => {}
                             }
-                        }
-
-                        if let Some(last_newline) = buffer.rfind('\n') {
-                            buffer.drain(..=last_newline);
                         }
                     }
                     Err(e) => {
@@ -835,5 +839,62 @@ mod tests {
         })
         .unwrap();
         assert_eq!(provider.responses_url(), "https://api.x.ai/v1/responses");
+    }
+
+    /// Incomplete trailing SSE lines must stay buffered and not be parsed
+    /// until a newline arrives (regression for gitar-bot finding on #645).
+    #[test]
+    fn sse_buffer_keeps_partial_line_until_newline() {
+        let mut buffer =
+            String::from("data: {\"type\":\"response.output_text.delta\",\"delta\":\"a\"}");
+        assert!(
+            buffer.rfind('\n').is_none(),
+            "unterminated line must not look complete"
+        );
+        buffer.push_str("\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"b\"}\n");
+        let last_newline = buffer.rfind('\n').expect("complete lines present");
+        let complete: String = buffer.drain(..=last_newline).collect();
+        let lines: Vec<&str> = complete
+            .lines()
+            .filter(|l| l.starts_with("data: "))
+            .collect();
+        assert_eq!(lines.len(), 2, "both complete data lines should parse");
+        assert!(
+            buffer.is_empty(),
+            "no partial remainder after trailing newline"
+        );
+
+        buffer.push_str("data: {\"type\":\"response.completed\"");
+        assert!(
+            buffer.rfind('\n').is_none(),
+            "partial completed event must remain buffered"
+        );
+        buffer.push_str("}\n");
+        let last_newline = buffer.rfind('\n').unwrap();
+        let complete: String = buffer.drain(..=last_newline).collect();
+        assert!(complete.contains("response.completed"));
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn terminal_done_emitted_only_once() {
+        let mut terminal_sent = false;
+        let signals = ["response.completed", "[DONE]", "[DONE]"];
+        let mut emitted = 0usize;
+        for signal in signals {
+            if signal == "[DONE]" {
+                if !terminal_sent {
+                    emitted += 1;
+                    terminal_sent = true;
+                }
+                break;
+            }
+            if signal == "response.completed" && !terminal_sent {
+                emitted += 1;
+                terminal_sent = true;
+            }
+        }
+        assert_eq!(emitted, 1, "only one terminal done signal");
+        assert!(terminal_sent);
     }
 }
