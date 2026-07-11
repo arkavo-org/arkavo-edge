@@ -26,6 +26,7 @@ Expected output:
 [AGENT] Starting code-analyzer (port 8412)...
 [AGENT] Starting test-generator (port 8414)...
 [AGENT] Starting security-auditor (port 8416)...
+[AGENT] Starting task-generator (port 8418)...
 [INFO]  Waiting for agents to initialize and discover peers...
 ```
 
@@ -34,7 +35,7 @@ Verify agents are running:
 ./launch.sh status
 ```
 
-All four agents should show `[OK]`.
+All five agents should show `[OK]`.
 
 ## Step 2: Start the AG-UI Gateway
 
@@ -150,6 +151,6 @@ Guidance only appears when the PolicyCache has lessons for the task category.
 
 **Port already in use:**
 ```bash
-lsof -i :8410 -i :8412 -i :8414 -i :8416
+lsof -i :8410 -i :8412 -i :8414 -i :8416 -i :8418
 ./stop.sh
 ```

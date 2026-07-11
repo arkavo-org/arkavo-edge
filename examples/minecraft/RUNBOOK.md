@@ -28,7 +28,7 @@ ls -la ../../target/debug/arkavo
 ### Step 1: Start the Swarm
 
 ```bash
-./launch_minecraft.sh
+./launch.sh
 ```
 
 **What happens:**
@@ -90,7 +90,7 @@ Minecraft: localhost:25565 (connect with client)
 ### Step 2: Check Swarm Status
 
 ```bash
-./launch_minecraft.sh status
+./launch.sh status
 ```
 
 **Expected:** All 5 agents report healthy.
@@ -119,9 +119,9 @@ tail -f logs/runner.log
 ### Step 5: Stop the Swarm
 
 ```bash
-./launch_minecraft.sh stop
+./launch.sh stop
 # or
-./stop_minecraft.sh
+./stop.sh
 ```
 
 ## Verification
@@ -184,8 +184,8 @@ docker compose logs -f minecraft | grep -m1 "Done"
 ### Agents Not Discovering Peers
 
 ```bash
-# Increase mDNS wait time (edit launch_minecraft.sh)
-# Or add explicit peers in AGENTS.md
+# Increase mDNS wait time (edit launch.sh)
+# Or add explicit handoffs/context_scope in minecraft-swarm.swarmkit.yaml
 ```
 
 ## Architecture Notes
@@ -212,8 +212,8 @@ Multiple agents coordinate to control ONE bot because:
 
 ## Related Files
 
-- `agents/commander/AGENTS.md` - MCP tools, coordination
-- `agents/router/AGENTS.md` - Specialist selection
-- `agents/specialists/*/AGENTS.md` - Domain expertise
+- `minecraft-swarm.swarmkit.yaml` - all 5 roles: MCP tools + coordination
+  (commander), specialist selection (router), domain expertise (scout,
+  builder, runner)
 - `compose.yaml` - Minecraft server config
 - `logs/` - Per-agent logs (gitignored)
