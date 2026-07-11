@@ -917,3 +917,20 @@ scenarios:
     refs:
       - crates/arkavo-swarmkit/src/discover.rs
     changed: "2026-07-11"
+
+  - id: SK-103
+    name: runtime.kas.trusted_roots parses and validates DIDs
+    criticality: critical
+    given:
+      - Manifest with runtime.kas.trusted_roots entries (did, optional name)
+      - Existing kits omit trusted_roots entirely
+    when: parse_yaml and validate run
+    then:
+      - trusted_roots deserializes into Vec<TrustedRoot>
+      - Each did must be non-empty and start with "did:"
+      - Empty/malformed dids are rejected with InvalidTrustedRootDid
+      - Kits without trusted_roots still validate
+      - Empty trusted_roots is omitted on serialization (byte-identical round trip)
+    refs:
+      - crates/arkavo-swarmkit/src/runtime_config.rs
+    changed: "2026-07-11"

@@ -7,7 +7,6 @@
 use arkavo_cli::commands::kit;
 use arkavo_cli::commands::kit::migrate_from_agents_md;
 use std::fs;
-use std::path::Path;
 
 fn tempdir() -> tempfile::TempDir {
     tempfile::tempdir().expect("create tempdir")
@@ -546,23 +545,31 @@ mcp_servers:
     assert_eq!(runtime.mcp_servers.len(), 1);
 }
 
+/// Regression fixture for the minimal single-agent AGENTS.md shape
+/// (previously the `examples/01-hello-world/AGENTS.md` file on disk; inlined
+/// here so this test doesn't depend on that example surviving the AGENTS.md
+/// deprecation sweep).
 #[test]
-fn migrates_hello_world_example_fixture() {
+fn migrates_minimal_single_agent_file() {
     let dir = tempdir();
-    let in_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/01-hello-world/AGENTS.md");
-    assert!(
-        in_path.exists(),
-        "fixture must exist at {}",
-        in_path.display()
-    );
+    let in_path = dir.path().join("AGENTS.md");
+    fs::write(
+        &in_path,
+        r#"# AGENTS.md
+## hello-agent
+purpose: "A friendly agent that introduces itself and answers basic questions"
+model: ministral-3b
+mdns: true
+"#,
+    )
+    .unwrap();
     let out_path = dir.path().join("hello.swarmkit.yaml");
 
     let report =
-        migrate_from_agents_md(&in_path, &out_path).expect("real fixture should migrate cleanly");
+        migrate_from_agents_md(&in_path, &out_path).expect("fixture should migrate cleanly");
     assert!(
         report.unmapped.is_empty(),
-        "hello-world fixture should have no unmapped fields: {:?}",
+        "minimal single-agent fixture should have no unmapped fields: {:?}",
         report.unmapped
     );
 

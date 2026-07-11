@@ -71,6 +71,17 @@ pub struct RuntimeKas {
     pub key_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub algorithm: Option<String>,
+    /// DID-identified authorities this kit trusts as TDF attribute issuers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_roots: Vec<TrustedRoot>,
+}
+
+/// A single trusted KAS root, identified by DID.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TrustedRoot {
+    pub did: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// MCP server process/URL metadata for tool bridges.
@@ -268,6 +279,16 @@ pub fn validate_runtime(runtime: &KitRuntimeConfig) -> Result<(), RuntimeValidat
         });
     }
 
+    if let Some(kas) = &runtime.kas {
+        for root in &kas.trusted_roots {
+            if !root.did.starts_with("did:") {
+                return Err(RuntimeValidationError::InvalidTrustedRootDid(
+                    root.did.clone(),
+                ));
+            }
+        }
+    }
+
     let mut server_names = std::collections::HashSet::new();
     for server in &runtime.mcp_servers {
         if server.name.is_empty() {
@@ -310,6 +331,9 @@ pub enum RuntimeValidationError {
 
     #[error("runtime.mcp_servers {name:?} needs command or url")]
     McpServerMissingEndpoint { name: String },
+
+    #[error("runtime.kas.trusted_roots did {0:?} must be non-empty and start with \"did:\"")]
+    InvalidTrustedRootDid(String),
 }
 
 #[cfg(test)]
@@ -413,5 +437,96 @@ mcp_servers:
             validate_runtime(&cfg),
             Err(RuntimeValidationError::McpServerMissingEndpoint { .. })
         ));
+    }
+
+    #[spec("SK-103")]
+    #[test]
+    fn kas_trusted_roots_parse_and_validate() {
+        let yaml = r#"
+kas:
+  enabled: true
+  key_id: "kas-key-1"
+  algorithm: "ec:secp256r1"
+  trusted_roots:
+    - did: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+      name: "Demo Root Authority"
+"#;
+        let cfg: KitRuntimeConfig = serde_yaml::from_str(yaml).unwrap();
+        let kas = cfg.kas.as_ref().expect("kas block present");
+        assert_eq!(kas.trusted_roots.len(), 1);
+        assert_eq!(
+            kas.trusted_roots[0].did,
+            "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+        );
+        assert_eq!(
+            kas.trusted_roots[0].name.as_deref(),
+            Some("Demo Root Authority")
+        );
+        validate_runtime(&cfg).unwrap();
+    }
+
+    #[spec("SK-103")]
+    #[test]
+    fn kas_trusted_root_rejects_malformed_did() {
+        let cfg = KitRuntimeConfig {
+            kas: Some(RuntimeKas {
+                enabled: true,
+                trusted_roots: vec![TrustedRoot {
+                    did: "not-a-did".into(),
+                    name: None,
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_runtime(&cfg),
+            Err(RuntimeValidationError::InvalidTrustedRootDid(_))
+        ));
+    }
+
+    #[spec("SK-103")]
+    #[test]
+    fn kas_trusted_root_rejects_empty_did() {
+        let cfg = KitRuntimeConfig {
+            kas: Some(RuntimeKas {
+                enabled: true,
+                trusted_roots: vec![TrustedRoot {
+                    did: String::new(),
+                    name: None,
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_runtime(&cfg),
+            Err(RuntimeValidationError::InvalidTrustedRootDid(_))
+        ));
+    }
+
+    #[spec("SK-103")]
+    #[test]
+    fn kas_without_trusted_roots_still_validates() {
+        let cfg: KitRuntimeConfig = serde_yaml::from_str("kas:\n  enabled: true\n").unwrap();
+        assert!(cfg.kas.as_ref().unwrap().trusted_roots.is_empty());
+        validate_runtime(&cfg).unwrap();
+    }
+
+    #[spec("SK-103")]
+    #[test]
+    fn kas_trusted_roots_absent_when_empty_on_round_trip() {
+        let cfg = KitRuntimeConfig {
+            kas: Some(RuntimeKas {
+                enabled: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let yaml = serde_yaml::to_string(&cfg).unwrap();
+        assert!(
+            !yaml.contains("trusted_roots"),
+            "empty trusted_roots must be omitted from serialized output: {yaml}"
+        );
     }
 }
