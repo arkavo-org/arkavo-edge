@@ -146,7 +146,7 @@ pub fn spawn_status_broadcaster(connections: Arc<RwLock<HashMap<String, Connecti
                         .snapshot(),
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 };
-                for (_, conn_info) in conns.iter() {
+                for conn_info in conns.values() {
                     let _ = conn_info._ws_tx.send(status_event.clone()).await;
                     let _ = conn_info._ws_tx.send(router_telemetry.clone()).await;
                 }
@@ -195,7 +195,7 @@ pub fn spawn_agent_monitor(
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
                     let conns = connections.read().await;
-                    for (_, ci) in conns.iter() {
+                    for ci in conns.values() {
                         let _ = ci._ws_tx.send(event.clone()).await;
                     }
                 }
@@ -208,7 +208,7 @@ pub fn spawn_agent_monitor(
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 };
                 let conns = connections.read().await;
-                for (_, ci) in conns.iter() {
+                for ci in conns.values() {
                     let _ = ci._ws_tx.send(event.clone()).await;
                 }
             }
