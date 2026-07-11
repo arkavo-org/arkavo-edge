@@ -485,5 +485,23 @@ mod tests {
             cost > 0.0,
             "Grok must not be treated as free in architect accounting"
         );
+
+        // n_eval and n_thinking_eval are disjoint; cost must sum them once.
+        let with_thinking = ProviderResponse {
+            content: "hello".into(),
+            inference_timing: Some(arkavo_llm::InferenceTiming {
+                n_prompt_eval: 0,
+                n_eval: 200_000,
+                n_thinking_eval: Some(300_000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        // 500k output tokens at $6/M → $3.00 (not $3.00 + $1.80 double-count)
+        let thinking_cost = executor.estimate_actual_cost(&ModelChoice::Grok45, &with_thinking);
+        assert!(
+            (thinking_cost - 3.0).abs() < 1e-9,
+            "thinking tokens must not double-count; got {thinking_cost}"
+        );
     }
 }

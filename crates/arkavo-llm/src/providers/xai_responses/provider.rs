@@ -1,8 +1,8 @@
 use super::config::ResponsesConfig;
 use super::convert::{convert_input, convert_tools, parse_output};
 use super::sse::{
-    SseAction, action_sets_terminal, drain_complete_sse_lines, handle_sse_data_line,
-    should_stop_after,
+    SseAction, action_sets_terminal, append_utf8_chunk, drain_complete_sse_lines,
+    handle_sse_data_line, should_stop_after,
 };
 use super::types::{ResponsesApiResponse, ResponsesRequest, ResponsesResult, timing_from_usage};
 use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
@@ -283,6 +283,9 @@ impl Provider for ResponsesProvider {
         let (tx, rx) = tokio::sync::mpsc::channel(1024);
 
         tokio::spawn(async move {
+            // Byte pending retains incomplete multi-byte UTF-8 sequences that
+            // straddle TCP chunks; text buffer only grows with valid UTF-8.
+            let mut pending_utf8 = Vec::new();
             let mut buffer = String::new();
             let mut stream = response.bytes_stream();
             let mut terminal_sent = false;
@@ -290,7 +293,7 @@ impl Provider for ResponsesProvider {
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        buffer.push_str(&String::from_utf8_lossy(&bytes));
+                        append_utf8_chunk(&mut pending_utf8, &mut buffer, &bytes);
                         let Some(complete) = drain_complete_sse_lines(&mut buffer) else {
                             continue;
                         };

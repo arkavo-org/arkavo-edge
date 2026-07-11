@@ -29,6 +29,44 @@ pub(super) fn drain_complete_sse_lines(buffer: &mut String) -> Option<String> {
     Some(buffer.drain(..=last_newline).collect())
 }
 
+/// Append a network chunk into `pending` and decode as many complete UTF-8
+/// characters as possible into `text`.
+///
+/// Leaves a trailing incomplete multi-byte sequence in `pending` so a UTF-8
+/// character split across TCP chunks is not corrupted by `from_utf8_lossy`.
+pub(super) fn append_utf8_chunk(pending: &mut Vec<u8>, text: &mut String, chunk: &[u8]) {
+    pending.extend_from_slice(chunk);
+    loop {
+        match std::str::from_utf8(pending) {
+            Ok(s) => {
+                text.push_str(s);
+                pending.clear();
+                return;
+            }
+            Err(e) => {
+                let valid_up_to = e.valid_up_to();
+                if valid_up_to > 0 {
+                    // valid_up_to is a UTF-8 boundary by definition of Utf8Error.
+                    let valid = std::str::from_utf8(&pending[..valid_up_to])
+                        .expect("valid_up_to marks a UTF-8 boundary");
+                    text.push_str(valid);
+                    pending.drain(..valid_up_to);
+                }
+                match e.error_len() {
+                    // Incomplete multi-byte sequence at the end — wait for more.
+                    None => return,
+                    // Invalid bytes mid-stream — replace and keep scanning.
+                    Some(len) => {
+                        text.push('\u{FFFD}');
+                        let skip = len.min(pending.len()).max(1);
+                        pending.drain(..skip);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Parse one complete SSE `data:` payload into a stream action.
 ///
 /// `terminal_sent` tracks whether a `done: true` chunk was already emitted so
@@ -204,5 +242,33 @@ mod tests {
             SseAction::Emit(StreamResponse { done: true, .. })
         ));
         assert!(should_stop_after(&action, "[DONE]"));
+    }
+
+    #[test]
+    fn utf8_chunk_split_across_tcp_boundaries_is_not_corrupted() {
+        // "你好" is e4 bd a0 e5 a5 bd — split after first two bytes of first char.
+        let full = "你好".as_bytes();
+        let mut pending = Vec::new();
+        let mut text = String::new();
+
+        append_utf8_chunk(&mut pending, &mut text, &full[..2]);
+        assert!(
+            text.is_empty(),
+            "incomplete UTF-8 must not decode yet; got {text:?}"
+        );
+        assert_eq!(pending, full[..2]);
+
+        append_utf8_chunk(&mut pending, &mut text, &full[2..]);
+        assert_eq!(text, "你好");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn utf8_chunk_ascii_passes_through() {
+        let mut pending = Vec::new();
+        let mut text = String::new();
+        append_utf8_chunk(&mut pending, &mut text, b"data: hi\n");
+        assert_eq!(text, "data: hi\n");
+        assert!(pending.is_empty());
     }
 }
