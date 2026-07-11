@@ -1,0 +1,116 @@
+# Single-role SwarmKit — replaces the deprecated per-product config for
+# secure-agent. `a2a.enabled`/discovery aren't representable kit fields;
+# see README.md for where that information now lives.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "secure-agent"
+  version: "0.1.0"
+  description: "Demonstrates preflight policy configuration for input moderation"
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "u0Ftg7XfnQ-kQFNpFmfHXA"
+
+objective:
+  goal: "Demonstrates preflight policy configuration for input moderation"
+  success_criteria:
+    - "PII, SQL injection, shell commands, and oversized inputs are blocked before inference"
+    - "clean inputs are allowed through and answered normally"
+
+roles:
+  - id: "secure-agent"
+    role_type: "operator"
+    description: "Applies preflight moderation policies before every inference call."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Demonstrates preflight policy configuration for input
+            moderation. Inputs are screened by the configured preflight
+            policies before they ever reach you.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 300
+    max_total_tokens: 100000
+    max_cost_usd: 0.50
+  data_classifications:
+    - "public"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "input processed or blocked by preflight"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true
+  preflight:
+    policies:
+      - id: "block_pii"
+        features:
+          - "InputContainsPII"
+        action: block
+        description: "Blocks SSN, credit card numbers, and email addresses"
+        enabled: true
+      - id: "block_sql_injection"
+        features:
+          - "InputContainsSQLKeywords"
+        action: block
+        description: "Blocks SQL keywords like DROP, SELECT, DELETE"
+        enabled: true
+      - id: "block_shell_commands"
+        features:
+          - "InputContainsShellCommands"
+        action: block
+        description: "Blocks shell commands like sudo, rm, chmod"
+        enabled: true
+      - id: "block_long_input"
+        features:
+          - "InputLengthExceedsThreshold(100000)"
+        action: block
+        description: "Blocks inputs exceeding 100KB"
+        enabled: true

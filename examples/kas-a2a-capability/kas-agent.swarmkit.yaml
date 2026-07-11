@@ -1,28 +1,29 @@
-# Single-role SwarmKit — replaces the deprecated per-product config for hello-world.
-# Validate: cargo run -p arkavo-swarmkit --example validate_kit -- examples/01-hello-world/hello-agent.swarmkit.yaml
+# Single-role SwarmKit — replaces the deprecated per-product config for
+# kas-a2a-capability. `a2a.enabled`/discovery aren't representable kit
+# fields; see README.md for where that information now lives.
 spec_version: "1.0.0"
 kit:
-  id: "blake3:CuiN0Cj6nEab8glfIKyhM3hiDw4o9iTfkt8hmUz-JMQ"
-  name: "hello-agent"
+  id: ""
+  name: "kas-agent"
   version: "0.1.0"
-  description: "A friendly agent that introduces itself and answers basic questions"
+  description: "Demonstrates KAS (Key Access Service) as an A2A JSON-RPC capability"
   authors:
     - did: "did:web:arkavo.com"
       name: "Arkavo"
   created: "2026-07-11T00:00:00Z"
   expires: "2027-07-11T00:00:00Z"
-  nonce: "helloAgentNonce00001"
+  nonce: "WSLpUFeWi-pwZ8x0t6MVng"
 
 objective:
-  goal: "Introduce yourself and answer basic questions helpfully"
+  goal: "Demonstrates KAS (Key Access Service) as an A2A JSON-RPC capability"
   success_criteria:
-    - "responds in a friendly tone"
-    - "answers basic questions"
+    - "kas.publicKey returns the configured public key"
+    - "kas.rewrap enforces delegation verification and ABAC policy before rewrapping"
 
 roles:
-  - id: "agent"
+  - id: "kas-agent"
     role_type: "operator"
-    description: "Primary single-agent role"
+    description: "Exposes KAS key operations (publicKey, rewrap) over A2A JSON-RPC."
     agent_provisioning:
       model:
         family: "ministral"
@@ -46,7 +47,9 @@ roles:
           name: "identity"
           description: "System identity"
           instructions: >-
-            You are a friendly agent that introduces itself and answers basic questions.
+            Demonstrates KAS (Key Access Service) as an A2A JSON-RPC
+            capability, enabling TDF key rewrap operations for secure data
+            sharing.
           resources: []
     mcp_tools: []
     handoffs: []
@@ -63,14 +66,14 @@ constraints:
     max_total_tokens: 100000
     max_cost_usd: 0.50
   data_classifications:
-    - "public"
+    - "internal"
   network:
     egress_allowed: false
     egress_allowlist: []
 
 completion:
   rules:
-    - "user question answered"
+    - "kas.publicKey and kas.rewrap requests handled per delegation and ABAC policy"
   on_failure: abort
   max_retries: 0
 
@@ -85,3 +88,10 @@ runtime:
   mdns: true
   cloud_policy: ask_before_cloud
   local_dev: true
+  kas:
+    enabled: true
+    key_id: "kas-demo-key-1"
+    algorithm: "ec:secp256r1"
+    trusted_roots:
+      - did: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+        name: "Demo Root Authority"

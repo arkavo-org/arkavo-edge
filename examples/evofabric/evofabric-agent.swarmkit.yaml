@@ -1,28 +1,27 @@
-# Single-role SwarmKit — replaces the deprecated per-product config for hello-world.
-# Validate: cargo run -p arkavo-swarmkit --example validate_kit -- examples/01-hello-world/hello-agent.swarmkit.yaml
+# Single-role SwarmKit — replaces the deprecated per-product config for evofabric.
 spec_version: "1.0.0"
 kit:
-  id: "blake3:CuiN0Cj6nEab8glfIKyhM3hiDw4o9iTfkt8hmUz-JMQ"
-  name: "hello-agent"
+  id: ""
+  name: "evofabric-agent"
   version: "0.1.0"
-  description: "A friendly agent that introduces itself and answers basic questions"
+  description: "Propose and verify AST-level code modifications using typed operations"
   authors:
     - did: "did:web:arkavo.com"
       name: "Arkavo"
   created: "2026-07-11T00:00:00Z"
   expires: "2027-07-11T00:00:00Z"
-  nonce: "helloAgentNonce00001"
+  nonce: "ggCTPTv_TDoX0iiy0ScQdg"
 
 objective:
-  goal: "Introduce yourself and answer basic questions helpfully"
+  goal: "Propose and verify AST-level code modifications using typed operations"
   success_criteria:
-    - "responds in a friendly tone"
-    - "answers basic questions"
+    - "the proposed OpBundle parses and applies cleanly to the target file"
+    - "the modified workspace compiles and its tests pass before anything is committed"
 
 roles:
-  - id: "agent"
+  - id: "evofabric-agent"
     role_type: "operator"
-    description: "Primary single-agent role"
+    description: "Reads a target source file, proposes a typed AST OpBundle, and commits only after verification."
     agent_provisioning:
       model:
         family: "ministral"
@@ -30,7 +29,7 @@ roles:
         backend: "llama.cpp"
       inference:
         max_tokens: 1024
-        temperature: 0.7
+        temperature: 0.3
       budget:
         max_inference_calls: 32
         max_wallclock_ms: 120000
@@ -46,7 +45,12 @@ roles:
           name: "identity"
           description: "System identity"
           instructions: >-
-            You are a friendly agent that introduces itself and answers basic questions.
+            Propose and verify AST-level code modifications using typed
+            operations. Read the target source file, propose an OpBundle of
+            typed AST operations (never a raw text diff), apply it, and
+            verify the result in an isolated workspace (cargo check and
+            cargo test) before committing. Target AST nodes by semantic
+            identity (function/type name), not line number.
           resources: []
     mcp_tools: []
     handoffs: []
@@ -70,7 +74,7 @@ constraints:
 
 completion:
   rules:
-    - "user question answered"
+    - "OpBundle applied, verified, and committed, or no change proposed"
   on_failure: abort
   max_retries: 0
 

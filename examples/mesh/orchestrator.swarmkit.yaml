@@ -1,28 +1,29 @@
-# Single-role SwarmKit — replaces the deprecated per-product config for hello-world.
-# Validate: cargo run -p arkavo-swarmkit --example validate_kit -- examples/01-hello-world/hello-agent.swarmkit.yaml
+# Single-role SwarmKit for mesh/agent-0 — the only mesh member with a
+# purpose-built identity; mesh.sh -c's this in for index 0 and starts the
+# rest (agent-1..N) zero-config so the mesh also demonstrates default routing.
 spec_version: "1.0.0"
 kit:
-  id: "blake3:CuiN0Cj6nEab8glfIKyhM3hiDw4o9iTfkt8hmUz-JMQ"
-  name: "hello-agent"
+  id: ""
+  name: "mesh-orchestrator"
   version: "0.1.0"
-  description: "A friendly agent that introduces itself and answers basic questions"
+  description: "Coordinate agent mesh and execute scenario tasks"
   authors:
     - did: "did:web:arkavo.com"
       name: "Arkavo"
   created: "2026-07-11T00:00:00Z"
   expires: "2027-07-11T00:00:00Z"
-  nonce: "helloAgentNonce00001"
+  nonce: "BqOJWbxn14ZbZBmxKY7BiQ"
 
 objective:
-  goal: "Introduce yourself and answer basic questions helpfully"
+  goal: "Coordinate agent mesh and execute scenario tasks"
   success_criteria:
-    - "responds in a friendly tone"
-    - "answers basic questions"
+    - "discovers mesh peers via mDNS"
+    - "routes and executes scenario tasks across the mesh"
 
 roles:
-  - id: "agent"
+  - id: "orchestrator"
     role_type: "operator"
-    description: "Primary single-agent role"
+    description: "Coordinates the agent mesh and executes scenario tasks."
     agent_provisioning:
       model:
         family: "ministral"
@@ -46,7 +47,7 @@ roles:
           name: "identity"
           description: "System identity"
           instructions: >-
-            You are a friendly agent that introduces itself and answers basic questions.
+            Coordinate agent mesh and execute scenario tasks.
           resources: []
     mcp_tools: []
     handoffs: []
@@ -70,7 +71,7 @@ constraints:
 
 completion:
   rules:
-    - "user question answered"
+    - "scenario task executed"
   on_failure: abort
   max_retries: 0
 

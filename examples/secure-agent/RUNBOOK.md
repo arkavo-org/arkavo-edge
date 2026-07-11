@@ -80,7 +80,7 @@ Or press `Ctrl+C` in the terminal running the agent.
 
 ### Policy Not Blocking
 
-Check that policies are enabled in AGENTS.md:
+Check that policies are enabled in `secure-agent.swarmkit.yaml`:
 ```yaml
 enabled: true
 ```
@@ -96,7 +96,7 @@ pkill -f "arkavo agent"
 
 ### Add Custom Policy
 
-In AGENTS.md:
+In `secure-agent.swarmkit.yaml`, under `runtime.preflight.policies`:
 ```yaml
 - id: block_custom
   features:
