@@ -63,6 +63,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     match args[0].as_str() {
         "agent" => commands::agent::execute(&args[1..]),
+        "kit" => commands::kit::execute(&args[1..]),
         "chat" => commands::chat::execute(&args[1..]),
         "task" => commands::task::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),
@@ -170,6 +171,7 @@ fn print_usage() {
     println!();
     println!("COMMANDS:");
     println!("    chat           Conversational chat");
+    println!("    kit            Author and validate SwarmKit manifests");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
     println!();
