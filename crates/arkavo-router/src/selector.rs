@@ -12,6 +12,7 @@ pub struct ProviderAvailability {
     pub deepseek: bool,
     pub kimi: bool,
     pub glm: bool,
+    pub xai: bool,
 }
 
 impl ProviderAvailability {
@@ -25,12 +26,14 @@ impl ProviderAvailability {
             // Gated on the `glm` feature so the arm isn't marked feasible in a
             // build that can't instantiate it (instantiation is cfg(glm)).
             glm: cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
+            // Same pattern for xAI Grok: feature + key.
+            xai: cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok(),
         }
     }
 
     /// Check if any cloud provider is available
     pub fn has_cloud(&self) -> bool {
-        self.gemini || self.anthropic || self.deepseek || self.kimi || self.glm
+        self.gemini || self.anthropic || self.deepseek || self.kimi || self.glm || self.xai
     }
 }
 
@@ -394,6 +397,10 @@ impl ModelSelector {
             // beats the other low-cost cloud arms (DeepSeek, Gemini Flash).
             models.push(ModelChoice::Glm52);
         }
+        if self.availability.xai {
+            // Grok 4.5 enters as a single Thompson Sampling arm (cold-start).
+            models.push(ModelChoice::Grok45);
+        }
 
         // Fallback: always include Qwen3 as baseline
         if models.is_empty() {
@@ -423,6 +430,7 @@ mod tests {
             deepseek: false,
             kimi: false,
             glm: false,
+            xai: false,
         }
     }
 
@@ -433,6 +441,7 @@ mod tests {
             deepseek: false,
             kimi: false,
             glm: false,
+            xai: false,
         }
     }
 
@@ -443,6 +452,7 @@ mod tests {
             deepseek: true,
             kimi: false,
             glm: false,
+            xai: false,
         }
     }
 
@@ -453,6 +463,18 @@ mod tests {
             deepseek: false,
             kimi: false,
             glm: true,
+            xai: false,
+        }
+    }
+
+    fn xai_only() -> ProviderAvailability {
+        ProviderAvailability {
+            gemini: false,
+            anthropic: false,
+            deepseek: false,
+            kimi: false,
+            glm: false,
+            xai: true,
         }
     }
 
@@ -562,8 +584,22 @@ mod tests {
     }
 
     #[test]
+    fn test_feasible_models_xai_only() {
+        let selector = ModelSelector::with_availability(xai_only());
+        let feasible = selector.feasible_models();
+        assert!(feasible.contains(&ModelChoice::Grok45));
+        assert!(!feasible.contains(&ModelChoice::Glm52));
+        assert!(!feasible.contains(&ModelChoice::ClaudeSonnet));
+    }
+
+    #[test]
     fn test_provider_availability_glm_counts_as_cloud() {
         assert!(glm_only().has_cloud());
+    }
+
+    #[test]
+    fn test_provider_availability_xai_counts_as_cloud() {
+        assert!(xai_only().has_cloud());
     }
 
     #[spec("ROUTER-003")]

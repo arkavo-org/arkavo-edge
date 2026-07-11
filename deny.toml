@@ -11,6 +11,10 @@ ignore = [
     # Transitive unmaintained crates with no alternatives
     { id = "RUSTSEC-2024-0436", reason = "paste in alloy-primitives (no replacement available)" },
     { id = "RUSTSEC-2025-0141", reason = "bincode in hnsw_rs (transitive, no direct usage)" },
+    # quick-xml DoS: forced by iroh -> netwatch -> netdev -> plist ^1.8 which
+    # requires quick-xml ^0.39.2. Fixed in quick-xml >=0.41; blocked on plist.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml via iroh/plist pin; upgrade blocked on plist" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml via iroh/plist pin; upgrade blocked on plist" },
 ]
 
 [bans]

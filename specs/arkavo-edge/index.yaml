@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.81.0
-last_updated: 2026-06-12
+version: 0.87.0
+last_updated: 2026-06-28
 
 components:
   - name: trusted-agent
@@ -105,7 +105,7 @@ components:
     module: arkavo_router
     description: LLM routing with quality gates, response processing, and sampling parameters
     criticality: critical
-    scenario_count: 17
+    scenario_count: 23
     invariants:
       - Preflight moderation before model selection
       - Max 3 quality gate retries with escalation
@@ -152,7 +152,7 @@ components:
     module: arkavo_budget
     description: Budget tracking, cost management, and policy
     criticality: critical
-    scenario_count: 7
+    scenario_count: 11
     invariants:
       - All LLM calls track cost
       - Budget limits enforced
@@ -600,7 +600,7 @@ components:
     module: arkavo_swarmkit
     description: SwarmKit manifest, runtime, and AG-UI gateway integration
     criticality: high
-    scenario_count: 51
+    scenario_count: 53
     invariants:
       - kit.id equals BLAKE3 of canonical manifest
       - SwarmFlight builds one ArpRuntime per role at launch
@@ -939,7 +939,7 @@ components:
 
 stats:
   total_specs: 80
-  total_scenarios: 739
+  total_scenarios: 751
   critical_scenarios: 204
   coverage_areas:
     - authentication

@@ -28,4 +28,9 @@ ignore = [
     "RUSTSEC-2024-0436",
     # proc-macro-error unmaintained — widely used transitive proc-macro crate.
     "RUSTSEC-2024-0370",
+    # quick-xml DoS via unbounded namespace allocation / quadratic attribute
+    # checking. Forced by iroh -> netwatch -> netdev -> plist =^1.8 which pins
+    # quick-xml ^0.39.2. Fix needs plist >= version that requires quick-xml 0.41+.
+    "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0194",
 ]

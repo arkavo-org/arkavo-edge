@@ -305,7 +305,9 @@ mod tdf_io {
         use super::super::tests::sample_bundle;
         use super::{BundleError, BundleTdfError, unwrap_bundle, wrap_bundle};
         use arkavo_tdf::testing::MockTdfService;
+        use arkavo_test_macros::spec;
 
+        #[spec("SK-071")]
         #[tokio::test]
         async fn bundle_round_trips_through_tdf() {
             let bundle = sample_bundle();
@@ -319,6 +321,7 @@ mod tdf_io {
             assert_eq!(original_bytes, recovered_bytes);
         }
 
+        #[spec("SK-072")]
         #[tokio::test]
         async fn unwrap_with_wrong_did_fails() {
             let bundle = sample_bundle();

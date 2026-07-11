@@ -4,6 +4,7 @@ mod tests {
     use crate::config::{BudgetConfig, BudgetLimits, BudgetThresholds};
     use crate::cost::{TokenCost, TokenUsage};
     use crate::tracker::BudgetTracker;
+    use arkavo_test_macros::spec;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -45,6 +46,7 @@ mod tests {
         );
     }
 
+    #[spec("BUDGET-008")]
     #[tokio::test]
     async fn try_spend_caps_concurrent_reservations_at_budget() {
         // The cost gate relies on try_spend holding the budget lock across
@@ -97,6 +99,62 @@ mod tests {
             status.session_spent <= TokenCost::from_dollars(3.0),
             "total reserved must never exceed the session limit, got {}",
             status.session_spent
+        );
+    }
+
+    #[spec("BUDGET-008")]
+    #[tokio::test]
+    async fn try_spend_caps_concurrent_agent_reservations_at_budget() {
+        // The atomic check-and-deduct lock also protects agent-specific budgets.
+        // Many concurrent reservations from the same agent against its personal
+        // cap must not overspend, mirroring the global-budget race protection.
+        use crate::config::AgentBudget;
+        let agent_budget = AgentBudget::new("concurrent-agent".to_string())
+            .with_session_limit(TokenCost::from_dollars(2.0));
+        let mut config = BudgetConfig::default();
+        config
+            .agent_budgets
+            .insert("concurrent-agent".to_string(), agent_budget);
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+
+        // 10 concurrent $1 reservations against a $2 agent session limit.
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let tracker = Arc::clone(&tracker);
+            handles.push(tokio::spawn(async move {
+                tracker
+                    .try_spend(
+                        "concurrent-agent".to_string(),
+                        "test".to_string(),
+                        "model".to_string(),
+                        TokenUsage::new(0, 0),
+                        TokenCost::from_dollars(1.0),
+                    )
+                    .await
+                    .is_ok()
+            }));
+        }
+
+        let mut succeeded = 0;
+        for h in handles {
+            if h.await.unwrap() {
+                succeeded += 1;
+            }
+        }
+
+        assert_eq!(
+            succeeded, 2,
+            "exactly 2 of 10 concurrent $1 reservations may succeed against a \
+             $2 agent session limit; got {succeeded}"
+        );
+        let agent_status = tracker
+            .get_agent_status("concurrent-agent")
+            .await
+            .expect("agent status must exist after reservations");
+        assert!(
+            agent_status.session_spent <= TokenCost::from_dollars(2.0),
+            "total reserved must never exceed the agent session limit, got {}",
+            agent_status.session_spent
         );
     }
 

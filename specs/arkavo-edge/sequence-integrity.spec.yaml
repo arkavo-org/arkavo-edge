@@ -56,7 +56,6 @@ scenarios:
       - Transformation type recorded in provenance chain
       - Encoding changes do not strip taint (base64, JSON, etc.)
       - Summarization preserves source taint classification
-    refs: [crates/arkavo-mcp/src/taint.rs]
     changed: "2026-03-21"
     edge_cases:
       - condition: Agent extracts single field from tainted record
@@ -109,7 +108,6 @@ scenarios:
       - Edges connect data flow between calls (output → input)
       - Node metadata includes tool name, parameters hash, taint labels
       - Graph updated atomically
-    refs: [crates/arkavo-protocol/src/sequence_graph.rs]
     changed: "2026-03-21"
 
   - id: SEQ-005

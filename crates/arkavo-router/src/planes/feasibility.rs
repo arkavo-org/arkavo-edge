@@ -132,6 +132,7 @@ pub fn assess(stats: &RuntimeStats) -> FeasibilityVerdict {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     /// A healthy, idle runtime with plenty of headroom.
     fn healthy() -> RuntimeStats {
@@ -145,11 +146,13 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-019")]
     #[test]
     fn healthy_runtime_runs_now() {
         assert_eq!(assess(&healthy()), FeasibilityVerdict::LocalCanRunNow);
     }
 
+    #[spec("ROUTER-019")]
     #[test]
     fn no_local_model_cannot_run() {
         let stats = RuntimeStats {

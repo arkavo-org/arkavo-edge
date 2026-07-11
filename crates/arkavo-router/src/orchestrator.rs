@@ -623,7 +623,9 @@ impl ArchitectRoutingResult {
 mod tests {
     use super::*;
     use arkavo_budget::{BudgetConfig, BudgetManager};
+    use arkavo_test_macros::spec;
 
+    #[spec("BUDGET-010")]
     #[test]
     fn manifest_pricing_is_authoritative_over_static_estimate() {
         use crate::classifier::TaskCategory;
@@ -657,6 +659,7 @@ mod tests {
         assert_ne!(cost, TokenCost::from_dollars(decision.estimated_cost_usd));
     }
 
+    #[spec("BUDGET-010")]
     #[test]
     fn empty_pricing_falls_back_to_static_estimate() {
         use crate::classifier::TaskCategory;
@@ -673,6 +676,7 @@ mod tests {
         assert_eq!(cost, TokenCost::from_dollars(decision.estimated_cost_usd));
     }
 
+    #[spec("BUDGET-009")]
     #[tokio::test]
     async fn route_with_budget_reserves_the_estimated_cost() {
         // Regression for the cost-gate fail-open / TOCTOU race: the gate must

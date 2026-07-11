@@ -355,6 +355,28 @@ mod tests {
     }
 
     #[test]
+    fn test_grok45_priced_at_published_list_rates() {
+        // Grok 4.5: $2.00/$6.00 per MTok (+ $0.50 cached input).
+        // cents/MTok: 200 input, 600 output, 50 cached.
+        let mut pricing = ProviderPricing::new();
+        pricing.register(&PricingEntry {
+            model_id: "grok-4.5".into(),
+            provider: "xai".into(),
+            input_cents_per_mtok: 200,
+            output_cents_per_mtok: 600,
+            cached_input_cents_per_mtok: Some(50),
+            cache_write_cents_per_mtok: None,
+            context_window: Some(500_000),
+            max_output_tokens: Some(131_072),
+        });
+        // 200K in + 100K out = 200_000*200/1e6 + 100_000*600/1e6 = 40 + 60 = 100c.
+        let cost = pricing
+            .estimate_cost("xai", "grok-4.5", 200_000, 100_000)
+            .unwrap();
+        assert_eq!(cost.as_cents(), 100);
+    }
+
+    #[test]
     fn test_cache_cost_cheaper_than_standard() {
         let mut pricing = ProviderPricing::new();
         pricing.load_from_entries(&sample_entries());

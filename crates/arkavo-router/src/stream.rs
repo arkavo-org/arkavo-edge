@@ -154,4 +154,77 @@ mod tests {
         let result = stream.complete().await.unwrap();
         assert_eq!(result.content, "Hello, world!");
     }
+
+    /// Backpressure: a bounded channel with capacity 100 blocks the producer
+    /// when the consumer cannot keep up, so the buffer never grows without bound.
+    /// This exercises ROUTER-005 from the slow-consumer angle.
+    #[spec("ROUTER-005")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_bounded_stream_backpressure_blocks_sender() {
+        use futures::StreamExt;
+        use std::time::Duration;
+
+        // tokio::sync::mpsc::channel buffers exactly `capacity` messages; the
+        // 101st send on a capacity-100 channel blocks until the consumer makes
+        // room. This matches ROUTER-005's "buffer size capped at 100 chunks".
+        const BUFFER: usize = 100;
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<StreamChunk>>(BUFFER);
+        let metadata = RouteMetadata {
+            model: ModelChoice::LocalGemma270M,
+            used_architect_mode: false,
+            estimated_cost_usd: 0.0,
+        };
+        let mut stream = RouteStream::new(
+            Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)),
+            metadata,
+        );
+
+        // Fill the buffer; each send succeeds while capacity remains.
+        for i in 0..BUFFER {
+            tx.send(Ok(StreamChunk {
+                content: format!("chunk-{i}"),
+                done: false,
+            }))
+            .await
+            .unwrap();
+        }
+
+        // The next send should be rejected immediately because the buffer is full.
+        assert!(
+            matches!(
+                tx.try_send(Ok(StreamChunk {
+                    content: "overflow-chunk".to_string(),
+                    done: false,
+                })),
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_))
+            ),
+            "bounded channel should apply backpressure when buffer is full"
+        );
+
+        // Start a slow consumer that drains everything after a delay, then send
+        // the overflow chunk. This proves the producer can make progress once
+        // the consumer creates capacity.
+        let consumer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let mut count = 0;
+            while let Some(Ok(chunk)) = stream.next().await {
+                assert!(!chunk.done);
+                count += 1;
+                if chunk.content == "overflow-chunk" {
+                    break;
+                }
+            }
+            count
+        });
+
+        tx.send(Ok(StreamChunk {
+            content: "overflow-chunk".to_string(),
+            done: false,
+        }))
+        .await
+        .unwrap();
+
+        let drained = consumer.await.expect("consumer task finished");
+        assert_eq!(drained, BUFFER + 1);
+    }
 }

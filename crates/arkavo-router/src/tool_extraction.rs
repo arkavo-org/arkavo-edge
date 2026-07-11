@@ -55,7 +55,8 @@ pub(crate) fn detail_level_for_model(
         | ModelChoice::DeepSeekV32
         | ModelChoice::DeepSeekV32Speciale
         | ModelChoice::KimiK2
-        | ModelChoice::Glm52 => arkavo_mcp_tools::DetailLevel::FullSchema,
+        | ModelChoice::Glm52
+        | ModelChoice::Grok45 => arkavo_mcp_tools::DetailLevel::FullSchema,
     }
 }
 

@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 # Full defaults with all providers (cross-platform)
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "web-ui", "claude-agent", "kas", "iroh"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "web-ui", "claude-agent", "kas", "iroh"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
@@ -31,6 +31,7 @@ llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-ter
 kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
 glm = ["arkavo-llm/llm-remote", "arkavo-router/glm", "arkavo-ui-core/glm"]
+xai = ["arkavo-llm/llm-remote", "arkavo-router/xai", "arkavo-ui-core/xai"]
 gemini = ["arkavo-llm/gemini", "arkavo-router/gemini"]
 llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp", "arkavo-context/llama-cpp", "arkavo-server/llama-cpp"]
 snpe = ["arkavo-llm/snpe"]

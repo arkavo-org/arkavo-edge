@@ -139,7 +139,7 @@ impl AgUiGateway {
             tokio::spawn(async move {
                 while let Some(event) = budget_rx.recv().await {
                     let conns = connections.read().await;
-                    for (_, conn_info) in conns.iter() {
+                    for conn_info in conns.values() {
                         let _ = conn_info._ws_tx.send(event.clone()).await;
                     }
                 }
@@ -240,7 +240,7 @@ impl AgUiGateway {
         tokio::spawn(async move {
             while let Some(alert_event) = health_alert_rx.recv().await {
                 let conns = connections_for_health.read().await;
-                for (_, conn_info) in conns.iter() {
+                for conn_info in conns.values() {
                     let _ = conn_info._ws_tx.send(alert_event.clone()).await;
                 }
             }
@@ -342,7 +342,7 @@ impl AgUiGateway {
                     }
                 };
                 let conns = connections_for_telemetry.read().await;
-                for (_, conn_info) in conns.iter() {
+                for conn_info in conns.values() {
                     let _ = conn_info._ws_tx.send(ui_event.clone()).await;
                 }
             }

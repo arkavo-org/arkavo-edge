@@ -1088,6 +1088,26 @@ async fn create_client_from_routing(
                 Err("GLM support requires glm feature".into())
             }
         }
+        ModelChoice::Grok45 => {
+            #[cfg(feature = "xai")]
+            {
+                use arkavo_llm::providers::xai_responses::{ResponsesConfig, ResponsesProvider};
+                let api_key = std::env::var("XAI_API_KEY")?;
+                let base_url = std::env::var("XAI_BASE_URL")
+                    .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+                let config = ResponsesConfig::for_agent(
+                    api_key,
+                    base_url,
+                    decision.recommended_model.name().to_string(),
+                );
+                let provider = Box::new(ResponsesProvider::new(config)?);
+                Ok(LlmClient::new(provider))
+            }
+            #[cfg(not(feature = "xai"))]
+            {
+                Err("xAI/Grok support requires xai feature".into())
+            }
+        }
     }
 }
 

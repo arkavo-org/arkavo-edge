@@ -109,3 +109,69 @@ fn spec_example_parses_validates_and_hashes() {
     let kit_id_again = kit_id_for(&manifest).unwrap();
     assert_eq!(kit_id, kit_id_again);
 }
+
+#[spec("SK-001")]
+#[test]
+fn spec_example_with_two_roles_parses_and_validates() {
+    let yaml = r#"
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "Two-Role Kit"
+  version: "1.0.0"
+  authors:
+    - did: "did:web:arkavo.net"
+      name: "Arkavo"
+  created: "2026-04-29T12:00:00Z"
+  expires: "2026-07-28T12:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+objective:
+  goal: "Exercise cross-block validation"
+  success_criteria: ["done"]
+inputs: []
+deliverables: [{name: "out", type: "json"}]
+roles:
+  - id: "worker"
+    role_type: "specialist"
+    agent_provisioning:
+      model: {family: "qwen3", size: "3B"}
+      budget: {max_total_tokens: 4000}
+    skills: []
+    mcp_tools: []
+    handoffs: []
+  - id: "critic"
+    role_type: "critic"
+    agent_provisioning:
+      model: {family: "qwen3", size: "3B"}
+      budget: {max_total_tokens: 4000}
+    skills: []
+    mcp_tools: []
+    handoffs: []
+coordination:
+  topology: "hub-spoke"
+  routing: {strategy: "static"}
+constraints:
+  global_budget: {max_wallclock_seconds: 60, max_total_tokens: 8000, max_cost_usd: 0.01}
+  data_classifications: ["public"]
+  network: {egress_allowed: false, egress_allowlist: []}
+evaluation:
+  rubric:
+    dimensions:
+      - name: "quality"
+        weight: 1.0
+        threshold: 0.8
+  critic_role: "critic"
+completion:
+  rules: ["all deliverables present"]
+  on_failure: "abort"
+  max_retries: 0
+provenance:
+  signatures: [{signer_did: "did:web:example.com", algorithm: "ed25519", signature: "AAA"}]
+"#;
+
+    let manifest = parse_yaml(yaml).expect("two-role manifest must parse + validate");
+    assert_eq!(manifest.roles.len(), 2);
+    assert_eq!(manifest.roles[0].id, "worker");
+    assert_eq!(manifest.roles[1].id, "critic");
+    assert_eq!(manifest.evaluation.as_ref().unwrap().critic_role, "critic");
+}

@@ -103,6 +103,9 @@ pub fn detect_platform_code() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+
+    const TEST_APP_VERSION: &str = "0.38.2";
 
     #[test]
     fn test_detect_platform_code() {
@@ -123,5 +126,41 @@ mod tests {
         let at_type = AttestationType::TpmQuote;
         let json = serde_json::to_string(&at_type).unwrap();
         assert_eq!(json, "\"tpm_quote\"");
+    }
+
+    #[test]
+    #[spec("ATT-002")]
+    fn test_platform_evidence_from_agent_identity() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let platform_code = detect_platform_code();
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let evidence =
+            PlatformEvidence::from_agent_identity(identity.clone(), platform_code.clone());
+
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        assert_eq!(evidence.device_id, identity.device_id, "Device ID captured");
+        assert_eq!(evidence.platform_code, platform_code);
+        assert_eq!(evidence.platform_state, SecurityState::Unknown);
+        assert_eq!(
+            evidence.attestation_type,
+            AttestationType::SoftwareFingerprint
+        );
+        assert!(
+            evidence.evidence_blob.is_empty(),
+            "Evidence blob initialized empty"
+        );
+        assert_eq!(evidence.app_version, TEST_APP_VERSION);
+        assert!(
+            evidence.timestamp >= before && evidence.timestamp <= after,
+            "Timestamp recorded"
+        );
     }
 }

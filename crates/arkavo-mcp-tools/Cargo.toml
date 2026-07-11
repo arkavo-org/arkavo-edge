@@ -52,6 +52,7 @@ arkavo-mcp-workspace = { path = "../arkavo-mcp-workspace", optional = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [features]
 default = ["iroh", "code-tools"]

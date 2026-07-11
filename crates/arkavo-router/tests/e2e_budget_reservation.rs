@@ -23,6 +23,7 @@ use arkavo_budget::config::AgentBudget;
 use arkavo_budget::provider_costs::{PricingEntry, ProviderPricing};
 use arkavo_budget::{BudgetConfig, BudgetManager, TokenCost};
 use arkavo_router::orchestrator::CostOrchestrator;
+use arkavo_test_macros::spec;
 use std::collections::HashMap;
 
 /// Every local arm priced at $1.40/$4.40 per MTok (the published GLM-5.2 rate),
@@ -64,6 +65,7 @@ fn local_pricing() -> ProviderPricing {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[spec("BUDGET-009")]
 #[ignore = "requires a local GGUF model for the classifier"]
 async fn budget_gate_reserves_and_fails_closed_over_budget() {
     // Global $10 session limit (BudgetConfig default); one agent capped at 1¢.

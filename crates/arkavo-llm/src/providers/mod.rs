@@ -6,6 +6,8 @@ pub mod factory;
 pub mod health;
 #[cfg(feature = "llm-remote")]
 pub mod openai;
+#[cfg(feature = "llm-remote")]
+pub mod xai_responses;
 
 #[cfg(feature = "llm-remote")]
 pub use anthropic::{AnthropicConfig, AnthropicProvider};
@@ -22,3 +24,5 @@ pub use health::{
 };
 #[cfg(feature = "llm-remote")]
 pub use openai::{OpenAIConfig, OpenAIProvider};
+#[cfg(feature = "llm-remote")]
+pub use xai_responses::{ReasoningEffort, ResponsesConfig, ResponsesProvider, ResponsesResult};

@@ -650,4 +650,56 @@ mod tests {
         assert!(entry.distilled_alpha.unwrap_or(0.0) > 0.0);
         assert!(entry.distilled_weight.unwrap_or(1.0) < 1.0);
     }
+
+    #[spec("ARP-009")]
+    #[tokio::test]
+    async fn distilled_floor_preserves_minimum_teacher_mass() {
+        use arkavo_arp::model::BetaPrior;
+        let mut doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        doc.adaptation.prior_management = Some(arkavo_arp::adaptation::PriorManagement {
+            version_binding: None,
+            reset_on_version_change: None,
+            reset_state: None,
+            provenance_tracking: Some(true),
+            distilled_decay: Some(arkavo_arp::adaptation::DistilledDecay {
+                strategy: arkavo_arp::adaptation::DistilledDecayStrategy::LiveDisplacement,
+                displacement_factor: Some(0.1),
+                floor: Some(0.25),
+            }),
+        });
+        let rt = ArpRuntime::from_document(&doc);
+
+        rt.adaptation().lock().await.seed_distilled(
+            "tool_x",
+            BetaPrior {
+                alpha: 8.0,
+                beta: 2.0,
+            },
+        );
+
+        // With displacement_factor 0.1, ten live observations would fully
+        // displace distilled mass. The 0.25 floor must keep a minimum share.
+        for _ in 0..10 {
+            rt.record_tool_outcome("tool_x", true, 0.9).await;
+        }
+
+        let adaptation = rt.adaptation();
+        let eng = adaptation.lock().await;
+        let snapshot = eng.snapshot();
+        let entry = snapshot.iter().find(|e| e.id == "tool_x").unwrap();
+        let live = eng.live_prior("tool_x");
+        let distilled = eng.distilled_prior("tool_x").unwrap();
+
+        assert!((entry.distilled_weight.unwrap() - 0.25).abs() < 1e-9);
+        assert!(
+            (entry.alpha - (live.alpha + 0.25 * distilled.alpha)).abs() < 1e-9,
+            "effective alpha must combine live and floor-weighted distilled mass"
+        );
+        assert!(
+            (entry.beta - (live.beta + 0.25 * distilled.beta)).abs() < 1e-9,
+            "effective beta must combine live and floor-weighted distilled mass"
+        );
+        assert!(entry.live_alpha > 0.0);
+        assert!(entry.distilled_alpha.unwrap() > 0.0);
+    }
 }

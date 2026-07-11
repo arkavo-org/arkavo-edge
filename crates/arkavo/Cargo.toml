@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 # Full defaults with all LLM providers
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "web-ui", "claude-agent"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "web-ui", "claude-agent"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows
@@ -24,6 +24,7 @@ llm-remote = ["arkavo-cli/llm-remote"]
 kimi = ["arkavo-cli/kimi"]
 deepseek = ["arkavo-cli/deepseek"]
 glm = ["arkavo-cli/glm"]
+xai = ["arkavo-cli/xai"]
 gemini = ["arkavo-cli/gemini"]
 llama-cpp = ["arkavo-cli/llama-cpp"]
 snpe = ["arkavo-cli/snpe"]

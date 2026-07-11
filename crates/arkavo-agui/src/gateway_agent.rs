@@ -86,6 +86,7 @@ mod tests {
     use std::collections::{HashMap, VecDeque};
 
     use arkavo_agui_protocol::RunAgentInput;
+    use arkavo_test_macros::spec;
     use axum::extract::{Query, State};
 
     use super::*;
@@ -131,6 +132,7 @@ mod tests {
         assert!(caps.tools.enabled);
     }
 
+    #[spec("AGUI-016")]
     #[tokio::test]
     async fn run_agent_handler_returns_503_when_no_agent_available() {
         let state = test_app_state();
@@ -140,5 +142,53 @@ mod tests {
         assert!(result.is_err());
         let response = result.unwrap_err();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[spec("AGUI-016")]
+    #[tokio::test]
+    async fn resolve_agent_prefers_requested_id_then_deterministic_fallback() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let make_conn = |id: &str| {
+            Arc::new(AgentConnection::new(
+                id.into(),
+                "127.0.0.1:0".into(),
+                tx.clone(),
+            ))
+        };
+
+        let conns: HashMap<String, Arc<AgentConnection>> = [
+            ("agent-bravo".into(), make_conn("agent-bravo")),
+            ("agent-alpha".into(), make_conn("agent-alpha")),
+        ]
+        .into_iter()
+        .collect();
+        let conns = Arc::new(tokio::sync::RwLock::new(conns));
+
+        // Explicit match is honored.
+        assert_eq!(
+            resolve_agent(&conns, Some("agent-bravo".into())).await,
+            Some("agent-bravo".into())
+        );
+
+        // No explicit id falls back to the lexicographically smallest agent id
+        // so gateway behavior is deterministic regardless of HashMap ordering.
+        assert_eq!(
+            resolve_agent(&conns, None).await,
+            Some("agent-alpha".into())
+        );
+
+        // Request for an unknown id with other agents present falls back too.
+        assert_eq!(
+            resolve_agent(&conns, Some("agent-missing".into())).await,
+            Some("agent-alpha".into())
+        );
+
+        // Empty map yields no agent, which makes the handler return 503.
+        let empty = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        assert_eq!(resolve_agent(&empty, None).await, None);
+        assert_eq!(
+            resolve_agent(&empty, Some("agent-alpha".into())).await,
+            None
+        );
     }
 }

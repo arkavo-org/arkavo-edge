@@ -1968,4 +1968,126 @@ mod tests {
         let json_missing = r#"{"sessionId":"s1","delta":{"type":"text","text":"hi"}}"#;
         assert!(serde_json::from_str::<MessageDelta>(json_missing).is_err());
     }
+
+    #[tokio::test]
+    #[spec("CHAT-002")]
+    async fn test_send_message_to_active_session_with_adapter() {
+        let adapter = create_mock_adapter(0);
+        let manager = ChatSessionManager::new(Some(adapter));
+        let session = manager.create_session(None).await;
+        let session_id = session.session_id.clone();
+
+        let result = manager
+            .send_message(
+                &session_id,
+                UserMessage {
+                    content: "Hello with adapter".to_string(),
+                    attachments: None,
+                    metadata: None,
+                },
+            )
+            .await;
+        assert!(
+            result.is_ok(),
+            "Active session with adapter must accept messages"
+        );
+
+        let metrics = manager.get_metrics_snapshot().await;
+        let session_metrics = metrics.get(&session_id).expect("session metrics exist");
+        assert_eq!(session_metrics.messages_sent, 1);
+
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-003")]
+    async fn test_send_message_to_missing_session_returns_not_found() {
+        let manager = ChatSessionManager::new(None);
+        let result = manager
+            .send_message(
+                "non-existent-session",
+                UserMessage {
+                    content: "Hello".to_string(),
+                    attachments: None,
+                    metadata: None,
+                },
+            )
+            .await;
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(matches!(e, A2aError::SessionNotFound(_)));
+        }
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-004")]
+    async fn test_stream_deltas_below_back_pressure_threshold() {
+        const DELTA_COUNT: usize = 5;
+        let adapter = create_mock_adapter(DELTA_COUNT);
+        let mut buffers = BufferConfig::default();
+        buffers.chat_streaming_mode = ChatStreamingMode::Delta;
+        let manager = ChatSessionManager::with_config(Some(adapter), None, None, 3600, buffers);
+        let session = manager.create_session(None).await;
+        let session_id = session.session_id.clone();
+
+        let mut delta_rx = manager
+            .get_delta_stream(&session_id)
+            .await
+            .expect("delta stream available");
+
+        manager
+            .send_message(
+                &session_id,
+                UserMessage {
+                    content: "start".to_string(),
+                    attachments: None,
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("message accepted");
+
+        let mut received = Vec::new();
+        while let Ok(Some(delta)) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), delta_rx.recv()).await
+        {
+            received.push(delta);
+        }
+
+        assert_eq!(
+            received.len(),
+            DELTA_COUNT + 1,
+            "All deltas including StreamEnd must arrive without back-pressure below threshold"
+        );
+        assert!(
+            received
+                .iter()
+                .any(|d| matches!(d.delta, MessageDeltaContent::StreamEnd { .. })),
+            "StreamEnd delta must be present"
+        );
+
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-008")]
+    async fn test_get_delta_stream_closed_session_returns_none() {
+        let adapter = create_mock_adapter(0);
+        let manager = ChatSessionManager::new(Some(adapter));
+        let session = manager.create_session(None).await;
+        let session_id = session.session_id.clone();
+
+        assert!(
+            manager.get_delta_stream(&session_id).await.is_some(),
+            "Active session must expose a delta stream"
+        );
+        manager.close_session(&session_id).await.unwrap();
+        assert!(
+            manager.get_delta_stream(&session_id).await.is_none(),
+            "Closed session must not expose a delta stream"
+        );
+
+        manager.shutdown().await;
+    }
 }

@@ -21,3 +21,4 @@ uuid = { workspace = true }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }

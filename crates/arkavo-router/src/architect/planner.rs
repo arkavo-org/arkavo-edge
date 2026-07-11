@@ -65,6 +65,7 @@ impl ArchitectPlanner {
         }
 
         // Fallback to Gemini Pro
+        #[cfg(feature = "gemini")]
         if self.availability.gemini
             && let Ok(provider) = arkavo_llm::GeminiProvider::new()
         {

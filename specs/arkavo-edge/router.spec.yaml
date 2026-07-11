@@ -2,7 +2,7 @@
 
 feature: LLM Router with Quality Gates
 module: arkavo_router
-version: 0.57.2
+version: 0.87.0
 
 invariants:
   - All routes must pass preflight moderation before model selection
@@ -27,7 +27,9 @@ scenarios:
       - Model selected based on capability match and cost
       - Response streamed with RouteMetadata
       - Metrics updated for routing decision
-    refs: [crates/arkavo-router/src/lib.rs:100-150]
+    refs:
+      - crates/arkavo-router/src/selector_quality.rs
+      - crates/arkavo-router/src/learning/module.rs
 
   - id: ROUTER-002
     name: Quality gate with retry and escalation
@@ -42,7 +44,7 @@ scenarios:
       - Failed responses trigger retry with escalated model
       - Max retries prevents infinite loops
       - Final response marked with validation status
-    refs: [crates/arkavo-router/src/lib.rs:200-280]
+    refs: [crates/arkavo-router/src/quality_gate.rs]
 
   - id: ROUTER-003
     name: Offline mode restricts to local models
@@ -55,7 +57,7 @@ scenarios:
       - Only local models (llama-cpp) considered
       - Remote providers excluded from selection
       - Error if no local models available
-    refs: [crates/arkavo-router/src/lib.rs:92-99]
+    refs: [crates/arkavo-router/src/lib.rs]
 
   - id: ROUTER-004
     name: Preflight moderation blocks policy violations
@@ -290,3 +292,97 @@ scenarios:
       - Default for unknown models
     refs: [crates/arkavo-context/src/rlm_detection.rs:31-60]
     changed: "2025-02-05"
+
+  - id: ROUTER-018
+    name: Cost-aware ranking objective
+    criticality: critical
+    given:
+      - Multiple feasible models with known quality priors
+      - Models have different authored per-call costs
+      - cost_sensitivity configured
+    when: rank_agents_cost_aware or select_adaptive runs
+    then:
+      - Cheaper models rank higher when quality is equal
+      - cost_sensitivity of 0 reverts to pure quality ranking
+      - Local or free models use COST_FLOOR to avoid infinite preference
+      - Sensitivity values outside [0,1] are clamped to the valid range
+    refs:
+      - crates/arkavo-router/src/learning/module.rs
+      - crates/arkavo-router/src/selector_quality.rs
+    changed: "2026-06-28"
+
+  - id: ROUTER-019
+    name: Feasibility plane rejects oversized or KV-saturated prompts
+    criticality: critical
+    given:
+      - Router configured with feasibility plane
+      - Prompt exceeds model context or KV-cache capacity
+    when: route() evaluates feasibility before dispatch
+    then:
+      - Feasibility assessment rejects the local plan
+      - A reshape warning is emitted
+      - No cloud spend is authorized from the feasibility plane
+    refs: [crates/arkavo-router/src/planes/feasibility.rs]
+    changed: "2026-06-28"
+
+  - id: ROUTER-020
+    name: Collapse detector flags visible local-answer breakdowns
+    criticality: critical
+    given:
+      - Router configured with collapse plane
+      - Local response is empty, truncated, repetitive, or has format/tool failure
+    when: collapse detector evaluates the response
+    then:
+      - CollapseSignal identifies the breakdown category
+      - A cloud upgrade may be requested but not spent
+      - Verdict is recorded for the routing loop
+    refs: [crates/arkavo-router/src/planes/collapse.rs]
+    changed: "2026-06-28"
+
+  - id: ROUTER-021
+    name: Availability and quality re-routes stay local without cloud policy permission
+    criticality: critical
+    given:
+      - Feasibility or collapse plane triggers a re-route
+      - Default CloudPolicy does not permit silent cloud spend
+    when: routing loop augments exclusions for the policy
+    then:
+      - Re-route excludes cloud provider arms
+      - Only local models are considered for the retry
+      - No unauthorized cloud spend occurs
+    refs: [crates/arkavo-router/src/planes/mod.rs]
+    changed: "2026-06-28"
+
+  - id: ROUTER-022
+    name: Cloud upgrade offered only after spend-plane authorization
+    criticality: high
+    given:
+      - Collapse plane requests a cloud upgrade
+      - Spend plane CloudPolicy is LocalOnly, AskBeforeCloud, or CloudWithinCap
+    when: upgrade_offer is evaluated
+    then:
+      - LocalOnly denies the offer immediately
+      - AskBeforeCloud returns a user-confirmation prompt
+      - CloudWithinCap authorizes only when budget cap allows
+      - Authorized upgrades are recorded by the budget tracker
+    refs:
+      - crates/arkavo-router/src/planes/mod.rs
+      - crates/arkavo-budget/src/cloud_policy.rs
+    changed: "2026-06-28"
+
+  - id: ROUTER-023
+    name: Manifest pricing overrides static cost estimate in live router
+    criticality: high
+    given:
+      - Router has a live projected_cloud_cost estimate
+      - AgentSpecializationBundle carries authored manifest_pricing
+    when: apply_manifest_pricing updates the live Router
+    then:
+      - Authored rates take precedence over static estimates
+      - Missing model in populated registry falls back to static with a warning
+      - Empty registry falls back silently for backward compatibility
+      - Poisoned lock is recovered via into_inner
+    refs:
+      - crates/arkavo-router/src/lib.rs
+      - crates/arkavo-swarmkit/src/pricing.rs
+    changed: "2026-06-28"

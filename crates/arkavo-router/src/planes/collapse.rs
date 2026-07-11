@@ -162,6 +162,7 @@ fn has_repetition_loop(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn answer(text: &str) -> AnswerObservation<'_> {
         AnswerObservation {
@@ -170,6 +171,7 @@ mod tests {
         }
     }
 
+    #[spec("ROUTER-020")]
     #[test]
     fn healthy_answer_has_no_visible_collapse() {
         let verdict = detect(&answer("The capital of France is Paris."));
@@ -177,6 +179,7 @@ mod tests {
         assert!(!verdict.collapsed());
     }
 
+    #[spec("ROUTER-020")]
     #[test]
     fn empty_chat_answer_is_empty_output() {
         assert_eq!(

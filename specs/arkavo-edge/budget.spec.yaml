@@ -2,7 +2,7 @@
 
 feature: Budget and Cost Management
 module: arkavo_budget
-version: 0.57.2
+version: 0.87.0
 
 invariants:
   - All LLM calls track token usage and cost
@@ -73,11 +73,12 @@ scenarios:
     criticality: medium
     given:
       - Provider costs configured
-      - Model rates specified
+      - Model rates specified in cents per million tokens
     when: Cost calculated
     then:
       - Per-provider rates applied
       - Per-model rates override defaults
+      - Sub-cent per-1K rates preserved (e.g., GLM-5.2 at $1.40/MTok)
       - Currency normalized
     refs: [crates/arkavo-budget/src/provider_costs.rs]
 
@@ -115,3 +116,68 @@ scenarios:
       - condition: Spend tracking fails
         expected: Continues with warning, alerts operator
     changed: "2025-01-31"
+
+  - id: BUDGET-008
+    name: Atomic budget reservation holds lock across check and deduct
+    criticality: critical
+    given:
+      - BudgetTracker with a configured cap
+      - Concurrent routing attempts
+    when: try_spend is invoked
+    then:
+      - Budget lock is held across the check-and-deduct
+      - Concurrent reservations cannot over-commit the cap
+      - Reservation is recorded before the provider call
+    refs:
+      - crates/arkavo-budget/src/tracker.rs
+      - crates/arkavo-budget/src/tracker_tests.rs
+    changed: "2026-06-28"
+
+  - id: BUDGET-009
+    name: Reservation fails closed on over-limit and budget-store errors
+    criticality: critical
+    given:
+      - Budget limit reached or budget store returns an error
+    when: route_with_budget evaluates a request
+    then:
+      - Request is rejected when over budget
+      - Budget-store errors fail closed and surface the cause
+      - No provider call is made
+    refs:
+      - crates/arkavo-router/src/orchestrator.rs
+      - crates/arkavo-router/tests/e2e_budget_reservation.rs
+    changed: "2026-06-28"
+
+  - id: BUDGET-010
+    name: Manifest pricing is authoritative over static model estimate
+    criticality: high
+    given:
+      - Routing decision uses a static cost estimate
+      - AgentSpecializationBundle provides authored manifest_pricing for the model
+    when: projected_cloud_cost is computed
+    then:
+      - Authored manifest rate takes precedence over the static estimate
+      - Missing model in a populated registry falls back to static with a warning
+      - Empty registry falls back silently for backward compatibility
+    refs:
+      - crates/arkavo-router/src/orchestrator.rs
+      - crates/arkavo-router/src/lib.rs
+      - crates/arkavo-swarmkit/src/pricing.rs
+    changed: "2026-06-28"
+
+  - id: BUDGET-011
+    name: CloudPolicy gates cloud spend
+    criticality: high
+    given:
+      - CloudPolicy configured as LocalOnly, AskBeforeCloud, or CloudWithinCap
+      - A routing path considers a cloud model
+    when: authorize_cloud_spend is checked
+    then:
+      - LocalOnly denies all cloud spend
+      - AskBeforeCloud requires explicit user confirmation
+      - CloudWithinCap authorizes spend only within the live cap
+      - Exhausted cap denies cloud even when confirmed
+    refs:
+      - crates/arkavo-budget/src/cloud_policy.rs
+      - crates/arkavo-server/src/spend_plane.rs
+    changed: "2026-06-28"

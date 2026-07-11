@@ -26,6 +26,7 @@ pub fn init_egress_filter() {
         filter.allow("https://generativelanguage.googleapis.com");
         filter.allow("https://api.github.com");
         filter.allow("https://api.deepseek.com");
+        filter.allow("https://api.x.ai");
 
         filter
     });

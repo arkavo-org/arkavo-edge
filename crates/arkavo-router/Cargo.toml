@@ -47,7 +47,7 @@ arkavo-tdf = { path = "../arkavo-tdf", optional = true, features = ["opentdf"] }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
-default = ["llama-cpp", "gemini", "deepseek", "kimi", "glm"]
+default = ["llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai"]
 critic = []
 advisor-persistence = ["dep:arkavo-memory"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
@@ -57,11 +57,13 @@ kimi = ["arkavo-llm/kimi"]
 # GLM-5.2 routes through the generic OpenAI-compatible provider, which lives
 # behind arkavo-llm's `llm-remote` feature.
 glm = ["arkavo-llm/llm-remote"]
+# Grok 4.5 (xAI) uses the Responses API client in arkavo-llm (llm-remote).
+xai = ["arkavo-llm/llm-remote"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
 tdf-encrypt = ["dep:arkavo-tdf", "dep:arkavo-memory"]
 persistence = ["sqlx"]
 # Windows compatible features (no C++ dependencies)
-windows = ["gemini", "llm-remote", "deepseek", "kimi", "glm"]
+windows = ["gemini", "llm-remote", "deepseek", "kimi", "glm", "xai"]
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }

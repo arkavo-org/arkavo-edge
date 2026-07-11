@@ -185,7 +185,10 @@ mod tests {
     use super::*;
     use crate::checks::{LintCheck, PolicyCheck, SchemaCheck};
     use arkavo_llm::ProviderResponse;
+    use arkavo_llm::tool_parser::ParsedToolCall;
+    use arkavo_mcp_tools::ToolInfo;
     use arkavo_test_macros::spec;
+    use serde_json::json;
 
     fn response(content: &str) -> ProviderResponse {
         ProviderResponse {
@@ -285,5 +288,74 @@ mod tests {
         assert!(!result.passed);
         assert!(!result.failures().is_empty());
         assert_eq!(result.max_severity(), Some(CheckSeverity::Critical));
+    }
+
+    #[spec("CRIT-001")]
+    #[tokio::test]
+    async fn test_default_pipeline_runs_default_checks() {
+        let pipeline = crate::default_pipeline();
+        let input = VerificationInput::new(
+            "Test".to_string(),
+            response("A valid response with no secrets."),
+            vec![],
+        );
+
+        let result = pipeline.verify(&input).await;
+
+        assert!(result.passed);
+        // Default pipeline has CircuitCheck, SchemaCheck, and PolicyCheck.
+        assert_eq!(result.checks_run + result.checks_skipped, 3);
+        assert!(result.evidence.iter().any(|e| e.check_id == "policy"));
+    }
+
+    #[spec("CRIT-002")]
+    #[tokio::test]
+    async fn test_add_check_respects_priority_order() {
+        let tool = ToolInfo {
+            name: "test".to_string(),
+            category: "Test".to_string(),
+            description: "Test tool".to_string(),
+            schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        };
+
+        let config = CriticConfig {
+            fail_fast: false,
+            ..Default::default()
+        };
+        let pipeline = CriticPipeline::with_config(config)
+            .add_check(SchemaCheck::with_priority(30))
+            .add_check(PolicyCheck::with_security_defaults());
+
+        let input = VerificationInput::new(
+            "Test".to_string(),
+            ProviderResponse {
+                content: "The password is secret123".to_string(),
+                reasoning_content: None,
+                tool_calls: vec![ParsedToolCall {
+                    tool_name: "test".to_string(),
+                    arguments: json!({}),
+                    call_id: Some("call-1".to_string()),
+                }],
+                finish_reason: None,
+                inference_timing: None,
+                quality_gate_retries: 0,
+            },
+            vec![tool],
+        );
+
+        let result = pipeline.verify(&input).await;
+
+        assert!(!result.passed);
+        assert_eq!(result.checks_run, 2);
+        let ids: Vec<&str> = result
+            .evidence
+            .iter()
+            .map(|e| e.check_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["policy", "schema"]);
     }
 }
