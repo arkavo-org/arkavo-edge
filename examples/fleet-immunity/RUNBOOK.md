@@ -28,7 +28,7 @@ cd ..
 ### Step 1: Launch the Fleet
 
 ```bash
-./launch_fleet.sh
+./launch.sh
 ```
 
 **What to watch for:**
@@ -45,7 +45,8 @@ cd ..
 ```
 
 **Note:** Agents use dynamic ports for A2A communication, discovered via mDNS.
-The port numbers in AGENTS.md are configuration hints; actual ports are assigned dynamically.
+None of the three rover roles in `fleet-immunity.swarmkit.yaml` set a fixed
+`-p` port in `launch.sh`; actual ports are assigned dynamically.
 
 ### Step 2: Verify Agents Running
 
@@ -84,7 +85,7 @@ In a new terminal:
 ### Step 5: Stop the Fleet
 
 ```bash
-./stop_fleet.sh
+./stop.sh
 ```
 
 ## Verification
@@ -93,7 +94,7 @@ In a new terminal:
 
 ```bash
 # 1. Launch fleet
-./launch_fleet.sh
+./launch.sh
 
 # 2. Wait for mesh discovery (5 seconds)
 sleep 5
@@ -108,7 +109,7 @@ sleep 10
 grep -i "crash\|lesson\|learned" logs/*.log
 
 # 6. Stop fleet
-./stop_fleet.sh
+./stop.sh
 ```
 
 ### Expected Behavior
@@ -179,8 +180,6 @@ Each rover has access to MCP tools:
 
 ## Related Files
 
-- `rover-alpha/AGENTS.md` - Alpha agent configuration
-- `rover-beta/AGENTS.md` - Beta agent configuration
-- `rover-gamma/AGENTS.md` - Gamma agent configuration
+- `fleet-immunity.swarmkit.yaml` - All 3 rover roles (Alpha, Beta, Gamma) as a single kit
 - `mcp-fleet-env/` - MCP tools for environment simulation
 - `logs/` - Runtime logs

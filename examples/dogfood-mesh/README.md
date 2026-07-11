@@ -43,6 +43,19 @@ cargo run -p arkavo -- model download glm
 brew install jq  # macOS
 ```
 
+`glm-4.7-flash` isn't in the kit's local-edge-model vocabulary
+(`crates/arkavo-cli/src/commands/kit/model_map.rs` only maps
+ministral/gemma-4/qwen3 families to `agent_provisioning.model`), so
+`dogfood-mesh.swarmkit.yaml` omits `model:` for all three roles. This isn't
+just a missing kit field: `agent_kit.rs::role_to_agent_config` resolves the
+model hint via `kit_model_to_hint(family, size)`, and any family/size pair
+outside that table returns `None` — even if you hand-author
+`agent_provisioning.model: { family: "glm", size: "4.7-flash" }` — so the
+router silently falls back to its default local model instead of GLM.
+Running this mesh against GLM currently requires extending
+`model_map.rs`'s `LOCAL_EDGE_MODELS` table (a Rust change, out of scope for
+this example conversion).
+
 ## Quick Start
 
 ```bash

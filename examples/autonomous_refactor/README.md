@@ -37,8 +37,8 @@ arkavo chat --prompt "Fix the build errors in demo_workspace"
 ### Option 2: Multi-Agent Mesh
 
 ```bash
-# Launch the mesh (starts 4 agents)
-./launch_mesh.sh
+# Launch the mesh (starts 4 agents from autonomous-refactor.swarmkit.yaml)
+./launch.sh
 
 # Watch agent logs
 tail -f logs/*.log
@@ -47,8 +47,15 @@ tail -f logs/*.log
 arkavo task run --prompt "Fix all build errors in demo_workspace"
 
 # Stop the mesh
-./stop_mesh.sh
+./stop.sh
 ```
+
+The 4 agents run as roles of a single kit, `autonomous-refactor.swarmkit.yaml`
+(`arkavo agent -c autonomous-refactor.swarmkit.yaml -n <role>`). The old
+per-agent `a2a.enabled`/`discovery.service_type` fields aren't representable
+in a kit — mesh discovery now runs on the kit's `runtime.mdns: true`. The old
+per-agent `logging:` blocks (level/file) aren't representable either; set
+`RUST_LOG` and redirect stdout, as `launch.sh` already does.
 
 ## Mesh Architecture
 

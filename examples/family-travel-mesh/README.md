@@ -7,6 +7,13 @@
 
 This demo implements the complete HRM-Style Orchestration architecture from Issue #236 using a "Family Travel Planning" use case.
 
+All 7 agents are now roles of a single kit, `family-travel-mesh.swarmkit.yaml`
+(`arkavo agent -c family-travel-mesh.swarmkit.yaml -n <role> -p <port>`).
+The old per-agent `a2a.enabled`/`a2a.peers` static peer lists aren't
+representable kit fields; the mesh's actual wiring now lives in the kit's
+`handoffs`/`context_scope` graph (conductor → router → specialists →
+critic → memory), and discovery runs on the kit's `runtime.mdns: true`.
+
 ## Architecture
 
 ```
@@ -52,7 +59,7 @@ cargo build
 2. Start the mesh:
 ```bash
 cd examples/family-travel-mesh
-./launch_mesh.sh
+./launch.sh
 ```
 
 3. Run the demo:
@@ -62,7 +69,7 @@ cd examples/family-travel-mesh
 
 4. Stop the mesh:
 ```bash
-./stop_mesh.sh
+./stop.sh
 ```
 
 ## Demo Scenario
@@ -152,7 +159,7 @@ The Critic enforces `family_safety.yaml`:
 - Verify binary exists: `ls ../../target/debug/arkavo`
 
 ### Discovery failures
-- Ensure mDNS is enabled in AGENTS.md files
+- Ensure `runtime.mdns: true` is set in `family-travel-mesh.swarmkit.yaml`
 - Wait for discovery (5 seconds after launch)
 
 ### Policy violations
@@ -164,19 +171,18 @@ The Critic enforces `family_safety.yaml`:
 ```
 family-travel-mesh/
 ├── README.md                      # This file
-├── launch_mesh.sh                 # Start all agents
-├── stop_mesh.sh                   # Stop all agents
+├── family-travel-mesh.swarmkit.yaml # All 7 agent roles (single kit)
+├── launch.sh                      # Start all agents
+├── stop.sh                        # Stop all agents
 ├── run_task.sh                    # Execute demo task
 ├── guided_demo.sh                 # Interactive demo with real LLM calls
 ├── show_adversarial_scenarios.sh  # View adversarial test scenarios
 ├── config/
 │   └── hrm_defaults.yaml          # HRM configuration
 ├── agents/
-│   ├── conductor/                 # Task orchestrator
-│   ├── router/                    # Agent selector
-│   ├── specialists/               # Domain experts (vegas-guide*, family-activities, budget-optimizer)
-│   ├── critic/                    # Verification pipeline
-│   └── memory/                    # Context service
+│   └── critic/
+│       └── policies/
+│           └── family_safety.yaml # Policy enforced by the critic role
 ├── scenarios/
 │   ├── vegas_friday.json          # Main scenario
 │   └── adversarial/               # Fault injection scenarios
