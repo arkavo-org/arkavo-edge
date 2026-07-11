@@ -119,6 +119,30 @@ impl LlmIntegration {
                     anyhow::bail!("GLM feature not enabled")
                 }
             }
+            ModelChoice::Grok45 => {
+                #[cfg(feature = "xai")]
+                {
+                    use arkavo_llm::providers::xai_responses::{
+                        ResponsesConfig, ResponsesProvider,
+                    };
+                    let Ok(api_key) = std::env::var("XAI_API_KEY") else {
+                        anyhow::bail!("XAI_API_KEY not set")
+                    };
+                    let base_url = std::env::var("XAI_BASE_URL")
+                        .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+                    let provider = ResponsesProvider::new(ResponsesConfig {
+                        api_key,
+                        base_url,
+                        model: decision.recommended_model.name().to_string(),
+                        ..Default::default()
+                    })?;
+                    Ok(LlmClient::new(Box::new(provider)))
+                }
+                #[cfg(not(feature = "xai"))]
+                {
+                    anyhow::bail!("xAI/Grok feature not enabled")
+                }
+            }
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
             | ModelChoice::LocalMinistral8B

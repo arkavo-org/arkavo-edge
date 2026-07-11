@@ -306,6 +306,8 @@ impl ArchitectExecutor {
             // GLM-5.2 is a low-cost cloud arm; escalate to a stronger tier
             // when it underperforms on a task.
             ModelChoice::Glm52 => ModelChoice::ClaudeSonnet,
+            // Grok 4.5 escalates toward Claude for hard failures.
+            ModelChoice::Grok45 => ModelChoice::ClaudeSonnet,
         }
     }
 

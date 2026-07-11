@@ -16,6 +16,7 @@ gemini = ["arkavo-llm/gemini"]
 deepseek = ["arkavo-llm/deepseek"]
 kimi = ["arkavo-llm/kimi"]
 glm = ["arkavo-llm/llm-remote"]
+xai = ["arkavo-llm/llm-remote"]
 
 [dependencies]
 # Core async runtime

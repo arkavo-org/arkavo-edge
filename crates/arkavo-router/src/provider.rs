@@ -69,6 +69,10 @@ impl super::Router {
         cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok()
     }
 
+    pub fn is_xai_available(&self) -> bool {
+        cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok()
+    }
+
     pub fn get_anthropic_provider(
         &self,
     ) -> Option<arkavo_llm::providers::anthropic::AnthropicProvider> {
@@ -105,6 +109,7 @@ impl super::Router {
             }
             ModelChoice::KimiK2 => std::env::var("MOONSHOT_API_KEY").is_ok(),
             ModelChoice::Glm52 => cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
+            ModelChoice::Grok45 => cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok(),
             m if m.is_local() => match (m.repo_id(), m.gguf_filename()) {
                 (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
                 _ => false,
@@ -408,6 +413,29 @@ impl super::Router {
 
                 let provider = OpenAIProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create GLM provider: {e}"))
+                })?;
+                Ok(Box::new(provider))
+            }
+            #[cfg(feature = "xai")]
+            ModelChoice::Grok45 => {
+                // Grok 4.5 uses the xAI Responses API (not Chat Completions)
+                // for reasoning_effort control and multi-turn agent state.
+                use arkavo_llm::providers::xai_responses::{ResponsesConfig, ResponsesProvider};
+
+                let api_key = std::env::var("XAI_API_KEY")
+                    .map_err(|_| Error::ModelExecution("XAI_API_KEY not set".to_string()))?;
+                let base_url = std::env::var("XAI_BASE_URL")
+                    .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+
+                let config = ResponsesConfig {
+                    api_key,
+                    base_url,
+                    model: model.name().to_string(),
+                    ..Default::default()
+                };
+
+                let provider = ResponsesProvider::new(config).map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create xAI Responses provider: {e}"))
                 })?;
                 Ok(Box::new(provider))
             }

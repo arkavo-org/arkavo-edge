@@ -84,6 +84,11 @@ pub enum ModelChoice {
     /// Sampling arm to respect the cold-start exploration cap; a thinking-tier
     /// (High/Max) split can follow once this base arm graduates probation.
     Glm52,
+    /// Grok 4.5 (xAI) - flagship OpenAI-compatible cloud model.
+    /// Routed through the generic OpenAI-compatible adapter (`XAI_API_KEY`,
+    /// base `https://api.x.ai/v1`). Single Thompson Sampling arm for cold-start;
+    /// reasoning-tier splits can follow once this base arm graduates probation.
+    Grok45,
 }
 
 impl ModelChoice {
@@ -125,6 +130,7 @@ impl ModelChoice {
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek-chat",
             Self::KimiK2 => "kimi-k2.5",
             Self::Glm52 => "glm-5.2",
+            Self::Grok45 => "grok-4.5",
         }
     }
 
@@ -154,6 +160,7 @@ impl ModelChoice {
             | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus | Self::ClaudeFable5 => "anthropic",
             Self::KimiK2 => "kimi",
+            Self::Grok45 => "grok",
         }
     }
 
@@ -181,6 +188,9 @@ impl ModelChoice {
             "deepseek-coder-v2-lite-instruct" => Some(Self::LocalDeepSeekCoder),
             "deepseek-chat" => Some(Self::DeepSeekV32),
             "kimi-k2.5" => Some(Self::KimiK2),
+            "grok-4.5" | "grok-4.5-latest" | "grok-build-latest" | "grok45" | "grok" => {
+                Some(Self::Grok45)
+            }
             "gemini-flash-latest" => Some(Self::GeminiFlash),
             "gemini-3.5-flash"
             | "gemini-3.5-flash-latest"
@@ -269,6 +279,7 @@ impl ModelChoice {
         Self::DeepSeekV32Speciale,
         Self::KimiK2,
         Self::Glm52,
+        Self::Grok45,
     ];
 
     pub fn is_anthropic(&self) -> bool {
@@ -337,6 +348,11 @@ impl ModelChoice {
         matches!(self, Self::Glm52)
     }
 
+    /// Cloud Grok (xAI) arm, reached via the OpenAI-compatible adapter.
+    pub fn is_grok(&self) -> bool {
+        matches!(self, Self::Grok45)
+    }
+
     pub fn provider(&self) -> &str {
         match self {
             Self::GeminiFlash
@@ -364,6 +380,7 @@ impl ModelChoice {
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
             Self::KimiK2 => "kimi",
             Self::Glm52 => "zhipu",
+            Self::Grok45 => "xai",
         }
     }
 
@@ -400,7 +417,8 @@ impl ModelChoice {
             | Self::DeepSeekV32
             | Self::DeepSeekV32Speciale
             | Self::KimiK2
-            | Self::Glm52 => PlannerTier::Large,
+            | Self::Glm52
+            | Self::Grok45 => PlannerTier::Large,
         }
     }
 
@@ -601,6 +619,7 @@ impl ModelChoice {
             Self::DeepSeekV32Speciale => "DeepSeek V3.2 Speciale",
             Self::KimiK2 => "Kimi K2.5",
             Self::Glm52 => "GLM-5.2",
+            Self::Grok45 => "Grok 4.5",
         }
     }
 }
@@ -772,6 +791,14 @@ impl RoutingDecision {
                     ModelChoice::LocalMinistral8B,
                 ]
             }
+            // Grok 4.5 steps to mid-tier cloud then a local safety net.
+            (ModelChoice::Grok45, _) => {
+                vec![
+                    ModelChoice::ClaudeSonnet,
+                    ModelChoice::GeminiFlash,
+                    ModelChoice::LocalMinistral8B,
+                ]
+            }
             _ => vec![ModelChoice::GeminiFlash],
         }
     }
@@ -868,6 +895,15 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 4.40;
                 input_cost + output_cost
             }
+            ModelChoice::Grok45 => {
+                // Grok 4.5 (xAI) list rates: $2.00/1M input, $6.00/1M output
+                // (docs.x.ai). Cached input is $0.50/1M when the API reports it;
+                // static estimates use the full input rate. Real spend should
+                // come from the response `usage` block once surfaced.
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 2.00;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 6.00;
+                input_cost + output_cost
+            }
             // All local models are free
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
@@ -925,6 +961,8 @@ impl RoutingDecision {
             // GLM-5.2 reasons before answering; budget extra wall-clock on
             // hard tasks, in line with the other thinking cloud arms.
             ModelChoice::Glm52 => Duration::from_secs(8),
+            // Grok 4.5 is reasoning-capable; budget similar wall-clock.
+            ModelChoice::Grok45 => Duration::from_secs(7),
         }
     }
 }
@@ -1149,6 +1187,81 @@ mod tests {
         // to the supports_vision allow-list, which would send image parts the
         // model can't accept.
         assert!(!model.supports_vision(), "GLM-5.2 is text-only");
+    }
+
+    #[test]
+    fn test_grok45_properties() {
+        let model = ModelChoice::Grok45;
+        assert_eq!(model.name(), "grok-4.5");
+        assert_eq!(model.provider(), "xai");
+        assert_eq!(model.family(), "grok");
+        assert_eq!(model.display_name(), "Grok 4.5");
+        assert!(model.is_grok());
+        assert!(model.is_cloud());
+        assert!(!model.is_local());
+        assert!(!model.is_glm());
+        assert_eq!(model.capability(), PlannerTier::Large);
+        assert!(ModelChoice::ALL_CLOUD.contains(&ModelChoice::Grok45));
+    }
+
+    #[test]
+    fn test_grok45_name_resolution() {
+        for alias in [
+            "grok-4.5",
+            "grok-4.5-latest",
+            "grok-build-latest",
+            "grok45",
+            "grok",
+            "GROK-4.5",
+        ] {
+            assert_eq!(
+                ModelChoice::from_name(alias),
+                Some(ModelChoice::Grok45),
+                "alias {alias} should resolve to Grok45"
+            );
+        }
+        assert_eq!(
+            ModelChoice::from_name(ModelChoice::Grok45.name()),
+            Some(ModelChoice::Grok45),
+            "round-trip via primary name"
+        );
+    }
+
+    #[test]
+    fn test_grok45_cost_math_matches_published_rate() {
+        let cost =
+            RoutingDecision::estimate_cost(&ModelChoice::Grok45, TaskCategory::CodeGeneration);
+        let input_cost = 800.0 / 1_000_000.0 * 2.00;
+        let output_cost = 3000.0 / 1_000_000.0 * 6.00;
+        let expected = input_cost + output_cost;
+        assert!(
+            (cost - expected).abs() < 1e-9,
+            "Grok 4.5 cost {cost} must equal {expected} at the published $2.00/$6.00 rate"
+        );
+    }
+
+    #[test]
+    fn test_grok45_fallback_chain_has_local_safety_net() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Grok45,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Test".to_string(),
+        );
+        let chain = &decision.fallback_chain;
+        assert!(!chain.is_empty(), "Grok 4.5 must have a fallback chain");
+        assert!(
+            chain.last().is_some_and(ModelChoice::is_local),
+            "Grok 4.5 fallback chain must end on a local model: {chain:?}"
+        );
+        assert_eq!(
+            chain,
+            &vec![
+                ModelChoice::ClaudeSonnet,
+                ModelChoice::GeminiFlash,
+                ModelChoice::LocalMinistral8B,
+            ]
+        );
     }
 
     #[test]
