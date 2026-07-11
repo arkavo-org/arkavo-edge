@@ -1,7 +1,10 @@
-//! `arkavo kit init` / `arkavo kit validate` — author and check SwarmKit manifests.
+//! `arkavo kit init` / `arkavo kit validate` / `arkavo kit migrate-from-agents-md`
+//! — author, check, and migrate-into SwarmKit manifests.
 //!
 //! This is the Phase S4 replacement for `arkavo agent init` (which still
-//! writes AGENTS.md; that command is deprecated separately).
+//! writes AGENTS.md; that command is deprecated separately). The migration
+//! logic itself lives in the sibling `kit_build` module to keep this file
+//! under the repo's per-file size limit.
 
 use base64::Engine;
 use rand::Rng;
@@ -16,6 +19,9 @@ use arkavo_swarmkit::{
     discover::ARKAVO_DIR, kit_id_for, load_kit_file, validate,
 };
 
+mod kit_build;
+pub use kit_build::{MigrateReport, migrate_from_agents_md};
+
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.is_empty() {
         print_usage();
@@ -28,6 +34,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
         "init" => cmd_init(&args[1..]),
         "validate" => cmd_validate(&args[1..]),
+        "migrate-from-agents-md" => cmd_migrate(&args[1..]),
         other => {
             eprintln!("Error: Unknown kit subcommand '{other}'");
             print_usage();
@@ -64,6 +71,56 @@ fn cmd_validate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// `--in <path> --out <path>` are the only accepted flags (contractually
+/// pinned: `discover.rs`'s `AgentsMdUnsupported` error message tells users
+/// to run exactly this invocation shape).
+fn cmd_migrate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut in_path: Option<PathBuf> = None;
+    let mut out_path: Option<PathBuf> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--in" => {
+                i += 1;
+                in_path = args.get(i).map(PathBuf::from);
+            }
+            "--out" => {
+                i += 1;
+                out_path = args.get(i).map(PathBuf::from);
+            }
+            other => {
+                eprintln!("Error: Unknown argument '{other}'");
+                print_usage();
+                return Err(format!("Unknown argument: {other}").into());
+            }
+        }
+        i += 1;
+    }
+
+    let (Some(in_path), Some(out_path)) = (in_path, out_path) else {
+        eprintln!("Error: --in <path> and --out <path> are both required");
+        print_usage();
+        return Err("Missing --in/--out".into());
+    };
+
+    let report = migrate_from_agents_md(&in_path, &out_path)?;
+    println!("Wrote {}", display_relative(&report.path));
+    println!("kit.id: {}", report.kit_id);
+
+    if report.unmapped.is_empty() {
+        return Ok(());
+    }
+    for line in &report.unmapped {
+        eprintln!("{line}");
+    }
+    Err(format!(
+        "{} field(s) from {} could not be migrated; see stderr for details",
+        report.unmapped.len(),
+        in_path.display()
+    )
+    .into())
+}
+
 /// Strip a leading `./` so CLI output reads as a normal relative path
 /// (`base_dir` is `.` when invoked from the CLI, an absolute tempdir in tests).
 fn display_relative(p: &Path) -> String {
@@ -71,18 +128,22 @@ fn display_relative(p: &Path) -> String {
 }
 
 fn print_usage() {
-    println!("Arkavo Kit - Author and validate SwarmKit manifests");
+    println!("Arkavo Kit - Author, validate, and migrate SwarmKit manifests");
     println!();
     println!("USAGE:");
     println!("    arkavo kit init <name>");
     println!("    arkavo kit validate <path>");
+    println!("    arkavo kit migrate-from-agents-md --in <path> --out <path>");
     println!();
     println!("SUBCOMMANDS:");
     println!(
-        "    init <name>      Write a minimal single-role kit to .arkavo/<name>.swarmkit.yaml"
+        "    init <name>                            Write a minimal single-role kit to .arkavo/<name>.swarmkit.yaml"
     );
-    println!("    validate <path>  Load and validate a kit file");
-    println!("    help             Print this help message");
+    println!("    validate <path>                         Load and validate a kit file");
+    println!(
+        "    migrate-from-agents-md --in <in> --out <out>  Best-effort convert an AGENTS.md file into a kit"
+    );
+    println!("    help                                     Print this help message");
 }
 
 /// Result of a successful `kit init`.
@@ -156,7 +217,44 @@ pub fn validate_kit(path: &Path) -> Result<KitValidateReport, Box<dyn std::error
     })
 }
 
+/// Default single-role goal text, shared with `kit_build` as the fallback
+/// `objective.goal` when a migrated AGENTS.md has no usable `purpose`.
+const DEFAULT_GOAL: &str = "Introduce yourself and assist with the tasks the user brings to you";
+/// Default identity-skill instructions, shared with `kit_build` as the
+/// fallback per-role instructions when a migrated agent has no `purpose`.
+const DEFAULT_IDENTITY_INSTRUCTIONS: &str =
+    "You are a helpful agent. Introduce yourself and assist with the tasks the user brings to you.";
+
 fn build_manifest(name: &str) -> Manifest {
+    manifest_skeleton(
+        name,
+        format!("Locally authored single-role agent kit for {name}"),
+        Objective {
+            goal: DEFAULT_GOAL.to_string(),
+            success_criteria: vec![
+                "responds helpfully and stays within its configured budget".to_string(),
+            ],
+        },
+        vec![primary_role()],
+        Some(KitRuntimeConfig {
+            local_dev: Some(true),
+            mdns: Some(true),
+            ..Default::default()
+        }),
+    )
+}
+
+/// The kit-metadata / coordination / constraints / completion / provenance
+/// skeleton shared by every producer path (`kit init`, `kit
+/// migrate-from-agents-md`). Producers own `objective` and `roles`; `runtime`
+/// is optional since not every caller sets it.
+fn manifest_skeleton(
+    name: &str,
+    description: String,
+    objective: Objective,
+    roles: Vec<RoleSpec>,
+    runtime: Option<KitRuntimeConfig>,
+) -> Manifest {
     let now = chrono::Utc::now();
     let created = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let expires =
@@ -169,7 +267,7 @@ fn build_manifest(name: &str) -> Manifest {
             id: String::new(),
             name: name.to_string(),
             version: "0.1.0".to_string(),
-            description: Some(format!("Locally authored single-role agent kit for {name}")),
+            description: Some(description),
             authors: vec![Author {
                 did: author_did.clone(),
                 name: Some("Local Author".to_string()),
@@ -178,15 +276,10 @@ fn build_manifest(name: &str) -> Manifest {
             expires: Some(expires),
             nonce: generate_nonce(),
         },
-        objective: Objective {
-            goal: "Introduce yourself and assist with the tasks the user brings to you".to_string(),
-            success_criteria: vec![
-                "responds helpfully and stays within its configured budget".to_string(),
-            ],
-        },
+        objective,
         inputs: vec![],
         deliverables: vec![],
-        roles: vec![primary_role()],
+        roles,
         coordination: CoordinationSpec {
             topology: Topology::HubSpoke,
             protocol: "a2a-jsonrpc-2.0".to_string(),
@@ -212,11 +305,7 @@ fn build_manifest(name: &str) -> Manifest {
         pricing: vec![],
         evaluation: None,
         proposal_governance: None,
-        runtime: Some(KitRuntimeConfig {
-            local_dev: Some(true),
-            mdns: Some(true),
-            ..Default::default()
-        }),
+        runtime,
         completion: CompletionSpec {
             rules: vec!["objective addressed".to_string()],
             on_failure: OnFailure::Abort,
@@ -240,30 +329,16 @@ fn primary_role() -> RoleSpec {
         plane: None,
         description: Some("Primary agent".to_string()),
         agent_provisioning: AgentProvisioning {
-            model: Some(Model {
-                family: "ministral".to_string(),
-                size: Some("3B".to_string()),
-                quantization: None,
-                backend: Some("llama.cpp".to_string()),
-                fallback: None,
-            }),
+            model: Some(default_model()),
             inference: None,
-            budget: Some(Budget {
-                max_inference_calls: Some(32),
-                max_wallclock_ms: None,
-                max_total_tokens: Some(100_000),
-            }),
+            budget: Some(default_budget()),
             tool_use: None,
             context: None,
             observability: None,
-            isolation: Some(Isolation {
-                sandbox: Some(Sandbox::Process),
-                fs_writable: vec![],
-                network_egress: Some(false),
-            }),
+            isolation: Some(default_isolation()),
             failure: None,
         },
-        skills: vec![identity_skill()],
+        skills: vec![identity_skill(DEFAULT_IDENTITY_INSTRUCTIONS)],
         mcp_tools: vec![],
         tdf_attribute_release_policy: None,
         handoffs: vec![],
@@ -271,7 +346,35 @@ fn primary_role() -> RoleSpec {
     }
 }
 
-fn identity_skill() -> Skill {
+/// Default local edge model. Also the migrate-from-agents-md fallback for
+/// unmapped or absent `model:` hints (brief item 4).
+fn default_model() -> Model {
+    Model {
+        family: "ministral".to_string(),
+        size: Some("3B".to_string()),
+        quantization: None,
+        backend: Some("llama.cpp".to_string()),
+        fallback: None,
+    }
+}
+
+fn default_budget() -> Budget {
+    Budget {
+        max_inference_calls: Some(32),
+        max_wallclock_ms: None,
+        max_total_tokens: Some(100_000),
+    }
+}
+
+fn default_isolation() -> Isolation {
+    Isolation {
+        sandbox: Some(Sandbox::Process),
+        fs_writable: vec![],
+        network_egress: Some(false),
+    }
+}
+
+fn identity_skill(instructions: &str) -> Skill {
     Skill {
         id: "skill:identity".to_string(),
         version: "0.1.0".to_string(),
@@ -279,7 +382,7 @@ fn identity_skill() -> Skill {
         payload: Some(serde_json::json!({
             "name": "identity",
             "description": "System identity",
-            "instructions": "You are a helpful agent. Introduce yourself and assist with the tasks the user brings to you.",
+            "instructions": instructions,
             "resources": [],
         })),
         signature: None,
