@@ -106,9 +106,7 @@ impl ModelSelector {
             ModelChoice::DeepSeekV32Speciale => "Planning-optimized (5s), reasoning-only, no tools",
             ModelChoice::KimiK2 => "Fast (5s), 256K context, thinking mode support",
             ModelChoice::Glm52 => "GLM-5.2 (8s), low-cost cloud reasoning, OpenAI-compatible",
-            ModelChoice::Grok45 => {
-                "Grok 4.5 (7s), xAI flagship, OpenAI-compatible, tools + reasoning"
-            }
+            ModelChoice::Grok45 => "Grok 4.5 (7s), xAI Responses API, tools + low-effort reasoning",
         };
 
         format!(

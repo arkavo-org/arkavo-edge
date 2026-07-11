@@ -130,12 +130,12 @@ impl LlmIntegration {
                     };
                     let base_url = std::env::var("XAI_BASE_URL")
                         .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-                    let provider = ResponsesProvider::new(ResponsesConfig {
+                    let config = ResponsesConfig::for_agent(
                         api_key,
                         base_url,
-                        model: decision.recommended_model.name().to_string(),
-                        ..Default::default()
-                    })?;
+                        decision.recommended_model.name().to_string(),
+                    );
+                    let provider = ResponsesProvider::new(config)?;
                     Ok(LlmClient::new(Box::new(provider)))
                 }
                 #[cfg(not(feature = "xai"))]

@@ -84,9 +84,10 @@ pub enum ModelChoice {
     /// Sampling arm to respect the cold-start exploration cap; a thinking-tier
     /// (High/Max) split can follow once this base arm graduates probation.
     Glm52,
-    /// Grok 4.5 (xAI) - flagship OpenAI-compatible cloud model.
-    /// Routed through the generic OpenAI-compatible adapter (`XAI_API_KEY`,
-    /// base `https://api.x.ai/v1`). Single Thompson Sampling arm for cold-start;
+    /// Grok 4.5 (xAI) - flagship cloud model via the xAI Responses API.
+    /// Routed through `ResponsesProvider` (`XAI_API_KEY`, base
+    /// `https://api.x.ai/v1`, `POST /v1/responses`) with low reasoning effort
+    /// by default for agent latency. Single Thompson Sampling arm for cold-start;
     /// reasoning-tier splits can follow once this base arm graduates probation.
     Grok45,
 }
@@ -348,7 +349,7 @@ impl ModelChoice {
         matches!(self, Self::Glm52)
     }
 
-    /// Cloud Grok (xAI) arm, reached via the OpenAI-compatible adapter.
+    /// Cloud Grok (xAI) arm, reached via the xAI Responses API client.
     pub fn is_grok(&self) -> bool {
         matches!(self, Self::Grok45)
     }

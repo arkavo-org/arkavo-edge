@@ -1095,12 +1095,12 @@ async fn create_client_from_routing(
                 let api_key = std::env::var("XAI_API_KEY")?;
                 let base_url = std::env::var("XAI_BASE_URL")
                     .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-                let provider = Box::new(ResponsesProvider::new(ResponsesConfig {
+                let config = ResponsesConfig::for_agent(
                     api_key,
                     base_url,
-                    model: decision.recommended_model.name().to_string(),
-                    ..Default::default()
-                })?);
+                    decision.recommended_model.name().to_string(),
+                );
+                let provider = Box::new(ResponsesProvider::new(config)?);
                 Ok(LlmClient::new(provider))
             }
             #[cfg(not(feature = "xai"))]

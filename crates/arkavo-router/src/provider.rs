@@ -425,7 +425,8 @@ impl super::Router {
             #[cfg(feature = "xai")]
             ModelChoice::Grok45 => {
                 // Grok 4.5 uses the xAI Responses API (not Chat Completions)
-                // for reasoning_effort control and multi-turn agent state.
+                // for reasoning_effort control. v1 multi-turn is full-transcript;
+                // store stays off unless XAI_STORE opts in.
                 use arkavo_llm::providers::xai_responses::{ResponsesConfig, ResponsesProvider};
 
                 let api_key = std::env::var("XAI_API_KEY")
@@ -433,12 +434,8 @@ impl super::Router {
                 let base_url = std::env::var("XAI_BASE_URL")
                     .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
 
-                let config = ResponsesConfig {
-                    api_key,
-                    base_url,
-                    model: model.name().to_string(),
-                    ..Default::default()
-                };
+                let config =
+                    ResponsesConfig::for_agent(api_key, base_url, model.name().to_string());
 
                 let provider = ResponsesProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create xAI Responses provider: {e}"))

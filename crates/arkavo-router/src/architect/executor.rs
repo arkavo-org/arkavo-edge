@@ -321,10 +321,15 @@ impl ArchitectExecutor {
     }
 
     fn estimate_actual_cost(&self, model: &ModelChoice, response: &ProviderResponse) -> f64 {
-        // Rough estimation based on response length
-        // Actual token counts would require tokenizer
-        let output_tokens = (response.content.len() / 4) as f64; // ~4 chars per token
-        let input_tokens = output_tokens / 3.0; // Typical ratio
+        // Prefer provider-reported usage when present; otherwise rough
+        // char-length heuristics (~4 chars/token, ~3:1 in:out).
+        let (input_tokens, output_tokens) = if let Some(t) = &response.inference_timing {
+            let thinking = f64::from(t.n_thinking_eval.unwrap_or(0));
+            (f64::from(t.n_prompt_eval), f64::from(t.n_eval) + thinking)
+        } else {
+            let output_tokens = (response.content.len() / 4) as f64;
+            (output_tokens / 3.0, output_tokens)
+        };
 
         match model {
             ModelChoice::GeminiFlash => {
@@ -348,6 +353,14 @@ impl ArchitectExecutor {
             }
             ModelChoice::ClaudeFable5 => {
                 (input_tokens / 1_000_000.0).mul_add(10.00, (output_tokens / 1_000_000.0) * 50.00)
+            }
+            ModelChoice::Grok45 => {
+                // Grok 4.5 list rates: $2.00/1M input, $6.00/1M output
+                (input_tokens / 1_000_000.0).mul_add(2.00, (output_tokens / 1_000_000.0) * 6.00)
+            }
+            ModelChoice::Glm52 => {
+                // GLM-5.2 list rates: $1.40/1M input, $4.40/1M output
+                (input_tokens / 1_000_000.0).mul_add(1.40, (output_tokens / 1_000_000.0) * 4.40)
             }
             _ => 0.0,
         }
@@ -438,6 +451,39 @@ mod tests {
                 executor.escalate_model(&ModelChoice::ClaudeFable5),
                 ModelChoice::ClaudeFable5
             );
+            assert_eq!(
+                executor.escalate_model(&ModelChoice::Grok45),
+                ModelChoice::ClaudeSonnet
+            );
         }
+    }
+
+    #[test]
+    fn grok_actual_cost_uses_list_rates_and_usage() {
+        let router = futures::executor::block_on(async { Router::new().await.ok() });
+        let Some(router) = router else {
+            return;
+        };
+        let executor = ArchitectExecutor::new(Arc::new(router));
+
+        let resp = ProviderResponse {
+            content: "hello".into(),
+            inference_timing: Some(arkavo_llm::InferenceTiming {
+                n_prompt_eval: 1_000_000,
+                n_eval: 500_000,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        // $2/M in + $6/M out → 2 + 3 = $5.00
+        let cost = executor.estimate_actual_cost(&ModelChoice::Grok45, &resp);
+        assert!(
+            (cost - 5.0).abs() < 1e-9,
+            "Grok actual cost should be $5.00 for 1M/0.5M tokens, got {cost}"
+        );
+        assert!(
+            cost > 0.0,
+            "Grok must not be treated as free in architect accounting"
+        );
     }
 }

@@ -1,7 +1,11 @@
 //! End-to-end test against the **live Grok 4.5** xAI Responses API.
 //!
-//! Exercises the exact path the router uses for `ModelChoice::Grok45`:
-//! [`ResponsesProvider`] with `reasoning_effort: low`.
+//! Exercises the **router path** for `ModelChoice::Grok45`:
+//! [`ResponsesProvider`] behind [`LlmClient`] with agent defaults
+//! (`reasoning_effort: low`, `store: false` unless `XAI_STORE` is set).
+//!
+//! For Responses-native create (response id) and streaming, see
+//! `e2e_xai_responses.rs`.
 //!
 //! ## Running it
 //!
@@ -12,7 +16,7 @@
 
 #![allow(clippy::disallowed_methods)]
 
-use arkavo_llm::providers::xai_responses::{ReasoningEffort, ResponsesConfig, ResponsesProvider};
+use arkavo_llm::providers::xai_responses::{ResponsesConfig, ResponsesProvider};
 use arkavo_llm::{LlmClient, Message, Provider};
 
 fn grok_provider() -> Option<ResponsesProvider> {
@@ -20,14 +24,11 @@ fn grok_provider() -> Option<ResponsesProvider> {
     let base_url =
         std::env::var("XAI_BASE_URL").unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
     Some(
-        ResponsesProvider::new(ResponsesConfig {
+        ResponsesProvider::new(ResponsesConfig::for_agent(
             api_key,
             base_url,
-            model: "grok-4.5".to_string(),
-            reasoning_effort: ReasoningEffort::Low,
-            store: true,
-            service_tier: None,
-        })
+            "grok-4.5".to_string(),
+        ))
         .expect("ResponsesProvider construction should not fail with a valid config"),
     )
 }

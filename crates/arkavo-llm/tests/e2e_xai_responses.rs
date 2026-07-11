@@ -1,4 +1,7 @@
-//! Live e2e against xAI **Responses API** (`POST /v1/responses`) for Grok 4.5.
+//! Live e2e against xAI **Responses API** surfaces not covered by the
+//! router/`LlmClient` path in `e2e_grok.rs`:
+//! - non-streaming `create` captures `response_id` / `last_response_id`
+//! - SSE streaming ends with a single `done: true`
 //!
 //! ```sh
 //! export XAI_API_KEY=<key>
@@ -7,7 +10,7 @@
 
 #![allow(clippy::disallowed_methods)]
 
-use arkavo_llm::providers::xai_responses::{ReasoningEffort, ResponsesConfig, ResponsesProvider};
+use arkavo_llm::providers::xai_responses::{ResponsesConfig, ResponsesProvider};
 use arkavo_llm::{Message, Provider};
 
 fn provider() -> Option<ResponsesProvider> {
@@ -15,14 +18,11 @@ fn provider() -> Option<ResponsesProvider> {
     let base_url =
         std::env::var("XAI_BASE_URL").unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
     Some(
-        ResponsesProvider::new(ResponsesConfig {
+        ResponsesProvider::new(ResponsesConfig::for_agent(
             api_key,
             base_url,
-            model: "grok-4.5".to_string(),
-            reasoning_effort: ReasoningEffort::Low,
-            store: true,
-            service_tier: None,
-        })
+            "grok-4.5".to_string(),
+        ))
         .expect("ResponsesProvider construction"),
     )
 }
@@ -38,8 +38,8 @@ fn is_transient(err: &impl std::fmt::Display) -> bool {
 }
 
 #[tokio::test]
-#[ignore = "Requires XAI_API_KEY — live Responses API call"]
-async fn responses_round_trips_with_low_reasoning() {
+#[ignore = "Requires XAI_API_KEY — live Responses API create + response id"]
+async fn responses_create_records_response_id() {
     let Some(p) = provider() else {
         eprintln!("XAI_API_KEY not set — skip");
         return;
@@ -67,6 +67,13 @@ async fn responses_round_trips_with_low_reasoning() {
                 p.last_response_id().as_deref(),
                 Some(result.response_id.as_str())
             );
+            // finish_reason is Responses status (e.g. "completed"), not OpenAI tool_calls.
+            if let Some(status) = &result.finish_reason {
+                assert!(
+                    !status.is_empty(),
+                    "status should be non-empty when present"
+                );
+            }
         }
         Err(err) if is_transient(&err) => {
             eprintln!("skip transient: {err}");
@@ -95,14 +102,14 @@ async fn responses_streams_text_deltas() {
     };
 
     let mut content = String::new();
-    let mut done = false;
+    let mut done_count = 0usize;
     let mut stream = stream;
     while let Some(item) = stream.next().await {
         match item {
             Ok(chunk) => {
                 content.push_str(&chunk.content);
                 if chunk.done {
-                    done = true;
+                    done_count += 1;
                 }
             }
             Err(err) if is_transient(&err) => {
@@ -112,13 +119,17 @@ async fn responses_streams_text_deltas() {
             Err(err) => panic!("stream error: {err}"),
         }
     }
-    assert!(done, "stream must end with done");
+    assert_eq!(done_count, 1, "stream must end with exactly one done");
     assert!(!content.is_empty(), "expected streamed text");
 }
 
 #[test]
-fn provider_defaults_to_low_effort() {
+fn provider_defaults_to_low_effort_and_ephemeral_store() {
     let cfg = ResponsesConfig::default();
-    assert_eq!(cfg.reasoning_effort, ReasoningEffort::Low);
+    assert_eq!(
+        cfg.reasoning_effort,
+        arkavo_llm::providers::xai_responses::ReasoningEffort::Low
+    );
     assert_eq!(cfg.model, "grok-4.5");
+    assert!(!cfg.store, "default store is false for agent privacy");
 }
