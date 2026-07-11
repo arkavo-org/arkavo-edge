@@ -105,6 +105,31 @@ pub(super) fn validate_kit_yaml(content: &str) -> std::result::Result<(), String
         .map_err(|e| format!("Kit parse error: {e}"))
 }
 
+/// Returns the kit's declared model as a display string when it does not
+/// match the currently running model hint, `None` when they agree.
+///
+/// The kit expresses models as family/size (e.g. `ministral`/`3B`) while
+/// the router hint is a flat string (e.g. `"ministral-3b"`); the mapping
+/// table between the two lives in the CLI's kit model_map, so hot-reload
+/// cannot recompute the hint — it can only detect divergence (by
+/// normalized substring match) and warn that a restart is needed.
+pub(super) fn pending_model_change(
+    family: &str,
+    size: Option<&str>,
+    current_model: &str,
+) -> Option<String> {
+    let current = current_model.to_lowercase();
+    let family_matches = current.contains(&family.to_lowercase());
+    let size_matches = size.is_none_or(|s| current.contains(&s.to_lowercase()));
+    if family_matches && size_matches {
+        return None;
+    }
+    Some(match size {
+        Some(size) => format!("{family} {size}"),
+        None => family.to_string(),
+    })
+}
+
 /// Update [`AgentMetadata`] from a SwarmKit kit's primary role, then handle
 /// the kit-level MCP server list the same way the legacy AGENTS.md reload
 /// did (clear stale connections, log servers needing a restart).
@@ -141,6 +166,21 @@ pub(super) async fn apply_kit_reload(
         info!("Updated agent metadata for '{}'", metadata.name);
         info!("  Purpose: {}", metadata.purpose);
         info!("  Endpoint: {}", metadata.endpoint);
+
+        // The kit's declared model cannot be hot-applied (the family/size →
+        // router-hint mapping lives in the CLI's model_map, and adapter
+        // recreation is not implemented); surface divergence instead of
+        // silently freezing the running model.
+        if let Some(role) = runtime_config.primary_role()
+            && let Some(family) = &role.model_family
+            && let Some(declared) =
+                pending_model_change(family, role.model_size.as_deref(), &metadata.model)
+        {
+            warn!(
+                "Kit declares model '{}' but agent is running '{}'; model changes take effect on restart",
+                declared, metadata.model
+            );
+        }
     }
 
     if !runtime_config.runtime.mcp_servers.is_empty() {
@@ -305,6 +345,110 @@ provenance:
             .await
             .unwrap_err();
         assert!(err.to_string().contains("empty"));
+    }
+
+    /// MINIMAL_KIT_YAML with the primary role declaring a model.
+    const KIT_YAML_WITH_MODEL: &str = r#"
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "hello"
+  version: "0.1.0"
+  authors:
+    - did: "did:web:example.com"
+  created: "2026-04-29T00:00:00Z"
+  expires: "2026-05-29T00:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+objective:
+  goal: "say hello"
+roles:
+  - id: agent
+    role_type: operator
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "8B"
+    skills: []
+    mcp_tools: []
+    handoffs: []
+coordination:
+  topology: hub-spoke
+  protocol: a2a-jsonrpc-2.0
+  routing:
+    strategy: static
+constraints:
+  global_budget:
+    max_wallclock_seconds: 60
+    max_total_tokens: 8000
+    max_cost_usd: 0.01
+  data_classifications: ["public"]
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+completion:
+  rules: ["done"]
+  on_failure: abort
+  max_retries: 0
+provenance:
+  signatures:
+    - signer_did: "did:web:example.com"
+      algorithm: ed25519
+      signature: "AAA"
+"#;
+
+    #[test]
+    fn pending_model_change_none_when_hint_matches_kit_model() {
+        assert_eq!(
+            pending_model_change("ministral", Some("3B"), "ministral-3b"),
+            None
+        );
+        assert_eq!(
+            pending_model_change("gemma", Some("E2B"), "gemma4-e2b"),
+            None
+        );
+        assert_eq!(pending_model_change("qwen", None, "qwen3.5-9b"), None);
+    }
+
+    #[test]
+    fn pending_model_change_flags_divergent_kit_model() {
+        assert_eq!(
+            pending_model_change("ministral", Some("8B"), "ministral-3b"),
+            Some("ministral 8B".to_string())
+        );
+        assert_eq!(
+            pending_model_change("gemma", Some("12B"), "ministral-3b"),
+            Some("gemma 12B".to_string())
+        );
+        // Empty running hint (router decides) still diverges from an
+        // explicit kit declaration.
+        assert_eq!(
+            pending_model_change("ministral", Some("3B"), ""),
+            Some("ministral 3B".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_kit_reload_leaves_model_unchanged_on_kit_model_change() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+            name: "agent".to_string(),
+            model: "ministral-3b".to_string(),
+            ..Default::default()
+        }));
+        let mcp_registry = McpRegistry::new();
+
+        // Kit declares ministral 8B — divergent from the running 3B hint.
+        apply_kit_reload(KIT_YAML_WITH_MODEL, &agent_metadata, &mcp_registry)
+            .await
+            .expect("valid kit should reload");
+
+        let metadata = agent_metadata.read().await;
+        assert_eq!(
+            metadata.model, "ministral-3b",
+            "hot-reload must not rewrite the running model hint"
+        );
+        // The divergence is flagged (via warn!) using this helper — assert
+        // the same inputs the reload path passes it produce a flag.
+        assert!(pending_model_change("ministral", Some("8B"), &metadata.model).is_some());
     }
 
     #[tokio::test]
