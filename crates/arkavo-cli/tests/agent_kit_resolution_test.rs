@@ -252,6 +252,35 @@ fn nothing_present_falls_back_to_default_config() {
     assert!(configs[0].mdns_enabled);
 }
 
+/// Review finding: `-n` with no kit anywhere must say no kit was found,
+/// not list the hostname-derived zero-config default name as if it were a
+/// selectable role id of some kit.
+#[test]
+fn name_flag_with_no_kit_anywhere_errors_with_no_kit_wording() {
+    let dir = tempdir();
+
+    let err = resolve_agent_configs(None, Some("bogus"), None, dir.path())
+        .expect_err("-n with no kit anywhere must be a fatal error");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("no SwarmKit manifest found"),
+        "message must say no kit exists: {msg}"
+    );
+    assert!(
+        msg.contains("bogus"),
+        "message should name the bad selector: {msg}"
+    );
+    assert!(
+        msg.contains("arkavo kit init"),
+        "message should point at kit creation: {msg}"
+    );
+    assert!(
+        !msg.contains("available role ids"),
+        "must not imply a kit with roles exists: {msg}"
+    );
+}
+
 #[test]
 fn explicit_config_path_to_invalid_yaml_is_fatal_with_no_default_fallback() {
     let dir = tempdir();

@@ -37,26 +37,29 @@ pub fn resolve_agent_configs(
     port: Option<u16>,
     cwd: &Path,
 ) -> Result<Vec<AgentConfig>, Box<dyn std::error::Error>> {
-    let mut configs = match cli_config_path {
+    // `from_kit` distinguishes real kit roles from the zero-config default,
+    // so a `-n` miss can report "no kit" instead of misleadingly presenting
+    // the hostname-derived default name as a selectable role id.
+    let (mut configs, from_kit) = match cli_config_path {
         // Explicit -c: errors (bad YAML, invalid kit) are fatal. No silent
         // fallback to defaults when the caller named a specific file.
         Some(explicit) => {
             let discovered = arkavo_swarmkit::load_kit_file(explicit)?;
-            agent_configs_from_kit(&discovered.config)
+            (agent_configs_from_kit(&discovered.config), true)
         }
         None => match arkavo_swarmkit::discover_kit_path(cwd) {
             Ok(path) => {
                 let discovered = arkavo_swarmkit::load_kit_file(&path)?;
-                agent_configs_from_kit(&discovered.config)
+                (agent_configs_from_kit(&discovered.config), true)
             }
             // Only-AGENTS.md-present is non-fatal: log the migrate hint once
             // and fall through to the zero-config default. The AGENTS.md
             // content itself is never read.
             Err(err @ DiscoverError::AgentsMdUnsupported { .. }) => {
                 eprintln!("{err}");
-                vec![default_agent_config()]
+                (vec![default_agent_config()], false)
             }
-            Err(DiscoverError::NotFound) => vec![default_agent_config()],
+            Err(DiscoverError::NotFound) => (vec![default_agent_config()], false),
             // Multiple candidates, or a read/parse failure during
             // discovery itself: fatal, with the error's own message.
             Err(err) => return Err(err.into()),
@@ -76,7 +79,7 @@ pub fn resolve_agent_configs(
 
     match configs.iter().position(|c| c.name == name) {
         Some(idx) => Ok(vec![configs.remove(idx)]),
-        None => {
+        None if from_kit => {
             let available: Vec<&str> = configs.iter().map(|c| c.name.as_str()).collect();
             Err(format!(
                 "no role {name:?} in kit; available role ids: {}",
@@ -84,6 +87,14 @@ pub fn resolve_agent_configs(
             )
             .into())
         }
+        // Zero-config default: there is no kit, so there are no role ids to
+        // offer — pointing at the default's hostname-derived name would
+        // misleadingly imply a kit exists.
+        None => Err(format!(
+            "no SwarmKit manifest found, so there is no kit role {name:?} to select; \
+             create one with 'arkavo kit init <name>' or pass -c <kit.swarmkit.yaml>"
+        )
+        .into()),
     }
 }
 
