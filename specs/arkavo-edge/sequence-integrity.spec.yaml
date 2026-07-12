@@ -368,7 +368,7 @@ scenarios:
     issue: https://github.com/arkavo-org/arkavo-edge/issues/551
     given:
       - AgentConfig includes sequence_integrity section
-      - AGENTS.md defines agent roles
+      - A SwarmKit kit defines agent roles (AGENTS.md is no longer a config source as of S6)
     when: Agent starts with sequence integrity enabled
     then:
       - Taint tracking enabled for configured data sources
@@ -376,8 +376,8 @@ scenarios:
       - Gate thresholds applied from config
       - Ledger retention window set
       - Overhead budget enforced
-    refs: [crates/arkavo-protocol/src/agent_config.rs:1-389]
-    changed: "2026-03-21"
+    refs: [crates/arkavo-protocol/src/agent_config.rs:1-211]
+    changed: "2026-07-11"
     edge_cases:
       - condition: Sequence integrity disabled in config
         expected: Per-action policy still applies (existing behavior)

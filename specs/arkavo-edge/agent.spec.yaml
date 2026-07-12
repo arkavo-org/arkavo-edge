@@ -13,22 +13,29 @@ invariants:
 
 scenarios:
   - id: AGENT-001
-    name: Load and validate agent configuration
+    name: Load and validate agent configuration from a SwarmKit kit
     criticality: critical
     given:
-      - Configuration file or environment available
-    when: parse_agents_config() called
+      - Working directory may contain a .arkavo/*.swarmkit.yaml kit
+      - -c/--config may point at an explicit kit file
+    when: resolve_agent_configs runs (discover_kit_path/load_kit_file, then agent_configs_from_kit)
     then:
-      - AgentConfig parsed and validated
-      - MCP server configs loaded
-      - Runtime config resolved
-    refs: [crates/arkavo-agent/src/lib.rs:28-37]
-    changed: "2026-03-19"
+      - Kit discovered via env override, explicit path, or directory search
+      - Manifest validated and AgentRuntimeConfig derived
+      - One AgentConfig per role produced, with MCP server configs loaded from runtime.mcp_servers
+      - AGENTS.md content is never read; a lone AGENTS.md yields the zero-config default plus a migrate hint
+    refs:
+      - crates/arkavo-swarmkit/src/discover.rs
+      - crates/arkavo-swarmkit/src/runtime_config.rs
+      - crates/arkavo-cli/src/commands/agent_kit.rs
+    changed: "2026-07-11"
     edge_cases:
-      - condition: Missing required fields
-        expected: Validation error with field name
-      - condition: Invalid workspace paths
-        expected: Path validation error
+      - condition: Multiple kit files with no ARKAVO_SWARMKIT_PATH override
+        expected: Fatal Multiple-candidates error, no silent default fallback
+      - condition: -n/--name role selector does not match any role in the kit
+        expected: Fatal error listing available role ids
+      - condition: No kit found anywhere in the resolution order
+        expected: Falls through to the zero-config default AgentConfig
 
   - id: AGENT-002
     name: Register agent with control plane

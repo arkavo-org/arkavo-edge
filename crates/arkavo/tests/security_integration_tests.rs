@@ -130,21 +130,10 @@ mod end_to_end_security {
     fn security_workflow_end_to_end() {
         let temp_dir = TempDir::new().unwrap();
 
-        // Create AGENTS.md with security settings
-        let agents_md = r#"# Security Test Agent
-
-## security-test
-purpose: Test security controls
-model: test-model
-listen: 127.0.0.1:0
-security:
-  egress_filter: strict
-  rate_limit: 100/min
-  require_auth: true
-"#;
-        std::fs::write(temp_dir.path().join("AGENTS.md"), agents_md).unwrap();
-
-        // Verify executable runs with security settings
+        // Verify executable runs successfully. (This test previously wrote an
+        // AGENTS.md fixture with a `security:` block here, but `--version`
+        // never read it — no config is parsed for `--version`, so the write
+        // was vestigial. Removed in Task 14 / S6.)
         let output = Command::new(arkavo_bin())
             .current_dir(&temp_dir)
             .args(["--version"])
