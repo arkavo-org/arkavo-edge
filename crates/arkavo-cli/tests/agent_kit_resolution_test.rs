@@ -5,10 +5,11 @@
 //! Exercises the pure `commands::agent_kit::resolve_agent_configs` function
 //! directly (no process spawn, no server start) against temp directories.
 
-use arkavo_cli::commands::agent_kit::resolve_agent_configs;
+use arkavo_cli::commands::agent_kit::{export_resolved_kit_path, resolve_agent_configs};
 use arkavo_cli::commands::kit::init_kit;
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 
 fn tempdir() -> tempfile::TempDir {
     tempfile::tempdir().expect("create tempdir")
@@ -290,4 +291,92 @@ fn explicit_config_path_to_invalid_yaml_is_fatal_with_no_default_fallback() {
     let err = resolve_agent_configs(Some(&path), None, None, dir.path())
         .expect_err("invalid YAML at an explicit -c path must never fall back silently");
     assert!(!err.to_string().is_empty());
+}
+
+/// `ARKAVO_SWARMKIT_PATH` is process-global; this serializes the one test
+/// in this binary that mutates it, matching the pattern used elsewhere in
+/// the repo for this same env var (`arkavo-agui`'s
+/// `swarm_flight_registry.rs`, via `serial_test`) without adding a new
+/// dependency for a single call site.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// Regression (finding 1): an explicit `-c` kit's preflight/KAS/budget
+/// policy was silently not applied unless the kit also happened to be
+/// cwd-discoverable, because server-side loaders (`arkavo_router::
+/// load_agent_config`, spend plane, agui) re-discover their own kit from
+/// process cwd/env and never see the CLI's resolved `-c` path.
+///
+/// `export_resolved_kit_path` is the fix's seam: after this call,
+/// `ARKAVO_SWARMKIT_PATH` must point at the same kit `-c` resolved, and
+/// `arkavo_swarmkit::discover_kit_path` from a *different* cwd (one that
+/// does not itself contain the kit) must resolve to that same path —
+/// proving a server-side loader booted from a different working directory
+/// would now find it too.
+#[test]
+fn export_resolved_kit_path_makes_explicit_c_kit_discoverable_from_any_cwd() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let prev = std::env::var("ARKAVO_SWARMKIT_PATH").ok();
+
+    let kit_dir = tempdir();
+    let report = init_kit(kit_dir.path(), "explicit-c-agent").expect("init_kit should succeed");
+    let unrelated_cwd = tempdir(); // deliberately does not contain the kit
+
+    export_resolved_kit_path(Some(&report.path), unrelated_cwd.path());
+
+    let exported =
+        std::env::var("ARKAVO_SWARMKIT_PATH").expect("export must set ARKAVO_SWARMKIT_PATH");
+    let discovered = arkavo_swarmkit::discover_kit_path(unrelated_cwd.path());
+
+    // Restore before any assert that might panic.
+    // SAFETY: guarded by ENV_LOCK; no concurrent readers in this binary.
+    unsafe {
+        match &prev {
+            Some(p) => std::env::set_var("ARKAVO_SWARMKIT_PATH", p),
+            None => std::env::remove_var("ARKAVO_SWARMKIT_PATH"),
+        }
+    }
+
+    assert_eq!(exported, report.path.to_string_lossy());
+    assert_eq!(
+        discovered.expect("discovery must succeed via the env var"),
+        report.path,
+        "a loader started from an unrelated cwd must still find the -c kit"
+    );
+}
+
+/// No kit resolved anywhere (zero-config default) must not touch a
+/// pre-existing `ARKAVO_SWARMKIT_PATH` — clearing it would be a surprising
+/// side effect of a run that has no kit at all. Uses a stale (nonexistent)
+/// path as the pre-existing value: that's the only way discovery can both
+/// see an env var set *and* still resolve to "no kit" (a live env var
+/// pointing at a real file is instead a successful resolution).
+#[test]
+fn export_resolved_kit_path_is_noop_when_no_kit_resolved() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let prev = std::env::var("ARKAVO_SWARMKIT_PATH").ok();
+
+    let stale_path = "/nonexistent/does-not-exist.swarmkit.yaml";
+    // SAFETY: guarded by ENV_LOCK.
+    unsafe {
+        std::env::set_var("ARKAVO_SWARMKIT_PATH", stale_path);
+    }
+
+    let empty_dir = tempdir();
+    export_resolved_kit_path(None, empty_dir.path());
+
+    let after = std::env::var("ARKAVO_SWARMKIT_PATH").ok();
+
+    // SAFETY: guarded by ENV_LOCK.
+    unsafe {
+        match &prev {
+            Some(p) => std::env::set_var("ARKAVO_SWARMKIT_PATH", p),
+            None => std::env::remove_var("ARKAVO_SWARMKIT_PATH"),
+        }
+    }
+
+    assert_eq!(
+        after.as_deref(),
+        Some(stale_path),
+        "no kit resolved must leave a pre-existing env var untouched, not cleared"
+    );
 }

@@ -194,7 +194,7 @@ fn run_agent_with_options(
     override_name: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
-    use crate::commands::agent_kit::resolve_agent_configs;
+    use crate::commands::agent_kit::{export_resolved_kit_path, resolve_agent_configs};
 
     let cwd = std::env::current_dir()?;
     let cli_config_path = config_file.map(Path::new);
@@ -212,6 +212,12 @@ fn run_agent_with_options(
     .into_iter()
     .next()
     .ok_or("No agent configuration available")?;
+
+    // Export the resolved kit path so server-side policy loaders (preflight,
+    // budget, KAS — which re-discover their own kit from process cwd/env)
+    // see the same kit this just resolved, even when it came from an
+    // explicit -c path that isn't itself cwd-discoverable.
+    export_resolved_kit_path(cli_config_path, &cwd);
 
     // Set verbose mode - default is quiet (verbose = false)
     agent_config.quiet = !verbose;

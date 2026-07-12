@@ -287,7 +287,17 @@ pub fn agent_config_from_runtime(runtime_cfg: &arkavo_swarmkit::AgentRuntimeConf
             .collect(),
     });
 
-    let budget = Some(BudgetYamlConfig {
+    // Parity with the pre-SwarmKit behavior: a kit that says nothing about
+    // spend (no session/day cap, no explicit cloud policy) must produce the
+    // same `budget: None` as legacy AGENTS.md without a budget section, or
+    // zero-config with no kit at all — not a BudgetManager silently built
+    // from defaults. `rt.cloud_policy` (the raw Option) is the predicate
+    // here, not `cloud_policy_or_default()`'s always-Some result; setting
+    // cloud_policy alone is treated as an explicit spend declaration.
+    let kit_declares_spend = rt.max_cost_per_session.is_some()
+        || rt.max_cost_per_day.is_some()
+        || rt.cloud_policy.is_some();
+    let budget = kit_declares_spend.then(|| BudgetYamlConfig {
         max_cost_per_session: rt.max_cost_per_session,
         max_cost_per_day: rt.max_cost_per_day,
         cloud_policy: Some(cloud_policy.to_string()),
@@ -425,6 +435,98 @@ mod tests {
         let moderator = build_moderator_from_config(config.preflight.as_ref().unwrap());
         assert_eq!(moderator.len(), 1);
         assert!(moderator.check("SSN 123-45-6789").is_blocked());
+    }
+
+    #[test]
+    fn agent_config_from_swarmkit_runtime_without_runtime_block_has_no_budget() {
+        use arkavo_swarmkit::{AgentRuntimeConfig, KitRuntimeConfig, RoleRuntimeView};
+
+        let runtime_cfg = AgentRuntimeConfig {
+            kit_id: "blake3:test".into(),
+            kit_name: "no-runtime-kit".into(),
+            objective_goal: "stay safe".into(),
+            runtime: KitRuntimeConfig::default(),
+            roles: vec![RoleRuntimeView {
+                role_id: "agent".into(),
+                role_type: "operator".into(),
+                description: None,
+                model_family: None,
+                model_size: None,
+                model_backend: None,
+                skill_instructions: String::new(),
+                mcp_tool_grants: vec![],
+            }],
+        };
+
+        let config = agent_config_from_runtime(&runtime_cfg);
+        assert!(
+            config.budget.is_none(),
+            "a kit with no runtime block must not produce a budget, matching \
+             legacy AGENTS.md-without-budget and zero-config parity"
+        );
+    }
+
+    #[test]
+    fn agent_config_from_swarmkit_runtime_with_runtime_but_no_cost_fields_has_no_budget() {
+        use arkavo_swarmkit::{AgentRuntimeConfig, KitRuntimeConfig, RoleRuntimeView, RuntimeMode};
+
+        let runtime_cfg = AgentRuntimeConfig {
+            kit_id: "blake3:test".into(),
+            kit_name: "runtime-no-cost-kit".into(),
+            objective_goal: "stay safe".into(),
+            runtime: KitRuntimeConfig {
+                mode: Some(RuntimeMode::Specialist),
+                mdns: Some(false),
+                ..Default::default()
+            },
+            roles: vec![RoleRuntimeView {
+                role_id: "agent".into(),
+                role_type: "operator".into(),
+                description: None,
+                model_family: None,
+                model_size: None,
+                model_backend: None,
+                skill_instructions: String::new(),
+                mcp_tool_grants: vec![],
+            }],
+        };
+
+        let config = agent_config_from_runtime(&runtime_cfg);
+        assert!(
+            config.budget.is_none(),
+            "a runtime block that declares no cost fields must still yield no budget"
+        );
+    }
+
+    #[test]
+    fn agent_config_from_swarmkit_runtime_with_session_cost_has_budget() {
+        use arkavo_swarmkit::{AgentRuntimeConfig, KitRuntimeConfig, RoleRuntimeView};
+
+        let runtime_cfg = AgentRuntimeConfig {
+            kit_id: "blake3:test".into(),
+            kit_name: "spend-kit".into(),
+            objective_goal: "stay safe".into(),
+            runtime: KitRuntimeConfig {
+                max_cost_per_session: Some(2.5),
+                ..Default::default()
+            },
+            roles: vec![RoleRuntimeView {
+                role_id: "agent".into(),
+                role_type: "operator".into(),
+                description: None,
+                model_family: None,
+                model_size: None,
+                model_backend: None,
+                skill_instructions: String::new(),
+                mcp_tool_grants: vec![],
+            }],
+        };
+
+        let config = agent_config_from_runtime(&runtime_cfg);
+        let budget = config
+            .budget
+            .expect("max_cost_per_session must yield a budget");
+        assert_eq!(budget.max_cost_per_session, Some(2.5));
     }
 
     #[test]

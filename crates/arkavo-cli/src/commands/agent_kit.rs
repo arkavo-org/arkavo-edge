@@ -171,6 +171,53 @@ fn to_mcp_server_config(s: &RuntimeMcpServer) -> McpServerConfig {
     }
 }
 
+/// Resolve just the kit *path* SwarmKit would use for `-c`/discovery.
+///
+/// Does not load or parse it. Mirrors the resolution order at the top of
+/// [`resolve_agent_configs`] (`-c` > `discover_kit_path`), but stays pure —
+/// no filesystem writes, no env mutation — so it is safe to call from unit
+/// tests and from [`export_resolved_kit_path`] alike.
+///
+/// Returns `None` only for the zero-config-default case (no kit anywhere):
+/// there is nothing to export to `ARKAVO_SWARMKIT_PATH` then.
+pub fn resolve_kit_path(cli_config_path: Option<&Path>, cwd: &Path) -> Option<std::path::PathBuf> {
+    match cli_config_path {
+        Some(explicit) => Some(if explicit.is_absolute() {
+            explicit.to_path_buf()
+        } else {
+            cwd.join(explicit)
+        }),
+        None => arkavo_swarmkit::discover_kit_path(cwd).ok(),
+    }
+}
+
+/// Export the resolved kit path to `ARKAVO_SWARMKIT_PATH` for the rest of
+/// this process.
+///
+/// Server-side policy loaders (`arkavo_router::load_agent_config`, the
+/// spend plane, agui) re-discover their own kit from process cwd/env and
+/// never see an explicit `-c` path passed to the CLI — without this, a
+/// kit's preflight/KAS/budget policy is silently not applied unless the
+/// same kit also happens to be cwd-discoverable. `discover_kit_path`
+/// already prefers this env var over directory scanning, so setting it to
+/// the path this same resolution just landed on is idempotent when nothing
+/// was set before; when a stale value *was* set, this overwrites it so
+/// every consumer in the process agrees with what the CLI just resolved.
+///
+/// No-op when no kit was resolved (zero-config default): there is nothing
+/// to export, and clearing a pre-existing env var here would be a
+/// surprising side effect of an agent run that has no kit at all.
+pub fn export_resolved_kit_path(cli_config_path: Option<&Path>, cwd: &Path) {
+    if let Some(path) = resolve_kit_path(cli_config_path, cwd) {
+        // SAFETY: called once, early, from the single-threaded CLI startup
+        // path (`run_agent_with_options`), strictly before the A2A server
+        // (the first reader of this var) is started.
+        unsafe {
+            std::env::set_var(arkavo_swarmkit::SWARMKIT_PATH_ENV, path);
+        }
+    }
+}
+
 /// Zero-config default: no kit found anywhere in the resolution order.
 /// Mirrors the construction that used to live inline at `agent.rs:198`.
 fn default_agent_config() -> AgentConfig {
@@ -217,6 +264,46 @@ mod tests {
 
         let err = resolve_agent_configs(None, None, None, dir.path()).unwrap_err();
         assert!(err.to_string().contains("multiple"));
+    }
+
+    // Finding 1: -c kit's preflight/KAS/budget silently not applied unless
+    // the kit is also cwd-discoverable. `resolve_kit_path` is the pure seam
+    // `export_resolved_kit_path` builds on; these tests exercise it without
+    // touching process env (see `agent_kit_resolution_test.rs` for the
+    // actual env-mutation integration test).
+    #[test]
+    fn resolve_kit_path_explicit_relative_joins_cwd() {
+        let dir = tempdir();
+        let explicit = Path::new("some/kit.swarmkit.yaml");
+        let resolved = resolve_kit_path(Some(explicit), dir.path()).expect("explicit is Some");
+        assert_eq!(resolved, dir.path().join(explicit));
+    }
+
+    #[test]
+    fn resolve_kit_path_explicit_absolute_stays_absolute() {
+        let dir = tempdir();
+        let explicit = dir.path().join("kit.swarmkit.yaml");
+        let resolved =
+            resolve_kit_path(Some(&explicit), Path::new("/somewhere/else")).expect("is Some");
+        assert_eq!(resolved, explicit);
+    }
+
+    #[test]
+    fn resolve_kit_path_discovery_finds_kit_under_dot_arkavo() {
+        let dir = tempdir();
+        let arkavo_dir = dir.path().join(".arkavo");
+        fs::create_dir_all(&arkavo_dir).unwrap();
+        let kit_path = arkavo_dir.join("agent.swarmkit.yaml");
+        fs::write(&kit_path, minimal_kit_yaml()).unwrap();
+
+        let resolved = resolve_kit_path(None, dir.path()).expect("discovery should find the kit");
+        assert_eq!(resolved, kit_path);
+    }
+
+    #[test]
+    fn resolve_kit_path_no_kit_anywhere_is_none() {
+        let dir = tempdir();
+        assert_eq!(resolve_kit_path(None, dir.path()), None);
     }
 
     fn minimal_kit_yaml() -> String {

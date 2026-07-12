@@ -12,7 +12,8 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::super::config_helpers::{
-    DEFAULT_KIT_PATH, cleanup_old_backups, kit_filename_of, resolve_kit_path, validate_kit_yaml,
+    DEFAULT_KIT_PATH, cleanup_old_backups, is_safe_backup_filename, kit_filename_of,
+    resolve_kit_path, validate_kit_yaml,
 };
 
 pub async fn handle_config_get(
@@ -309,6 +310,18 @@ pub async fn handle_config_restore(
         metrics.record_rate_limit_blocked(None);
         timer.error();
         return Err(e);
+    }
+
+    // backup_filename is joined onto .arkavo/backups below; reject traversal first.
+    if !is_safe_backup_filename(&request.backup_filename) {
+        timer.error();
+        return Ok(AgentConfigRestoreResponse {
+            success: false,
+            new_version: None,
+            error: Some(ConfigError::ValidationFailed {
+                details: format!("invalid backup filename: {:?}", request.backup_filename),
+            }),
+        });
     }
 
     let backup_dir = std::path::Path::new(".arkavo/backups");
@@ -796,5 +809,48 @@ provenance:
             response.error,
             Some(ConfigError::ValidationFailed { .. })
         ));
+    }
+
+    /// Regression: an RPC-supplied `backup_filename` must not be able to
+    /// escape `.arkavo/backups` via `..` traversal — the handler joins it
+    /// onto that directory unsanitized before this fix.
+    #[tokio::test]
+    async fn restore_rejects_path_traversal_filename() {
+        let cwd = TestCwd::new();
+        let metrics = create_test_metrics();
+        let rate_limiter = create_test_rate_limiter();
+
+        // Plant a file outside .arkavo/backups that a traversal could reach.
+        let secret_path = cwd._tempdir.path().join("hostname");
+        std::fs::write(&secret_path, "should-not-be-read").unwrap();
+
+        for malicious in ["../../hostname", "..\\..\\hostname", "../hostname", ""] {
+            let response = handle_config_restore(
+                &metrics,
+                &rate_limiter,
+                AgentConfigRestoreRequest {
+                    agent_id: "agent".to_string(),
+                    backup_filename: malicious.to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+            assert!(
+                !response.success,
+                "traversal filename {malicious:?} must be rejected"
+            );
+            assert!(matches!(
+                response.error,
+                Some(ConfigError::ValidationFailed { .. })
+            ));
+        }
+
+        // The handler must never have read the file outside the backup dir.
+        assert!(secret_path.exists());
+        assert_eq!(
+            std::fs::read_to_string(&secret_path).unwrap(),
+            "should-not-be-read"
+        );
     }
 }
