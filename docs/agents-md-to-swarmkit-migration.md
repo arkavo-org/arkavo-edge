@@ -1,7 +1,7 @@
 # AGENTS.md → SwarmKit-Only Config Migration
 
 **Date:** 2026-07-11  
-**Status:** In progress (S0–S6 done: schema, discovery, router/server/CLI load path, kit init/migrate CLI, deprecated `agent init` alias, product AGENTS.md callers removed, legacy parsers deleted from arkavo-cli/arkavo-protocol with fixture tests rewritten onto kits; S7 final gate pending)  
+**Status:** S0–S7 implemented; PR pending (schema, discovery, router/server/CLI load path, kit init/migrate CLI, deprecated `agent init` alias, product AGENTS.md callers removed, legacy parsers deleted from arkavo-cli/arkavo-protocol with fixture tests rewritten onto kits, `parse_runtime_config` follow-up deleted, Tier F verification gate run — see `.superpowers/sdd/task-15-report.md`)  
 **Execution mode:** Local branch, targeted tests, checkpoints; **one final GitHub PR** (see [`agent-harness-local-workflow.md`](agent-harness-local-workflow.md))  
 **Branch:** `feature/swarmkit-only-config`
 

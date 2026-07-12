@@ -524,7 +524,7 @@ impl A2aServer {
 
                     // Load kit identity / skill text into policy cache at startup
                     if agent_config.name.is_some() {
-                        let kit_lessons = Self::read_kit_lesson_content().await;
+                        let kit_lessons = Self::read_kit_lesson_content();
                         if !kit_lessons.is_empty() {
                             bus.load_kit_lessons(&kit_lessons).await;
                         }
@@ -543,7 +543,7 @@ impl A2aServer {
     }
 
     /// Read kit purpose + skill instructions for teaching lesson injection.
-    async fn read_kit_lesson_content() -> String {
+    fn read_kit_lesson_content() -> String {
         let cwd = match std::env::current_dir() {
             Ok(p) => p,
             Err(_) => return String::new(),
