@@ -5,6 +5,18 @@
 
 use crate::commands::agent::{AgentConfig, McpServerConfig};
 
+/// Extract the raw YAML frontmatter block (the content strictly between the
+/// opening and closing `---` delimiters) from an AGENTS.md file, if present.
+/// Shared by `legacy_agents_md::parse_legacy_agents_md` (line-based parsing
+/// of the known top-level keys) and `frontmatter::extract_runtime_extras`
+/// (whole-block `serde_yaml` parsing of the `preflight`/`kas`/`budget` keys
+/// the line-based parser has no representation for).
+pub(super) fn extract_frontmatter(content: &str) -> Option<&str> {
+    let after_open = content.strip_prefix("---")?;
+    let end_idx = after_open.find("\n---")?;
+    Some(&after_open[..end_idx])
+}
+
 // Helper function to extract value from markdown field like "- **Name:** value"
 pub(super) fn extract_markdown_field_value(line: &str, field_prefix: &str) -> Option<String> {
     if let Some(start_pos) = line.find(field_prefix) {

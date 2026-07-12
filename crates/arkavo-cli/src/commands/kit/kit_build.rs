@@ -16,6 +16,7 @@ use arkavo_swarmkit::{
 };
 
 use crate::commands::agent::{AgentConfig, McpServerConfig};
+use crate::commands::kit::frontmatter::extract_runtime_extras;
 use crate::commands::kit::legacy_agents_md::parse_legacy_agents_md;
 use crate::commands::kit::model_map::hint_to_kit_model;
 
@@ -62,6 +63,12 @@ pub fn migrate_from_agents_md(
     let Some(first) = agents.first() else {
         return Err(format!("no agent sections found in {}", in_path.display()).into());
     };
+
+    // Frontmatter `preflight:`/`kas:`/`budget:` have no representation in
+    // the line-based parser above (it treats them as unknown sections and
+    // drops every line inside silently); recover them separately here
+    // (finding 2) so they land in `runtime.*` instead of being lost.
+    let extras = extract_runtime_extras(&content);
 
     let kit_name = first.name.clone();
     let goal = if first.purpose.trim().is_empty() {
@@ -116,7 +123,11 @@ pub fn migrate_from_agents_md(
             listen: Some(first.listen.clone()),
             mdns: Some(first.mdns_enabled),
             mcp_servers,
-            ..Default::default()
+            preflight: extras.preflight.clone(),
+            kas: extras.kas.clone(),
+            max_cost_per_session: extras.max_cost_per_session,
+            max_cost_per_day: extras.max_cost_per_day,
+            cloud_policy: extras.cloud_policy,
         }),
     );
 
@@ -131,6 +142,7 @@ pub fn migrate_from_agents_md(
 
     let mut unmapped = unmapped_lines(&agents, &content, &unmapped_models, &mcp_conflicts);
     unmapped.extend(runtime_divergence_lines(&agents));
+    unmapped.extend(extras.parse_errors);
 
     Ok(MigrateReport {
         path: out_path.to_path_buf(),

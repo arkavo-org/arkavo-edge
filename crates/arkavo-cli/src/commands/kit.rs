@@ -1,10 +1,12 @@
 //! `arkavo kit init` / `arkavo kit validate` / `arkavo kit migrate-from-agents-md`
 //! — author, check, and migrate-into SwarmKit manifests.
 //!
-//! This is the Phase S4 replacement for `arkavo agent init` (which still
-//! writes AGENTS.md; that command is deprecated separately). The migration
-//! logic itself lives in the sibling `kit_build` module to keep this file
-//! under the repo's per-file size limit.
+//! This is the Phase S4 replacement for `arkavo agent init` (which is now
+//! deprecated and delegates entirely to this module's `init_kit`, writing a
+//! SwarmKit manifest rather than AGENTS.md — see
+//! `commands::agent::deprecated_init`). The migration logic itself lives in
+//! the sibling `kit_build` module to keep this file under the repo's
+//! per-file size limit.
 
 use base64::Engine;
 use rand::Rng;
@@ -19,6 +21,7 @@ use arkavo_swarmkit::{
     discover::ARKAVO_DIR, kit_id_for, load_kit_file, validate,
 };
 
+mod frontmatter;
 mod kit_build;
 mod legacy_agents_md;
 mod legacy_agents_md_yaml;

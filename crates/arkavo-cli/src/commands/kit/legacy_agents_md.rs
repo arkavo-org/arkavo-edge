@@ -12,7 +12,7 @@
 use crate::commands::agent::{AgentConfig, McpServerConfig};
 
 use super::legacy_agents_md_yaml::{
-    extract_markdown_field_value, extract_yaml_value, parse_yaml_properties,
+    extract_frontmatter, extract_markdown_field_value, extract_yaml_value, parse_yaml_properties,
 };
 
 pub(super) fn parse_legacy_agents_md(
@@ -31,10 +31,7 @@ pub(super) fn parse_legacy_agents_md(
     let mut purpose_lines: Vec<String> = Vec::new();
 
     // Handle YAML frontmatter format (content between --- delimiters)
-    if let Some(after_open) = content.strip_prefix("---")
-        && let Some(end_idx) = after_open.find("\n---")
-    {
-        let frontmatter = &after_open[..end_idx];
+    if let Some(frontmatter) = extract_frontmatter(content) {
         let mut agent = AgentConfig {
             name: String::new(),
             purpose: String::new(),
