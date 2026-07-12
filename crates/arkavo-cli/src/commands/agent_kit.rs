@@ -24,8 +24,9 @@ const DEFAULT_LISTEN: &str = "0.0.0.0:0";
 /// `arkavo agent`, per the S6 resolution order: `-c` > discovery > the
 /// zero-config default.
 ///
-/// Returns one entry per kit role in manifest order — mirroring
-/// `parse_agents_config`'s multi-agent output — unless `name` narrows the
+/// Returns one entry per kit role in manifest order — mirroring the
+/// multi-agent output of the historical top-level AGENTS.md parser (deleted
+/// in Task 14 / S6) — unless `name` narrows the
 /// result to the single role whose id matches. `port`, when given, replaces
 /// the port part of every returned entry's `listen` (current CLI flag
 /// semantics, preserved). This function starts nothing; the caller (today,

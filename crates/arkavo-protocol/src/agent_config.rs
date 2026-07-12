@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
 /// Runtime configuration for timeouts and limits
 #[derive(Debug, Clone)]
@@ -34,7 +33,9 @@ impl Default for RuntimeConfig {
     }
 }
 
-/// Agent configuration parsed from AGENTS.md
+/// Agent configuration. Historically parsed from AGENTS.md; that parser was
+/// deleted in Task 14 / S6 (SwarmKit is now the sole config source) — this
+/// type itself remains live, used across arkavo-server.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
     pub name: String,
@@ -66,257 +67,15 @@ pub struct McpServerConfig {
     pub url: Option<String>,
 }
 
-/// Parse AGENTS.md configuration content
-pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn std::error::Error>> {
-    let mut agents = Vec::new();
-    let mut current_agent: Option<AgentConfig> = None;
-    let mut in_agent_section = false;
-    let mut in_mcp_section = false;
-    let mut current_mcp_server: Option<McpServerConfig> = None;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Check for agent section header
-        if trimmed.starts_with("## ") {
-            // Save any pending MCP server before switching agents
-            if let Some(server) = current_mcp_server.take()
-                && let Some(agent) = current_agent.as_mut()
-            {
-                agent.mcp_servers.push(server);
-            }
-
-            // Save previous agent if exists
-            if let Some(agent) = current_agent.take() {
-                agents.push(agent);
-            }
-
-            // Reset MCP section flag
-            in_mcp_section = false;
-
-            let name = trimmed.strip_prefix("## ").unwrap_or("").trim().to_string();
-            current_agent = Some(AgentConfig {
-                name,
-                purpose: String::new(),
-                model: String::new(),
-                mode: AgentMode::default(),
-                listen: String::new(),
-                mdns_enabled: true, // Default to true for zero-config
-                mcp_servers: Vec::new(),
-                api_keys: HashMap::new(),
-                runtime: RuntimeConfig::default(),
-            });
-            in_agent_section = true;
-            continue;
-        }
-
-        // Skip if not in agent section
-        if !in_agent_section || current_agent.is_none() {
-            continue;
-        }
-
-        // Check for mcp_servers section
-        if trimmed == "mcp_servers:" {
-            in_mcp_section = true;
-            continue;
-        }
-
-        // Handle MCP server entries
-        if in_mcp_section && trimmed.starts_with("- name:") {
-            // Save previous MCP server if exists
-            if let Some(server) = current_mcp_server.take()
-                && let Some(agent) = current_agent.as_mut()
-            {
-                agent.mcp_servers.push(server);
-            }
-
-            // Start new MCP server
-            current_mcp_server = Some(McpServerConfig {
-                name: trimmed
-                    .strip_prefix("- name:")
-                    .unwrap_or("")
-                    .trim()
-                    .to_string(),
-                command: None,
-                args: Vec::new(),
-                url: None,
-            });
-            continue;
-        }
-
-        // Parse MCP server properties
-        if in_mcp_section
-            && current_mcp_server.is_some()
-            && let Some(server) = current_mcp_server.as_mut()
-        {
-            if trimmed.starts_with("command:") {
-                server.command = Some(
-                    trimmed
-                        .strip_prefix("command:")
-                        .unwrap_or("")
-                        .trim()
-                        .trim_matches('"')
-                        .to_string(),
-                );
-            } else if trimmed.starts_with("args:") {
-                // Parse array format: ["arg1", "arg2"]
-                let args_str = trimmed.strip_prefix("args:").unwrap_or("").trim();
-                if args_str.starts_with('[') && args_str.ends_with(']') {
-                    let args_content = &args_str[1..args_str.len() - 1];
-                    server.args = args_content
-                        .split(',')
-                        .map(|s| s.trim().trim_matches('"').to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                }
-            } else if trimmed.starts_with("url:") {
-                server.url = Some(
-                    trimmed
-                        .strip_prefix("url:")
-                        .unwrap_or("")
-                        .trim()
-                        .trim_matches('"')
-                        .to_string(),
-                );
-            } else if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-')
-            {
-                // End of MCP section
-                in_mcp_section = false;
-                if let Some(server) = current_mcp_server.take()
-                    && let Some(agent) = current_agent.as_mut()
-                {
-                    agent.mcp_servers.push(server);
-                }
-            }
-        }
-
-        // Parse agent properties (when not in MCP section)
-        if !in_mcp_section && let Some(agent) = current_agent.as_mut() {
-            if trimmed.starts_with("purpose:") {
-                agent.purpose = trimmed
-                    .strip_prefix("purpose:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-            } else if trimmed.starts_with("model:") {
-                agent.model = trimmed
-                    .strip_prefix("model:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-            } else if trimmed.starts_with("mode:") {
-                let mode_str = trimmed
-                    .strip_prefix("mode:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"');
-                agent.mode = match mode_str {
-                    "specialist" => AgentMode::Specialist,
-                    _ => AgentMode::Orchestrator,
-                };
-            } else if trimmed.starts_with("listen:") {
-                agent.listen = trimmed
-                    .strip_prefix("listen:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-            } else if trimmed.starts_with("mdns:") {
-                // Only disable if explicitly set to false
-                agent.mdns_enabled = !trimmed.contains("false");
-            } else if trimmed.contains("_API_KEY:") || trimmed.contains("_api_key:") {
-                // Parse API key entries (e.g., MOONSHOT_API_KEY: sk-xxx)
-                if let Some(colon_pos) = trimmed.find(':') {
-                    let key_name = trimmed[..colon_pos].trim().to_string();
-                    let key_value = trimmed[colon_pos + 1..]
-                        .trim()
-                        .trim_matches('"')
-                        .to_string();
-                    agent.api_keys.insert(key_name, key_value);
-                }
-            }
-        }
-    }
-
-    // Save any pending MCP server
-    if let Some(server) = current_mcp_server
-        && let Some(agent) = current_agent.as_mut()
-    {
-        agent.mcp_servers.push(server);
-    }
-
-    // Save last agent
-    if let Some(agent) = current_agent {
-        agents.push(agent);
-    }
-
-    Ok(agents)
-}
-
-/// Workspace paths parsed from AGENTS.md paths: section
-#[derive(Debug, Clone, Default)]
-pub struct WorkspacePaths {
-    pub memory_db_path: Option<PathBuf>,
-    pub workspace_root: PathBuf,
-}
-
-/// Parse workspace paths from AGENTS.md content.
-/// Relative paths are resolved against the workspace_root (parent of .arkavo directory).
-pub fn parse_workspace_paths(content: &str, workspace_root: &Path) -> WorkspacePaths {
-    let mut paths = WorkspacePaths {
-        memory_db_path: None,
-        workspace_root: workspace_root.to_path_buf(),
-    };
-
-    let mut in_paths_section = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Check for Paths section header
-        if trimmed == "## Paths" {
-            in_paths_section = true;
-            continue;
-        }
-
-        // End paths section on next ## header
-        if in_paths_section && trimmed.starts_with("## ") {
-            break;
-        }
-
-        // Parse paths: section marker
-        if trimmed == "paths:" {
-            in_paths_section = true;
-            continue;
-        }
-
-        // Parse memory_db path
-        if in_paths_section && trimmed.starts_with("memory_db:") {
-            let path_str = trimmed
-                .strip_prefix("memory_db:")
-                .unwrap_or("")
-                .trim()
-                .trim_matches('"');
-
-            if !path_str.is_empty() {
-                let path = PathBuf::from(path_str);
-                // Resolve relative paths against workspace root
-                let resolved = if path.is_absolute() {
-                    path
-                } else {
-                    workspace_root.join(path)
-                };
-                paths.memory_db_path = Some(resolved);
-            }
-        }
-    }
-
-    paths
-}
-
-/// Parse runtime configuration from AGENTS.md content.
+/// Parse runtime configuration from a runtime: block.
+///
+/// The sole remaining caller (Task 14 / S6 audit) is
+/// `arkavo-protocol/tests/sequence_integrity_test.rs`'s SEQ-016 tripwire,
+/// which calls this with an empty string purely to obtain a
+/// [`RuntimeConfig`] value to inspect — it is not an AGENTS.md-reading test.
+/// Kept rather than deleted per the migration brief's "leave a live caller"
+/// rule; safe to delete once that tripwire is rewritten against
+/// `RuntimeConfig::default()` directly.
 ///
 /// Example format:
 /// ```yaml
@@ -391,57 +150,6 @@ pub fn parse_runtime_config(content: &str) -> RuntimeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_workspace_paths_relative() {
-        let content = r#"
-## Paths
-
-paths:
-  memory_db: .arkavo/memory_server/memories.db
-"#;
-        let workspace_root = PathBuf::from("/home/user/project");
-        let paths = parse_workspace_paths(content, &workspace_root);
-
-        assert_eq!(
-            paths.memory_db_path,
-            Some(PathBuf::from(
-                "/home/user/project/.arkavo/memory_server/memories.db"
-            ))
-        );
-        assert_eq!(paths.workspace_root, workspace_root);
-    }
-
-    #[test]
-    fn test_parse_workspace_paths_absolute() {
-        let content = r#"
-## Paths
-
-paths:
-  memory_db: /absolute/path/to/memories.db
-"#;
-        let workspace_root = PathBuf::from("/home/user/project");
-        let paths = parse_workspace_paths(content, &workspace_root);
-
-        assert_eq!(
-            paths.memory_db_path,
-            Some(PathBuf::from("/absolute/path/to/memories.db"))
-        );
-    }
-
-    #[test]
-    fn test_parse_workspace_paths_no_paths_section() {
-        let content = r#"
-## Agent
-
-name: test-agent
-model: gpt-4
-"#;
-        let workspace_root = PathBuf::from("/home/user/project");
-        let paths = parse_workspace_paths(content, &workspace_root);
-
-        assert_eq!(paths.memory_db_path, None);
-    }
 
     #[test]
     fn test_parse_runtime_config_with_values() {

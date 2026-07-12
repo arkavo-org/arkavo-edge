@@ -1,10 +1,10 @@
 //! `arkavo kit migrate-from-agents-md` — best-effort conversion of a legacy
 //! AGENTS.md agent config into a SwarmKit manifest.
 //!
-//! Reuses `parse_agents_config` (`crate::commands::agent`), the CLI-local
-//! legacy markdown/YAML parser scheduled for deletion once every product
-//! AGENTS.md caller has migrated onto SwarmKit. This command is its last
-//! sanctioned caller — do not add new callers.
+//! Reuses `parse_legacy_agents_md` (`crate::commands::kit::legacy_agents_md`),
+//! the CLI-local legacy markdown/YAML parser scheduled for deletion once this
+//! migrate command is retired. This command is its last sanctioned caller —
+//! do not add new callers.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,8 @@ use arkavo_swarmkit::{
     RuntimeMcpServer, RuntimeMode, validate,
 };
 
-use crate::commands::agent::{self, AgentConfig, McpServerConfig};
+use crate::commands::agent::{AgentConfig, McpServerConfig};
+use crate::commands::kit::legacy_agents_md::parse_legacy_agents_md;
 use crate::commands::kit::model_map::hint_to_kit_model;
 
 /// Result of a `migrate-from-agents-md` run.
@@ -56,7 +57,7 @@ pub fn migrate_from_agents_md(
         return Err(format!("parent directory {} does not exist", parent.display()).into());
     }
 
-    let agents = agent::parse_agents_config(&content)
+    let agents = parse_legacy_agents_md(&content)
         .map_err(|e| format!("failed to parse {}: {e}", in_path.display()))?;
     let Some(first) = agents.first() else {
         return Err(format!("no agent sections found in {}", in_path.display()).into());
@@ -350,7 +351,7 @@ fn unmapped_lines(
         );
     }
     // `quiet` is a CLI runtime flag, never actually parsed from AGENTS.md
-    // content by parse_agents_config (every branch of that parser defaults
+    // content by parse_legacy_agents_md (every branch of that parser defaults
     // it to `true` regardless of file content), so a parsed AgentConfig can
     // never distinguish "explicitly set" from "default" for this field. A
     // raw content scan is the only way to detect an explicit `quiet:` key,

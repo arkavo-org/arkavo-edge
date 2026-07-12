@@ -30,11 +30,14 @@ pub use arkavo_protocol::agent_registry;
 pub use arkavo_protocol::discovery;
 pub use arkavo_protocol::registration;
 
-// Re-export main types for convenience
-pub use agent_config::{
-    AgentConfig, McpServerConfig, RuntimeConfig, WorkspacePaths, parse_agents_config,
-    parse_runtime_config, parse_workspace_paths,
-};
+// Re-export main types for convenience. The legacy top-level AGENTS.md
+// markdown/YAML config-parsing function and the workspace-paths parser
+// (plus its `WorkspacePaths` type) were deleted in Task 14 / S6 (dead code
+// with zero live callers outside their own tests) — see
+// docs/agents-md-to-swarmkit-migration.md.
+// `parse_runtime_config` is kept because
+// arkavo-protocol/tests/sequence_integrity_test.rs still calls it directly.
+pub use agent_config::{AgentConfig, McpServerConfig, RuntimeConfig, parse_runtime_config};
 pub use agent_registry::{AgentInfo, AgentRegistry};
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 pub use registration::{

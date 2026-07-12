@@ -20,6 +20,8 @@ use arkavo_swarmkit::{
 };
 
 mod kit_build;
+mod legacy_agents_md;
+mod legacy_agents_md_yaml;
 mod model_map;
 pub use kit_build::{MigrateReport, migrate_from_agents_md};
 pub(crate) use model_map::kit_model_to_hint;
