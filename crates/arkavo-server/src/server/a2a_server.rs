@@ -64,9 +64,9 @@ pub struct A2aServer {
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
     /// Base64-encoded ECDSA P-256 public key for TDF encryption
     public_key: Arc<tokio::sync::RwLock<Option<String>>>,
-    /// Budget manager loaded from AGENTS.md config
+    /// Budget manager loaded from SwarmKit config
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
-    /// Cached AGENTS.md config to avoid repeated file reads
+    /// Cached SwarmKit agent config to avoid repeated discovery reads
     agent_config: Arc<tokio::sync::RwLock<arkavo_router::AgentConfig>>,
     /// Federated memory service for ABAC-scoped cross-agent retrieval
     federated_memory: Arc<tokio::sync::RwLock<Option<Arc<arkavo_memory::FederatedMemoryService>>>>,
@@ -282,74 +282,6 @@ impl A2aServer {
         metadata.api_keys = api_keys;
     }
 
-    #[allow(dead_code)]
-    async fn reload_configuration_from_content(&self, content: &str) -> Result<()> {
-        use arkavo_protocol::agent_config::parse_agents_config;
-
-        let configs = parse_agents_config(content)
-            .map_err(|e| A2aError::Configuration(format!("Failed to parse config: {e}")))?;
-
-        let current_name = {
-            let metadata = self.agent_metadata.read().await;
-            metadata.name.clone()
-        };
-
-        let new_config = configs
-            .iter()
-            .find(|c| c.name == current_name)
-            .ok_or_else(|| {
-                A2aError::Configuration(format!(
-                    "Agent '{current_name}' not found in updated configuration"
-                ))
-            })?;
-
-        info!(
-            "Updating agent metadata: name={}, purpose={}, model={}",
-            new_config.name, new_config.purpose, new_config.model
-        );
-
-        let (model_changed, existing_did) = {
-            let metadata = self.agent_metadata.read().await;
-            (metadata.model != new_config.model, metadata.did.clone())
-        };
-
-        self.set_agent_metadata(
-            new_config.name.clone(),
-            new_config.purpose.clone(),
-            new_config.model.clone(),
-            new_config.mode.clone(),
-            existing_did,
-        )
-        .await;
-
-        if !new_config.api_keys.is_empty() {
-            info!("Updating API keys");
-            self.set_api_keys(new_config.api_keys.clone()).await;
-        }
-
-        if model_changed {
-            info!("Model changed, LLM adapter recreated");
-        }
-
-        if !new_config.mcp_servers.is_empty() {
-            warn!(
-                "MCP server configuration changes detected. Full hot-reload for MCP servers will be implemented in Phase 3."
-            );
-            warn!("For now, MCP server changes require agent restart to take effect.");
-        }
-
-        let current_listen = format!("{}:{}", self.config.bind_address, self.config.port);
-        if new_config.listen != current_listen && new_config.listen != "0.0.0.0:0" {
-            warn!(
-                "Listen address changes require agent restart to take effect (current: {}, new: {})",
-                current_listen, new_config.listen
-            );
-        }
-
-        info!("Configuration reloaded successfully");
-        Ok(())
-    }
-
     pub async fn initialize_event_writer(&self) -> Result<()> {
         use arkavo_events::writer::EventWriterBuilder;
         use std::time::Duration;
@@ -433,7 +365,7 @@ impl A2aServer {
         Ok(())
     }
 
-    /// Resolve model hint from AGENTS.md.
+    /// Resolve model hint from SwarmKit.
     ///
     /// Returns the model specified in the agent's configuration. The router's
     /// ModelSelector memory budget (set from hint size) prevents Thompson
@@ -453,7 +385,7 @@ impl A2aServer {
             info!("Initializing router for dynamic model selection");
         }
 
-        // Use cached AGENTS.md config for preflight, budget, KAS
+        // Use cached SwarmKit-derived config for preflight, budget, KAS
         let agent_config = self.agent_config.read().await.clone();
 
         // Build the budget manager up front so the router can both enforce the
@@ -494,12 +426,12 @@ impl A2aServer {
                     router
                 };
 
-                // Wire preflight from AGENTS.md
+                // Wire preflight from SwarmKit runtime.preflight
                 let router = if let Some(ref pf) = agent_config.preflight {
                     let moderator = arkavo_router::build_moderator_from_config(pf);
                     let count = moderator.len();
                     if count > 0 {
-                        info!("Preflight: {} policies loaded from AGENTS.md", count);
+                        info!("Preflight: {} policies loaded from SwarmKit", count);
                     }
                     router.with_preflight(moderator)
                 } else {
@@ -515,7 +447,7 @@ impl A2aServer {
                     None => router,
                 };
 
-                // Wire TDF audit encryption from AGENTS.md
+                // Wire TDF audit encryption from SwarmKit runtime.kas
                 #[cfg(feature = "kas")]
                 let router = if let Some(ref kas) = agent_config.kas {
                     if kas.enabled {
@@ -566,7 +498,7 @@ impl A2aServer {
                                 model = hint.name(),
                                 hint_mb = hint_bytes / (1024 * 1024),
                                 budget_mb = cap / (1024 * 1024),
-                                "Router model budget set from AGENTS.md hint"
+                                "Router model budget set from kit model hint"
                             );
                         }
                     }
@@ -582,7 +514,7 @@ impl A2aServer {
                 // router above for live-cap spend enforcement).
                 if let Some(manager) = budget_manager {
                     *self.budget_manager.write().await = Some(manager);
-                    info!("Budget enforcement loaded from AGENTS.md");
+                    info!("Budget enforcement loaded from SwarmKit runtime");
                 }
 
                 // Set router on learning bus for LLM-based synthesis
@@ -590,14 +522,12 @@ impl A2aServer {
                     bus.set_router(router.clone()).await;
                     info!("✓ Router configured for learning synthesis");
 
-                    // Load AGENTS.md lessons into policy cache at startup
-                    if let Some(ref name) = agent_config.name {
-                        // Use the purpose field as AGENTS.md content if available
-                        let agents_md_content = Self::read_agents_md_content().await;
-                        if !agents_md_content.is_empty() {
-                            bus.load_agents_md_lessons(&agents_md_content).await;
+                    // Load kit identity / skill text into policy cache at startup
+                    if agent_config.name.is_some() {
+                        let kit_lessons = Self::read_kit_lesson_content();
+                        if !kit_lessons.is_empty() {
+                            bus.load_kit_lessons(&kit_lessons).await;
                         }
-                        let _ = name; // used for agent_config context
                     }
                 }
 
@@ -612,16 +542,16 @@ impl A2aServer {
         }
     }
 
-    /// Read AGENTS.md content from disk for teaching lesson injection.
-    async fn read_agents_md_content() -> String {
-        let path = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
-            ".arkavo/AGENTS.md"
-        } else if std::path::Path::new("AGENTS.md").exists() {
-            "AGENTS.md"
-        } else {
-            return String::new();
+    /// Read kit purpose + skill instructions for teaching lesson injection.
+    fn read_kit_lesson_content() -> String {
+        let cwd = match std::env::current_dir() {
+            Ok(p) => p,
+            Err(_) => return String::new(),
         };
-        tokio::fs::read_to_string(path).await.unwrap_or_default()
+        match arkavo_swarmkit::load_discovered_kit(&cwd) {
+            Ok(discovered) => discovered.config.purpose_text(),
+            Err(_) => String::new(),
+        }
     }
 
     /// Create the advisor state store alongside the workspace memory DB.
@@ -772,12 +702,8 @@ impl A2aServer {
 
         self.stop_file_watcher().await;
 
-        let config_path = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
-            std::path::Path::new(".arkavo/AGENTS.md")
-        } else if std::path::Path::new("AGENTS.md").exists() {
-            std::path::Path::new("AGENTS.md")
-        } else {
-            info!("AGENTS.md not found, skipping file watcher setup");
+        let Some(config_path) = super::config_helpers::resolve_kit_path() else {
+            info!("No SwarmKit kit found, skipping file watcher setup");
             return Ok(());
         };
 
@@ -786,13 +712,14 @@ impl A2aServer {
             .map_err(|e| A2aError::Internal(format!("Failed to create file watcher: {e}")))?;
 
         watcher
-            .watch(config_path, RecursiveMode::NonRecursive)
-            .map_err(|e| A2aError::Internal(format!("Failed to watch AGENTS.md: {e}")))?;
+            .watch(&config_path, RecursiveMode::NonRecursive)
+            .map_err(|e| A2aError::Internal(format!("Failed to watch kit file: {e}")))?;
 
         info!("File watcher started for {:?}", config_path);
 
         let agent_metadata = self.agent_metadata.clone();
         let mcp_registry = self.mcp_registry.clone();
+        let watch_path = config_path.clone();
 
         let handle = tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Handle::current();
@@ -805,21 +732,15 @@ impl A2aServer {
                         kind: EventKind::Modify(_),
                         ..
                     })) if last_reload.elapsed() > Duration::from_secs(1) => {
-                        info!("AGENTS.md modified, triggering hot-reload");
+                        info!("Kit file modified, triggering hot-reload");
 
                         let agent_metadata_clone = agent_metadata.clone();
                         let mcp_registry_clone = mcp_registry.clone();
+                        let path_clone = watch_path.clone();
 
                         #[allow(clippy::disallowed_methods)]
                         rt.block_on(async move {
-                            let config_content =
-                                if std::path::Path::new(".arkavo/AGENTS.md").exists() {
-                                    tokio::fs::read_to_string(".arkavo/AGENTS.md").await
-                                } else {
-                                    tokio::fs::read_to_string("AGENTS.md").await
-                                };
-
-                            match config_content {
+                            match tokio::fs::read_to_string(&path_clone).await {
                                 Ok(content) => {
                                     match reload_configuration_for_watcher(
                                         &content,
@@ -841,7 +762,7 @@ impl A2aServer {
                                         }
                                     }
                                 }
-                                Err(e) => error!("Failed to read AGENTS.md for hot-reload: {}", e),
+                                Err(e) => error!("Failed to read kit file for hot-reload: {}", e),
                             }
                         });
                         last_reload = std::time::Instant::now();
@@ -1157,7 +1078,7 @@ impl A2aServer {
             mgr.set_learning_context(learning_context.clone());
             mgr.set_task_context(task_context.clone());
 
-            // Inject agent purpose from AGENTS.md as system prompt for chat context
+            // Inject agent purpose from SwarmKit as system prompt for chat context
             {
                 let metadata = self.agent_metadata.read().await;
                 mgr.set_system_prompt(metadata.purpose.clone());
@@ -1490,7 +1411,7 @@ impl A2aServer {
     }
 }
 
-/// Convert AGENTS.md budget YAML to BudgetConfig for the budget manager
+/// Convert kit budget YAML to BudgetConfig for the budget manager
 fn build_budget_config(yaml: &arkavo_router::BudgetYamlConfig) -> arkavo_budget::BudgetConfig {
     let mut config = arkavo_budget::BudgetConfig::default();
 

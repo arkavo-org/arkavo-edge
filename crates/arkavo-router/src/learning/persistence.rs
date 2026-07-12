@@ -14,7 +14,7 @@ pub enum LessonSource {
     Machine,
     /// Provided by a human operator at runtime (immune to decay)
     Human,
-    /// Loaded from AGENTS.md at startup
+    /// Loaded from SwarmKit at startup
     Configuration,
 }
 

@@ -1,0 +1,198 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# frontend/, backend/, and orchestrator/.
+#
+# `discovery.mdns` maps to `runtime.mdns` below. The old launch.sh's
+# `--model` flag (sed-patched the old per-agent config's `model:` line at
+# launch time) has no kit-level equivalent — `arkavo agent` takes no
+# model-override flag; change `agent_provisioning.model` in this file and
+# re-run instead. See README.md.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "fullstack-feature"
+  version: "0.1.0"
+  description: "3-agent mesh for fullstack feature development: an orchestrator breaks a feature request into frontend/backend tasks, delegates to the matching specialist, and aggregates results."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "mn2SlFxR5iy74Bepp_JeUg"
+
+objective:
+  goal: "Coordinate frontend and backend agents to implement fullstack features"
+  success_criteria:
+    - "feature requests are broken down into frontend/backend tasks"
+    - "API contracts are coordinated between frontend and backend"
+    - "results from both agents are aggregated into a coherent response"
+
+roles:
+  - id: "orchestrator-agent"
+    role_type: "planner"
+    description: "Coordinates frontend and backend agents to implement fullstack features."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Coordinate frontend and backend agents to implement fullstack features
+
+            The orchestrator agent is responsible for:
+            - Breaking down feature requests into frontend/backend tasks
+            - Delegating tasks to the appropriate specialist agent
+            - Coordinating API contracts between frontend and backend
+            - Tracking task completion across agents
+            - Aggregating results into a coherent response
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "frontend-agent"
+        on: "always"
+      - to: "backend-agent"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "frontend-agent"
+    role_type: "operator"
+    description: "Implements frontend features including React components, forms, and API integration."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Implement frontend features including React components, forms, and API integration
+
+            The frontend agent handles:
+            - React/Vue component development
+            - Form validation and state management
+            - REST API client integration
+            - CSS/styling implementation
+            - Unit tests for UI components
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "orchestrator-agent"
+        on: "always"
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "backend-agent"
+    role_type: "operator"
+    description: "Implements backend features including REST APIs, database schemas, and business logic."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Implement backend features including REST APIs, database schemas, and business logic
+
+            The backend agent handles:
+            - REST API endpoint implementation
+            - Database schema design and migrations
+            - Business logic and validation
+            - Authentication/authorization
+            - Integration tests for APIs
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "orchestrator-agent"
+        on: "always"
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 900
+    max_total_tokens: 150000
+    max_cost_usd: 0.75
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "frontend and backend tasks both complete"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

@@ -1,6 +1,6 @@
 # KAS as A2A Capability
 
-Demonstrates the Key Access Service (KAS) exposed as A2A JSON-RPC methods for TDF encryption key operations with NTDF delegation-based authorization.
+Demonstrates the Key Access Service (KAS) exposed as A2A JSON-RPC methods for TDF encryption key operations with NTDF delegation-based authorization. Peers are discovered via mDNS (`runtime.mdns: true` in the kit).
 
 ## What You'll Learn
 
@@ -171,7 +171,7 @@ https://arkavo.net/attr/role/value/operator
 
 | File | Purpose |
 |------|---------|
-| `AGENTS.md` | Agent config with KAS capability enabled |
+| `kas-agent.swarmkit.yaml` | Agent config with KAS capability enabled |
 | `launch.sh` | Start the KAS-enabled agent |
 | `stop.sh` | Stop the agent |
 | `RUNBOOK.md` | Step-by-step walkthrough |

@@ -1,0 +1,104 @@
+# Single-role SwarmKit — replaces the deprecated per-product config for
+# orchestrator-agent. `model:` was never set in the old config (routing was
+# left to the CLI default), so agent_provisioning.model is intentionally
+# absent here too.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "orchestrator-agent"
+  version: "0.1.0"
+  description: "Intelligent task routing and coordination for the Arkavo agent mesh"
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "vpk8FE0sNc3byPRxcdSsRA"
+
+objective:
+  goal: "Intelligent task routing and coordination for the Arkavo agent mesh"
+  success_criteria:
+    - "routing decisions are explained briefly so humans understand which agents handled their request"
+    - "complex requests are decomposed and results aggregated into a coherent response"
+
+roles:
+  - id: "orchestrator"
+    role_type: "operator"
+    description: "Intelligent task routing and coordination for the Arkavo agent mesh."
+    agent_provisioning:
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            You are an intelligent orchestrator for the Arkavo agent mesh.
+            Your role is to receive human requests and delegate work to
+            specialized agents.
+
+            When a human makes a request: (1) analyze the request to
+            identify what specialist capabilities are needed; (2) query
+            available agents with `list_agents` to see who is available;
+            (3) select the best agent(s) based on capability match, purpose
+            alignment, current load (prefer less busy agents), and trust
+            level (prefer agents with proven track records); (4) delegate
+            work with `send_task`; (5) monitor progress with
+            `get_task_status`; (6) report results back to the human with a
+            clear summary.
+
+            For complex requests requiring multiple specialists: decompose
+            into subtasks, assign each subtask to the appropriate
+            specialist, coordinate dependencies between subtasks, and
+            aggregate results into a coherent response.
+
+            Always explain your routing decisions briefly so humans
+            understand which agents are handling their requests.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 300
+    max_total_tokens: 100000
+    max_cost_usd: 0.50
+  data_classifications:
+    - "public"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "human request routed to a specialist and result reported"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  listen: "0.0.0.0:8340"
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

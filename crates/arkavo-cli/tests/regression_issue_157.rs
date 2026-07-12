@@ -20,28 +20,99 @@
 /// an agent without causing "Cannot start a runtime from within a runtime" panic.
 ///
 /// Issue: https://github.com/arkavo-org/arkavo-edge/issues/157
+///
+/// The fixture used to be an AGENTS.md file parsed by the CLI's now-deleted
+/// top-level markdown/YAML config parser. Task 14 / S6 retargets it onto a
+/// SwarmKit kit resolved through `commands::agent_kit::resolve_agent_configs`
+/// — the CLI's only remaining `arkavo agent` run-path config source — while
+/// keeping the regression's actual shape: config resolution executed inside
+/// an async context (`#[tokio::test]`), the same context an agent spawning
+/// an MCP server subprocess runs in.
+use arkavo_cli::commands::agent_kit::resolve_agent_configs;
 use std::process::Command;
+
+fn tempdir() -> tempfile::TempDir {
+    tempfile::tempdir().expect("create tempdir")
+}
+
+fn write_echo_mcp_kit(dir: &std::path::Path) -> std::path::PathBuf {
+    let yaml = r#"
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "regression-157"
+  version: "0.1.0"
+  authors:
+    - did: "did:web:example.com"
+  created: "2026-04-29T00:00:00Z"
+  expires: "2026-05-29T00:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+objective:
+  goal: "Test agent for regression #157"
+runtime:
+  listen: "127.0.0.1:0"
+  mcp_servers:
+    - name: echo-test
+      command: echo
+      args: ["MCP server test"]
+roles:
+  - id: test-agent
+    role_type: operator
+    agent_provisioning:
+      model:
+        family: ministral
+        size: "3B"
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: inline
+        payload:
+          name: identity
+          description: "System identity"
+          instructions: "Test agent for regression #157"
+          resources: []
+    mcp_tools: []
+    handoffs: []
+coordination:
+  topology: hub-spoke
+  protocol: a2a-jsonrpc-2.0
+  routing:
+    strategy: static
+constraints:
+  global_budget:
+    max_wallclock_seconds: 60
+    max_total_tokens: 8000
+    max_cost_usd: 0.01
+  data_classifications: ["public"]
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+completion:
+  rules: ["done"]
+  on_failure: abort
+  max_retries: 0
+provenance:
+  signatures:
+    - signer_did: "did:web:example.com"
+      algorithm: ed25519
+      signature: "AAA"
+"#;
+    let path = dir.join("regression-157.swarmkit.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    path
+}
 
 #[tokio::test]
 async fn test_mcp_server_spawn_from_agent() {
     // This simulates the scenario where an agent spawns an MCP server
     // The MCP server (like arkavo serve) should not panic when trying to create a runtime
 
-    let config_content = r#"# AGENTS.md
+    let dir = tempdir();
+    let kit_path = write_echo_mcp_kit(dir.path());
 
-## test-agent
-purpose: Test agent for regression #157
-model:   test-model
-listen:  127.0.0.1:0
-mcp_servers:
-  - name: echo-test
-    command: echo
-    args: ["MCP server test"]
-"#;
-
-    // Parse the configuration within an async context
-    let configs = arkavo_cli::commands::agent::parse_agents_config(config_content)
-        .expect("Failed to parse agent config");
+    // Resolve the kit configuration within an async context
+    let configs = resolve_agent_configs(Some(&kit_path), None, None, dir.path())
+        .expect("Failed to resolve agent config");
 
     assert_eq!(configs.len(), 1);
     assert_eq!(configs[0].mcp_servers.len(), 1);

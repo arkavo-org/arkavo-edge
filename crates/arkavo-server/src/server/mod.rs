@@ -392,7 +392,7 @@ pub struct A2aRpcImpl {
     pub(crate) budget_manager: Option<Arc<arkavo_budget::BudgetManager>>,
     /// Agent cycle counter (shared with agent loop)
     pub(crate) orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
-    /// Model hint from AGENTS.md (bias for Thompson Sampling, not override)
+    /// Model hint from SwarmKit (bias for Thompson Sampling, not override)
     pub(crate) model_hint: Option<arkavo_router::ModelChoice>,
     /// Per-agent compute budget (specialists check before each cycle)
     pub(crate) compute_budget: arkavo_budget::SharedComputeBudget,
@@ -681,7 +681,6 @@ impl A2aRpcServer for A2aRpcImpl {
         request: AgentConfigUpdateRequest,
     ) -> RpcResult<AgentConfigUpdateResponse> {
         let agent_metadata = self.agent_metadata.clone();
-        let has_llm_adapter = self.llm_adapter.is_some();
         let mcp_registry = self.mcp_registry.clone();
 
         handlers::config::handle_config_update(
@@ -689,13 +688,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.rate_limiter,
             request,
             |content| async move {
-                handlers::config::reload_configuration(
-                    &content,
-                    &agent_metadata,
-                    has_llm_adapter,
-                    &mcp_registry,
-                )
-                .await
+                config_helpers::apply_kit_reload(&content, &agent_metadata, &mcp_registry).await
             },
         )
         .await

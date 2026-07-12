@@ -63,9 +63,11 @@ stop_agents() {
     pkill -f "arkavo agent" 2>/dev/null || true
 }
 
+KIT="$SCRIPT_DIR/minecraft-swarm.swarmkit.yaml"
+
 start_agent() {
     local name=$1
-    local dir=$2
+    local role=$2
     local port=$3
     local log_file="$LOG_DIR/${name}.log"
 
@@ -76,11 +78,9 @@ start_agent() {
         return 1
     fi
 
-    cd "$dir"
-    nohup env RUST_LOG=info "$BINARY" agent --config AGENTS.md > "$log_file" 2>&1 &
+    nohup env RUST_LOG=info "$BINARY" agent -c "$KIT" -n "$role" -p "$port" > "$log_file" 2>&1 &
     local pid=$!
     echo "$pid:$name" >> "$PIDS_FILE"
-    cd "$SCRIPT_DIR"
 
     local max_attempts=30
     local attempt=0
@@ -202,15 +202,15 @@ main() {
     echo ""
 
     # Start in dependency order: Specialists -> Router -> Commander
-    start_agent "scout" "$SCRIPT_DIR/agents/specialists/scout" 8410 || exit 1
-    start_agent "builder" "$SCRIPT_DIR/agents/specialists/builder" 8411 || exit 1
-    start_agent "runner" "$SCRIPT_DIR/agents/specialists/runner" 8412 || exit 1
+    start_agent "scout" "minecraft-scout" 8410 || exit 1
+    start_agent "builder" "minecraft-builder" 8411 || exit 1
+    start_agent "runner" "minecraft-runner" 8412 || exit 1
     sleep 1
 
-    start_agent "router" "$SCRIPT_DIR/agents/router" 8402 || exit 1
+    start_agent "router" "minecraft-router" 8402 || exit 1
     sleep 1
 
-    start_agent "commander" "$SCRIPT_DIR/agents/commander" 8401 || exit 1
+    start_agent "commander" "minecraft-commander" 8401 || exit 1
 
     echo ""
     print_status "INFO" "Waiting for mDNS discovery (5s)..."
@@ -231,7 +231,7 @@ main() {
         echo "Minecraft: localhost:25565 (connect with client)"
         echo ""
         print_status "INFO" "Logs in: $LOG_DIR/"
-        print_status "INFO" "Stop: ./launch_minecraft.sh stop"
+        print_status "INFO" "Stop: ./launch.sh stop"
         echo ""
     else
         print_status "ERROR" "Failed to start all agents"

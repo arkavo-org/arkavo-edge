@@ -86,7 +86,7 @@ impl super::Router {
     }
 
     /// Route with a model override — bypass classification, Thompson Sampling,
-    /// and quality gate retries. Use when AGENTS.md specifies `model:` and the
+    /// and quality gate retries. Use when SwarmKit specifies `model:` and the
     /// caller wants the exact model with minimal overhead.
     pub async fn route_with_tools_override(
         &self,
@@ -187,7 +187,7 @@ impl super::Router {
         Ok(response)
     }
 
-    /// Route with a model hint from AGENTS.md configuration.
+    /// Route with a model hint from SwarmKit configuration.
     ///
     /// If the hinted model is available, it biases the initial Thompson Sampling
     /// selection. Escalation and quality gates still apply if inference fails.
@@ -213,7 +213,7 @@ impl super::Router {
         const MAX_RETRIES: u8 = 3;
         let mut current_decision = self.classify(task_description).await?;
 
-        // Execution iterations: when a model hint is provided (from AGENTS.md),
+        // Execution iterations: when a model hint is provided (from SwarmKit),
         // use it with execution-mode sampling (temp 0.1, thinking off, max 200 tokens).
         // Without a hint, fall back to the fastest local model for mechanical tool calls.
         let fast_model = self.selector.fastest_local_model();
@@ -249,7 +249,7 @@ impl super::Router {
                 tracing::info!(
                     hint = hint.name(),
                     original = current_decision.recommended_model.name(),
-                    "Applying model hint from AGENTS.md"
+                    "Applying model hint from SwarmKit"
                 );
                 current_decision.recommended_model = hint.clone();
             } else {

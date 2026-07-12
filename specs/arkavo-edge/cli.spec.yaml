@@ -6,7 +6,7 @@ version: 0.57.2
 
 invariants:
   - Tracing subscriber initialized once on first run
-  - API keys loaded from .arkavo/AGENTS.md
+  - API keys are sourced from the process environment only
   - First-run experience checks model availability
   - Commands dispatch to appropriate handlers
   - Interactive REPL commands start with "/"

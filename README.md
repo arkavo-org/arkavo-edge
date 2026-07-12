@@ -95,9 +95,9 @@ cd examples/autonomous_refactor
 
 ### Custom Agent Config (Optional)
 ```bash
-arkavo agent init my-agent  # Creates AGENTS.md template
-# Edit AGENTS.md to set model, capabilities, API keys
-arkavo  # Runs with your config
+arkavo kit init my-agent  # Writes .arkavo/my-agent.swarmkit.yaml
+# Edit the kit to set model, skills — API keys stay in env vars, never the kit
+arkavo agent  # Runs with your config
 ```
 
 ### Security (Optional)

@@ -11,6 +11,14 @@ This example demonstrates a self-healing artificial immune system using autonomo
 
 Three autonomous delivery rovers (Alpha, Beta, Gamma) navigate a warehouse. Alpha hits black ice in Sector 4, crashes, learns "slow down in Sector 4", and broadcasts this lesson via A2A protocol. Beta, approaching Sector 4, receives the lesson and slows down instead of crashing.
 
+All 3 rovers are roles of a single kit, `fleet-immunity.swarmkit.yaml`
+(`arkavo agent -c fleet-immunity.swarmkit.yaml -n <role>`, run from each
+rover's own directory so PID/database state stays separate). The old
+per-rover `a2a.enabled`/`discovery.service_type` fields aren't
+representable kit fields; mesh discovery now runs on the kit's
+`runtime.mdns: true`. The old per-rover `logging:` blocks (level/file)
+aren't representable either — see `RUST_LOG` in `launch.sh`.
+
 ## Why This Matters
 
 1. **Visceral Value**: "My car learned from the car ahead and saved my life"
@@ -35,7 +43,7 @@ cd ..
 
 ```bash
 # 1. Launch the fleet
-./launch_fleet.sh
+./launch.sh
 
 # 2. In another terminal, monitor the fleet
 ./monitor_fleet.sh
@@ -46,7 +54,7 @@ cd ..
 # 4. Watch the rovers learn from Alpha's crash
 
 # 5. Stop the fleet when done
-./stop_fleet.sh
+./stop.sh
 ```
 
 See [RUNBOOK.md](RUNBOOK.md) for detailed test procedures and expected outputs.
@@ -57,8 +65,9 @@ See [RUNBOOK.md](RUNBOOK.md) for detailed test procedures and expected outputs.
 fleet-immunity/
 ├── README.md                    # This file
 ├── RUNBOOK.md                   # Detailed test procedures
-├── launch_fleet.sh              # Start all 3 rovers
-├── stop_fleet.sh                # Stop all rovers
+├── fleet-immunity.swarmkit.yaml # All 3 rover roles (single kit)
+├── launch.sh                    # Start all 3 rovers
+├── stop.sh                      # Stop all rovers
 ├── inject_hazard.sh             # Inject black ice hazard
 ├── monitor_fleet.sh             # Watch fleet logs
 ├── mcp-fleet-env/               # MCP tools for environment simulation
@@ -68,14 +77,11 @@ fleet-immunity/
 │       ├── get_sector.rs        # GetSectorTool
 │       └── inject_hazard.rs     # InjectHazardTool
 ├── rover-alpha/
-│   ├── AGENTS.md                # Alpha agent configuration
-│   └── logs/
+│   └── logs/                    # Runs role "rover-alpha" from the shared kit
 ├── rover-beta/
-│   ├── AGENTS.md                # Beta agent configuration
-│   └── logs/
+│   └── logs/                    # Runs role "rover-beta" from the shared kit
 ├── rover-gamma/
-│   ├── AGENTS.md                # Gamma agent configuration
-│   └── logs/
+│   └── logs/                    # Runs role "rover-gamma" from the shared kit
 └── logs/                        # Combined runtime logs
 ```
 
@@ -209,7 +215,7 @@ Translation: "It is forbidden to drive fast while sliding."
 ## Video Recording Tips
 
 1. **Hook**: "What if your car could learn from the car ahead's crash?"
-2. **Setup**: Show `./launch_fleet.sh` starting 3 rovers
+2. **Setup**: Show `./launch.sh` starting 3 rovers
 3. **Normal**: Rovers driving fast through sectors
 4. **Hazard**: `./inject_hazard.sh` - black ice appears
 5. **Crash**: Alpha's dramatic CRASH box

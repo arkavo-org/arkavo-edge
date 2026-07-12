@@ -19,6 +19,7 @@ WORKSPACE_DIR="$AGENT_DIR/workspace"
 LOGS_DIR="$AGENT_DIR/logs"
 PID_FILE="$LOGS_DIR/${AGENT_NAME}.pid"
 LOG_FILE="$LOGS_DIR/${AGENT_NAME}.log"
+KIT="$AGENT_DIR/code-agent-gemini.swarmkit.yaml"
 
 # Arkavo binary location
 ARKAVO_BIN="${ARKAVO_BIN:-../../target/debug/arkavo}"
@@ -141,7 +142,8 @@ start_agent() {
     cd "$AGENT_DIR"
     nohup "$ARKAVO_BIN" agent run \
         --port "$AGENT_PORT" \
-        --config "AGENTS.md" \
+        --config "$KIT" \
+        -n "gemini-code-agent" \
         > "$LOG_FILE" 2>&1 &
 
     PID=$!

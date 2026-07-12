@@ -867,3 +867,70 @@ scenarios:
       - crates/arkavo-protocol/src/agent_specialization.rs
       - crates/arkavo-orchestrator/src/swarmkit_apply.rs
     changed: "2026-06-28"
+
+  # --- Kit runtime config (AGENTS.md replacement) ---------------------------
+
+  - id: SK-100
+    name: Optional kit runtime block parses and validates
+    criticality: critical
+    given:
+      - Manifest with optional runtime mode cloud_policy preflight mcp_servers
+      - Existing kits omit runtime entirely
+    when: parse_yaml and validate run
+    then:
+      - runtime deserializes into KitRuntimeConfig
+      - Duplicate preflight policy ids are rejected
+      - MCP servers without command or url are rejected
+      - Kits without runtime keep valid kit.id hashes
+    refs:
+      - crates/arkavo-swarmkit/src/runtime_config.rs
+      - crates/arkavo-swarmkit/src/manifest.rs
+      - crates/arkavo-swarmkit/src/validate.rs
+    changed: "2026-07-11"
+
+  - id: SK-101
+    name: AgentRuntimeConfig is derived from a validated manifest
+    criticality: critical
+    given:
+      - Validated Manifest with roles and optional runtime
+    when: agent_runtime_config_from_manifest is called
+    then:
+      - Kit id name and objective are copied
+      - Primary role exposes model and skill instructions
+      - Defaults apply for missing runtime fields
+    refs:
+      - crates/arkavo-swarmkit/src/runtime_config.rs
+    changed: "2026-07-11"
+
+  - id: SK-102
+    name: Discover kit path prefers SwarmKit over AGENTS.md
+    criticality: critical
+    given:
+      - Working directory may contain .arkavo kits or AGENTS.md
+      - ARKAVO_SWARMKIT_PATH may be set
+    when: discover_kit_path or load_discovered_kit runs
+    then:
+      - Env path wins when set
+      - Single .arkavo/*.swarmkit.yaml is selected
+      - AGENTS.md alone yields AgentsMdUnsupported with migrate hint
+      - Multiple kits without env yield Multiple error
+    refs:
+      - crates/arkavo-swarmkit/src/discover.rs
+    changed: "2026-07-11"
+
+  - id: SK-103
+    name: runtime.kas.trusted_roots parses and validates DIDs
+    criticality: critical
+    given:
+      - Manifest with runtime.kas.trusted_roots entries (did, optional name)
+      - Existing kits omit trusted_roots entirely
+    when: parse_yaml and validate run
+    then:
+      - trusted_roots deserializes into Vec<TrustedRoot>
+      - Each did must be non-empty and start with "did:"
+      - Empty/malformed dids are rejected with InvalidTrustedRootDid
+      - Kits without trusted_roots still validate
+      - Empty trusted_roots is omitted on serialization (byte-identical round trip)
+    refs:
+      - crates/arkavo-swarmkit/src/runtime_config.rs
+    changed: "2026-07-11"

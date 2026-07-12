@@ -1,9 +1,3 @@
-# Ignore AGENTS.md with API keys
-AGENTS.md
-
-# But track the example configuration
-!AGENTS.md.example
-
 # Ignore environment files
 .env
 

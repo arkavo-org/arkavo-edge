@@ -33,9 +33,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .with_line_number(false)
             .init();
 
-        // Load API keys from .arkavo/AGENTS.md if present
-        arkavo_router::model_discovery::load_api_keys_from_config();
-
         // Initialize security controls
         // SECURITY: Egress filter prevents SSRF attacks
         secure_http::init_egress_filter();
@@ -63,6 +60,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     match args[0].as_str() {
         "agent" => commands::agent::execute(&args[1..]),
+        "kit" => commands::kit::execute(&args[1..]),
         "chat" => commands::chat::execute(&args[1..]),
         "task" => commands::task::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),
@@ -170,6 +168,7 @@ fn print_usage() {
     println!();
     println!("COMMANDS:");
     println!("    chat           Conversational chat");
+    println!("    kit            Author and validate SwarmKit manifests");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
     println!();

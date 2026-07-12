@@ -166,7 +166,7 @@ impl ModelChoice {
     }
 
     /// Resolve a model name string to a ModelChoice (reverse of `name()`).
-    /// Used as a hint from AGENTS.md `model:` field.
+    /// Used as a hint from SwarmKit `model:` field.
     pub fn from_name(name: &str) -> Option<Self> {
         let name = &name.to_lowercase();
         match name.as_str() {

@@ -4,7 +4,6 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -84,7 +83,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     match subcommand {
         Some("init") => {
             if let Some(name) = init_name {
-                init_agent(&name)
+                let report = deprecated_init(Path::new("."), &name)?;
+                println!("Wrote {}", report.path.display());
+                println!("kit.id: {}", report.kit_id);
+                Ok(())
             } else {
                 eprintln!("Error: Agent name required");
                 eprintln!("Usage: arkavo agent init <agent-name>");
@@ -113,173 +115,74 @@ fn print_usage() {
     println!("    arkavo agent init <name>");
     println!();
     println!("SUBCOMMANDS:");
-    println!("    init <name>         Create a new .arkavo/AGENTS.md configuration file");
+    println!(
+        "    init <name>         [DEPRECATED] alias for 'arkavo kit init <name>'; writes .arkavo/<name>.swarmkit.yaml"
+    );
     println!("    run                 Run an agent (alias for default behavior)");
     println!("    help                Print this help message");
     println!();
     println!("OPTIONS:");
     println!(
-        "    -c, --config <FILE> Specify config file (default: .arkavo/AGENTS.md or AGENTS.md)"
+        "    -c, --config <FILE> SwarmKit manifest path (default: discover .arkavo/*.swarmkit.yaml or ./*.swarmkit.yaml)"
     );
     println!("    -p, --port <PORT>   Override the listen port (default: random available port)");
-    println!("    -n, --name <NAME>   Override the agent name");
+    println!(
+        "    -n, --name <NAME>   Select a role by id from a multi-role kit (default: the first role)"
+    );
     println!("    -v, --verbose       Show startup messages and status");
     println!("    --trust             Show the agent authorization QR code (DID:key) on startup,");
     println!("                        for scanning to authorize/trust this agent");
     println!();
     println!("EXAMPLES:");
     println!("    arkavo agent                           # Run with auto-discovery");
-    println!("    arkavo agent --config AGENTS.md        # Run with specific config");
+    println!("    arkavo agent --config agent.swarmkit.yaml  # Run with a specific kit");
     println!("    arkavo agent --port 8343 -v            # Run on specific port with verbose");
-    println!("    arkavo agent -n my-agent -p 8343       # Run with custom name and port");
+    println!(
+        "    arkavo agent -c team.swarmkit.yaml -n worker -p 8343  # Run one role of a multi-role kit"
+    );
     println!("    arkavo agent run --trust               # Show the QR code to trust this agent");
 }
 
-// Extract agent role/purpose from AGENTS.md for use in chat mode
-pub fn extract_agent_role() -> Option<String> {
-    // Try .arkavo/AGENTS.md first, then fallback to root AGENTS.md
-    let config_path = if Path::new(".arkavo/AGENTS.md").exists() {
-        ".arkavo/AGENTS.md"
-    } else {
-        "AGENTS.md"
-    };
-
-    if let Ok(content) = fs::read_to_string(config_path)
-        && let Ok(agents) = parse_agents_config(&content)
-        && let Some(first_agent) = agents.first()
-    {
-        return Some(first_agent.purpose.clone());
-    }
-    None
+/// Deprecated: `arkavo agent init` no longer writes AGENTS.md.
+///
+/// It now prints a deprecation warning and delegates entirely to the same
+/// manifest writer `kit init` uses, so the two commands can never drift in
+/// what they produce. `base_dir` is exposed (rather than hardcoded to `.`)
+/// so tests can drive this without touching the process's current
+/// directory; the CLI arm always passes `.`.
+pub fn deprecated_init(
+    base_dir: &Path,
+    name: &str,
+) -> Result<crate::commands::kit::KitInitReport, Box<dyn std::error::Error>> {
+    eprintln!(
+        "warning: 'arkavo agent init' is deprecated; use 'arkavo kit init <name>'. Writing a SwarmKit manifest."
+    );
+    crate::commands::kit::init_kit(base_dir, name)
 }
 
-fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Create .arkavo directory if it doesn't exist
-    let arkavo_dir = Path::new(".arkavo");
-    if !arkavo_dir.exists() {
-        fs::create_dir_all(arkavo_dir)?;
-    }
+/// Generate the zero-config default agent name: `<hostname>-<folder>`, e.g.
+/// `macbook-arkavo-edge`. Shared by the SwarmKit-kit resolution path
+/// (`agent_kit::resolve_agent_configs`, used when no kit is found anywhere
+/// in the resolution order) and this module's own "listen address turned
+/// out invalid at runtime" recovery fallback below.
+pub(crate) fn default_agent_name() -> String {
+    use std::process::Command;
 
-    let agents_path = arkavo_dir.join("AGENTS.md");
+    // Get machine hostname (strip .local suffix if present)
+    let hostname = Command::new("hostname")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|s| s.trim().trim_end_matches(".local").to_string())
+        .unwrap_or_else(|| "unknown".to_string());
 
-    if agents_path.exists() {
-        return Err(".arkavo/AGENTS.md already exists. Please rename or remove it first.".into());
-    }
+    // Get current folder name
+    let folder_name = std::env::current_dir()
+        .ok()
+        .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
+        .unwrap_or_else(|| "unknown".to_string());
 
-    println!("Creating .arkavo/AGENTS.md configuration for agent '{name}'...");
-
-    // Create a comprehensive template that matches the expected format
-    let template = format!(
-        r#"# AGENTS.md — {name}
-
-## Agent Identity
-
-- **Name:** {name}
-- **Mission:** "An AI agent that assists with specific tasks and capabilities"
-
-## Runtime Configuration
-
-```yaml
-listen: 0.0.0.0:8342
-mdns: true
-```
-
-## Capabilities
-
-Define what this agent can do:
-
-- [ ] Code review and analysis
-- [ ] Documentation generation
-- [ ] Test creation
-- [ ] Bug fixing
-- [ ] Performance optimization
-- [ ] Data analysis
-- [ ] System design
-- [ ] Security analysis
-
-## Tool Requirements
-
-Specify which tools this agent needs:
-
-- [ ] Git tools (version control operations)
-- [ ] Filesystem access (read/write files)
-- [ ] Terminal/Shell (execute commands)
-- [ ] Code analysis tools
-- [ ] Database access
-- [ ] Web APIs
-- [ ] Docker/Container management
-
-## MCP Servers
-
-Configure MCP servers that this agent should use:
-
-```yaml
-mcp_servers:
-  - name: filesystem
-    command: mcp-filesystem
-    args: []
-  - name: git
-    command: mcp-git
-    args: []
-```
-
-## Agent Configuration
-
-Customize the following values for your agent:
-
-```yaml
-purpose: "Describe your agent's primary purpose and goals here"
-listen: 0.0.0.0:8342
-mdns: true
-```
-
-## API Keys (Optional)
-
-If your agent needs to access external services, add API keys here:
-
-```yaml
-# OPENAI_API_KEY: sk-xxx
-# MOONSHOT_API_KEY: sk-xxx
-# DEEPSEEK_API_KEY: sk-xxx
-```
-
-## Notes
-
-1. Edit the **Mission** field to describe what your agent does
-2. Check the capabilities your agent should have
-3. Select the tools your agent needs access to
-4. Configure MCP servers for additional functionality
-5. Update the model if you want to use a different LLM
-6. Change the listen address if needed (default: 0.0.0.0:8342)
-7. Set mdns to false if you don't want network discovery
-
-## Running Your Agent
-
-Once configured, run your agent with:
-
-```bash
-arkavo agent
-```
-
-Or specify the config file explicitly:
-
-```bash
-arkavo agent --config AGENTS.md
-```
-
-Your agent will start and be available at the configured address."#
-    );
-
-    fs::write(&agents_path, template)?;
-    println!("✓ Created .arkavo/AGENTS.md template for agent '{name}'");
-    println!();
-    println!("Next steps:");
-    println!("1. Edit .arkavo/AGENTS.md to customize your agent's purpose and capabilities");
-    println!("2. Configure the model and listen address as needed");
-    println!("3. Add any required API keys");
-    println!("4. Run your agent with: arkavo agent");
-
-    Ok(())
+    format!("{hostname}-{folder_name}")
 }
 
 #[allow(clippy::disallowed_methods)]
@@ -291,116 +194,30 @@ fn run_agent_with_options(
     override_name: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
+    use crate::commands::agent_kit::{export_resolved_kit_path, resolve_agent_configs};
 
-    // Determine config path: explicit arg > .arkavo/AGENTS.md > AGENTS.md
-    let config_path = if let Some(explicit_path) = config_file {
-        Path::new(explicit_path).to_path_buf()
-    } else if Path::new(".arkavo/AGENTS.md").exists() {
-        Path::new(".arkavo/AGENTS.md").to_path_buf()
-    } else {
-        Path::new("AGENTS.md").to_path_buf()
-    };
+    let cwd = std::env::current_dir()?;
+    let cli_config_path = config_file.map(Path::new);
 
-    // If AGENTS.md doesn't exist, use default configuration
-    let agents = if !config_path.exists() && config_file.is_none() {
-        use std::process::Command;
+    // Resolve config from a SwarmKit kit: -c/--config > discovery > the
+    // zero-config default. AGENTS.md is never read on this path (S6).
+    // Mirrors legacy multi-agent behavior by only ever starting the first
+    // resolved entry, unless -n/--name narrowed the result to one role.
+    let mut agent_config = resolve_agent_configs(
+        cli_config_path,
+        override_name.as_deref(),
+        override_port,
+        &cwd,
+    )?
+    .into_iter()
+    .next()
+    .ok_or("No agent configuration available")?;
 
-        // Get machine hostname (strip .local suffix if present)
-        let hostname = Command::new("hostname")
-            .output()
-            .ok()
-            .and_then(|output| String::from_utf8(output.stdout).ok())
-            .map(|s| s.trim().trim_end_matches(".local").to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-
-        // Get current folder name
-        let folder_name = std::env::current_dir()
-            .ok()
-            .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
-            .unwrap_or_else(|| "unknown".to_string());
-
-        let agent_name = format!("{hostname}-{folder_name}");
-
-        vec![AgentConfig {
-            name: agent_name,
-            purpose: "A general-purpose AI agent".to_string(),
-            model: String::new(), // Empty model - let arkavo-router decide
-            mode: arkavo_protocol::agent_config::AgentMode::default(),
-            listen: "0.0.0.0:0".to_string(), // Dynamic port - OS assigns available port
-            mdns_enabled: true,
-            mcp_servers: Vec::new(),
-            api_keys: std::collections::HashMap::new(),
-            quiet: true,
-            peers: Vec::new(),
-            a2a_enabled: true,
-            a2a_service_type: None,
-            swarm: None,
-        }]
-    } else {
-        let config_content = fs::read_to_string(&config_path)?;
-        match agent::parse_agents_config(&config_content) {
-            Ok(agents) if !agents.is_empty() => agents,
-            _ => {
-                if verbose {
-                    eprintln!(
-                        "Warning: Could not parse {}, using default configuration",
-                        config_path.display()
-                    );
-                }
-
-                // Fall back to default config
-                use std::process::Command;
-
-                // Get machine hostname (strip .local suffix if present)
-                let hostname = Command::new("hostname")
-                    .output()
-                    .ok()
-                    .and_then(|output| String::from_utf8(output.stdout).ok())
-                    .map(|s| s.trim().trim_end_matches(".local").to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                // Get current folder name
-                let folder_name = std::env::current_dir()
-                    .ok()
-                    .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                let agent_name = format!("{hostname}-{folder_name}");
-
-                vec![AgentConfig {
-                    name: agent_name,
-                    purpose: "A general-purpose AI agent".to_string(),
-                    model: String::new(),
-                    mode: arkavo_protocol::agent_config::AgentMode::default(),
-                    listen: "0.0.0.0:0".to_string(), // Dynamic port
-                    mdns_enabled: true,
-                    mcp_servers: Vec::new(),
-                    api_keys: std::collections::HashMap::new(),
-                    quiet: true,
-                    peers: Vec::new(),
-                    a2a_enabled: true,
-                    a2a_service_type: None,
-                    swarm: None,
-                }]
-            }
-        }
-    };
-
-    // Run the first agent (or fall back to single agent if only one)
-    let mut agent_config = agents
-        .into_iter()
-        .next()
-        .ok_or("No agent configuration available")?;
-
-    // Apply command-line overrides
-    if let Some(port) = override_port {
-        // Parse the current listen address to get the host part
-        let host = agent_config.listen.split(':').next().unwrap_or("0.0.0.0");
-        agent_config.listen = format!("{host}:{port}");
-    }
-    if let Some(name) = override_name {
-        agent_config.name = name;
-    }
+    // Export the resolved kit path so server-side policy loaders (preflight,
+    // budget, KAS — which re-discover their own kit from process cwd/env)
+    // see the same kit this just resolved, even when it came from an
+    // explicit -c path that isn't itself cwd-discoverable.
+    export_resolved_kit_path(cli_config_path, &cwd);
 
     // Set verbose mode - default is quiet (verbose = false)
     agent_config.quiet = !verbose;
@@ -429,24 +246,8 @@ fn run_agent_with_options(
             }
 
             // Create default config
-            use std::process::Command;
-
-            // Get machine hostname (strip .local suffix if present)
-            let hostname = Command::new("hostname")
-                .output()
-                .ok()
-                .and_then(|output| String::from_utf8(output.stdout).ok())
-                .map(|s| s.trim().trim_end_matches(".local").to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-
-            // Get current folder name
-            let folder_name = std::env::current_dir()
-                .ok()
-                .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
-                .unwrap_or_else(|| "unknown".to_string());
-
             let default_config = AgentConfig {
-                name: format!("{hostname}-{folder_name}"),
+                name: default_agent_name(),
                 purpose: "A general-purpose AI agent".to_string(),
                 model: String::new(),
                 mode: arkavo_protocol::agent_config::AgentMode::default(),
@@ -510,370 +311,6 @@ pub struct McpServerConfig {
     pub url: Option<String>,
 }
 
-pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn std::error::Error>> {
-    let mut agents = Vec::new();
-    let mut current_agent: Option<AgentConfig> = None;
-    let mut in_agent_section = false;
-    let mut in_mcp_section = false;
-    let mut current_mcp_server: Option<McpServerConfig> = None;
-    let mut current_section: Option<String> = None;
-    let mut in_peers_section = false;
-    let mut in_args_section = false;
-    let mut in_a2a_section = false;
-    let mut in_purpose_multiline = false;
-    let mut purpose_lines: Vec<String> = Vec::new();
-
-    // Handle YAML frontmatter format (content between --- delimiters)
-    if let Some(after_open) = content.strip_prefix("---")
-        && let Some(end_idx) = after_open.find("\n---")
-    {
-        let frontmatter = &after_open[..end_idx];
-        let mut agent = AgentConfig {
-            name: String::new(),
-            purpose: String::new(),
-            model: String::new(),
-            mode: arkavo_protocol::agent_config::AgentMode::default(),
-            listen: "0.0.0.0:0".to_string(),
-            mdns_enabled: true,
-            mcp_servers: Vec::new(),
-            api_keys: std::collections::HashMap::new(),
-            quiet: true,
-            peers: Vec::new(),
-            a2a_enabled: true,
-            a2a_service_type: None,
-            swarm: None,
-        };
-        // Known top-level YAML keys that parse_yaml_properties handles
-        const KNOWN_SECTIONS: &[&str] = &[
-            "name:",
-            "purpose:",
-            "model:",
-            "mode:",
-            "listen:",
-            "mdns:",
-            "swarm:",
-            "a2a:",
-            "peers:",
-            "mcp_servers:",
-            "discovery:",
-        ];
-        let mut in_unknown_section = false;
-        for line in frontmatter.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            // Non-indented line: check if it starts a known or unknown section
-            if !line.starts_with(' ') && !line.starts_with('\t') {
-                let is_known = KNOWN_SECTIONS.iter().any(|k| trimmed.starts_with(k))
-                    || trimmed.contains("_API_KEY:")
-                    || trimmed.contains("_api_key:");
-                in_unknown_section = !is_known;
-            }
-            if in_unknown_section {
-                continue;
-            }
-            parse_yaml_properties(
-                line,
-                trimmed,
-                &mut agent,
-                &mut in_mcp_section,
-                &mut current_mcp_server,
-                &mut in_peers_section,
-                &mut in_a2a_section,
-                &mut in_args_section,
-                &mut in_purpose_multiline,
-                &mut purpose_lines,
-            );
-        }
-        if in_purpose_multiline {
-            agent.purpose = purpose_lines.join("\n").trim().to_string();
-        }
-        if let Some(server) = current_mcp_server.take() {
-            agent.mcp_servers.push(server);
-        }
-        return Ok(vec![agent]);
-    }
-
-    // Check if this is the new markdown format by looking for specific patterns
-    let is_new_format = content.contains("## Agent Identity")
-        || content.contains("**Mission:**")
-        || content.contains("**Name:**")
-        || content.contains("# AGENTS.md");
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Handle new markdown format
-        if is_new_format {
-            // Extract agent name from H1 title (e.g., "# AGENTS.md — alert-manager")
-            if trimmed.starts_with("# AGENTS.md") && trimmed.contains("—") {
-                // Save previous agent if exists
-                if let Some(agent) = current_agent.take() {
-                    agents.push(agent);
-                }
-
-                let name = if let Some(em_dash_pos) = trimmed.find("—") {
-                    trimmed[em_dash_pos + "—".len()..].trim().to_string()
-                } else if let Some(dash_pos) = trimmed.find(" - ") {
-                    trimmed[dash_pos + 3..].trim().to_string()
-                } else {
-                    "unnamed-agent".to_string()
-                };
-
-                current_agent = Some(AgentConfig {
-                    name,
-                    purpose: String::new(),
-                    model: String::new(),
-                    mode: arkavo_protocol::agent_config::AgentMode::default(),
-                    listen: "0.0.0.0:0".to_string(),
-                    mdns_enabled: true,
-                    mcp_servers: Vec::new(),
-                    api_keys: std::collections::HashMap::new(),
-                    quiet: true, // Default is quiet
-                    peers: Vec::new(),
-                    a2a_enabled: true,
-                    a2a_service_type: None,
-                    swarm: None,
-                });
-                in_agent_section = true;
-                continue;
-            }
-
-            // Track current markdown section
-            if trimmed.starts_with("## ") {
-                let section_name = trimmed.strip_prefix("## ").unwrap_or("").to_string();
-
-                // Check if this is an agent definition (not a standard section)
-                let is_standard_section = section_name.starts_with("Agent Identity")
-                    || section_name.starts_with("Runtime Configuration")
-                    || section_name.starts_with("Capabilities")
-                    || section_name.starts_with("Tool Requirements")
-                    || section_name.starts_with("MCP Server")
-                    || section_name.starts_with("Purpose")
-                    || section_name.starts_with("Model Configuration")
-                    || section_name.starts_with("Rover Configuration")
-                    || section_name.starts_with("A2A Protocol")
-                    || section_name.starts_with("Logging");
-
-                if !is_standard_section {
-                    // Save any pending MCP server before switching agents
-                    if let (Some(server), Some(agent)) =
-                        (current_mcp_server.take(), current_agent.as_mut())
-                    {
-                        agent.mcp_servers.push(server);
-                    }
-
-                    // Save previous agent if exists
-                    if let Some(agent) = current_agent.take() {
-                        agents.push(agent);
-                    }
-
-                    // Reset MCP section flag
-                    in_mcp_section = false;
-
-                    // Create new agent from ## agent-name header
-                    current_agent = Some(AgentConfig {
-                        name: section_name.clone(),
-                        purpose: String::new(),
-                        model: String::new(),
-                        mode: arkavo_protocol::agent_config::AgentMode::default(),
-                        listen: "0.0.0.0:0".to_string(),
-                        mdns_enabled: true,
-                        mcp_servers: Vec::new(),
-                        api_keys: std::collections::HashMap::new(),
-                        quiet: true, // Default is quiet
-                        peers: Vec::new(),
-                        a2a_enabled: true,
-                        a2a_service_type: None,
-                        swarm: None,
-                    });
-                    in_agent_section = true;
-                }
-
-                current_section = Some(section_name);
-                continue;
-            }
-
-            // Parse agent information from markdown sections
-            if let Some(agent) = current_agent.as_mut() {
-                if let Some(section) = &current_section {
-                    match section.as_str() {
-                        "Agent Identity" => {
-                            // Extract name
-                            if trimmed.starts_with("- **Name:**") {
-                                if let Some(name) =
-                                    extract_markdown_field_value(trimmed, "**Name:**")
-                                {
-                                    agent.name = name;
-                                }
-                            }
-                            // Extract mission/purpose
-                            else if trimmed.starts_with("- **Mission:**")
-                                && let Some(mission) =
-                                    extract_markdown_field_value(trimmed, "**Mission:**")
-                            {
-                                agent.purpose = mission;
-                            }
-                        }
-                        "Runtime Configuration (example)" => {
-                            // Try to extract listen address from YAML block
-                            if trimmed.starts_with("listen:")
-                                && let Some(listen) = extract_yaml_value(trimmed, "listen:")
-                            {
-                                agent.listen = listen;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Also handle direct YAML-style properties in markdown (for flexibility)
-                parse_yaml_properties(
-                    line,
-                    trimmed,
-                    agent,
-                    &mut in_mcp_section,
-                    &mut current_mcp_server,
-                    &mut in_peers_section,
-                    &mut in_a2a_section,
-                    &mut in_args_section,
-                    &mut in_purpose_multiline,
-                    &mut purpose_lines,
-                );
-            }
-        } else {
-            // Handle old YAML-style format
-            // Check for single # header (creates new agent)
-            let is_top_level_header = trimmed.starts_with("# ") && !trimmed.starts_with("## ");
-
-            // Check for ## header that's not a standard section
-            let is_new_agent_section = if trimmed.starts_with("## ") {
-                let section_name = trimmed.strip_prefix("## ").unwrap_or("").trim();
-                // Standard sections don't create new agents
-                !section_name.starts_with("Agent Identity")
-                    && !section_name.starts_with("Runtime Configuration")
-                    && !section_name.starts_with("Capabilities")
-                    && !section_name.starts_with("Tool Requirements")
-                    && !section_name.starts_with("MCP Server")
-                    && !section_name.starts_with("Purpose")
-                    && !section_name.starts_with("Model Configuration")
-                    && !section_name.starts_with("Rover Configuration")
-                    && !section_name.starts_with("A2A Protocol")
-                    && !section_name.starts_with("Logging")
-            } else {
-                false
-            };
-
-            let is_agent_header = is_top_level_header || is_new_agent_section;
-
-            if is_agent_header {
-                // Save any pending MCP server before switching agents
-                if let (Some(server), Some(agent)) =
-                    (current_mcp_server.take(), current_agent.as_mut())
-                {
-                    agent.mcp_servers.push(server);
-                }
-
-                // Save previous agent if exists
-                if let Some(agent) = current_agent.take() {
-                    agents.push(agent);
-                }
-
-                // Reset MCP section flag
-                in_mcp_section = false;
-
-                // Extract name from header
-                let header_prefix = if trimmed.starts_with("## ") {
-                    "## "
-                } else {
-                    "# "
-                };
-                let header_text = trimmed.strip_prefix(header_prefix).unwrap_or("").trim();
-
-                // Use a default name that will be overridden by explicit name: field
-                let name = header_text.to_string();
-
-                current_agent = Some(AgentConfig {
-                    name,
-                    purpose: String::new(),
-                    model: String::new(),
-                    mode: arkavo_protocol::agent_config::AgentMode::default(),
-                    listen: "0.0.0.0:0".to_string(), // Dynamic port
-                    mdns_enabled: true,              // Default to true for zero-config
-                    mcp_servers: Vec::new(),
-                    api_keys: std::collections::HashMap::new(),
-                    quiet: true, // Default is quiet
-                    peers: Vec::new(),
-                    a2a_enabled: true,
-                    a2a_service_type: None,
-                    swarm: None,
-                });
-                in_agent_section = true;
-                continue;
-            }
-
-            // Skip if not in agent section
-            if !in_agent_section || current_agent.is_none() {
-                continue;
-            }
-
-            if let Some(agent) = current_agent.as_mut() {
-                parse_yaml_properties(
-                    line,
-                    trimmed,
-                    agent,
-                    &mut in_mcp_section,
-                    &mut current_mcp_server,
-                    &mut in_peers_section,
-                    &mut in_a2a_section,
-                    &mut in_args_section,
-                    &mut in_purpose_multiline,
-                    &mut purpose_lines,
-                );
-            }
-        }
-    }
-
-    // Save any pending MCP server
-    if let (Some(server), Some(agent)) = (current_mcp_server.take(), current_agent.as_mut()) {
-        agent.mcp_servers.push(server);
-    }
-
-    // Save last agent
-    if let Some(agent) = current_agent {
-        agents.push(agent);
-    }
-
-    Ok(agents)
-}
-
-// Helper function to extract value from markdown field like "- **Name:** value"
-fn extract_markdown_field_value(line: &str, field_prefix: &str) -> Option<String> {
-    if let Some(start_pos) = line.find(field_prefix) {
-        let after_prefix = &line[start_pos + field_prefix.len()..];
-        let value = after_prefix.trim();
-        if !value.is_empty() {
-            return Some(value.to_string());
-        }
-    }
-    None
-}
-
-// Helper function to extract YAML-style values like "listen: 0.0.0.0:8342"
-fn extract_yaml_value(line: &str, key: &str) -> Option<String> {
-    if let Some(colon_pos) = line.find(':') {
-        let key_part = line[..colon_pos].trim();
-        if key_part == key.trim_end_matches(':') {
-            let value = line[colon_pos + 1..].trim().trim_matches('"');
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
-}
-
 /// Check if a tool's input schema has required arguments
 fn has_required_args(schema: &serde_json::Value) -> bool {
     // Check if there's a "required" array with any entries
@@ -881,278 +318,6 @@ fn has_required_args(schema: &serde_json::Value) -> bool {
         .get("required")
         .and_then(|r| r.as_array())
         .is_some_and(|arr| !arr.is_empty())
-}
-
-// Helper function to parse YAML-style properties (used by both old and new format parsers)
-#[allow(clippy::too_many_arguments)]
-fn parse_yaml_properties(
-    line: &str,
-    trimmed: &str,
-    agent: &mut AgentConfig,
-    in_mcp_section: &mut bool,
-    current_mcp_server: &mut Option<McpServerConfig>,
-    in_peers_section: &mut bool,
-    in_a2a_section: &mut bool,
-    in_args_section: &mut bool,
-    in_purpose_multiline: &mut bool,
-    purpose_lines: &mut Vec<String>,
-) {
-    // Check for a2a section
-    if trimmed == "a2a:" {
-        *in_a2a_section = true;
-        return;
-    }
-
-    // Check for peers section (can be top-level or under a2a)
-    if trimmed == "peers:" {
-        *in_peers_section = true;
-        return;
-    }
-
-    // Handle peer entries
-    if *in_peers_section && trimmed.starts_with("- ") {
-        let peer = trimmed
-            .strip_prefix("- ")
-            .unwrap_or("")
-            .trim()
-            .trim_matches('"')
-            .to_string();
-        if !peer.is_empty() {
-            agent.peers.push(peer);
-        }
-        return;
-    }
-
-    // End peers section when we hit a non-list item
-    if *in_peers_section
-        && !trimmed.is_empty()
-        && !trimmed.starts_with('-')
-        && !trimmed.starts_with(' ')
-    {
-        *in_peers_section = false;
-    }
-
-    // Parse a2a properties
-    if *in_a2a_section && !*in_peers_section {
-        if trimmed.starts_with("enabled:") {
-            agent.a2a_enabled = !trimmed.contains("false");
-            return;
-        } else if trimmed.starts_with("service_type:") {
-            agent.a2a_service_type = Some(
-                trimmed
-                    .strip_prefix("service_type:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string(),
-            );
-            return;
-        }
-        // End a2a section when we hit a non-indented, non-a2a property
-        if !trimmed.is_empty()
-            && !trimmed.starts_with(' ')
-            && !trimmed.starts_with('-')
-            && !trimmed.starts_with("enabled:")
-            && !trimmed.starts_with("service_type:")
-            && trimmed != "peers:"
-            && !trimmed.starts_with("discovery:")
-        {
-            *in_a2a_section = false;
-        }
-    }
-
-    // Check for mcp_servers section
-    if trimmed == "mcp_servers:" {
-        *in_mcp_section = true;
-        *in_a2a_section = false;
-        *in_peers_section = false;
-        return;
-    }
-
-    // Handle MCP server entries
-    if *in_mcp_section && trimmed.starts_with("- name:") {
-        // Save previous MCP server if exists
-        if let Some(server) = current_mcp_server.take() {
-            agent.mcp_servers.push(server);
-        }
-
-        // Start new MCP server
-        *current_mcp_server = Some(McpServerConfig {
-            name: trimmed
-                .strip_prefix("- name:")
-                .unwrap_or("")
-                .trim()
-                .to_string(),
-            command: None,
-            args: Vec::new(),
-            url: None,
-        });
-        return;
-    }
-
-    // Handle YAML list args (e.g., "- value")
-    if *in_args_section && trimmed.starts_with("- ") {
-        if let Some(server) = current_mcp_server.as_mut() {
-            let arg = trimmed
-                .strip_prefix("- ")
-                .unwrap_or("")
-                .trim()
-                .trim_matches('"')
-                .to_string();
-            if !arg.is_empty() {
-                server.args.push(arg);
-            }
-        }
-        return;
-    }
-
-    // End args section when we hit a non-list item
-    if *in_args_section && !trimmed.starts_with("- ") && !trimmed.is_empty() {
-        *in_args_section = false;
-    }
-
-    // Parse MCP server properties
-    if *in_mcp_section && let Some(server) = current_mcp_server.as_mut() {
-        if trimmed.starts_with("command:") {
-            *in_args_section = false;
-            server.command = Some(
-                trimmed
-                    .strip_prefix("command:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string(),
-            );
-        } else if trimmed.starts_with("args:") {
-            // Check for inline array format: ["arg1", "arg2"]
-            let args_str = trimmed.strip_prefix("args:").unwrap_or("").trim();
-            if args_str.starts_with('[') && args_str.ends_with(']') {
-                let args_content = &args_str[1..args_str.len() - 1];
-                server.args = args_content
-                    .split(',')
-                    .map(|s| s.trim().trim_matches('"').to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-            } else if args_str.is_empty() {
-                // Start YAML list mode for args
-                *in_args_section = true;
-            }
-        } else if trimmed.starts_with("url:") {
-            *in_args_section = false;
-            server.url = Some(
-                trimmed
-                    .strip_prefix("url:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string(),
-            );
-        } else if trimmed.starts_with("transport:") {
-            *in_args_section = false;
-            // Skip transport for now, not used
-        } else if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-') {
-            // End of MCP section
-            *in_mcp_section = false;
-            *in_args_section = false;
-            if let Some(server) = current_mcp_server.take() {
-                agent.mcp_servers.push(server);
-            }
-        }
-    }
-
-    // Parse agent properties (when not in MCP section)
-    if !*in_mcp_section {
-        if trimmed.starts_with("name:") && !trimmed.starts_with("name: |") {
-            agent.name = trimmed
-                .strip_prefix("name:")
-                .unwrap_or("")
-                .trim()
-                .trim_matches('"')
-                .to_string();
-        } else if trimmed.starts_with("purpose:") {
-            let value = trimmed.strip_prefix("purpose:").unwrap_or("").trim();
-            if value == "|" || value == "|-" || value == "|+" {
-                // Start multi-line YAML string
-                *in_purpose_multiline = true;
-                purpose_lines.clear();
-            } else {
-                // Single-line purpose
-                agent.purpose = value.trim_matches('"').to_string();
-            }
-        } else if *in_purpose_multiline {
-            // Collect multi-line purpose content
-            if line.starts_with("  ") || line.starts_with('\t') {
-                // Indented line - part of multi-line value
-                purpose_lines.push(line.trim().to_string());
-            } else if trimmed.is_empty() {
-                // Empty line in multi-line - preserve as paragraph break
-                purpose_lines.push(String::new());
-            } else {
-                // Non-indented, non-empty line - end of multi-line
-                *in_purpose_multiline = false;
-                agent.purpose = purpose_lines.join("\n").trim().to_string();
-                purpose_lines.clear();
-                // Re-process this line (it might be a new property)
-                // Continue to let other parsers handle it
-            }
-        }
-
-        // End multi-line purpose on new property/section
-        if *in_purpose_multiline && (trimmed.starts_with("model:") || trimmed.starts_with('#')) {
-            *in_purpose_multiline = false;
-            agent.purpose = purpose_lines.join("\n").trim().to_string();
-            purpose_lines.clear();
-        }
-
-        if trimmed.starts_with("model:") {
-            agent.model = trimmed
-                .strip_prefix("model:")
-                .unwrap_or("")
-                .trim()
-                .trim_matches('"')
-                .to_string();
-        } else if trimmed.starts_with("mode:") {
-            let mode_str = trimmed
-                .strip_prefix("mode:")
-                .unwrap_or("")
-                .trim()
-                .trim_matches('"');
-            agent.mode = match mode_str {
-                "specialist" => arkavo_protocol::agent_config::AgentMode::Specialist,
-                _ => arkavo_protocol::agent_config::AgentMode::Orchestrator,
-            };
-        } else if trimmed.starts_with("listen:") {
-            agent.listen = trimmed
-                .strip_prefix("listen:")
-                .unwrap_or("")
-                .trim()
-                .trim_matches('"')
-                .to_string();
-        } else if trimmed.starts_with("swarm:") {
-            agent.swarm = Some(
-                trimmed
-                    .strip_prefix("swarm:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string(),
-            );
-        } else if trimmed.starts_with("mdns:") {
-            // Only disable if explicitly set to false
-            agent.mdns_enabled = !trimmed.contains("false");
-        } else if trimmed.contains("_API_KEY:") || trimmed.contains("_api_key:") {
-            // Parse API key entries (e.g., MOONSHOT_API_KEY: sk-xxx)
-            if let Some(colon_pos) = trimmed.find(':') {
-                let key_name = trimmed[..colon_pos].trim().to_string();
-                let key_value = trimmed[colon_pos + 1..]
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-                agent.api_keys.insert(key_name, key_value);
-            }
-        }
-        // Note: autonomous_interval and event_tool are deprecated - push notifications are used instead
-    }
 }
 
 #[allow(clippy::future_not_send)]
@@ -2215,120 +1380,5 @@ mod tests {
     fn unknown_option_errors_instead_of_running() {
         assert!(execute(&["--bogus".to_string()]).is_err());
         assert!(execute(&["--trsut".to_string()]).is_err()); // typo of --trust
-    }
-
-    #[test]
-    fn parse_frontmatter_basic() {
-        let content = "---\nname: my-agent\npurpose: \"Test agent\"\nmodel: ministral-3b\n---\n\n# My Agent\nSome docs here.\n";
-        let agents = parse_agents_config(content).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].name, "my-agent");
-        assert_eq!(agents[0].purpose, "Test agent");
-        assert_eq!(agents[0].model, "ministral-3b");
-    }
-
-    #[test]
-    fn parse_frontmatter_with_a2a() {
-        let content = "---\nname: bridge-agent\npurpose: \"Bridge\"\nmodel: ministral-3b\n\na2a:\n  enabled: true\n  service_type: \"bridge\"\n---\n";
-        let agents = parse_agents_config(content).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].name, "bridge-agent");
-        assert!(agents[0].a2a_enabled);
-        assert_eq!(agents[0].a2a_service_type.as_deref(), Some("bridge"));
-    }
-
-    #[test]
-    fn parse_frontmatter_with_yaml_comments() {
-        let content = "---\nname: kas-agent\npurpose: \"KAS demo\"\nmodel: ministral-3b\n\n# This is a YAML comment\n# Another comment\n\na2a:\n  enabled: true\n---\n";
-        let agents = parse_agents_config(content).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].name, "kas-agent");
-        assert_eq!(agents[0].purpose, "KAS demo");
-        assert!(agents[0].a2a_enabled);
-    }
-
-    #[test]
-    fn parse_frontmatter_openclaw_bridge() {
-        let content = r#"---
-name: arkavo-bridge-agent
-purpose: "A2A protocol bridge demonstrating TDF encryption, budget enforcement, and preflight policies"
-model: ministral-3b
-
-kas:
-  enabled: true
-  key_id: "bridge-demo-key-1"
-  algorithm: "ec:secp256r1"
-  trusted_roots:
-    - did: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
-      name: "Demo Root Authority"
-
-a2a:
-  enabled: true
-  discovery:
-    mdns: true
----
-
-# Arkavo Bridge Agent
-
-This agent serves as Arkavo's side of the A2A protocol bridge.
-"#;
-        let agents = parse_agents_config(content).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].name, "arkavo-bridge-agent");
-        assert_eq!(agents[0].model, "ministral-3b");
-        assert!(agents[0].a2a_enabled);
-        assert!(agents[0].purpose.contains("A2A protocol bridge"));
-    }
-
-    #[test]
-    fn parse_frontmatter_unknown_section_name_not_leaked() {
-        // Regression: nested `name:` inside kas: trusted_roots must not override agent name
-        let content = "---\nname: my-agent\npurpose: \"Test\"\nmodel: test\nkas:\n  trusted_roots:\n    - did: \"did:key:abc\"\n      name: \"Root Authority\"\n---\n";
-        let agents = parse_agents_config(content).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].name, "my-agent");
-    }
-
-    #[test]
-    fn parse_frontmatter_no_closing_delimiter_falls_through() {
-        let content =
-            "---\nname: broken\n\n## actual-agent\npurpose: \"works\"\nmodel: ministral-3b\n";
-        let agents = parse_agents_config(content).unwrap();
-        // No closing ---, so frontmatter path is skipped; falls through to existing parser
-        assert!(!agents.is_empty());
-        assert_eq!(agents[0].name, "actual-agent");
-        assert_eq!(agents[0].purpose, "works");
-    }
-
-    #[test]
-    fn parse_existing_format_still_works() {
-        let content = "## my-agent\nname: my-agent\npurpose: \"Test\"\nmodel: ministral-3b\nlisten: 0.0.0.0:8080\n";
-        let agents = parse_agents_config(content).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].name, "my-agent");
-        assert_eq!(agents[0].purpose, "Test");
-        assert_eq!(agents[0].model, "ministral-3b");
-        assert_eq!(agents[0].listen, "0.0.0.0:8080");
-    }
-
-    #[test]
-    fn parse_frontmatter_with_peers() {
-        let content = "---\nname: peer-agent\npurpose: \"Peer test\"\nmodel: ministral-3b\npeers:\n  - \"localhost:8081\"\n  - \"localhost:8082\"\n---\n";
-        let agents = parse_agents_config(content).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].peers.len(), 2);
-        assert_eq!(agents[0].peers[0], "localhost:8081");
-        assert_eq!(agents[0].peers[1], "localhost:8082");
-    }
-
-    #[test]
-    fn parse_frontmatter_with_mcp_servers() {
-        let content = "---\nname: mcp-agent\npurpose: \"MCP test\"\nmodel: ministral-3b\nmcp_servers:\n  - name: my-server\n    command: npx\n    args: [\"arg1\", \"arg2\"]\n---\n";
-        let agents = parse_agents_config(content).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].mcp_servers.len(), 1);
-        assert_eq!(agents[0].mcp_servers[0].name, "my-server");
-        assert_eq!(agents[0].mcp_servers[0].command.as_deref(), Some("npx"));
-        assert_eq!(agents[0].mcp_servers[0].args, vec!["arg1", "arg2"]);
     }
 }

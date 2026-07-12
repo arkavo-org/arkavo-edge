@@ -56,7 +56,7 @@ pub struct ChatSessionManager {
     learning_context: Option<Arc<RwLock<String>>>,
     /// Channel for emitting human teaching events to the learning bus
     teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
-    /// Agent purpose/system prompt from AGENTS.md, prepended to every chat context
+    /// Agent purpose/system prompt (from the SwarmKit kit config), prepended to every chat context
     system_prompt: Option<String>,
     /// Override the default model selection (for testing/benchmarking)
     model_override: Option<arkavo_router::ModelChoice>,
@@ -181,7 +181,7 @@ impl ChatSessionManager {
         self.teaching_tx = Some(tx);
     }
 
-    /// Set the agent's purpose/system prompt from AGENTS.md.
+    /// Set the agent's purpose/system prompt (sourced from the SwarmKit kit config).
     /// Prepended as a system message to every chat context window.
     pub fn set_system_prompt(&mut self, prompt: String) {
         if !prompt.is_empty() {
@@ -927,7 +927,7 @@ impl ChatSessionManager {
                         }
                     }
 
-                    // Prepend agent purpose/system prompt from AGENTS.md (always first)
+                    // Prepend agent purpose/system prompt (from the SwarmKit kit config; always first)
                     if let Some(ref prompt) = system_prompt {
                         windowed_context.insert(0, Message::system(prompt.clone()));
                     }

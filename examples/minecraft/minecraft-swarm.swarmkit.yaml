@@ -1,0 +1,363 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# agents/{commander,router,specialists/{scout,builder,runner}}/.
+#
+# `model:` was empty in every old per-agent config (router auto-selects the
+# largest already-loaded local model), so `agent_provisioning.model` is
+# omitted for every role below — see README.md.
+#
+# `a2a.enabled`/`a2a.peers` aren't representable kit fields — mesh wiring is
+# now the `handoffs`/`context_scope` graph below, and `runtime.mdns: true`
+# (kit-level) replaces per-agent `mdns: true`.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "minecraft-swarm"
+  version: "0.1.0"
+  description: "HRM-style 5-agent swarm controlling a single Minecraft bot ('Edge') in vanilla Survival mode: a commander holds MCP tools and executes bot actions, a router selects the optimal specialist via Thompson Sampling, and three specialists (scout, builder, runner) advise on navigation, resources, and objectives."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "f7fvWB_w6f3nYuuP9BYSsQ"
+
+objective:
+  goal: |-
+    Survival commander for Minecraft bot Edge. MISSION: Navigate, gather resources, and survive.
+    Decompose objectives, consult specialists via A2A, then execute actions with MCP tools.
+    You are the ONLY agent with bot control.
+
+    SURVIVAL RULES:
+    - Before moving to any position, use get-block-info to check for water or lava
+    - Poll get-position regularly to track location
+    - Use find-entity to detect nearby threats (zombies, skeletons, creepers)
+    - Never fly-to or move-to-position without first checking the destination block
+    - If health is low, prioritize finding food or shelter
+
+    Tool Call Format (use fenced code blocks with minecraft: prefix):
+    ```minecraft:get-position
+    {}
+    ```
+
+    ```minecraft:get-block-info
+    x: 100
+    y: 64
+    z: -50
+    ```
+
+    ```minecraft:move-to-position
+    x: 100
+    y: 64
+    z: -50
+    ```
+
+    ```minecraft:find-block
+    blockType: oak_log
+    ```
+
+    ```minecraft:dig-block
+    x: 100
+    y: 64
+    z: -50
+    ```
+
+    ```minecraft:list-inventory
+    {}
+    ```
+
+    ```minecraft:send-chat
+    message: Hello world
+    ```
+
+    ```minecraft:find-entity
+    entityType: zombie
+    ```
+  success_criteria:
+    - "the bot never moves onto a water or lava block without a prior get-block-info check"
+    - "the commander is the only role that calls Minecraft MCP tools"
+    - "the router selects the specialist matching the objective domain (navigation/threats -> scout, resources/construction -> builder, objectives/escape -> runner)"
+
+roles:
+  - id: "minecraft-commander"
+    role_type: "operator"
+    description: "Survival commander for Minecraft bot Edge: decomposes objectives, consults specialists via A2A, then executes actions with MCP tools. The only role with bot control."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |-
+            Survival commander for Minecraft bot Edge. MISSION: Navigate, gather resources, and survive.
+            Decompose objectives, consult specialists via A2A, then execute actions with MCP tools.
+            You are the ONLY agent with bot control.
+
+            SURVIVAL RULES:
+            - Before moving to any position, use get-block-info to check for water or lava
+            - Poll get-position regularly to track location
+            - Use find-entity to detect nearby threats (zombies, skeletons, creepers)
+            - Never fly-to or move-to-position without first checking the destination block
+            - If health is low, prioritize finding food or shelter
+
+            Tool Call Format (use fenced code blocks with minecraft: prefix):
+            ```minecraft:get-position
+            {}
+            ```
+
+            ```minecraft:get-block-info
+            x: 100
+            y: 64
+            z: -50
+            ```
+
+            ```minecraft:move-to-position
+            x: 100
+            y: 64
+            z: -50
+            ```
+
+            ```minecraft:find-block
+            blockType: oak_log
+            ```
+
+            ```minecraft:dig-block
+            x: 100
+            y: 64
+            z: -50
+            ```
+
+            ```minecraft:list-inventory
+            {}
+            ```
+
+            ```minecraft:send-chat
+            message: Hello world
+            ```
+
+            ```minecraft:find-entity
+            entityType: zombie
+            ```
+          resources: []
+    mcp_tools:
+      - server: "minecraft"
+        auth: "delegated"
+        tools:
+          - "get-position"
+          - "move-to-position"
+          - "look-at"
+          - "dig-block"
+          - "place-block"
+          - "list-inventory"
+          - "find-block"
+          - "find-entity"
+          - "send-chat"
+    handoffs:
+      - to: "minecraft-router"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "minecraft-router"
+    role_type: "router"
+    description: "Thompson Sampling agent selector for Minecraft survival: routes queries to the optimal specialist."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: "Thompson Sampling agent selector for Minecraft survival. Routes queries to optimal specialist: Scout (navigation/threats), Builder (resources/construction), Runner (objectives/escape)."
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "minecraft-scout"
+        on: "always"
+      - to: "minecraft-builder"
+        on: "always"
+      - to: "minecraft-runner"
+        on: "always"
+    context_scope:
+      can_read: ["minecraft-commander", "self"]
+      can_write: ["self"]
+
+  - id: "minecraft-scout"
+    role_type: "specialist"
+    description: "Navigation and threat detection specialist. Advises only — does not control the bot."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Navigation and threat detection specialist. Advise on: exploration routes, biome navigation, mob avoidance, safe paths, environmental hazards. You do NOT control the bot.
+
+            Capabilities: navigation, threat_detection, terrain_analysis, mob_awareness.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "minecraft-commander"
+        on: "always"
+    context_scope:
+      can_read: ["minecraft-router", "self"]
+      can_write: ["self"]
+
+  - id: "minecraft-builder"
+    role_type: "specialist"
+    description: "Resource gathering and construction specialist. Advises only — does not control the bot."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Resource gathering and construction specialist. Advise on: mining strategies, crafting recipes, tool durability, shelter construction, base fortification. You do NOT control the bot.
+
+            Capabilities: resource_gathering, crafting_knowledge, construction_planning, inventory_management.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "minecraft-commander"
+        on: "always"
+    context_scope:
+      can_read: ["minecraft-router", "self"]
+      can_write: ["self"]
+
+  - id: "minecraft-runner"
+    role_type: "specialist"
+    description: "Objective retrieval and survival specialist. Advises only — does not control the bot."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Objective retrieval and survival specialist. Advise on: fastest routes to objectives, escape paths, survival priorities under pressure, risk assessment. You do NOT control the bot.
+
+            Capabilities: objective_retrieval, escape_planning, risk_assessment, survival_priorities.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "minecraft-commander"
+        on: "always"
+    context_scope:
+      can_read: ["minecraft-router", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hierarchical"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "thompson_sampling"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 1800
+    max_total_tokens: 250000
+    max_cost_usd: 1.00
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "objective addressed"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true
+  mcp_servers:
+    - name: "minecraft"
+      command: "docker"
+      args:
+        - "exec"
+        - "-i"
+        - "arkavo-minecraft-mcp"
+        - "npx"
+        - "-y"
+        - "github:yuniko-software/minecraft-mcp-server"
+        - "--host"
+        - "minecraft"
+        - "--port"
+        - "25565"
+        - "--username"
+        - "Edge"

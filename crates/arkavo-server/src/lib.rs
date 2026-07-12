@@ -11,7 +11,7 @@
 pub mod server;
 pub mod spend_plane;
 
-pub use spend_plane::{cloud_policy_from_agents_md, cloud_policy_from_config};
+pub use spend_plane::{cloud_policy_from_config, cloud_policy_from_kit};
 
 // Re-export commonly used types
 pub use server::{

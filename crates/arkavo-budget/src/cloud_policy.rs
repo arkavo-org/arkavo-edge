@@ -33,7 +33,7 @@ pub enum CloudPolicy {
 }
 
 impl CloudPolicy {
-    /// Parse a policy from a config/AGENTS.md string. Accepts snake_case,
+    /// Parse a policy from a SwarmKit config `cloud_policy` string. Accepts snake_case,
     /// kebab-case, and a few natural aliases. Returns `None` for unknown input
     /// so the caller can keep the safe default.
     pub fn parse(s: &str) -> Option<Self> {

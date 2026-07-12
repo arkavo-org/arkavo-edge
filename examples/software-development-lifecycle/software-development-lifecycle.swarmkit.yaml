@@ -1,0 +1,628 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# orchestrator/, security/, code-review/, database/, testing/,
+# documentation/, performance/, devops/, frontend/, architecture/,
+# data-science/, debug/.
+#
+# Every AGENTS.md in this tree carried its own commented-out `mcp_servers:`
+# block; consolidated here once instead of 12 times:
+#   - orchestrator used the built-in memory server (`arkavo serve`):
+#       mcp_servers:
+#         - name: memory
+#           command: arkavo
+#           args: ["serve"]
+#   - the 11 specialists used the optional filesystem/git npm servers
+#     (`npm install -g @modelcontextprotocol/server-filesystem`), read-only
+#     except for testing/documentation/devops which used `--allow-write`:
+#       mcp_servers:
+#         - name: filesystem
+#           command: mcp-filesystem
+#           args: ["--read-only"]   # or ["--allow-write"]
+#         - name: git
+#           command: mcp-git
+#           args: ["--read-only"]
+#     None of these servers are required to run the mesh; see README.md.
+#
+# `code-review/AGENTS.md` also carried a `swarm: code-review` field with no
+# equivalent RoleSpec slot (it predates SwarmKit's own "swarm" concept and
+# isn't read by the runtime) — dropped, noted in README.md.
+# `discovery.mdns` (set on every role) maps to the single kit-level
+# `runtime.mdns` below.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "software-development-lifecycle"
+  version: "0.1.0"
+  description: "12-agent knowledge-sharing mesh for software development: an orchestrator decomposes requests and coordinates 11 domain-specialist agents (security, code review, database, testing, documentation, performance, devops, frontend, architecture, data science, debug) that can also query each other directly."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "sdlcMeshNonce0000001"
+
+objective:
+  goal: "Decompose complex tasks and coordinate specialized agents to achieve goals"
+  success_criteria:
+    - "the request is routed to the domain specialist(s) whose expertise it needs"
+    - "specialists may query each other directly for cross-domain knowledge"
+    - "the orchestrator aggregates findings into a coherent response"
+
+roles:
+  - id: "orchestrator-agent"
+    role_type: "planner"
+    description: "Decompose complex tasks and coordinate specialized agents to achieve goals"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Decompose complex tasks and coordinate specialized agents to achieve goals.
+
+            Responsible for:
+            - Understanding user requests
+            - Breaking down complex tasks into subtasks
+            - Identifying which specialized agents to involve
+            - Coordinating agent-to-agent communication
+            - Aggregating results from multiple agents
+            - Presenting coherent responses to users
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "security-agent"
+        on: "always"
+      - to: "code-review-agent"
+        on: "always"
+      - to: "database-agent"
+        on: "always"
+      - to: "testing-agent"
+        on: "always"
+      - to: "documentation-agent"
+        on: "always"
+      - to: "performance-agent"
+        on: "always"
+      - to: "devops-agent"
+        on: "always"
+      - to: "frontend-agent"
+        on: "always"
+      - to: "architecture-agent"
+        on: "always"
+      - to: "data-science-agent"
+        on: "always"
+      - to: "debug-agent"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "security-agent"
+    role_type: "specialist"
+    description: "Analyze code for security vulnerabilities and suggest best practices"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Analyze code for security vulnerabilities and suggest best practices.
+
+            Specializes in:
+            - Identifying security vulnerabilities (SQL injection, XSS, etc.)
+            - Analyzing authentication and authorization patterns
+            - Reviewing encryption and data protection practices
+            - Suggesting security improvements
+            - Checking for common security misconfigurations
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "code-review-agent"
+    role_type: "specialist"
+    description: "Review code quality, patterns, and suggest improvements"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Review code quality, patterns, and suggest improvements.
+
+            Specializes in:
+            - Identifying code smells and anti-patterns
+            - Suggesting refactoring opportunities
+            - Checking coding standards compliance
+            - Analyzing code complexity
+            - Reviewing error handling and edge cases
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "database-agent"
+    role_type: "specialist"
+    description: "Optimize SQL queries and design database schemas"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Optimize SQL queries and design database schemas.
+
+            Specializes in:
+            - SQL query optimization
+            - Database schema design
+            - Index recommendations
+            - Data modeling best practices
+            - Database performance tuning
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "testing-agent"
+    role_type: "specialist"
+    description: "Generate tests and analyze code coverage"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Generate tests and analyze code coverage.
+
+            Specializes in:
+            - Generating unit tests
+            - Creating integration tests
+            - Analyzing test coverage
+            - Identifying untested code paths
+            - Suggesting test improvements
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "documentation-agent"
+    role_type: "specialist"
+    description: "Generate API documentation and README files"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Generate API documentation and README files.
+
+            Specializes in:
+            - Generating API documentation
+            - Creating README files
+            - Writing code comments
+            - Documenting architecture decisions
+            - Creating user guides
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "performance-agent"
+    role_type: "specialist"
+    description: "Profile code and suggest performance optimizations"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Profile code and suggest performance optimizations.
+
+            Specializes in:
+            - Identifying performance bottlenecks
+            - Suggesting optimization strategies
+            - Analyzing algorithm complexity
+            - Memory usage optimization
+            - Caching recommendations
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "devops-agent"
+    role_type: "specialist"
+    description: "Design CI/CD pipelines and deployment strategies"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Design CI/CD pipelines and deployment strategies.
+
+            Specializes in:
+            - CI/CD pipeline design
+            - Deployment automation
+            - Infrastructure as code
+            - Container orchestration
+            - Monitoring and logging strategies
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "frontend-agent"
+    role_type: "specialist"
+    description: "Analyze UI/UX patterns and accessibility compliance"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Analyze UI/UX patterns and accessibility compliance.
+
+            Specializes in:
+            - UI/UX best practices
+            - Accessibility compliance (WCAG)
+            - Responsive design patterns
+            - Frontend performance optimization
+            - Component architecture
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "architecture-agent"
+    role_type: "specialist"
+    description: "Design system architecture and scalability patterns"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Design system architecture and scalability patterns.
+
+            Specializes in:
+            - System design patterns
+            - Microservices architecture
+            - Scalability strategies
+            - Design pattern recommendations
+            - Architecture documentation
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "data-science-agent"
+    role_type: "specialist"
+    description: "Suggest ML models and analyze data patterns"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Suggest ML models and analyze data patterns.
+
+            Specializes in:
+            - ML model recommendations
+            - Data analysis patterns
+            - Feature engineering
+            - Statistical analysis
+            - Data visualization suggestions
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+  - id: "debug-agent"
+    role_type: "specialist"
+    description: "Analyze agent sessions and diagnose errors"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Analyze agent sessions and diagnose errors.
+
+            A hyper-specialized agent for debugging and analyzing agent sessions
+            using the Interactive Agent Debugger infrastructure. Provides
+            intelligent analysis of agent execution patterns, error diagnosis,
+            and session replay capabilities. Leverages the arkavo-debugger
+            Diagnostics API to help agents self-heal and developers understand
+            complex agent behaviors.
+
+            Capabilities:
+            - Session Analysis: analyze event patterns across agent sessions
+            - Error Diagnosis: identify recurring errors and suggest remediation
+            - Performance Profiling: track token usage, response times, and
+              resource consumption
+            - Replay Orchestration: guide users through session replays with
+              insights
+            - Pattern Recognition: identify common failure modes and success
+              patterns
+
+            Key functions:
+            1. Analyze Session: given a session ID, provide comprehensive
+               analysis
+            2. Compare Sessions: identify differences between successful and
+               failed runs
+            3. Suggest Fixes: recommend code changes based on error patterns
+            4. Generate Reports: create detailed debugging reports with
+               visualizations
+
+            Integration points:
+            - Uses arkavo-debugger Diagnostics trait for data access
+            - Connects via WebSocket to AG-UI debug endpoint
+            - Can trigger self-healing in other agents
+            - Exports findings to monitoring systems
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["orchestrator-agent", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 1800
+    max_total_tokens: 600000
+    max_cost_usd: 3.00
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "the orchestrator aggregates findings and presents a response"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

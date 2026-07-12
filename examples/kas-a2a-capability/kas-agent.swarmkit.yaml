@@ -1,0 +1,98 @@
+# Single-role SwarmKit — replaces the deprecated per-product config for
+# kas-a2a-capability. `a2a.enabled`/discovery aren't representable kit
+# fields; see README.md for where that information now lives.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "kas-agent"
+  version: "0.1.0"
+  description: "Demonstrates KAS (Key Access Service) as an A2A JSON-RPC capability"
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "WSLpUFeWi-pwZ8x0t6MVng"
+
+objective:
+  goal: "Demonstrates KAS (Key Access Service) as an A2A JSON-RPC capability"
+  success_criteria:
+    - "kas.publicKey returns the configured public key"
+    - "kas.rewrap enforces delegation verification and ABAC policy before rewrapping"
+
+roles:
+  - id: "kas-agent"
+    role_type: "operator"
+    description: "Exposes KAS key operations (publicKey, rewrap) over A2A JSON-RPC."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Demonstrates KAS (Key Access Service) as an A2A JSON-RPC
+            capability, enabling TDF key rewrap operations for secure data
+            sharing.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 300
+    max_total_tokens: 100000
+    max_cost_usd: 0.50
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "kas.publicKey and kas.rewrap requests handled per delegation and ABAC policy"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true
+  kas:
+    enabled: true
+    key_id: "kas-demo-key-1"
+    algorithm: "ec:secp256r1"
+    trusted_roots:
+      - did: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+        name: "Demo Root Authority"

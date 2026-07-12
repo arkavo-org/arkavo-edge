@@ -2,6 +2,7 @@
 
 //! SEQ-001, SEQ-016, SEQ-017: Tests against existing protocol types.
 
+use arkavo_protocol::agent_config::RuntimeConfig;
 use arkavo_protocol::data_classification::{
     ClassifiedDatum, DatumType, DlpAction, DlpPolicy, SensitivityLevel,
 };
@@ -49,7 +50,7 @@ fn sensitivity_level_allows_downgrade() {
 #[test]
 #[should_panic(expected = "SEQ-016")]
 fn runtime_config_has_no_sequence_integrity_fields() {
-    let config = arkavo_protocol::agent_config::parse_runtime_config("");
+    let config = RuntimeConfig::default();
 
     let config_str = format!("{config:?}");
     assert!(

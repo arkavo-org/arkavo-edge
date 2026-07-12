@@ -30,7 +30,7 @@ done
 
 ```bash
 cd examples/family-travel-mesh
-./launch_mesh.sh
+./launch.sh
 ```
 
 **What to watch for:**
@@ -92,7 +92,7 @@ tail -50 logs/conductor.log
 ### Step 4: Clean Shutdown
 
 ```bash
-./stop_mesh.sh
+./stop.sh
 ```
 
 **What to watch for:**
@@ -111,13 +111,13 @@ lsof -i :8401 -i :8402 -i :8403 -i :8404 -i :8410 -i :8411 -i :8412
 #!/bin/bash
 # test_example.sh - Run this for automated validation
 
-./launch_mesh.sh
+./launch.sh
 sleep 15
 
 # Verify conductor is healthy
 if ! curl -sSf http://localhost:8401/.well-known/agent.json > /dev/null; then
     echo "FAIL: Conductor not responding"
-    ./stop_mesh.sh
+    ./stop.sh
     exit 1
 fi
 
@@ -127,7 +127,7 @@ if ! grep -q "peer" logs/router.log 2>/dev/null; then
 fi
 
 echo "PASS: Mesh is healthy"
-./stop_mesh.sh
+./stop.sh
 ```
 
 ## Common Failure Modes
@@ -163,4 +163,4 @@ cat logs/critic.log | grep -i "policy\|veto"
 - **Vegas-guide is intentionally rigged** to always recommend casinos
 - This triggers the Critic's policy enforcement
 - Router learns via Thompson Sampling to prefer family-activities
-- See `agents/specialists/vegas-guide/AGENTS.md` for details
+- See the `vegas-guide` role's identity skill in `family-travel-mesh.swarmkit.yaml` for details

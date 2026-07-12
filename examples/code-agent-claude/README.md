@@ -85,12 +85,31 @@ Four tools are registered when Claude Code auth is available:
 
 ## Configuration
 
-See `AGENTS.md` for the full agent configuration including:
-- Bidirectional session mode (`use_bidirectional: true`)
-- Budget limits (`max_budget_usd`, `budget_tokens`)
+See `code-agent-claude.swarmkit.yaml` for the role's SwarmKit-modeled
+configuration (`agent_provisioning.budget.max_total_tokens`,
+`runtime.max_cost_per_session`).
+
+### Configuration not yet modeled in SwarmKit
+
+The rest of the old AGENTS.md's `claude_code:` block has no RoleSpec
+equivalent and is supplied via env/flags instead:
+- Bidirectional session mode (`use_bidirectional: true`) — SDK default
 - Tool permissions and filtering (`allowed_tools`, `disallowed_tools`)
 - File access patterns (`allow_globs`, `deny_globs`)
 - Permission mode (`default`, `plan`, `acceptEdits`)
+- Workspace root (`workspace_root`) — defaults to `./workspace`
+- OAuth vs API key (`use_oauth`) — see Authentication above
+
+### Environment variables
+
+Copy `.env.example` to `.env` and fill in real values — never commit a
+real key. Recognized variables (checked at process startup, no config
+file involved):
+- `ANTHROPIC_API_KEY` — Claude API key (unused if `claude login` OAuth is active)
+- `ANTHROPIC_BASE_URL` — alternative API endpoint (e.g. DeepSeek's Anthropic-compatible API)
+- `ANTHROPIC_AUTH_TOKEN` — alternative auth token for a non-Anthropic base URL
+- `ANTHROPIC_MODEL` — override model selection
+- `ANTHROPIC_SMALL_FAST_MODEL` — fast model for simple tasks
 
 ## Files
 

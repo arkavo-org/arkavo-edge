@@ -40,13 +40,6 @@ check_prerequisites() {
         return 1
     fi
     print_status "SUCCESS" "Arkavo binary found"
-
-    local hf_cache="${HF_HOME:-$HOME/.cache/huggingface}/hub"
-    if [ -d "$hf_cache/models--unsloth--GLM-4.7-Flash-GGUF" ]; then
-        print_status "SUCCESS" "GLM-4.7-Flash model available"
-    else
-        print_status "WARNING" "GLM-4.7-Flash not found. Run: hf download unsloth/GLM-4.7-Flash-GGUF GLM-4.7-Flash-Q4_K_M.gguf"
-    fi
 }
 
 stop_agents() {
@@ -63,33 +56,28 @@ stop_agents() {
     print_status "SUCCESS" "All agents stopped"
 }
 
+KIT="$SCRIPT_DIR/learning-mesh.swarmkit.yaml"
+
 start_agent() {
     local name=$1
-    local dir=$2
+    local role=$2
     local port=$3
-
-    if [ ! -f "$dir/AGENTS.md" ]; then
-        print_status "WARNING" "No AGENTS.md in $dir, skipping $name"
-        return 0
-    fi
 
     print_status "AGENT" "Starting $name (port $port)..."
 
-    cd "$dir"
-    RUST_LOG=info nohup "$BINARY" agent run > "$LOG_DIR/${name}.log" 2>&1 &
+    RUST_LOG=info nohup "$BINARY" agent -c "$KIT" -n "$role" -p "$port" > "$LOG_DIR/${name}.log" 2>&1 &
     echo "$!" >> "$PID_FILE"
-    cd "$SCRIPT_DIR"
 }
 
 start_mesh() {
     > "$PID_FILE"
 
-    start_agent "orchestrator" "$SCRIPT_DIR/orchestrator" 8410
+    start_agent "orchestrator" "learning-orchestrator" 8410
     sleep 1
-    start_agent "code-analyzer" "$SCRIPT_DIR/code-analyzer" 8412
-    start_agent "test-generator" "$SCRIPT_DIR/test-generator" 8414
-    start_agent "security-auditor" "$SCRIPT_DIR/security-auditor" 8416
-    start_agent "task-generator" "$SCRIPT_DIR/task-generator" 8418
+    start_agent "code-analyzer" "code-analyzer-agent" 8412
+    start_agent "test-generator" "test-generator-agent" 8414
+    start_agent "security-auditor" "security-auditor-agent" 8416
+    start_agent "task-generator" "task-generator-agent" 8418
 
     print_status "INFO" "Waiting for agents to initialize and discover peers..."
     sleep 3

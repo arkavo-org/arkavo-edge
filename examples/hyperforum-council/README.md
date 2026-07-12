@@ -47,14 +47,14 @@ Multi-agent orchestration for AI-augmented discourse in HYPERforum.
 ## Quick Start
 
 ```bash
-# Launch all agents
-./launch_mesh.sh
+# Launch all agents (reads roles/ports from hyperforum-council.swarmkit.yaml)
+./launch.sh
 
-# Run a test deliberation
-./run_deliberation.sh "Should we implement feature X?"
+# Submit a deliberation task to the Conductor
+curl -X POST http://localhost:8501/tasks -d @tasks.json
 
 # Stop all agents
-./stop_mesh.sh
+./stop.sh
 ```
 
 ## Specialist Roles
@@ -69,8 +69,14 @@ Multi-agent orchestration for AI-augmented discourse in HYPERforum.
 
 ## Configuration
 
-- `config/hrm_defaults.yaml` - HRM orchestration settings
-- `agents/critic/policies/discourse_quality.yaml` - Discourse quality policy
+- `hyperforum-council.swarmkit.yaml` - the 9-role SwarmKit mesh definition
+- `config/hrm_defaults.yaml` - HRM orchestration settings (router scoring weights,
+  guardrails, memory tiers, deliberation rounds). Its `encryption.kas_url` block
+  (OpenTDF for sensitive insights) has no kit-level home yet:
+  `runtime.kas` (see `crates/arkavo-swarmkit/src/runtime_config.rs`) is
+  DID/trusted-root shaped, not a KAS URL — not yet modeled in SwarmKit.
+- `agents/critic/policies/discourse_quality.yaml` - Discourse quality policy,
+  referenced in the Critic role's skill instructions in the kit
 
 ## Integration with HYPERforum
 

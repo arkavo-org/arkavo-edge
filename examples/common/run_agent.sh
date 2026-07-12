@@ -3,7 +3,7 @@
 #
 # Usage: source this file from your launch script
 #   source "$(dirname "$0")/../common/run_agent.sh"
-#   start_agent "$BINARY" "$CONFIG_PATH" "$LOG_FILE" "$PID_FILE"
+#   start_agent "$BINARY" "$KIT_PATH" "$LOG_FILE" "$PID_FILE"
 
 set -e
 
@@ -34,7 +34,7 @@ start_agent() {
     echo -e "${BLUE}Starting $name...${NC}"
 
     # Start agent in background
-    nohup "$binary" agent --config "$config" >"$log_file" 2>&1 &
+    nohup "$binary" agent -c "$config" >"$log_file" 2>&1 &
     local pid=$!
 
     # Record PID
@@ -52,18 +52,18 @@ start_agent() {
     echo -e "${GREEN}✓${NC} $name started (PID $pid)"
 }
 
-# Start multiple agents from a directory of AGENTS.md files
+# Start multiple agents from a directory of *.swarmkit.yaml kit files
 start_agents_from_dir() {
     local binary="$1"
     local agents_dir="$2"
     local log_dir="$3"
     local pid_file="$4"
 
-    for config in "$agents_dir"/*/AGENTS.md; do
+    for config in "$agents_dir"/*.swarmkit.yaml; do
         [[ -f "$config" ]] || continue
 
         local name
-        name=$(basename "$(dirname "$config")")
+        name=$(basename "$config" .swarmkit.yaml)
         local log_file="$log_dir/$name.log"
 
         start_agent "$binary" "$config" "$log_file" "$pid_file" "$name"

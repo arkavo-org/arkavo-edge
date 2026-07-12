@@ -9,5 +9,5 @@ if [ -f "$PID_FILE" ]; then
     rm -f "$PID_FILE"
 fi
 # Kill any straggler agents so they cannot hold ports or stale db handles.
-pkill -f "arkavo agent run" 2>/dev/null || true
+pkill -f "arkavo agent" 2>/dev/null || true
 echo "shadow-teacher-kit agents stopped"

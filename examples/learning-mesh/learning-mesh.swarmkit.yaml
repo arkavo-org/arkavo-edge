@@ -1,0 +1,312 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# orchestrator/, code-analyzer/, test-generator/, security-auditor/, and
+# task-generator/.
+#
+# `discovery.mdns: true` maps to `runtime.mdns` below. The old per-agent
+# configs had no static peer list; peer discovery was mDNS-only, unchanged
+# here.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "learning-mesh"
+  version: "0.1.0"
+  description: "Quality-aware agent mesh demonstrating lesson-informed prompting: an orchestrator routes tasks to specialists via Thompson Sampling, judges response quality, extracts lessons from low-quality responses, and injects corrective guidance into future prompts."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "z9waWyQVXUAtM1QVBfQ_KQ"
+
+objective:
+  goal: |-
+    You are a task router. For every task, immediately call send_task.
+    Route security tasks to security-auditor-agent.
+    Route test tasks to test-generator-agent.
+    Route code review tasks to code-analyzer-agent.
+    Do not explain. Just call send_task with the agent_id and the task text.
+  success_criteria:
+    - "security_scan tasks route to security-auditor-agent"
+    - "test_generation tasks route to test-generator-agent"
+    - "code_review tasks route to code-analyzer-agent"
+    - "a low-quality response (score < 0.5) always extracts a lesson and updates routing weights"
+
+roles:
+  - id: "learning-orchestrator"
+    role_type: "router"
+    description: "Task router: sends every task to the right specialist agent via send_task, no explanation."
+    agent_provisioning:
+      model:
+        family: "qwen"
+        size: "0.8B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |-
+            You are a task router. For every task, immediately call send_task.
+            Route security tasks to security-auditor-agent.
+            Route test tasks to test-generator-agent.
+            Route code review tasks to code-analyzer-agent.
+            Do not explain. Just call send_task with the agent_id and the task text.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "code-analyzer-agent"
+        on: "always"
+      - to: "test-generator-agent"
+        on: "always"
+      - to: "security-auditor-agent"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "code-analyzer-agent"
+    role_type: "specialist"
+    description: "Analyzes source code for quality issues, anti-patterns, and complexity."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Analyze source code for quality issues, anti-patterns, and complexity.
+
+            Use filesystem_tools to read source files under review.
+            Use code_review for automated static analysis.
+            Use git_diff to see recent changes and focus review on modified code.
+            Use git_log to understand commit history and change patterns.
+
+            Specializations:
+            - Static analysis beyond clippy
+            - Code complexity metrics (cyclomatic, cognitive)
+            - Dead code detection
+            - API design review
+            - Dependency analysis
+
+            When reviewing code, always provide:
+            - Specific file paths and line numbers
+            - Severity classification (critical, warning, info)
+            - Concrete fix suggestions with code examples
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["learning-orchestrator", "self"]
+      can_write: ["self"]
+
+  - id: "test-generator-agent"
+    role_type: "specialist"
+    description: "Generates comprehensive tests for Rust code."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Generate comprehensive tests for Rust code.
+
+            Use filesystem_tools to read existing test files and source code under test.
+            Use test_run to verify generated tests compile and pass.
+            Use git_status to see which files have been modified.
+
+            Specializations:
+            - Unit tests (inline #[cfg(test)] modules)
+            - Integration tests (tests/ directory)
+            - Property-based tests
+            - Edge case identification
+            - Test coverage analysis
+
+            When generating tests, always provide:
+            - Test function with descriptive name
+            - Arrange-Act-Assert structure
+            - Edge cases (empty input, overflow, None values)
+            - Both positive and negative test cases
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["learning-orchestrator", "self"]
+      can_write: ["self"]
+
+  - id: "security-auditor-agent"
+    role_type: "specialist"
+    description: "Audits code for security vulnerabilities and unsafe patterns."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Audit code for security vulnerabilities and unsafe patterns.
+
+            Use filesystem_tools to read source files under audit.
+            Use shell_exec to run security scanners when available.
+            Use git_log to check for recent security-related commits.
+            Use git_diff to identify recently changed code that may introduce vulnerabilities.
+
+            Specializations:
+            - OWASP Top 10 detection
+            - Rust-specific unsafe code audit
+            - Input validation gaps
+            - Cryptographic misuse
+            - Supply chain risk assessment
+
+            When auditing code, always provide:
+            - CVE references where applicable
+            - Severity rating (critical, high, medium, low)
+            - Proof-of-concept or exploit scenario
+            - Specific remediation with code examples
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["learning-orchestrator", "self"]
+      can_write: ["self"]
+
+  - id: "task-generator-agent"
+    role_type: "operator"
+    description: "Sends code review tasks to agents for demo/load purposes, no explanation."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Call send_task to send code review tasks to agents. Do not explain, just call tools.
+
+            Step 1: call list_agents
+            Step 2: call send_task with agent_id from step 1 and a Rust code snippet to review
+            Step 3: repeat with a different agent and different code
+
+            Example send_task args: {"agent_id": "security-auditor-agent", "task": "Review for SQL injection:\nlet q = format!(\"SELECT * WHERE id={}\", input);"}
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "learning-orchestrator"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "thompson_sampling"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 1200
+    max_total_tokens: 250000
+    max_cost_usd: 1.00
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "response quality judged and, when below 0.5, a lesson is extracted"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

@@ -1,0 +1,433 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# agents/{conductor,router,critic,synthesis,
+# specialists/{critical-analyst,researcher,synthesizer,devils-advocate,facilitator}}/.
+#
+# `a2a.enabled`/`a2a.peers` aren't representable kit fields — mesh wiring is
+# now the `handoffs`/`context_scope` graph below, and `runtime.mdns: true`
+# (kit-level) replaces per-agent `mdns: true`.
+#
+# `config/hrm_defaults.yaml` (router scoring weights, guardrails, memory
+# tiers, deliberation rounds, and an OpenTDF `encryption.kas_url` block) has
+# no kit home: `runtime.kas` (crates/arkavo-swarmkit/src/runtime_config.rs)
+# is DID/trusted-root shaped, not a KAS URL, so the encryption config isn't
+# representable here — not yet modeled in SwarmKit. See README.md.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "hyperforum-council"
+  version: "0.1.0"
+  description: "HRM-style 9-agent mesh for AI-augmented discourse in HYPERforum: a conductor decomposes discourse questions, a router selects specialists via Thompson Sampling, five specialists (critical analysis, research, synthesis, devil's advocacy, facilitation) contribute perspectives, a critic enforces discourse-quality policy, and a synthesis coordinator produces the final council response."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "5D6MZedL0GKbArzvKWZsIg"
+
+objective:
+  goal: "Master orchestrator for HYPERforum AI Council deliberation. Decomposes discourse questions into analysis subtasks, coordinates specialist bursts, and manages synthesis workflow. Enforces debate structure and ensures all perspectives are represented."
+  success_criteria:
+    - "the Critic vetoes any contribution that violates agents/critic/policies/discourse_quality.yaml (no ad hominem, no strawmanning, evidence required)"
+    - "the final synthesis integrates contributions from every specialist that responded"
+    - "no single specialist perspective is presented as the council's sole conclusion"
+
+roles:
+  - id: "council-conductor"
+    role_type: "planner"
+    description: "Master orchestrator for HYPERforum AI Council deliberation: decomposes discourse questions into analysis subtasks and coordinates specialist bursts."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: "Master orchestrator for HYPERforum AI Council deliberation. Decomposes discourse questions into analysis subtasks, coordinates specialist bursts, and manages synthesis workflow. Enforces debate structure and ensures all perspectives are represented."
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "council-router"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "council-router"
+    role_type: "router"
+    description: "Thompson Sampling agent selector for discourse: routes subtasks to optimal specialists based on topic domain and learned priors."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: "Thompson Sampling agent selector for discourse. Routes subtasks to optimal specialists based on topic domain, argument quality history, and learned priors from category_priors."
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "critical-analyst"
+        on: "always"
+      - to: "researcher"
+        on: "always"
+      - to: "synthesizer"
+        on: "always"
+      - to: "devils-advocate"
+        on: "always"
+      - to: "facilitator"
+        on: "always"
+    context_scope:
+      can_read: ["council-conductor", "self"]
+      can_write: ["self"]
+
+  - id: "council-critic"
+    role_type: "critic"
+    description: "Quality assurance for AI Council discourse: validates specialist outputs against discourse policies before synthesis."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Quality assurance for AI Council discourse. Validates specialist
+            outputs against discourse policies before synthesis. Checks for
+            fallacies, bias, evidence quality, and argument coherence.
+            Enforces productive discourse standards. Policy source:
+            agents/critic/policies/discourse_quality.yaml (prohibited:
+            personal attacks, ad hominem, harassment, threats,
+            discrimination, doxxing, circular reasoning, appeal to
+            violence, conspiracy without evidence; required: argument
+            structure, evidence support, perspective acknowledgment).
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read:
+        [
+          "critical-analyst",
+          "researcher",
+          "synthesizer",
+          "devils-advocate",
+          "facilitator",
+          "self",
+        ]
+      can_write: ["self"]
+
+  - id: "council-synthesis"
+    role_type: "synthesizer"
+    description: "Final synthesis coordinator for AI Council: aggregates specialist contributions, weights by critic scores, and produces a unified council response."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: "Final synthesis coordinator for AI Council. Aggregates specialist contributions, weights by critic scores, and produces unified council response. Supports OpenTDF encryption for sensitive insights (see README.md — kas_url is not yet modeled in SwarmKit)."
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read:
+        [
+          "council-conductor",
+          "council-critic",
+          "critical-analyst",
+          "researcher",
+          "synthesizer",
+          "devils-advocate",
+          "facilitator",
+          "self",
+        ]
+      can_write: ["self"]
+
+  - id: "critical-analyst"
+    role_type: "specialist"
+    description: "Expert in logical analysis and argument evaluation: identifies premises, conclusions, logical structure, and validity."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Expert in logical analysis and argument evaluation. Identifies premises, conclusions, logical structure, and validity. Detects fallacies (ad hominem, straw man, false dichotomy, etc.). Evaluates evidence quality and reasoning chains. Never accepts claims at face value.
+
+            Capabilities: logical_analysis, fallacy_detection, argument_mapping, evidence_evaluation, premise_identification, validity_assessment.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "council-critic"
+        on: "always"
+    context_scope:
+      can_read: ["council-router", "self"]
+      can_write: ["self"]
+
+  - id: "researcher"
+    role_type: "specialist"
+    description: "Expert in fact-finding, source verification, and knowledge synthesis: provides factual grounding for claims."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Expert in fact-finding, source verification, and knowledge synthesis. Provides factual grounding for claims. Identifies missing context, relevant precedents, and supporting/contradicting evidence. Distinguishes between primary sources, expert consensus, and anecdotal evidence.
+
+            Capabilities: source_verification, fact_checking, precedent_research, context_gathering, citation_analysis, evidence_synthesis.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "council-critic"
+        on: "always"
+    context_scope:
+      can_read: ["council-router", "self"]
+      can_write: ["self"]
+
+  - id: "synthesizer"
+    role_type: "specialist"
+    description: "Expert in integrating diverse perspectives into coherent frameworks: identifies common ground and emergent insights."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Expert in integrating diverse perspectives into coherent frameworks. Identifies common ground, bridges between viewpoints, and emergent insights. Creates unified narratives that honor nuance. Produces structured summaries with clear attribution of contributions.
+
+            Capabilities: perspective_integration, common_ground_identification, narrative_construction, insight_emergence, framework_building, attribution_tracking.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "council-critic"
+        on: "always"
+    context_scope:
+      can_read: ["council-router", "self"]
+      can_write: ["self"]
+
+  - id: "devils-advocate"
+    role_type: "specialist"
+    description: "Constructive contrarian who stress-tests arguments: identifies weaknesses, blind spots, and unexamined assumptions."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Constructive contrarian who stress-tests arguments. Identifies weaknesses, blind spots, and unexamined assumptions. Presents strongest possible counterarguments. Explores edge cases and failure modes. NEVER attacks people, only ideas. Always provides actionable critique.
+
+            Capabilities: counterargument_generation, assumption_challenging, weakness_identification, edge_case_exploration, steelmanning, constructive_criticism.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "council-critic"
+        on: "always"
+    context_scope:
+      can_read: ["council-router", "self"]
+      can_write: ["self"]
+
+  - id: "facilitator"
+    role_type: "specialist"
+    description: "Expert in productive discourse management: identifies when discussion is stalling, going off-topic, or becoming unproductive."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Expert in productive discourse management. Identifies when discussion is stalling, going off-topic, or becoming unproductive. Suggests process improvements. Ensures all voices are heard. Manages turn-taking and time allocation. Detects and defuses conflict while preserving productive tension.
+
+            Capabilities: discussion_management, conflict_resolution, process_optimization, participation_balancing, topic_steering, productive_tension.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "council-critic"
+        on: "always"
+    context_scope:
+      can_read: ["council-router", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hierarchical"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "thompson_sampling"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 1800
+    max_total_tokens: 450000
+    max_cost_usd: 2.00
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "the Critic approves a discourse-policy-compliant synthesis"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 1
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

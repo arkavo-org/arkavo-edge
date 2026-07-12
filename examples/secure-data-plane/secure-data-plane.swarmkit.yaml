@@ -1,0 +1,156 @@
+# Multi-role SwarmKit replacing the deprecated sender/ + receiver/ per-product configs.
+#
+# KAS merge decision: the two source configs declared different kas blocks
+# (sender: key_id sender-key-1, no trusted_roots; receiver: key_id
+# receiver-key-1, with a trusted_roots entry). RuntimeKas is kit-level only
+# — RoleSpec has no per-role KAS field (tdf_attribute_release_policy is
+# attribute-release, not raw key material) — so only one kas block can be
+# authored here. The receiver is the side that verifies delegation and
+# rewraps keys, so its kas config (including trusted_roots) is the one that
+# actually needs to be correct for the demo to work; it wins at kit level.
+# The sender's distinct key_id is preserved below in README.md's Security
+# Model section rather than silently dropped.
+#
+# `a2a.enabled`/discovery aren't representable kit fields; see README.md.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "secure-data-plane"
+  version: "0.1.0"
+  description: "Encrypted interagent data sharing: TDF encryption over an Iroh P2P data plane, with KAS key rewrap over the A2A control plane."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "Ru5UwN2Y7AF1dy4_mEs8MA"
+
+objective:
+  goal: "Share sensitive data between two agents with end-to-end TDF encryption over an Iroh P2P data plane"
+  success_criteria:
+    - "the sender's plaintext never crosses the network unencrypted"
+    - "the receiver only decrypts after delegation and ABAC policy checks pass"
+
+roles:
+  - id: "data-sender"
+    role_type: "operator"
+    description: "Encrypts sensitive data with TDF and shares via Iroh P2P data plane."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Encrypts sensitive data with TDF and shares via Iroh P2P data
+            plane. Read the sensitive input, fetch the receiver's KAS
+            public key via kas.publicKey, encrypt with TDF using ABAC
+            policy attributes, stage the encrypted blob to the local Iroh
+            node, and send the ticket to the receiver via tdf.share.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "data-receiver"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "data-receiver"
+    role_type: "operator"
+    description: "Receives TDF-encrypted data via Iroh P2P and decrypts using embedded KAS."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Receives TDF-encrypted data via Iroh P2P and decrypts using
+            embedded KAS. Accept tdf.share offers, list them via
+            tdf.offers, fetch the encrypted blob from Iroh, verify the
+            delegation token and ABAC policy, then rewrap the key and
+            decrypt the payload.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["data-sender", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "pipeline"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 600
+    max_total_tokens: 100000
+    max_cost_usd: 0.50
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "receiver has fetched and decrypted the shared payload"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true
+  kas:
+    enabled: true
+    key_id: "receiver-key-1"
+    algorithm: "ec:secp256r1"
+    trusted_roots:
+      - did: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+        name: "Demo Root Authority"

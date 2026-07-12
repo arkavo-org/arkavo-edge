@@ -6,8 +6,8 @@
 //!
 //! # Runtime Policy Configuration
 //!
-//! Policies are defined per-agent in AGENTS.md frontmatter, not hardcoded.
-//! The loader searches for AGENTS.md in the current directory and parent directories.
+//! Policies are defined per-kit in SwarmKit `runtime.preflight`, not hardcoded.
+//! The loader discovers `*.swarmkit.yaml` (see arkavo_swarmkit::discover).
 //!
 //! ```yaml
 //! ---
@@ -28,7 +28,7 @@
 //! ```ignore
 //! use arkavo_router::preflight::{PreflightModerator, load_policies_from_config};
 //!
-//! // Load policies from AGENTS.md in current/parent directories
+//! // Load policies from the discovered SwarmKit runtime.preflight
 //! let moderator = load_policies_from_config()?;
 //!
 //! // Check a request
@@ -49,8 +49,8 @@ mod result;
 
 pub use config::{
     AgentConfig, BudgetYamlConfig, KasYamlConfig, PolicyAction, PolicyConfig, PolicyFileConfig,
-    PreflightConfig, build_moderator_from_config, load_agent_config,
-    load_agent_config_from_agents_md, load_policies_from_agents_md, load_policies_from_config,
+    PreflightConfig, agent_config_from_runtime, build_moderator_from_config, load_agent_config,
+    load_policies_from_config,
 };
 pub use features::PreflightFeature;
 pub use moderator::{PolicyId, PreflightModerator};

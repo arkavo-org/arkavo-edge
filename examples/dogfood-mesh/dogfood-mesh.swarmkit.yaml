@@ -1,0 +1,268 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# orchestrator/, code-reviewer/, and test-writer/.
+#
+# `model: glm-4.7-flash` isn't in the local-edge-model vocabulary
+# (crates/arkavo-cli/src/commands/kit/model_map.rs only maps
+# ministral/gemma-4/qwen3 families), so `agent_provisioning.model` is
+# omitted here per convention — see README.md for how to run against GLM.
+# `discovery.mdns` maps to `runtime.mdns` below.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "dogfood-mesh"
+  version: "0.1.0"
+  description: "Self-improvement mesh for the Arkavo Edge codebase: an orchestrator routes crate scans to code-reviewer or test-writer specialists via Thompson Sampling, judges output quality, and gossips lessons back to the fleet."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "c1464CwXAamhrxJvUJ4_jQ"
+
+objective:
+  goal: |
+    Orchestrate self-improvement tasks across the Arkavo Edge codebase.
+    Routes tasks to specialist agents using Thompson Sampling: agents that
+    produce higher-quality, compilable output get more tasks over time.
+
+    Before each task, inject behavior guidance learned from prior failures.
+    After each task, judge response quality mechanically:
+    - Does the output compile? (cargo check)
+    - Do tests pass? (cargo test)
+    - Is it substantive? (length + specificity)
+
+    Workflow per round:
+    1. Receive a crate scan report (clippy warnings, test list, public API)
+    2. Select agent via Thompson Sampling (explore vs exploit)
+    3. Inject accumulated behavior guidance into the prompt
+    4. Send task to selected agent
+    5. Judge response quality (0.0-1.0)
+    6. If quality < 0.5: extract lesson, update routing weights
+    7. Gossip lessons to peers
+
+    Categories:
+    - code_review: structural analysis, clippy findings, test gap identification
+    - test_generation: writing new unit tests that compile and pass
+  success_criteria:
+    - "changes only land on a dogfood/YYYY-MM-DD branch, never main"
+    - "every change is validated (cargo fmt --check && cargo clippy -D warnings && cargo test) before it is committed"
+    - "quality below 0.5 always extracts a lesson and updates routing weights"
+
+roles:
+  - id: "dogfood-orchestrator"
+    role_type: "planner"
+    description: "Routes crate-scan tasks to specialists via Thompson Sampling and judges output quality."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Orchestrate self-improvement tasks across the Arkavo Edge codebase.
+            Routes tasks to specialist agents using Thompson Sampling: agents that
+            produce higher-quality, compilable output get more tasks over time.
+
+            Before each task, inject behavior guidance learned from prior failures.
+            After each task, judge response quality mechanically:
+            - Does the output compile? (cargo check)
+            - Do tests pass? (cargo test)
+            - Is it substantive? (length + specificity)
+
+            Workflow per round:
+            1. Receive a crate scan report (clippy warnings, test list, public API)
+            2. Select agent via Thompson Sampling (explore vs exploit)
+            3. Inject accumulated behavior guidance into the prompt
+            4. Send task to selected agent
+            5. Judge response quality (0.0-1.0)
+            6. If quality < 0.5: extract lesson, update routing weights
+            7. Gossip lessons to peers
+
+            Categories:
+            - code_review: structural analysis, clippy findings, test gap identification
+            - test_generation: writing new unit tests that compile and pass
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "dogfood-code-reviewer"
+        on: "always"
+      - to: "dogfood-test-writer"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "dogfood-code-reviewer"
+    role_type: "critic"
+    description: "Analyzes Rust crates for quality issues and produces a structured JSON findings report."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Analyze Rust crates in the Arkavo Edge repository for quality issues.
+
+            You receive cargo clippy output, test listings, and public function
+            signatures for a specific crate. Produce a structured JSON report.
+
+            Output format — a JSON array of findings:
+            ```json
+            [
+              {
+                "file_path": "crates/arkavo-validation/src/url.rs",
+                "line_number": 42,
+                "severity": "warning",
+                "category": "clippy",
+                "description": "Redundant clone on Copy type",
+                "suggested_fix": "Remove .clone() call"
+              }
+            ]
+            ```
+
+            Categories: clippy, dead_code, error_handling, test_gap, missing_docs
+
+            Rules:
+            - Only report issues verifiable from the provided clippy/test output
+            - Do NOT hallucinate file paths or line numbers
+            - Every finding must include a concrete suggested_fix
+            - Prioritize: error_handling > test_gap > clippy > dead_code > missing_docs
+            - For test_gap findings, identify the specific public function lacking tests
+              and describe what scenarios should be tested
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["dogfood-orchestrator", "self"]
+      can_write: ["self"]
+
+  - id: "dogfood-test-writer"
+    role_type: "operator"
+    description: "Writes compilable Rust unit tests targeting gaps identified by the code-reviewer."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Generate Rust unit tests for the Arkavo Edge codebase.
+
+            You receive a code-reviewer report identifying test gaps and quality
+            issues in a specific crate. Write compilable unit tests.
+
+            Output format:
+            ```
+            FILE: crates/<crate-name>/src/<filename>.rs
+            ```
+            Followed by one or more fenced Rust code blocks containing test functions:
+            ```rust
+            #[test]
+            fn test_function_scenario() {
+                // arrange
+                let input = "test value";
+                // act
+                let result = function_under_test(input);
+                // assert
+                assert_eq!(result, expected);
+            }
+            ```
+
+            Rules:
+            - Use inline #[cfg(test)] module style (idiomatic Rust)
+            - Descriptive test names: test_<function>_<scenario>
+            - Arrange-Act-Assert structure
+            - Cover edge cases: empty input, boundary values, error paths
+            - Only use imports available from the crate's existing dependencies
+            - Each test must be self-contained (no shared mutable state)
+            - Prefer assert_eq! over assert! for better error messages
+            - Test one behavior per test function
+            - Do NOT use unwrap() in tests — use expect() with descriptive message
+
+            Forbidden:
+            - External crate imports not in Cargo.toml
+            - Filesystem or network access in tests
+            - Tests that depend on execution order
+            - #[ignore] annotations
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["dogfood-orchestrator", "dogfood-code-reviewer", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "thompson_sampling"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 900
+    max_total_tokens: 150000
+    max_cost_usd: 0.75
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "response quality judged and, when below 0.5, a lesson is extracted"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

@@ -19,6 +19,7 @@ if [ ! -f "$BINARY" ]; then
 fi
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_FILE="$SCRIPT_DIR/.agent_pids"
+KIT="$SCRIPT_DIR/vision-mesh.swarmkit.yaml"
 
 mkdir -p "$LOG_DIR"
 
@@ -77,28 +78,26 @@ stop_agents() {
 
 start_agent() {
     local name=$1
-    local dir=$2
+    local role=$2
     local port=$3
 
-    if [ ! -f "$dir/AGENTS.md" ]; then
-        print_status "WARNING" "No AGENTS.md in $dir, skipping $name"
+    if [ ! -f "$KIT" ]; then
+        print_status "WARNING" "Kit $KIT not found, skipping $name"
         return 0
     fi
 
     print_status "AGENT" "Starting $name (port $port)..."
 
-    cd "$dir"
-    RUST_LOG=info nohup "$BINARY" agent run > "$LOG_DIR/${name}.log" 2>&1 &
+    RUST_LOG=info nohup "$BINARY" agent -c "$KIT" -n "$role" -p "$port" > "$LOG_DIR/${name}.log" 2>&1 &
     echo "$!" >> "$PID_FILE"
-    cd "$SCRIPT_DIR"
 }
 
 start_mesh() {
     > "$PID_FILE"
 
-    start_agent "orchestrator" "$SCRIPT_DIR/orchestrator" 8418
+    start_agent "orchestrator" "vision-orchestrator" 8418
     sleep 1
-    start_agent "vision-analyst" "$SCRIPT_DIR/vision-analyst" 8420
+    start_agent "vision-analyst" "vision-analyst-agent" 8420
 
     print_status "INFO" "Waiting for agents to initialize and discover peers..."
     sleep 3

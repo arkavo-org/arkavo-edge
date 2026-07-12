@@ -71,7 +71,9 @@ arkavo-registration = { path = "../arkavo-registration" }
 arkavo-agent-auth = { path = "../arkavo-agent-auth" }
 arkavo-config-encryption = { path = "../arkavo-config-encryption" }
 arkavo-config-bundle = { path = "../arkavo-config-bundle" }
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 base64 = { workspace = true }
+serde_yaml = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }

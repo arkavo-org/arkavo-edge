@@ -1,6 +1,7 @@
 spec_version: "1.0.0"
 kit:
   id: ""
+  # Authored empty; populated at publish
   name: "Shadow Teacher Kit"
   version: "0.1.0"
   description: >-
@@ -29,25 +30,75 @@ roles:
     description: "Reviews sample source files for security and quality issues using filesystem tools."
     agent_provisioning:
       model:
-        family: "gemma-4"
+        family: "gemma"
         size: "E4B"
         backend: "llama.cpp"
       budget:
         max_inference_calls: 24
         max_wallclock_ms: 1800000
         max_total_tokens: 96000
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            You review source code for security and quality issues.
+
+            For every task, FIRST read the file named in the task with your
+            filesystem tools, then review what you actually read. Never review
+            from memory — the file on disk is the source of truth.
+
+            When reviewing, report:
+            - The exact vulnerable or low-quality lines
+            - Why each finding matters (injection, panic path, complexity)
+            - A concrete fix as a code snippet
+
+            Keep answers under 300 words. Specific findings beat prose.
+          resources: []
+    mcp_tools:
+      - server: "filesystem"
+        auth: "delegated"
+        tools: []
   - id: "test-writer"
     role_type: "specialist"
     description: "Generates unit tests for sample source files using filesystem tools."
     agent_provisioning:
       model:
-        family: "gemma-4"
+        family: "gemma"
         size: "E4B"
         backend: "llama.cpp"
       budget:
         max_inference_calls: 24
         max_wallclock_ms: 1800000
         max_total_tokens: 96000
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            You write unit tests for source code.
+
+            For every task, FIRST read the file named in the task with your
+            filesystem tools, then write tests against the code you actually
+            read. Never invent an API — the file on disk is the source of truth.
+
+            When writing tests:
+            - Cover the happy path, one edge case, and one failure case
+            - Use idiomatic Rust #[test] functions
+            - Name each test for the behavior it proves
+
+            Keep answers under 300 words of prose; the tests carry the value.
+          resources: []
+    mcp_tools:
+      - server: "filesystem"
+        auth: "delegated"
+        tools: []
   - id: "shadow-teacher"
     role_type: "auditor"
     plane: "audit"
@@ -73,3 +124,12 @@ completion:
   max_retries: 0
 provenance:
   signatures: [{signer_did: "did:web:arkavo.com", algorithm: "ed25519", signature: "AAA"}]
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true
+  mcp_servers:
+    - name: "filesystem"
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "workspace"]
