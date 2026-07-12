@@ -382,7 +382,7 @@ impl ModelSelector {
             // so the learning module can converge on the task categories
             // where the capability gain justifies the premium. It is never a
             // category default — it's reached via learning, escalation, or an
-            // explicit AGENTS.md `model:` hint.
+            // explicit SwarmKit `model:` hint.
             models.push(ModelChoice::ClaudeFable5);
         }
         if self.availability.deepseek {

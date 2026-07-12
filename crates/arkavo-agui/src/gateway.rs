@@ -122,15 +122,15 @@ impl AgUiGateway {
         let discovered_agents = self.discovered_agents.clone();
         let agents_clone = discovered_agents.clone();
 
-        // Initialize security handler from AGENTS.md config
+        // Initialize security handler from SwarmKit config
         {
             let mut sec = self.security_handler.write().await;
-            sec.configure_from_agents_md();
+            sec.configure_from_kit();
         }
 
-        // Initialize budget handler with AGENTS.md config
+        // Initialize budget handler with SwarmKit config
         {
-            let budget_config = load_budget_config_from_agents_md();
+            let budget_config = load_budget_config_from_kit();
             let (budget_tx, mut budget_rx) = mpsc::channel::<AgUiEvent>(100);
             let mut handler = self.budget_handler.write().await;
             handler.initialize(budget_config, budget_tx).await?;
@@ -500,8 +500,8 @@ impl AgUiGateway {
     }
 }
 
-/// Load budget config from AGENTS.md, falling back to defaults
-fn load_budget_config_from_agents_md() -> arkavo_budget::BudgetConfig {
+/// Load budget config from SwarmKit, falling back to defaults
+fn load_budget_config_from_kit() -> arkavo_budget::BudgetConfig {
     let agent_config = arkavo_router::load_agent_config().unwrap_or_default();
 
     match agent_config.budget {
@@ -523,7 +523,7 @@ fn load_budget_config_from_agents_md() -> arkavo_budget::BudgetConfig {
                 config.cloud_policy = policy;
             }
             tracing::info!(
-                "AG-UI: Budget config loaded from AGENTS.md (session={:?}, daily={:?})",
+                "AG-UI: Budget config loaded from SwarmKit (session={:?}, daily={:?})",
                 budget_yaml.max_cost_per_session,
                 budget_yaml.max_cost_per_day
             );

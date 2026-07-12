@@ -2,13 +2,11 @@
 //!
 //! Policies are loaded from the kit-level SwarmKit `runtime.preflight` block.
 //! Product AGENTS.md is no longer read for process config (migrate to
-//! `*.swarmkit.yaml`). Legacy AGENTS.md helpers remain for unit tests and the
-//! migrate CLI only.
+//! `*.swarmkit.yaml`).
 
 use super::features::PreflightFeature;
 use super::moderator::{PolicyId, PreflightModerator};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use torg_core::{BoolOp, Graph, Node, Source};
 
 /// Policy action type
@@ -218,95 +216,6 @@ pub fn load_policies_from_config() -> Result<PreflightModerator, Box<dyn std::er
     }
 }
 
-/// Load policies from a legacy AGENTS.md file (tests / migrate only).
-#[deprecated(
-    since = "0.89.0",
-    note = "use load_policies_from_config / SwarmKit runtime.preflight"
-)]
-pub fn load_policies_from_agents_md(
-    path: &Path,
-) -> Result<PreflightModerator, Box<dyn std::error::Error>> {
-    let moderator = PreflightModerator::new();
-
-    if !path.exists() {
-        tracing::debug!(
-            path = %path.display(),
-            "AGENTS.md not found, using empty moderator"
-        );
-        return Ok(moderator);
-    }
-
-    let content = std::fs::read_to_string(path)?;
-
-    // Extract YAML content from markdown (between --- markers or parse directly)
-    let yaml_content = extract_yaml_from_markdown(&content);
-
-    let config: AgentConfig = serde_yaml::from_str(&yaml_content).unwrap_or_default();
-
-    let policies = match config.preflight {
-        Some(preflight) => preflight.policies,
-        None => {
-            tracing::debug!(
-                path = %path.display(),
-                "No preflight policies in AGENTS.md"
-            );
-            return Ok(moderator);
-        }
-    };
-
-    for policy in policies {
-        if !policy.enabled {
-            tracing::debug!(policy_id = %policy.id, "Skipping disabled policy");
-            continue;
-        }
-
-        let features: Vec<PreflightFeature> = policy
-            .features
-            .iter()
-            .filter_map(|f| {
-                let parsed = parse_feature(f);
-                if parsed.is_none() {
-                    tracing::warn!(
-                        policy_id = %policy.id,
-                        feature = %f,
-                        "Unknown feature, skipping"
-                    );
-                }
-                parsed
-            })
-            .collect();
-
-        if features.is_empty() {
-            tracing::warn!(
-                policy_id = %policy.id,
-                "Policy has no valid features, skipping"
-            );
-            continue;
-        }
-
-        let graph = match policy.action {
-            PolicyAction::Block => build_block_circuit(features.len()),
-            PolicyAction::Allow => build_allow_circuit(features.len()),
-        };
-
-        moderator.register_graph(PolicyId::new(&policy.id), graph, features);
-
-        tracing::info!(
-            policy_id = %policy.id,
-            action = ?policy.action,
-            "Loaded preflight policy from AGENTS.md"
-        );
-    }
-
-    tracing::info!(
-        policies_loaded = moderator.len(),
-        path = %path.display(),
-        "Preflight policies loaded from AGENTS.md"
-    );
-
-    Ok(moderator)
-}
-
 /// Load full agent config from the discovered SwarmKit kit.
 ///
 /// Discovery order: `ARKAVO_SWARMKIT_PATH`, `.arkavo/*.swarmkit.yaml`, cwd kits.
@@ -398,34 +307,6 @@ pub fn agent_config_from_runtime(runtime_cfg: &arkavo_swarmkit::AgentRuntimeConf
     }
 }
 
-/// Load full agent config from a legacy AGENTS.md file (migrate / tests only).
-#[deprecated(
-    since = "0.89.0",
-    note = "use SwarmKit load_agent_config / agent_config_from_runtime"
-)]
-pub fn load_agent_config_from_agents_md(
-    path: &Path,
-) -> Result<AgentConfig, Box<dyn std::error::Error>> {
-    if !path.exists() {
-        tracing::debug!(
-            path = %path.display(),
-            "AGENTS.md not found, using default agent config"
-        );
-        return Ok(AgentConfig::default());
-    }
-
-    let content = std::fs::read_to_string(path)?;
-    let yaml_content = extract_yaml_from_markdown(&content);
-    let config: AgentConfig = serde_yaml::from_str(&yaml_content).unwrap_or_default();
-
-    tracing::warn!(
-        path = %path.display(),
-        "Loaded agent config from deprecated AGENTS.md; migrate to SwarmKit"
-    );
-
-    Ok(config)
-}
-
 /// Build a PreflightModerator from a PreflightConfig
 pub fn build_moderator_from_config(config: &PreflightConfig) -> PreflightModerator {
     let moderator = PreflightModerator::new();
@@ -477,53 +358,9 @@ pub fn build_moderator_from_config(config: &PreflightConfig) -> PreflightModerat
     moderator
 }
 
-/// Extract YAML content from markdown file
-/// Handles both frontmatter (---) and inline YAML sections
-fn extract_yaml_from_markdown(content: &str) -> String {
-    // Try frontmatter first (between --- markers)
-    if let Some(after_start) = content.strip_prefix("---")
-        && let Some(end) = after_start.find("---")
-    {
-        return after_start[..end].to_string();
-    }
-
-    // Otherwise, try to parse the whole content as YAML-like markdown
-    // Extract key: value pairs from the markdown
-    let mut yaml_lines = Vec::new();
-    let mut in_yaml_block = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Skip markdown headers and comments
-        if trimmed.starts_with('#') && !trimmed.starts_with("# ") {
-            continue;
-        }
-        if trimmed.starts_with("## ") {
-            continue;
-        }
-
-        // Detect YAML-like content
-        if trimmed.contains(':') && !trimmed.starts_with("```") {
-            yaml_lines.push(line.to_string());
-            in_yaml_block = trimmed.ends_with(':') || trimmed.ends_with(": |");
-        } else if in_yaml_block && (trimmed.starts_with('-') || trimmed.starts_with(' ')) {
-            yaml_lines.push(line.to_string());
-        } else {
-            in_yaml_block = false;
-        }
-    }
-
-    yaml_lines.join("\n")
-}
-
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::path::PathBuf;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn test_parse_feature() {
@@ -540,69 +377,6 @@ mod tests {
             Some(PreflightFeature::InputLengthExceedsThreshold(1000))
         ));
         assert!(parse_feature("Unknown").is_none());
-    }
-
-    #[test]
-    fn test_load_agents_md_with_preflight() {
-        let mut file = NamedTempFile::with_suffix(".md").unwrap();
-        writeln!(
-            file,
-            r#"---
-name: test-agent
-preflight:
-  policies:
-    - id: block_pii
-      features:
-        - InputContainsPII
-      action: block
-      enabled: true
----
-"#
-        )
-        .unwrap();
-
-        let path = file.path().to_path_buf();
-        #[allow(deprecated)]
-        let moderator = load_policies_from_agents_md(&path).unwrap();
-        assert_eq!(moderator.len(), 1);
-
-        // Test that it blocks PII
-        let result = moderator.check("My SSN is 123-45-6789");
-        assert!(result.is_blocked());
-    }
-
-    #[test]
-    fn test_load_agents_md_multiple_policies() {
-        let mut file = NamedTempFile::with_suffix(".md").unwrap();
-        writeln!(
-            file,
-            r#"---
-name: secure-agent
-preflight:
-  policies:
-    - id: block_pii
-      features:
-        - InputContainsPII
-      action: block
-    - id: block_sql
-      features:
-        - InputContainsSQLKeywords
-      action: block
-    - id: disabled_policy
-      features:
-        - InputContainsShellCommands
-      action: block
-      enabled: false
----
-"#
-        )
-        .unwrap();
-
-        let path = file.path().to_path_buf();
-        #[allow(deprecated)]
-        let moderator = load_policies_from_agents_md(&path).unwrap();
-        // Only 2 policies loaded (one is disabled)
-        assert_eq!(moderator.len(), 2);
     }
 
     #[test]
@@ -654,54 +428,35 @@ preflight:
     }
 
     #[test]
-    fn test_missing_agents_md_returns_empty() {
-        let path = PathBuf::from("/nonexistent/path/AGENTS.md");
-        let moderator = load_policies_from_agents_md(&path).unwrap();
-        assert!(moderator.is_empty());
-    }
+    fn agent_config_from_swarmkit_runtime_maps_kas() {
+        use arkavo_swarmkit::{AgentRuntimeConfig, KitRuntimeConfig, RoleRuntimeView, RuntimeKas};
 
-    #[test]
-    fn test_load_agents_md_with_budget() {
-        let mut file = NamedTempFile::with_suffix(".md").unwrap();
-        writeln!(
-            file,
-            r#"---
-name: budget-agent
-budget:
-  max_cost_per_session: 5.0
-  max_cost_per_day: 25.0
----
-"#
-        )
-        .unwrap();
+        let runtime_cfg = AgentRuntimeConfig {
+            kit_id: "blake3:test".into(),
+            kit_name: "encrypted-kit".into(),
+            objective_goal: "stay safe".into(),
+            runtime: KitRuntimeConfig {
+                kas: Some(RuntimeKas {
+                    enabled: true,
+                    key_id: Some("my-key-42".into()),
+                    algorithm: Some("ec:secp256r1".into()),
+                    trusted_roots: vec![],
+                }),
+                ..Default::default()
+            },
+            roles: vec![RoleRuntimeView {
+                role_id: "agent".into(),
+                role_type: "operator".into(),
+                description: None,
+                model_family: None,
+                model_size: None,
+                model_backend: None,
+                skill_instructions: String::new(),
+                mcp_tool_grants: vec![],
+            }],
+        };
 
-        let path = file.path().to_path_buf();
-        let config = load_agent_config_from_agents_md(&path).unwrap();
-        assert_eq!(config.name.as_deref(), Some("budget-agent"));
-        let budget = config.budget.unwrap();
-        assert!((budget.max_cost_per_session.unwrap() - 5.0).abs() < f64::EPSILON);
-        assert!((budget.max_cost_per_day.unwrap() - 25.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_load_agents_md_with_kas() {
-        let mut file = NamedTempFile::with_suffix(".md").unwrap();
-        writeln!(
-            file,
-            r#"---
-name: encrypted-agent
-kas:
-  enabled: true
-  key_id: my-key-42
-  algorithm: ec:secp256r1
----
-"#
-        )
-        .unwrap();
-
-        let path = file.path().to_path_buf();
-        let config = load_agent_config_from_agents_md(&path).unwrap();
-        assert_eq!(config.name.as_deref(), Some("encrypted-agent"));
+        let config = agent_config_from_runtime(&runtime_cfg);
         let kas = config.kas.unwrap();
         assert!(kas.enabled);
         assert_eq!(kas.key_id.as_deref(), Some("my-key-42"));
@@ -709,39 +464,38 @@ kas:
     }
 
     #[test]
-    fn test_load_agents_md_full_config() {
-        let mut file = NamedTempFile::with_suffix(".md").unwrap();
-        writeln!(
-            file,
-            r#"---
-name: full-agent
-preflight:
-  policies:
-    - id: block_pii
-      features:
-        - InputContainsPII
-      action: block
-budget:
-  max_cost_per_session: 10.0
-  max_cost_per_day: 50.0
-kas:
-  enabled: true
-  key_id: kas-key-1
-  algorithm: ec:secp256r1
----
-"#
-        )
-        .unwrap();
+    fn agent_config_from_swarmkit_runtime_kas_disabled_by_default() {
+        use arkavo_swarmkit::{AgentRuntimeConfig, KitRuntimeConfig, RoleRuntimeView, RuntimeKas};
 
-        let path = file.path().to_path_buf();
-        let config = load_agent_config_from_agents_md(&path).unwrap();
-        assert!(config.preflight.is_some());
-        assert!(config.budget.is_some());
-        assert!(config.kas.is_some());
+        let runtime_cfg = AgentRuntimeConfig {
+            kit_id: "blake3:test".into(),
+            kit_name: "minimal-kas-kit".into(),
+            objective_goal: "stay safe".into(),
+            runtime: KitRuntimeConfig {
+                kas: Some(RuntimeKas {
+                    enabled: false,
+                    key_id: None,
+                    algorithm: None,
+                    trusted_roots: vec![],
+                }),
+                ..Default::default()
+            },
+            roles: vec![RoleRuntimeView {
+                role_id: "agent".into(),
+                role_type: "operator".into(),
+                description: None,
+                model_family: None,
+                model_size: None,
+                model_backend: None,
+                skill_instructions: String::new(),
+                mcp_tool_grants: vec![],
+            }],
+        };
 
-        // Verify preflight can build a moderator
-        let moderator = build_moderator_from_config(config.preflight.as_ref().unwrap());
-        assert_eq!(moderator.len(), 1);
+        let config = agent_config_from_runtime(&runtime_cfg);
+        let kas = config.kas.unwrap();
+        assert!(!kas.enabled);
+        assert!(kas.key_id.is_none());
     }
 
     #[test]
@@ -770,44 +524,5 @@ kas:
 
         let result = moderator.check("My SSN is 123-45-6789");
         assert!(result.is_blocked());
-    }
-
-    #[test]
-    fn test_kas_disabled_by_default() {
-        let mut file = NamedTempFile::with_suffix(".md").unwrap();
-        writeln!(
-            file,
-            r#"---
-name: minimal-kas
-kas:
-  enabled: false
----
-"#
-        )
-        .unwrap();
-
-        let path = file.path().to_path_buf();
-        let config = load_agent_config_from_agents_md(&path).unwrap();
-        let kas = config.kas.unwrap();
-        assert!(!kas.enabled);
-        assert!(kas.key_id.is_none());
-    }
-
-    #[test]
-    fn test_agents_md_no_preflight_returns_empty() {
-        let mut file = NamedTempFile::with_suffix(".md").unwrap();
-        writeln!(
-            file,
-            r#"---
-name: simple-agent
-model: gemma-3-270m
----
-"#
-        )
-        .unwrap();
-
-        let path = file.path().to_path_buf();
-        let moderator = load_policies_from_agents_md(&path).unwrap();
-        assert!(moderator.is_empty());
     }
 }

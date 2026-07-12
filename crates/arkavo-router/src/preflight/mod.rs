@@ -47,11 +47,10 @@ mod moderator;
 pub mod normalize;
 mod result;
 
-#[allow(deprecated)]
 pub use config::{
     AgentConfig, BudgetYamlConfig, KasYamlConfig, PolicyAction, PolicyConfig, PolicyFileConfig,
     PreflightConfig, agent_config_from_runtime, build_moderator_from_config, load_agent_config,
-    load_agent_config_from_agents_md, load_policies_from_agents_md, load_policies_from_config,
+    load_policies_from_config,
 };
 pub use features::PreflightFeature;
 pub use moderator::{PolicyId, PreflightModerator};

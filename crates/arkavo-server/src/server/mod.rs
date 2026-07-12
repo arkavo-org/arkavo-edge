@@ -392,7 +392,7 @@ pub struct A2aRpcImpl {
     pub(crate) budget_manager: Option<Arc<arkavo_budget::BudgetManager>>,
     /// Agent cycle counter (shared with agent loop)
     pub(crate) orchestrator_tick: Arc<std::sync::atomic::AtomicU64>,
-    /// Model hint from AGENTS.md (bias for Thompson Sampling, not override)
+    /// Model hint from SwarmKit (bias for Thompson Sampling, not override)
     pub(crate) model_hint: Option<arkavo_router::ModelChoice>,
     /// Per-agent compute budget (specialists check before each cycle)
     pub(crate) compute_budget: arkavo_budget::SharedComputeBudget,

@@ -64,9 +64,9 @@ pub struct A2aServer {
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
     /// Base64-encoded ECDSA P-256 public key for TDF encryption
     public_key: Arc<tokio::sync::RwLock<Option<String>>>,
-    /// Budget manager loaded from AGENTS.md config
+    /// Budget manager loaded from SwarmKit config
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
-    /// Cached AGENTS.md config to avoid repeated file reads
+    /// Cached SwarmKit agent config to avoid repeated discovery reads
     agent_config: Arc<tokio::sync::RwLock<arkavo_router::AgentConfig>>,
     /// Federated memory service for ABAC-scoped cross-agent retrieval
     federated_memory: Arc<tokio::sync::RwLock<Option<Arc<arkavo_memory::FederatedMemoryService>>>>,
@@ -365,7 +365,7 @@ impl A2aServer {
         Ok(())
     }
 
-    /// Resolve model hint from AGENTS.md.
+    /// Resolve model hint from SwarmKit.
     ///
     /// Returns the model specified in the agent's configuration. The router's
     /// ModelSelector memory budget (set from hint size) prevents Thompson
@@ -526,7 +526,7 @@ impl A2aServer {
                     if agent_config.name.is_some() {
                         let kit_lessons = Self::read_kit_lesson_content().await;
                         if !kit_lessons.is_empty() {
-                            bus.load_agents_md_lessons(&kit_lessons).await;
+                            bus.load_kit_lessons(&kit_lessons).await;
                         }
                     }
                 }
@@ -1078,7 +1078,7 @@ impl A2aServer {
             mgr.set_learning_context(learning_context.clone());
             mgr.set_task_context(task_context.clone());
 
-            // Inject agent purpose from AGENTS.md as system prompt for chat context
+            // Inject agent purpose from SwarmKit as system prompt for chat context
             {
                 let metadata = self.agent_metadata.read().await;
                 mgr.set_system_prompt(metadata.purpose.clone());
@@ -1411,7 +1411,7 @@ impl A2aServer {
     }
 }
 
-/// Convert AGENTS.md budget YAML to BudgetConfig for the budget manager
+/// Convert kit budget YAML to BudgetConfig for the budget manager
 fn build_budget_config(yaml: &arkavo_router::BudgetYamlConfig) -> arkavo_budget::BudgetConfig {
     let mut config = arkavo_budget::BudgetConfig::default();
 

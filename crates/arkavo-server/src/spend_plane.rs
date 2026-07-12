@@ -27,12 +27,6 @@ pub fn cloud_policy_from_kit() -> CloudPolicy {
     cloud_policy_from_config(&arkavo_router::load_agent_config().unwrap_or_default())
 }
 
-/// Deprecated alias for [`cloud_policy_from_kit`].
-#[deprecated(since = "0.89.0", note = "renamed to cloud_policy_from_kit")]
-pub fn cloud_policy_from_agents_md() -> CloudPolicy {
-    cloud_policy_from_kit()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

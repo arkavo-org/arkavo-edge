@@ -242,7 +242,7 @@ pub async fn handle_message_send(
     }
 
     // Read agent purpose for system prompt injection so specialists
-    // receive their AGENTS.md identity when processing delegated tasks.
+    // receive their SwarmKit identity when processing delegated tasks.
     let purpose = agent_metadata.read().await.purpose.clone();
 
     // Save metadata before submit_task consumes request.message

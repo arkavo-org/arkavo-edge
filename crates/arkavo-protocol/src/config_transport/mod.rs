@@ -108,7 +108,7 @@ impl ConfigTransportHandler {
                     agent_id = %request.agent_id,
                     "Agent public key not registered - falling back to standard config"
                 );
-                return Ok(None); // Fall back to standard AGENTS.md config
+                return Ok(None); // Fall back to standard SwarmKit config
             }
         };
 
