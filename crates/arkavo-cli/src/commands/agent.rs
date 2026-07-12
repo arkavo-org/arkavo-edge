@@ -4,7 +4,6 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -142,24 +141,6 @@ fn print_usage() {
         "    arkavo agent -c team.swarmkit.yaml -n worker -p 8343  # Run one role of a multi-role kit"
     );
     println!("    arkavo agent run --trust               # Show the QR code to trust this agent");
-}
-
-// Extract agent role/purpose from AGENTS.md for use in chat mode
-pub fn extract_agent_role() -> Option<String> {
-    // Try .arkavo/AGENTS.md first, then fallback to root AGENTS.md
-    let config_path = if Path::new(".arkavo/AGENTS.md").exists() {
-        ".arkavo/AGENTS.md"
-    } else {
-        "AGENTS.md"
-    };
-
-    if let Ok(content) = fs::read_to_string(config_path)
-        && let Ok(agents) = parse_agents_config(&content)
-        && let Some(first_agent) = agents.first()
-    {
-        return Some(first_agent.purpose.clone());
-    }
-    None
 }
 
 /// Deprecated: `arkavo agent init` no longer writes AGENTS.md.

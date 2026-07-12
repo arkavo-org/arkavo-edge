@@ -1,51 +1,8 @@
 /// Model discovery utilities using hf-hub API
 ///
-/// Future: This will be used by `arkavo models list` command and
-/// `.arkavo/AGENTS.md` configuration for remote model subsets.
+/// Future: This will be used by `arkavo models list` command for remote
+/// model subsets.
 use std::path::PathBuf;
-
-/// Load API keys from .arkavo/AGENTS.md if present
-///
-/// This searches for .arkavo/AGENTS.md in the current directory and parent directories,
-/// and sets any API_KEY environment variables found in the file.
-pub fn load_api_keys_from_config() {
-    // Try to find .arkavo/AGENTS.md in current directory or parent directories
-    let mut current_dir = std::env::current_dir().ok();
-    let mut agents_file = None;
-
-    while let Some(dir) = current_dir {
-        let candidate = dir.join(".arkavo").join("AGENTS.md");
-        if candidate.exists() {
-            agents_file = Some(candidate);
-            break;
-        }
-        current_dir = dir.parent().map(|p| p.to_path_buf());
-    }
-
-    if let Some(path) = agents_file
-        && let Ok(content) = std::fs::read_to_string(path)
-    {
-        for line in content.lines() {
-            let trimmed = line.trim();
-
-            // Look for API key assignments (e.g., GEMINI_API_KEY=...)
-            if trimmed.contains("API_KEY=")
-                && let Some((key, value)) = trimmed.split_once('=')
-            {
-                let key = key.trim();
-                let value = value.trim();
-                // Only set if not already set in environment
-                if std::env::var(key).is_err() {
-                    // SAFETY: We're setting environment variables during initialization
-                    // before any threads are spawned, so this is safe
-                    unsafe {
-                        std::env::set_var(key, value);
-                    }
-                }
-            }
-        }
-    }
-}
 
 /// Find a GGUF model file, preferring specific models but accepting any available
 ///

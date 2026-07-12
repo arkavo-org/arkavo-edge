@@ -2036,6 +2036,7 @@ dependencies = [
  "arkavo-mcp-macos",
  "arkavo-mcp-tools",
  "arkavo-memory",
+ "arkavo-swarmkit",
  "chrono",
  "crossterm",
  "ratatui",

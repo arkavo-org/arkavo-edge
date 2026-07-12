@@ -33,9 +33,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .with_line_number(false)
             .init();
 
-        // Load API keys from .arkavo/AGENTS.md if present
-        arkavo_router::model_discovery::load_api_keys_from_config();
-
         // Initialize security controls
         // SECURITY: Egress filter prevents SSRF attacks
         secure_http::init_egress_filter();
