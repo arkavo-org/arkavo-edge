@@ -37,8 +37,7 @@ impl ResponsesProvider {
         let http_config = HttpClientConfig {
             base_url: config.base_url.clone(),
             auth_token: Some(config.api_key.clone()),
-            // Reasoning models can run long; keep a generous ceiling.
-            timeout_secs: 300,
+            timeout_secs: config.reasoning_effort.request_timeout_secs(),
             max_retries: 3,
             initial_retry_delay_ms: 1000,
             backoff_factor: 2.0,
@@ -388,5 +387,19 @@ mod tests {
         assert_eq!(req.store, Some(true));
         assert_eq!(req.prompt_cache_key.as_deref(), Some("session-abc"));
         assert_eq!(req.max_output_tokens, Some(64));
+    }
+
+    #[test]
+    fn build_request_serializes_xhigh_effort() {
+        let provider = ResponsesProvider::new(ResponsesConfig {
+            api_key: "test".to_string(),
+            model: "grok-4.6".to_string(),
+            reasoning_effort: ReasoningEffort::Xhigh,
+            ..Default::default()
+        })
+        .unwrap();
+        let req = provider.build_request(json!([]), None, None, false, None);
+        assert_eq!(req.model, "grok-4.6");
+        assert_eq!(req.reasoning.unwrap()["effort"], "xhigh");
     }
 }

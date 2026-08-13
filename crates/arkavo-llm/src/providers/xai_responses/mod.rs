@@ -1,6 +1,6 @@
 //! xAI Responses API client (`POST /v1/responses`).
 //!
-//! Preferred path for Grok 4.5 agentic work. Uses the Responses surface (not
+//! Preferred path for Grok 4.6 agentic work. Uses the Responses surface (not
 //! Chat Completions) for configurable reasoning effort, function-call items,
 //! and optional SSE streaming.
 //!

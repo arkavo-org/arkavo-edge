@@ -21,7 +21,7 @@ fn provider() -> Option<ResponsesProvider> {
         ResponsesProvider::new(ResponsesConfig::for_agent(
             api_key,
             base_url,
-            "grok-4.5".to_string(),
+            "grok-4.6".to_string(),
         ))
         .expect("ResponsesProvider construction"),
     )
@@ -130,6 +130,6 @@ fn provider_defaults_to_low_effort_and_ephemeral_store() {
         cfg.reasoning_effort,
         arkavo_llm::providers::xai_responses::ReasoningEffort::Low
     );
-    assert_eq!(cfg.model, "grok-4.5");
+    assert_eq!(cfg.model, "grok-4.6");
     assert!(!cfg.store, "default store is false for agent privacy");
 }
