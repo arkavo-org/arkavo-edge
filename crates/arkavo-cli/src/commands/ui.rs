@@ -1102,10 +1102,12 @@ async fn create_client_from_routing(
                     .grok_api_model()
                     .unwrap_or("grok-4.6")
                     .to_string();
-                let mut config = ResponsesConfig::for_agent(api_key, base_url, api_model);
-                if matches!(decision.recommended_model, ModelChoice::Grok46Xhigh) {
-                    config = config.with_reasoning_effort(ReasoningEffort::Xhigh);
-                }
+                let effort = if matches!(decision.recommended_model, ModelChoice::Grok46Xhigh) {
+                    ReasoningEffort::Xhigh
+                } else {
+                    ReasoningEffort::Low
+                };
+                let config = ResponsesConfig::for_routed_arm(api_key, base_url, api_model, effort);
                 let provider = Box::new(ResponsesProvider::new(config)?);
                 Ok(LlmClient::new(provider))
             }

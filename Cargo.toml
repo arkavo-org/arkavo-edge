@@ -189,7 +189,7 @@ keyring = "3.6"
 # Common utilities
 url = "2.5"
 http = "1.1"
-lru = "0.16"
+lru = "0.18"
 anthropic-agent-sdk = { path = "crates/anthropic-agent-sdk" }
 async-stream = "0.3"
 tower = "0.5"

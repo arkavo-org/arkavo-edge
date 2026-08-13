@@ -38,7 +38,7 @@ impl ResponsesProvider {
             base_url: config.base_url.clone(),
             auth_token: Some(config.api_key.clone()),
             timeout_secs: config.reasoning_effort.request_timeout_secs(),
-            max_retries: 3,
+            max_retries: config.reasoning_effort.max_retries(),
             initial_retry_delay_ms: 1000,
             backoff_factor: 2.0,
             max_retry_delay_ms: 30000,

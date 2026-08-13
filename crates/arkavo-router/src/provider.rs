@@ -439,10 +439,12 @@ impl super::Router {
                     .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
                 let api_model = model.grok_api_model().unwrap_or("grok-4.6").to_string();
 
-                let mut config = ResponsesConfig::for_agent(api_key, base_url, api_model);
-                if matches!(model, ModelChoice::Grok46Xhigh) {
-                    config = config.with_reasoning_effort(ReasoningEffort::Xhigh);
-                }
+                let effort = if matches!(model, ModelChoice::Grok46Xhigh) {
+                    ReasoningEffort::Xhigh
+                } else {
+                    ReasoningEffort::Low
+                };
+                let config = ResponsesConfig::for_routed_arm(api_key, base_url, api_model, effort);
 
                 let provider = ResponsesProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create xAI Responses provider: {e}"))
