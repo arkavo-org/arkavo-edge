@@ -398,8 +398,10 @@ impl ModelSelector {
             models.push(ModelChoice::Glm52);
         }
         if self.availability.xai {
-            // Grok 4.5 enters as a single Thompson Sampling arm (cold-start).
-            models.push(ModelChoice::Grok45);
+            // Grok 4.6 base arm (low effort) plus the xhigh companion so
+            // Thompson Sampling can learn when max-depth reasoning pays off.
+            models.push(ModelChoice::Grok46);
+            models.push(ModelChoice::Grok46Xhigh);
         }
 
         // Fallback: always include Qwen3 as baseline
@@ -587,7 +589,8 @@ mod tests {
     fn test_feasible_models_xai_only() {
         let selector = ModelSelector::with_availability(xai_only());
         let feasible = selector.feasible_models();
-        assert!(feasible.contains(&ModelChoice::Grok45));
+        assert!(feasible.contains(&ModelChoice::Grok46));
+        assert!(feasible.contains(&ModelChoice::Grok46Xhigh));
         assert!(!feasible.contains(&ModelChoice::Glm52));
         assert!(!feasible.contains(&ModelChoice::ClaudeSonnet));
     }

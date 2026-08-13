@@ -1,8 +1,26 @@
-# Grok 4.5 Support Plan
+# Grok 4.5 / 4.6 Support Plan
+
+## Grok 4.6 update (2026-08-13)
+
+The flagship xAI arm is now **Grok 4.6**. `ModelChoice::Grok46` is the
+low-effort Thompson arm (same role as the former `Grok45`).
+`ModelChoice::Grok46Xhigh` is a companion arm that forces
+`reasoning.effort = "xhigh"` (Grok 4.6+ only; 4.5 treated `xhigh` as `high`).
+Persisted `"Grok45"` traces deserialize as `Grok46`. Name aliases `grok-4.5`,
+`grok-4.5-latest`, and `grok45` resolve to `Grok46`. `XAI_REASONING_EFFORT`
+accepts `low` / `medium` / `high` / `xhigh`.
+
+| Item | Value |
+|------|--------|
+| Model ID | `grok-4.6` (aliases: `grok-4.6-latest`, `grok-build-latest`, `grok`) |
+| xhigh arm | `grok-4.6-xhigh` (API model still `grok-4.6`) |
+| Pricing | **$2.00 / $0.50 cached / $6.00** per 1M tokens below 200k prompt tokens |
+| Context | 500k tokens |
+| Arkavo reasoning default | `low` on `Grok46`; `xhigh` on `Grok46Xhigh` |
 
 ## Goal
 
-Add **xAI Grok 4.5** as a routable cloud model arm via the **xAI Responses API**
+Add **xAI Grok 4.5** (now superseded by 4.6) as a routable cloud model arm via the **xAI Responses API**
 (`POST /v1/responses`) using `ResponsesProvider` in `arkavo-llm`. Chat Completions
 remains available through `OpenAIProvider` for generic OpenAI-compatible hosts,
 but Grok routing intentionally uses Responses for reasoning effort, function-call
@@ -27,7 +45,7 @@ Env vars:
 - `XAI_BASE_URL` (optional, default `https://api.x.ai/v1`)
 - `XAI_STORE` (optional; `1`/`true` enables server-side store for response-id chaining)
 - `XAI_PROMPT_CACHE_KEY` (optional; stable key for multi-turn cache hits)
-- `XAI_REASONING_EFFORT` (optional; `low` / `medium` / `high`, default `low`)
+- `XAI_REASONING_EFFORT` (optional; `low` / `medium` / `high` / `xhigh`, default `low`)
 
 ## Approach
 

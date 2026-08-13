@@ -119,22 +119,29 @@ impl LlmIntegration {
                     anyhow::bail!("GLM feature not enabled")
                 }
             }
-            ModelChoice::Grok45 => {
+            ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
                 #[cfg(feature = "xai")]
                 {
                     use arkavo_llm::providers::xai_responses::{
-                        ResponsesConfig, ResponsesProvider,
+                        ReasoningEffort, ResponsesConfig, ResponsesProvider,
                     };
                     let Ok(api_key) = std::env::var("XAI_API_KEY") else {
                         anyhow::bail!("XAI_API_KEY not set")
                     };
                     let base_url = std::env::var("XAI_BASE_URL")
                         .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-                    let config = ResponsesConfig::for_agent(
-                        api_key,
-                        base_url,
-                        decision.recommended_model.name().to_string(),
-                    );
+                    let api_model = decision
+                        .recommended_model
+                        .grok_api_model()
+                        .unwrap_or("grok-4.6")
+                        .to_string();
+                    let effort = if matches!(decision.recommended_model, ModelChoice::Grok46Xhigh) {
+                        ReasoningEffort::Xhigh
+                    } else {
+                        ReasoningEffort::Low
+                    };
+                    let config =
+                        ResponsesConfig::for_routed_arm(api_key, base_url, api_model, effort);
                     let provider = ResponsesProvider::new(config)?;
                     Ok(LlmClient::new(Box::new(provider)))
                 }

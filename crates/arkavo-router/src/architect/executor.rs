@@ -315,8 +315,9 @@ impl ArchitectExecutor {
             // GLM-5.2 is a low-cost cloud arm; escalate to a stronger tier
             // when it underperforms on a task.
             ModelChoice::Glm52 => ModelChoice::ClaudeSonnet,
-            // Grok 4.5 escalates toward Claude for hard failures.
-            ModelChoice::Grok45 => ModelChoice::ClaudeSonnet,
+            // Grok 4.6 climbs the effort ladder before leaving the family.
+            ModelChoice::Grok46 => ModelChoice::Grok46Xhigh,
+            ModelChoice::Grok46Xhigh => ModelChoice::ClaudeSonnet,
         }
     }
 
@@ -354,8 +355,8 @@ impl ArchitectExecutor {
             ModelChoice::ClaudeFable5 => {
                 (input_tokens / 1_000_000.0).mul_add(10.00, (output_tokens / 1_000_000.0) * 50.00)
             }
-            ModelChoice::Grok45 => {
-                // Grok 4.5 list rates: $2.00/1M input, $6.00/1M output
+            ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
+                // Grok 4.6 list rates: $2.00/1M input, $6.00/1M output
                 (input_tokens / 1_000_000.0).mul_add(2.00, (output_tokens / 1_000_000.0) * 6.00)
             }
             ModelChoice::Glm52 => {
@@ -452,7 +453,11 @@ mod tests {
                 ModelChoice::ClaudeFable5
             );
             assert_eq!(
-                executor.escalate_model(&ModelChoice::Grok45),
+                executor.escalate_model(&ModelChoice::Grok46),
+                ModelChoice::Grok46Xhigh
+            );
+            assert_eq!(
+                executor.escalate_model(&ModelChoice::Grok46Xhigh),
                 ModelChoice::ClaudeSonnet
             );
         }
@@ -476,7 +481,7 @@ mod tests {
             ..Default::default()
         };
         // $2/M in + $6/M out → 2 + 3 = $5.00
-        let cost = executor.estimate_actual_cost(&ModelChoice::Grok45, &resp);
+        let cost = executor.estimate_actual_cost(&ModelChoice::Grok46, &resp);
         assert!(
             (cost - 5.0).abs() < 1e-9,
             "Grok actual cost should be $5.00 for 1M/0.5M tokens, got {cost}"
@@ -498,7 +503,7 @@ mod tests {
             ..Default::default()
         };
         // 500k output tokens at $6/M → $3.00 (not $3.00 + $1.80 double-count)
-        let thinking_cost = executor.estimate_actual_cost(&ModelChoice::Grok45, &with_thinking);
+        let thinking_cost = executor.estimate_actual_cost(&ModelChoice::Grok46, &with_thinking);
         assert!(
             (thinking_cost - 3.0).abs() < 1e-9,
             "thinking tokens must not double-count; got {thinking_cost}"

@@ -57,7 +57,7 @@ kimi = ["arkavo-llm/kimi"]
 # GLM-5.2 routes through the generic OpenAI-compatible provider, which lives
 # behind arkavo-llm's `llm-remote` feature.
 glm = ["arkavo-llm/llm-remote"]
-# Grok 4.5 (xAI) uses the Responses API client in arkavo-llm (llm-remote).
+# Grok 4.6 (xAI) uses the Responses API client in arkavo-llm (llm-remote).
 xai = ["arkavo-llm/llm-remote"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
 tdf-encrypt = ["dep:arkavo-tdf", "dep:arkavo-memory"]

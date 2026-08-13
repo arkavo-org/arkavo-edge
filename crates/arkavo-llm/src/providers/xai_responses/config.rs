@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 /// Reasoning effort for Grok models.
 ///
 /// xAI's API default is `high`. Arkavo defaults to [`ReasoningEffort::Low`] for
-/// agent latency; set medium/high when the task needs deeper chain-of-thought.
+/// agent latency; set medium/high/`xhigh` when the task needs deeper
+/// chain-of-thought. `"xhigh"` is supported on `grok-4.6` and later; older
+/// models treat it as `"high"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
@@ -11,6 +13,8 @@ pub enum ReasoningEffort {
     Low,
     Medium,
     High,
+    /// Maximum reasoning depth on Grok 4.6+. Correspondingly higher latency.
+    Xhigh,
 }
 
 impl ReasoningEffort {
@@ -19,6 +23,40 @@ impl ReasoningEffort {
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
+            Self::Xhigh => "xhigh",
+        }
+    }
+
+    /// Parse an effort name. Unknown values fall back to [`Self::Low`].
+    pub fn from_name(name: &str) -> Self {
+        match name.to_ascii_lowercase().as_str() {
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" | "x-high" | "extra-high" => Self::Xhigh,
+            _ => Self::Low,
+        }
+    }
+
+    /// HTTP timeout for a Responses call at this effort.
+    ///
+    /// xAI's own examples use a 3600s ceiling for reasoning models; `xhigh`
+    /// is the only tier that needs the full hour. Lower tiers stay tighter
+    /// so a stuck agent loop fails faster.
+    pub fn request_timeout_secs(self) -> u64 {
+        match self {
+            Self::Low => 300,
+            Self::Medium => 600,
+            Self::High => 1800,
+            Self::Xhigh => 3600,
+        }
+    }
+
+    /// Retry budget for this effort. `xhigh` already waits up to an hour;
+    /// retrying timeouts would triple wall-clock and token spend.
+    pub fn max_retries(self) -> u32 {
+        match self {
+            Self::Xhigh => 1,
+            _ => 3,
         }
     }
 }
@@ -56,7 +94,7 @@ impl Default for ResponsesConfig {
         Self {
             api_key: String::new(),
             base_url: "https://api.x.ai/v1".to_string(),
-            model: "grok-4.5".to_string(),
+            model: "grok-4.6".to_string(),
             reasoning_effort: ReasoningEffort::Low,
             store: false,
             service_tier: None,
@@ -100,6 +138,24 @@ impl ResponsesConfig {
             ..Default::default()
         }
     }
+
+    /// Override reasoning effort after [`Self::for_agent`] / [`Self::from_env`].
+    pub fn with_reasoning_effort(mut self, effort: ReasoningEffort) -> Self {
+        self.reasoning_effort = effort;
+        self
+    }
+
+    /// Routed Grok arm: same agent defaults as [`Self::for_agent`], but
+    /// `effort` is pinned so `XAI_REASONING_EFFORT` cannot collapse distinct
+    /// Thompson Sampling arms into one behavior.
+    pub fn for_routed_arm(
+        api_key: String,
+        base_url: String,
+        model: String,
+        effort: ReasoningEffort,
+    ) -> Self {
+        Self::for_agent(api_key, base_url, model).with_reasoning_effort(effort)
+    }
 }
 
 fn env_truthy(name: &str) -> bool {
@@ -110,14 +166,9 @@ fn env_truthy(name: &str) -> bool {
 }
 
 fn env_reasoning_effort() -> ReasoningEffort {
-    match std::env::var("XAI_REASONING_EFFORT")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "medium" => ReasoningEffort::Medium,
-        "high" => ReasoningEffort::High,
-        _ => ReasoningEffort::Low,
+    match std::env::var("XAI_REASONING_EFFORT") {
+        Ok(name) => ReasoningEffort::from_name(&name),
+        Err(_) => ReasoningEffort::Low,
     }
 }
 
@@ -129,6 +180,34 @@ mod tests {
     fn reasoning_effort_serializes_lowercase() {
         assert_eq!(ReasoningEffort::Low.as_str(), "low");
         assert_eq!(ReasoningEffort::High.as_str(), "high");
+        assert_eq!(ReasoningEffort::Xhigh.as_str(), "xhigh");
+    }
+
+    #[test]
+    fn reasoning_effort_from_name_recognizes_xhigh_aliases() {
+        assert_eq!(ReasoningEffort::from_name("xhigh"), ReasoningEffort::Xhigh);
+        assert_eq!(ReasoningEffort::from_name("XHIGH"), ReasoningEffort::Xhigh);
+        assert_eq!(ReasoningEffort::from_name("x-high"), ReasoningEffort::Xhigh);
+        assert_eq!(
+            ReasoningEffort::from_name("extra-high"),
+            ReasoningEffort::Xhigh
+        );
+        assert_eq!(
+            ReasoningEffort::from_name("medium"),
+            ReasoningEffort::Medium
+        );
+        assert_eq!(ReasoningEffort::from_name("high"), ReasoningEffort::High);
+        assert_eq!(ReasoningEffort::from_name(""), ReasoningEffort::Low);
+        assert_eq!(ReasoningEffort::from_name("nope"), ReasoningEffort::Low);
+    }
+
+    #[test]
+    fn xhigh_uses_hour_timeout() {
+        assert_eq!(ReasoningEffort::Xhigh.request_timeout_secs(), 3600);
+        assert!(
+            ReasoningEffort::Xhigh.request_timeout_secs()
+                > ReasoningEffort::High.request_timeout_secs()
+        );
     }
 
     #[test]
@@ -136,7 +215,40 @@ mod tests {
         let cfg = ResponsesConfig::default();
         assert!(!cfg.store);
         assert_eq!(cfg.reasoning_effort, ReasoningEffort::Low);
-        assert_eq!(cfg.model, "grok-4.5");
+        assert_eq!(cfg.model, "grok-4.6");
         assert!(cfg.prompt_cache_key.is_none());
+    }
+
+    #[test]
+    fn with_reasoning_effort_overrides_default() {
+        let cfg = ResponsesConfig::default().with_reasoning_effort(ReasoningEffort::Xhigh);
+        assert_eq!(cfg.reasoning_effort, ReasoningEffort::Xhigh);
+        assert_eq!(cfg.model, "grok-4.6");
+    }
+
+    #[test]
+    fn for_routed_arm_pins_effort_over_for_agent_default() {
+        let low = ResponsesConfig::for_routed_arm(
+            "k".into(),
+            "https://api.x.ai/v1".into(),
+            "grok-4.6".into(),
+            ReasoningEffort::Low,
+        );
+        let xhigh = ResponsesConfig::for_routed_arm(
+            "k".into(),
+            "https://api.x.ai/v1".into(),
+            "grok-4.6".into(),
+            ReasoningEffort::Xhigh,
+        );
+        assert_eq!(low.reasoning_effort, ReasoningEffort::Low);
+        assert_eq!(xhigh.reasoning_effort, ReasoningEffort::Xhigh);
+        assert_eq!(low.model, "grok-4.6");
+    }
+
+    #[test]
+    fn xhigh_retries_once() {
+        assert_eq!(ReasoningEffort::Xhigh.max_retries(), 1);
+        assert_eq!(ReasoningEffort::Low.max_retries(), 3);
+        assert_eq!(ReasoningEffort::High.max_retries(), 3);
     }
 }

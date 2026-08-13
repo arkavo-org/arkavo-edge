@@ -115,7 +115,9 @@ impl super::Router {
             }
             ModelChoice::KimiK2 => std::env::var("MOONSHOT_API_KEY").is_ok(),
             ModelChoice::Glm52 => cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
-            ModelChoice::Grok45 => cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok(),
+            ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
+                cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok()
+            }
             m if m.is_local() => match (m.repo_id(), m.gguf_filename()) {
                 (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
                 _ => false,
@@ -423,19 +425,26 @@ impl super::Router {
                 Ok(Box::new(provider))
             }
             #[cfg(feature = "xai")]
-            ModelChoice::Grok45 => {
-                // Grok 4.5 uses the xAI Responses API (not Chat Completions)
-                // for reasoning_effort control. v1 multi-turn is full-transcript;
-                // store stays off unless XAI_STORE opts in.
-                use arkavo_llm::providers::xai_responses::{ResponsesConfig, ResponsesProvider};
+            ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
+                // Grok 4.6 uses the xAI Responses API (not Chat Completions)
+                // for reasoning_effort control. The API model is always
+                // `grok-4.6`; `Grok46Xhigh` forces `reasoning.effort = xhigh`.
+                use arkavo_llm::providers::xai_responses::{
+                    ReasoningEffort, ResponsesConfig, ResponsesProvider,
+                };
 
                 let api_key = std::env::var("XAI_API_KEY")
                     .map_err(|_| Error::ModelExecution("XAI_API_KEY not set".to_string()))?;
                 let base_url = std::env::var("XAI_BASE_URL")
                     .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+                let api_model = model.grok_api_model().unwrap_or("grok-4.6").to_string();
 
-                let config =
-                    ResponsesConfig::for_agent(api_key, base_url, model.name().to_string());
+                let effort = if matches!(model, ModelChoice::Grok46Xhigh) {
+                    ReasoningEffort::Xhigh
+                } else {
+                    ReasoningEffort::Low
+                };
+                let config = ResponsesConfig::for_routed_arm(api_key, base_url, api_model, effort);
 
                 let provider = ResponsesProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create xAI Responses provider: {e}"))

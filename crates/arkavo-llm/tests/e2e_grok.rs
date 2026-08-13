@@ -1,6 +1,6 @@
-//! End-to-end test against the **live Grok 4.5** xAI Responses API.
+//! End-to-end test against the **live Grok 4.6** xAI Responses API.
 //!
-//! Exercises the **router path** for `ModelChoice::Grok45`:
+//! Exercises the **router path** for `ModelChoice::Grok46`:
 //! [`ResponsesProvider`] behind [`LlmClient`] with agent defaults
 //! (`reasoning_effort: low`, `store: false` unless `XAI_STORE` is set).
 //!
@@ -27,7 +27,7 @@ fn grok_provider() -> Option<ResponsesProvider> {
         ResponsesProvider::new(ResponsesConfig::for_agent(
             api_key,
             base_url,
-            "grok-4.5".to_string(),
+            "grok-4.6".to_string(),
         ))
         .expect("ResponsesProvider construction should not fail with a valid config"),
     )
@@ -50,10 +50,10 @@ fn is_transient_provider_error(err: &impl std::fmt::Display) -> bool {
 }
 
 #[tokio::test]
-#[ignore = "Requires XAI_API_KEY — makes a live Grok 4.5 Responses call"]
-async fn grok45_round_trips_a_prompt() {
+#[ignore = "Requires XAI_API_KEY — makes a live Grok 4.6 Responses call"]
+async fn grok46_round_trips_a_prompt() {
     let Some(client) = grok_client() else {
-        eprintln!("XAI_API_KEY not set — skipping live Grok 4.5 e2e");
+        eprintln!("XAI_API_KEY not set — skipping live Grok 4.6 e2e");
         return;
     };
 
@@ -73,13 +73,13 @@ async fn grok45_round_trips_a_prompt() {
         Err(err) if is_transient_provider_error(&err) => {
             eprintln!("Skipping live Grok e2e on transient provider error: {err}");
         }
-        Err(err) => panic!("Grok 4.5 round-trip failed: {err}"),
+        Err(err) => panic!("Grok 4.6 round-trip failed: {err}"),
     }
 }
 
 #[tokio::test]
 #[ignore = "Requires XAI_API_KEY — live Grok provider construction check"]
-async fn grok45_provider_advertises_tools() {
+async fn grok46_provider_advertises_tools() {
     let Some(provider) = grok_provider() else {
         eprintln!("XAI_API_KEY not set — skipping Grok provider check");
         return;
