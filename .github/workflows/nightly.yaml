@@ -103,19 +103,22 @@ jobs:
   # daily to catch it here before it reaches beta and stable.
   # https://blog.rust-lang.org/2026/08/21/enabling-next-solver-on-nightly/
   #
-  # The crate and feature combinations below match the ones the Feature workflow
-  # builds on stable, so a failure here means nightly changed behavior rather
-  # than a configuration this repository never compiles.
+  # The groups mirror the ones the Feature workflow builds on stable, both so a
+  # failure means nightly changed behavior rather than a configuration this
+  # repository never compiles, and so each job's footprint stays within what a
+  # hosted runner is already known to hold: wider groups were killed mid-compile
+  # by runner shutdown rather than finishing with a verdict.
   build-nightly:
     name: Rust Nightly (${{ matrix.group }})
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false # A regression in one group should not hide the others
       matrix:
-        group:
-          - libs   # library crates, type-checked including test targets
-          - app    # router, UI, and CLI crates
-          - binary # full default-feature build of the shipped binary
+        group: [core, protocol, tools, routing, ui, cli, binary]
+    env:
+      # Nightly rustc peaks higher than stable, and the default job count put
+      # the runner over its budget. A daily job can afford the wall clock.
+      CARGO_BUILD_JOBS: 2
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -176,25 +179,39 @@ jobs:
           RUSTC_WRAPPER: sccache
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
-          if [ "${{ matrix.group }}" = "libs" ]; then
-            cargo +nightly check --locked --all-targets \
-              -p arkavo-memory -p arkavo-budget -p arkavo-context \
-              -p arkavo-protocol -p arkavo-observability -p arkavo-mcp-workspace \
-              -p arkavo-session -p arkavo-critic -p arkavo-mcp-tools \
-              -p arkavo-dataflow
+          if [ "${{ matrix.group }}" = "core" ]; then
             cargo +nightly check --locked --all-targets -p arkavo-llm \
               --no-default-features --features llm-remote
-          elif [ "${{ matrix.group }}" = "app" ]; then
+            cargo +nightly check --locked --all-targets \
+              -p arkavo-memory -p arkavo-budget -p arkavo-context
+          elif [ "${{ matrix.group }}" = "protocol" ]; then
+            cargo +nightly check --locked --all-targets \
+              -p arkavo-protocol -p arkavo-observability -p arkavo-mcp-workspace \
+              -p arkavo-session -p arkavo-critic
+          elif [ "${{ matrix.group }}" = "tools" ]; then
+            cargo +nightly check --locked --all-targets -p arkavo-mcp-tools
+          elif [ "${{ matrix.group }}" = "routing" ]; then
             cargo +nightly check --locked --all-targets -p arkavo-router \
               --no-default-features --features llm-remote,gemini
+            cargo +nightly check --locked --all-targets -p arkavo-dataflow
+          elif [ "${{ matrix.group }}" = "ui" ]; then
             cargo +nightly check --locked --all-targets -p arkavo-terminal -p arkavo-ui-generator
             cargo +nightly check --locked --all-targets -p arkavo-agui \
               --no-default-features --features mdns
+          elif [ "${{ matrix.group }}" = "cli" ]; then
             cargo +nightly check --locked --lib --bins -p arkavo-cli \
               --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui
           elif [ "${{ matrix.group }}" = "binary" ]; then
             cargo +nightly build --locked -p arkavo
           fi
+
+      - name: Report runner headroom
+        if: always()
+        run: |
+          # A job killed mid-compile leaves no cargo output to read, so record
+          # what the runner had left the last time it was still alive.
+          df -h /
+          free -m
 
       - name: Report nightly breakage
         if: failure()
