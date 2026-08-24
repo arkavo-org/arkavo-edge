@@ -380,8 +380,10 @@ impl MemoryStorage {
             let id = Uuid::parse_str(&id_str)
                 .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
             let embedding: Vec<f32> = embedding_blob
-                .chunks_exact(4)
-                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| f32::from_le_bytes(*chunk))
                 .collect();
             parsed.push((id, embedding));
         }
@@ -961,8 +963,10 @@ impl MemoryStorage {
                 // Convert binary blob to f32 vector
                 let mem_embedding: Vec<f32> = row
                     .embedding_blob
-                    .chunks_exact(4)
-                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|chunk| f32::from_le_bytes(*chunk))
                     .collect();
                 let score = EmbeddingService::cosine_similarity(&embedding, &mem_embedding);
 
