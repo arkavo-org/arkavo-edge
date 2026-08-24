@@ -389,8 +389,15 @@ jobs:
           echo "::warning::This branch does not compile on the Rust nightly toolchain. Merging is not blocked."
           echo "Nightly enables the next-generation trait solver by default:"
           echo "  https://blog.rust-lang.org/2026/08/21/enabling-next-solver-on-nightly/"
-          echo "To confirm the solver is the cause, re-run with the old solver:"
-          echo "  RUSTFLAGS='-Znext-solver=coherence' cargo +nightly check -p arkavo --bins --tests"
+          echo "First decide whose bug it is:"
+          echo "  1. Re-run the same command on stable. Failing there too makes it ours."
+          echo "  2. RUSTFLAGS='-Znext-solver=coherence' re-runs with the old solver."
+          echo "     Passing only with the old solver points at the toolchain."
+          echo "If it is the toolchain, search before filing:"
+          echo "  https://github.com/rust-lang/rust/labels/WG-trait-system-refactor"
+          echo "  https://github.com/rust-lang/rust/issues?q=is%3Aissue+next-solver"
+          echo "and open one with a minimal reproduction if nothing covers it:"
+          echo "  https://github.com/rust-lang/rust/issues/new/choose"
 
   test-kimi-feature:
     name: Test Kimi Feature
