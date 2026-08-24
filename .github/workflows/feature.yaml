@@ -299,6 +299,84 @@ jobs:
             cargo clippy --locked -p arkavo-cli --lib --bins --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui,cef-ui -- -D warnings
           fi
 
+  # Advisory early warning for the next-generation trait solver, which nightly
+  # enables by default as of 2026-08-21. Nightly regressions must never block a
+  # merge, so this job is continue-on-error and is deliberately absent from the
+  # release-readiness gate; it exists to show breakage in the PR that introduces
+  # code the new solver rejects.
+  # https://blog.rust-lang.org/2026/08/21/enabling-next-solver-on-nightly/
+  nightly-check:
+    name: Rust Nightly (advisory)
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Shallow-fetching llama.cpp for local inference support"
+          mkdir -p vendor/llama.cpp
+          cd vendor/llama.cpp
+          git init
+          git remote add origin https://github.com/ggerganov/llama.cpp
+          git fetch --depth 1 origin ef570f63087b6a5a2930210a13f87990e8113927
+          git checkout FETCH_HEAD
+          echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
+
+      - name: Free disk space
+        run: |
+          # Hosted runners have ~14 GB; reclaim space from pre-installed tools
+          # we do not need for Rust builds.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                     /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                     /usr/local/share/chromium /usr/share/swift /opt/pipx \
+                     /usr/local/share/powershell /usr/share/mysql /opt/mssql-tools
+          df -h
+
+      - name: Install CMake, mold linker, and build dependencies
+        run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Record toolchain version
+        run: |
+          # The rustc commit hash and date pin which nightly introduced a regression.
+          rustc +nightly --version --verbose
+
+      - name: Setup sccache for C++ caching
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "nightly-${{ runner.os }}"
+          prefix-key: "nightly-check"
+
+      # Checking the arkavo binary with default features pulls in nearly the whole
+      # workspace as libraries in a single compilation, which is the most solver
+      # coverage per minute of PR time. The daily Nightly workflow does the wider
+      # per-crate sweep including dependency test targets.
+      - name: Type-check on nightly
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: cargo +nightly check --locked -p arkavo --all-targets
+
+      - name: Report nightly breakage
+        if: failure()
+        run: |
+          echo "::warning::This branch does not compile on the Rust nightly toolchain. Merging is not blocked."
+          echo "Nightly enables the next-generation trait solver by default:"
+          echo "  https://blog.rust-lang.org/2026/08/21/enabling-next-solver-on-nightly/"
+          echo "To confirm the solver is the cause, re-run with the old solver:"
+          echo "  RUSTFLAGS='-Znext-solver=coherence' cargo +nightly check -p arkavo --all-targets"
+
   test-kimi-feature:
     name: Test Kimi Feature
     runs-on: ubuntu-22.04
