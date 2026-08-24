@@ -189,7 +189,7 @@ fn list_local_gguf_models() -> Vec<(String, String, PathBuf, u64)> {
     found_models
 }
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 pub async fn run(cmd: &ModelCommand) -> Result<()> {
     match &cmd.command {
         ModelSubcommand::List => {

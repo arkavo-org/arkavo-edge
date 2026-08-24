@@ -252,7 +252,7 @@ async fn create_backup(config_path: &std::path::Path) -> Option<String> {
     }
 }
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 pub async fn handle_config_validate(
     metrics: &Arc<MetricsCollector>,
     rate_limiter: &RateLimiter,

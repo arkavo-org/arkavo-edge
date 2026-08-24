@@ -2,7 +2,7 @@
 #![allow(clippy::significant_drop_tightening)]
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::unused_async)]
+#![allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 #![allow(clippy::needless_continue)]
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::uninlined_format_args)]
