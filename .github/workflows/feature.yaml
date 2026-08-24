@@ -360,13 +360,15 @@ jobs:
       # Checking the arkavo binary with default features pulls in nearly the whole
       # workspace as libraries in a single compilation, which is the most solver
       # coverage per minute of PR time. The daily Nightly workflow does the wider
-      # per-crate sweep including dependency test targets.
+      # per-crate sweep including dependency test targets. Bench and example
+      # targets are left out for the same reason as there: stable CI does not
+      # compile them, so they would report breakage unrelated to nightly.
       - name: Type-check on nightly
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-        run: cargo +nightly check --locked -p arkavo --all-targets
+        run: cargo +nightly check --locked -p arkavo --lib --bins --tests
 
       - name: Report nightly breakage
         if: failure()
@@ -375,7 +377,7 @@ jobs:
           echo "Nightly enables the next-generation trait solver by default:"
           echo "  https://blog.rust-lang.org/2026/08/21/enabling-next-solver-on-nightly/"
           echo "To confirm the solver is the cause, re-run with the old solver:"
-          echo "  RUSTFLAGS='-Znext-solver=coherence' cargo +nightly check -p arkavo --all-targets"
+          echo "  RUSTFLAGS='-Znext-solver=coherence' cargo +nightly check -p arkavo --lib --bins --tests"
 
   test-kimi-feature:
     name: Test Kimi Feature

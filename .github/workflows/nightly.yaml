@@ -170,9 +170,12 @@ jobs:
           prefix-key: "build-nightly-${{ matrix.group }}"
 
       # Trait solver regressions surface while type checking, so the library
-      # groups check --all-targets (tests and examples included) instead of
-      # paying for codegen. The binary group does a real build to also cover
-      # codegen and linking under the default feature set.
+      # groups check lib, bin, and test targets instead of paying for codegen;
+      # test code is where inference breakage tends to show first. Bench and
+      # example targets stay out: stable CI compiles them for only two crates,
+      # and arkavo-router's preflight bench does not currently build at all, so
+      # --all-targets would report breakage that has nothing to do with nightly.
+      # The binary group does a real build to also cover codegen and linking.
       - name: Compile on nightly
         env:
           SCCACHE_GHA_ENABLED: "true"
@@ -180,23 +183,23 @@ jobs:
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
           if [ "${{ matrix.group }}" = "core" ]; then
-            cargo +nightly check --locked --all-targets -p arkavo-llm \
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-llm \
               --no-default-features --features llm-remote
-            cargo +nightly check --locked --all-targets \
+            cargo +nightly check --locked --lib --bins --tests \
               -p arkavo-memory -p arkavo-budget -p arkavo-context
           elif [ "${{ matrix.group }}" = "protocol" ]; then
-            cargo +nightly check --locked --all-targets \
+            cargo +nightly check --locked --lib --bins --tests \
               -p arkavo-protocol -p arkavo-observability -p arkavo-mcp-workspace \
               -p arkavo-session -p arkavo-critic
           elif [ "${{ matrix.group }}" = "tools" ]; then
-            cargo +nightly check --locked --all-targets -p arkavo-mcp-tools
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-mcp-tools
           elif [ "${{ matrix.group }}" = "routing" ]; then
-            cargo +nightly check --locked --all-targets -p arkavo-router \
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-router \
               --no-default-features --features llm-remote,gemini
-            cargo +nightly check --locked --all-targets -p arkavo-dataflow
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-dataflow
           elif [ "${{ matrix.group }}" = "ui" ]; then
-            cargo +nightly check --locked --all-targets -p arkavo-terminal -p arkavo-ui-generator
-            cargo +nightly check --locked --all-targets -p arkavo-agui \
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-terminal -p arkavo-ui-generator
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-agui \
               --no-default-features --features mdns
           elif [ "${{ matrix.group }}" = "cli" ]; then
             cargo +nightly check --locked --lib --bins -p arkavo-cli \
@@ -222,4 +225,4 @@ jobs:
           echo "Check the trait system refactor tracking issues before filing a new report:"
           echo "  https://github.com/rust-lang/rust/labels/WG-trait-system-refactor"
           echo "To confirm the solver is the cause, re-run the failing command with the old solver:"
-          echo "  RUSTFLAGS='-Znext-solver=coherence' cargo +nightly check --all-targets ..."
+          echo "  RUSTFLAGS='-Znext-solver=coherence' cargo +nightly check --lib --bins --tests ..."
