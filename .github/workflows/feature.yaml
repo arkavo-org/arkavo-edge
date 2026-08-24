@@ -309,6 +309,10 @@ jobs:
     name: Rust Nightly (advisory)
     runs-on: ubuntu-22.04
     continue-on-error: true
+    env:
+      # Nightly rustc peaks higher than stable, and the default job count has
+      # cost this job a runner mid-compile more than once.
+      CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -370,6 +374,14 @@ jobs:
           RUSTC_WRAPPER: sccache
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: cargo +nightly check --locked -p arkavo --bins --tests
+
+      - name: Report runner headroom
+        if: always()
+        run: |
+          # A job killed mid-compile leaves no cargo output to read, so record
+          # what the runner had left the last time it was still alive.
+          df -h /
+          free -m
 
       - name: Report nightly breakage
         if: failure()
