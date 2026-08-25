@@ -19,9 +19,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 # Iroh dependencies
-iroh = { version = "1.0.0-rc.0", default-features = false, features = ["tls-aws-lc-rs"] }
-iroh-base = { version = "1.0.0-rc.0", default-features = false }
-iroh-blobs = { version = "0.101", default-features = false }
+iroh = { version = "1.0.3", default-features = false, features = ["tls-aws-lc-rs"] }
+iroh-base = { version = "1.0.3", default-features = false }
+iroh-blobs = { version = "0.103", default-features = false }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
