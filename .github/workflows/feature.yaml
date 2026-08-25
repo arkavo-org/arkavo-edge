@@ -191,7 +191,7 @@ jobs:
           cd vendor/llama.cpp
           git init
           git remote add origin https://github.com/ggerganov/llama.cpp
-          git fetch --depth 1 origin ef570f63087b6a5a2930210a13f87990e8113927
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
           git checkout FETCH_HEAD
           echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
 
@@ -325,7 +325,7 @@ jobs:
           cd vendor/llama.cpp
           git init
           git remote add origin https://github.com/ggerganov/llama.cpp
-          git fetch --depth 1 origin ef570f63087b6a5a2930210a13f87990e8113927
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
           git checkout FETCH_HEAD
           echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
 
@@ -524,7 +524,7 @@ jobs:
           git init
           git remote add origin https://github.com/ggerganov/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git fetch --depth 1 origin ef570f63087b6a5a2930210a13f87990e8113927
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
           git checkout FETCH_HEAD
           echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
@@ -661,7 +661,7 @@ jobs:
           git init
           git remote add origin https://github.com/ggerganov/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git fetch --depth 1 origin ef570f63087b6a5a2930210a13f87990e8113927
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
           git checkout FETCH_HEAD
           echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
       - uses: dtolnay/rust-toolchain@stable
@@ -680,7 +680,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/aarch64-apple-darwin/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-ef570f63087b6a5a2930210a13f87990e8113927
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-f280b26983ad0fdb705a0d9ebf0503e76f2899b0
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -779,7 +779,7 @@ jobs:
           git init
           git remote add origin https://github.com/ggerganov/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git fetch --depth 1 origin ef570f63087b6a5a2930210a13f87990e8113927
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
           git checkout FETCH_HEAD
           echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
 
@@ -814,7 +814,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/x86_64-pc-windows-msvc/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-ef570f63087b6a5a2930210a13f87990e8113927
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-f280b26983ad0fdb705a0d9ebf0503e76f2899b0
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 

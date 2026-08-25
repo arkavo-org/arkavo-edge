@@ -1,7 +1,7 @@
-# BASE_COMMIT: ef570f630
+# BASE_COMMIT: f280b2698
 # VERIFY_ABSENT: TODO @aldehir : need to extend json-schema-to-grammar
 # VERIFY_PRESENT: gemma4-dict-nonempty
-# Reapplied for b9292 — upstream still uses gemma4-dict (allows {}) for all
+# Reapplied for b10615 — upstream still uses gemma4-dict (allows {}) for all
 # tool args, and gemma4_to_json() returns "" for unknown composite rules. Both
 # combine to let Gemma 4 emit tool calls like `step({})` that satisfy the
 # grammar but lack required schema fields, which downstream MCP rejects.

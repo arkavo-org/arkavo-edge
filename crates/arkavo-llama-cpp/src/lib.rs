@@ -236,6 +236,16 @@ impl LlamaModel {
         Self::from_file_with_options(path, true, false)
     }
 
+    fn load_mode_from_flags(use_mmap: bool, use_direct_io: bool) -> ffi::llama_load_mode {
+        if use_direct_io {
+            ffi::llama_load_mode_LLAMA_LOAD_MODE_DIRECT_IO
+        } else if use_mmap {
+            ffi::llama_load_mode_LLAMA_LOAD_MODE_MMAP
+        } else {
+            ffi::llama_load_mode_LLAMA_LOAD_MODE_NONE
+        }
+    }
+
     /// Load model with explicit options
     /// - `use_direct_io`: Use direct I/O for faster loading (bypasses OS cache)
     /// - `use_mmap`: Use memory-mapped I/O (default: true, ignored if use_direct_io is true)
@@ -261,7 +271,7 @@ impl LlamaModel {
             let mut params = unsafe { ffi::llama_model_default_params() };
             params.n_gpu_layers = -1; // Offload all layers (negative = all in llama.cpp b7785+)
             params.main_gpu = 0; // Use GPU 0 (primary GPU)
-            params.use_mmap = use_mmap;
+            params.load_mode = Self::load_mode_from_flags(use_mmap, use_direct_io);
 
             if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
                 eprintln!(
@@ -295,7 +305,7 @@ impl LlamaModel {
         // SAFETY: Null return is checked immediately after this call
         let mut cpu_params = unsafe { ffi::llama_model_default_params() };
         cpu_params.n_gpu_layers = 0; // CPU only
-        cpu_params.use_mmap = use_mmap;
+        cpu_params.load_mode = Self::load_mode_from_flags(use_mmap, use_direct_io);
 
         // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
         let cpu_model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), cpu_params) };
@@ -1721,7 +1731,7 @@ impl LlamaSampler {
     /// CRITICAL for GLM-4.7-Flash: Without dry_multiplier ~1.1, the model loops.
     ///
     /// - `vocab`: Model vocabulary for sequence detection
-    /// - `n_ctx_train`: Training context size
+    /// - `n_ctx_train`: Unused since llama.cpp b10615; kept for caller compatibility
     /// - `dry_multiplier`: Penalty multiplier (1.1 recommended for GLM-4.7)
     /// - `dry_base`: Base for exponential penalty growth (default 1.75)
     /// - `dry_allowed_length`: Min length before penalty applies (default 2)
@@ -1732,7 +1742,7 @@ impl LlamaSampler {
     pub unsafe fn add_dry(
         &self,
         vocab: *const ffi::llama_vocab,
-        n_ctx_train: i32,
+        _n_ctx_train: i32,
         dry_multiplier: f32,
         dry_base: f32,
         dry_allowed_length: i32,
@@ -1743,10 +1753,11 @@ impl LlamaSampler {
             [c"\n".as_ptr(), c":".as_ptr(), c"\"".as_ptr(), c"*".as_ptr()];
 
         // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
+        // b10615 dropped n_ctx_train from llama_sampler_init_dry; keep the
+        // wrapper argument so existing callers compile.
         let dry_sampler = unsafe {
             ffi::llama_sampler_init_dry(
                 vocab,
-                n_ctx_train,
                 dry_multiplier,
                 dry_base,
                 dry_allowed_length,
@@ -2136,8 +2147,7 @@ pub fn test_minimal_init() -> Result<(), String> {
     // SAFETY: Null return is checked immediately after this call
     let mut _model_params = unsafe { ffi::llama_model_default_params() };
     _model_params.vocab_only = true; // only read vocab & metadata
-    _model_params.use_mmap = false; // avoid vm tricks until stable
-    _model_params.use_mlock = false; // avoid locking (needs perms)
+    _model_params.load_mode = ffi::llama_load_mode_LLAMA_LOAD_MODE_NONE;
 
     // Only show debug output if debug logging is enabled
     if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
