@@ -80,7 +80,7 @@ impl CefProcess {
     pub fn is_running(&mut self) -> bool {
         self.child
             .as_mut()
-            .is_some_and(|c| c.try_wait().ok().is_some_and(|status| status.is_none()))
+            .is_some_and(|c| c.try_wait().is_ok_and(|status| status.is_none()))
     }
 
     pub fn kill(&mut self) -> Result<()> {

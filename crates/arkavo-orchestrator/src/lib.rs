@@ -1,8 +1,12 @@
+// Deep async call graphs through the router push trait solving past the default
+// recursion limit; rustc 1.98 warns that the overflow will become a hard error.
+// https://github.com/rust-lang/rust/issues/159228
+#![recursion_limit = "256"]
 #![allow(clippy::future_not_send)]
 #![allow(clippy::significant_drop_tightening)]
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::unused_async)]
+#![allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 #![allow(clippy::needless_continue)]
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::uninlined_format_args)]

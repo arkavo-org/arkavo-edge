@@ -51,7 +51,7 @@ impl SemanticCheck {
     /// Returns error if judge needs to be initialized via `with_judge()`.
     /// This check requires explicit judge initialization since it uses
     /// LLM-based validation which needs a provider.
-    #[allow(clippy::unused_async)]
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     async fn ensure_judge(&self) -> crate::Result<()> {
         let is_none = self.judge.read().await.is_none();
         if is_none {

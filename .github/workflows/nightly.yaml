@@ -96,3 +96,138 @@ jobs:
             echo "::warning::Fuzz Cargo.lock has outdated dependencies"
             cat update-check.txt
           fi
+
+  # Rust nightly enabled the next-generation trait solver by default on
+  # 2026-08-21, replacing how where-clauses are proven and associated types are
+  # normalized. Ecosystem-wide breakage is expected, so compile against nightly
+  # daily to catch it here before it reaches beta and stable.
+  # https://blog.rust-lang.org/2026/08/21/enabling-next-solver-on-nightly/
+  #
+  # The groups mirror the ones the Feature workflow builds on stable, both so a
+  # failure means nightly changed behavior rather than a configuration this
+  # repository never compiles, and so each job's footprint stays within what a
+  # hosted runner is already known to hold: wider groups were killed mid-compile
+  # by runner shutdown rather than finishing with a verdict.
+  build-nightly:
+    name: Rust Nightly (${{ matrix.group }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false # A regression in one group should not hide the others
+      matrix:
+        group: [core, protocol, tools, routing, ui, cli, binary]
+    env:
+      # Nightly rustc peaks higher than stable, and the default job count put
+      # the runner over its budget. A daily job can afford the wall clock.
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Shallow-fetching llama.cpp for local inference support"
+          mkdir -p vendor/llama.cpp
+          cd vendor/llama.cpp
+          git init
+          git remote add origin https://github.com/ggerganov/llama.cpp
+          git fetch --depth 1 origin ef570f63087b6a5a2930210a13f87990e8113927
+          git checkout FETCH_HEAD
+          echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
+
+      - name: Free disk space
+        run: |
+          # Hosted runners have ~14 GB; reclaim space from pre-installed tools
+          # we do not need for Rust builds.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                     /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                     /usr/local/share/chromium /usr/share/swift /opt/pipx \
+                     /usr/local/share/powershell /usr/share/mysql /opt/mssql-tools
+          df -h
+
+      - name: Install CMake, mold linker, and build dependencies
+        run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Record toolchain version
+        run: |
+          # The rustc commit hash and date pin which nightly introduced a regression.
+          rustc +nightly --version --verbose
+
+      - name: Setup sccache for C++ caching
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "nightly-${{ runner.os }}"
+          prefix-key: "build-nightly-${{ matrix.group }}"
+
+      # Trait solver regressions surface while type checking, so the library
+      # groups check lib, bin, and test targets instead of paying for codegen;
+      # test code is where inference breakage tends to show first. Bench and
+      # example targets stay out: stable CI compiles them for only two crates,
+      # and arkavo-router's preflight bench does not currently build at all, so
+      # --all-targets would report breakage that has nothing to do with nightly.
+      # The binary group does a real build to also cover codegen and linking.
+      - name: Compile on nightly
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: |
+          if [ "${{ matrix.group }}" = "core" ]; then
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-llm \
+              --no-default-features --features llm-remote
+            cargo +nightly check --locked --lib --bins --tests \
+              -p arkavo-memory -p arkavo-budget -p arkavo-context
+          elif [ "${{ matrix.group }}" = "protocol" ]; then
+            cargo +nightly check --locked --lib --bins --tests \
+              -p arkavo-protocol -p arkavo-observability -p arkavo-mcp-workspace \
+              -p arkavo-session -p arkavo-critic
+          elif [ "${{ matrix.group }}" = "tools" ]; then
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-mcp-tools
+          elif [ "${{ matrix.group }}" = "routing" ]; then
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-router \
+              --no-default-features --features llm-remote,gemini
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-dataflow
+          elif [ "${{ matrix.group }}" = "ui" ]; then
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-terminal -p arkavo-ui-generator
+            cargo +nightly check --locked --lib --bins --tests -p arkavo-agui \
+              --no-default-features --features mdns
+          elif [ "${{ matrix.group }}" = "cli" ]; then
+            cargo +nightly check --locked --lib --bins -p arkavo-cli \
+              --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui
+          elif [ "${{ matrix.group }}" = "binary" ]; then
+            cargo +nightly build --locked -p arkavo
+          fi
+
+      - name: Report runner headroom
+        if: always()
+        run: |
+          # A job killed mid-compile leaves no cargo output to read, so record
+          # what the runner had left the last time it was still alive.
+          df -h /
+          free -m
+
+      - name: Report nightly breakage
+        if: failure()
+        run: |
+          echo "::error::Group '${{ matrix.group }}' does not compile on the Rust nightly toolchain."
+          echo "Nightly enables the next-generation trait solver by default:"
+          echo "  https://blog.rust-lang.org/2026/08/21/enabling-next-solver-on-nightly/"
+          echo "First decide whose bug it is:"
+          echo "  1. Re-run the same command on stable. Failing there too makes it ours."
+          echo "  2. RUSTFLAGS='-Znext-solver=coherence' re-runs with the old solver."
+          echo "     Passing only with the old solver points at the toolchain."
+          echo "If it is the toolchain, search before filing:"
+          echo "  https://github.com/rust-lang/rust/labels/WG-trait-system-refactor"
+          echo "  https://github.com/rust-lang/rust/issues?q=is%3Aissue+next-solver"
+          echo "and open one with a minimal reproduction if nothing covers it:"
+          echo "  https://github.com/rust-lang/rust/issues/new/choose"

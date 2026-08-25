@@ -1,5 +1,6 @@
 #![allow(clippy::significant_drop_tightening)]
-#![allow(clippy::unused_async)]
+// Rust 1.98 flags the same shape under a second name for functions in impl blocks.
+#![allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 
 pub mod architect;
 pub mod classifier;
