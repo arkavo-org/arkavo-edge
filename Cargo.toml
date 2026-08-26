@@ -78,6 +78,7 @@ members = [
     "crates/arkavo-policy-cache",
     "crates/arkavo-adaptation",
     "crates/arkavo-arp-runtime",
+    "crates/arkavo-permit",
     "crates/arkavo-swarmkit",
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
@@ -153,7 +154,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.89.4"
+version = "0.89.6"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

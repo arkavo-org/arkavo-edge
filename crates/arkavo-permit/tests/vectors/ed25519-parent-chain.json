@@ -1,0 +1,36 @@
+{
+  "algorithm": "EdDSA",
+  "claims": {
+    "agent_workload_id": "spiffe://arkavo-edge/ns/default/sa/edge-agent-001",
+    "argument_hash_hex": "e02c6eb385256fdf6d3a61f6ed673c499463dbcce85095aee694edfe6a4ad656",
+    "arguments": {
+      "agent": "spiffe://arkavo-edge/ns/default/sa/edge-agent-002",
+      "task": "summarize"
+    },
+    "budget": {
+      "cost_micro_usd": 250000,
+      "max_invocations": 5,
+      "token_ceiling": 100000
+    },
+    "data_classifications": [
+      "tdf:classification:confidential",
+      "tdf:region:us"
+    ],
+    "exp": 1700000300,
+    "iat": 1700000000,
+    "iss": "https://permit-issuer.arkavo.example",
+    "nbf": 1700000000,
+    "parent_permit_hex": "c71dcec671887873e530e4b45968dffcb5ecd0b60c57b415ce99b6fae7ea56a8",
+    "policy_bundle_hash_hex": "438c3a1bf4d4708cf8084ea5b889279b7e3992dac8dc42e1e62e50915e869a5e",
+    "sequence_state_hash_hex": "3fcb0977a9a08cd4c8f829a837f4157be009926babec23a8039fb480bb631cbc",
+    "sub": "did:example:human-alice",
+    "tool_name": "arkavo.a2a.delegate"
+  },
+  "cwt_hex": "d83dd28446a2012703183da05901b6ae01782468747470733a2f2f7065726d69742d6973737565722e61726b61766f2e6578616d706c6502776469643a6578616d706c653a68756d616e2d616c696365041a6553f22c051a6553f100061a6553f10008a101a401010327200621582017cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce3a0001117078317370696666653a2f2f61726b61766f2d656467652f6e732f64656661756c742f73612f656467652d6167656e742d3030313a000111715820438c3a1bf4d4708cf8084ea5b889279b7e3992dac8dc42e1e62e50915e869a5e3a000111727361726b61766f2e6132612e64656c65676174653a000111735820e02c6eb385256fdf6d3a61f6ed673c499463dbcce85095aee694edfe6a4ad6563a0001117482781f7464663a636c617373696669636174696f6e3a636f6e666964656e7469616c6d7464663a726567696f6e3a75733a00011175a30105021a000186a0031a0003d0903a0001117658203fcb0977a9a08cd4c8f829a837f4157be009926babec23a8039fb480bb631cbc3a000111775820c71dcec671887873e530e4b45968dffcb5ecd0b60c57b415ce99b6fae7ea56a8584073b0209142a1a36651ff2157b48e7d147394f971f60a638bd883b11b18133ad6f967788f76bda4ce197aea4e82285a3a8018989af32614f1e7dcd4414466250d",
+  "description": "Signed CWT permit test vector for arkavo-permit; regenerate with `cargo run -p arkavo-permit --example generate_vectors`",
+  "hash_algorithm": "sha256",
+  "name": "ed25519-parent-chain",
+  "now_for_verification": 1700000060,
+  "public_key_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce",
+  "secret_key_hex": "3333333333333333333333333333333333333333333333333333333333333333"
+}
