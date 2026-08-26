@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
 version: 0.87.0
-last_updated: 2026-06-28
+last_updated: 2026-08-26
 
 components:
   - name: trusted-agent
@@ -31,7 +31,7 @@ components:
   - name: token-binding
     file: token-binding.spec.yaml
     module: arkavo_agent_auth
-    description: Sender-constrained agent tokens (DPoP/mTLS) and attestation-based OAuth Token Exchange
+    description: Sender-constrained agent tokens (CWT/COSE cnf, mTLS) and attestation-based OAuth Token Exchange
     criticality: critical
     scenario_count: 10
     invariants:
