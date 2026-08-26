@@ -437,7 +437,48 @@ impl ChatSessionManager {
 
             self.task_tracker
                 .spawn_named("delta-forwarder", async move {
-                    while let Ok(delta) = broadcast_rx.recv().await {
+                    loop {
+                        let delta = match broadcast_rx.recv().await {
+                            Ok(delta) => delta,
+                            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                                // Dropped deltas corrupt the reassembled message, so a
+                                // lagging subscriber must see an explicit stream error
+                                // rather than a truncated stream that looks complete.
+                                warn!(
+                                    session.id = %session_id_clone,
+                                    skipped,
+                                    "Delta subscriber lagged; terminating stream with error"
+                                );
+                                let error_delta = MessageDelta {
+                                    session_id: session_id_clone.clone(),
+                                    message_id: uuid::Uuid::new_v4().to_string(),
+                                    sequence: 0,
+                                    delta: MessageDeltaContent::Error {
+                                        code: "STREAM_LAGGED".to_string(),
+                                        message: format!(
+                                            "Stream truncated: subscriber lagged, {skipped} deltas dropped"
+                                        ),
+                                    },
+                                    timestamp: chrono::Utc::now(),
+                                };
+                                if delta_tx.send(error_delta).await.is_err() {
+                                    break; // Receiver dropped
+                                }
+                                let end_delta = MessageDelta {
+                                    session_id: session_id_clone.clone(),
+                                    message_id: uuid::Uuid::new_v4().to_string(),
+                                    sequence: 1,
+                                    delta: MessageDeltaContent::StreamEnd {
+                                        reason: StreamEndReason::Error,
+                                    },
+                                    timestamp: chrono::Utc::now(),
+                                };
+                                let _ = delta_tx.send(end_delta).await;
+                                break;
+                            }
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        };
+
                         // Record delta metrics
                         let delta_type = match &delta.delta {
                             MessageDeltaContent::Text { .. } => "text",
@@ -493,6 +534,24 @@ impl ChatSessionManager {
         // Update metrics state
         if let Some(metrics) = self.session_metrics.write().await.get_mut(session_id) {
             metrics.set_state(SessionState::Closing);
+        }
+
+        // Notify stream subscribers with a terminal StreamEnd before teardown,
+        // so the delta channel does not close silently — the streaming handler
+        // reports a channel close without StreamEnd as an abnormal termination.
+        {
+            let sessions = self.sessions.read().await;
+            if let Some(state) = sessions.get(session_id) {
+                let _ = state.delta_tx.send(MessageDelta {
+                    session_id: session_id.to_string(),
+                    message_id: uuid::Uuid::new_v4().to_string(),
+                    sequence: 0,
+                    delta: MessageDeltaContent::StreamEnd {
+                        reason: StreamEndReason::SessionClosed,
+                    },
+                    timestamp: chrono::Utc::now(),
+                });
+            }
         }
 
         // Gracefully shutdown session task manager
@@ -2072,6 +2131,76 @@ mod tests {
 
     #[tokio::test]
     #[spec("CHAT-008")]
+    async fn test_lagging_delta_stream_ends_with_error_not_silent_truncation() {
+        let manager = ChatSessionManager::new(None);
+        let session = manager.create_session(None).await;
+        let session_id = session.session_id.clone();
+
+        let mut delta_rx = manager
+            .get_delta_stream(&session_id)
+            .await
+            .expect("delta stream available");
+
+        // Flood the broadcast channel without consuming from the mpsc receiver,
+        // so the forwarder lags behind and deltas are dropped.
+        let broadcast_tx = {
+            let sessions = manager.sessions.read().await;
+            sessions
+                .get(&session_id)
+                .expect("session exists")
+                .delta_tx
+                .clone()
+        };
+        // Broadcast capacity is 256 and the mpsc buffer is 32; 512 guarantees lag.
+        const FLOOD: usize = 512;
+        for i in 0..FLOOD {
+            let _ = broadcast_tx.send(MessageDelta {
+                session_id: session_id.clone(),
+                message_id: "flood".to_string(),
+                sequence: i as u64,
+                delta: MessageDeltaContent::Text {
+                    text: "x".to_string(),
+                },
+                timestamp: chrono::Utc::now(),
+            });
+        }
+
+        // Drain until the stream closes; truncation must be surfaced as an
+        // explicit error followed by StreamEnd(Error), not silent completion.
+        let mut saw_lag_error = false;
+        let mut saw_error_end = false;
+        while let Ok(Some(delta)) =
+            tokio::time::timeout(std::time::Duration::from_secs(5), delta_rx.recv()).await
+        {
+            match &delta.delta {
+                MessageDeltaContent::Error { code, .. } if code == "STREAM_LAGGED" => {
+                    saw_lag_error = true;
+                }
+                MessageDeltaContent::StreamEnd { reason } => {
+                    assert!(
+                        matches!(reason, StreamEndReason::Error),
+                        "Truncated stream must end with StreamEndReason::Error"
+                    );
+                    saw_error_end = true;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(
+            saw_lag_error,
+            "Lagged subscriber must receive an explicit STREAM_LAGGED error delta"
+        );
+        assert!(
+            saw_error_end,
+            "Lagged subscriber must receive StreamEnd with Error reason"
+        );
+
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-008")]
     async fn test_get_delta_stream_closed_session_returns_none() {
         let adapter = create_mock_adapter(0);
         let manager = ChatSessionManager::new(Some(adapter));
@@ -2086,6 +2215,40 @@ mod tests {
         assert!(
             manager.get_delta_stream(&session_id).await.is_none(),
             "Closed session must not expose a delta stream"
+        );
+
+        manager.shutdown().await;
+    }
+
+    /// Regression: closing a session must deliver a terminal StreamEnd to
+    /// existing subscribers so the streaming handler does not report a
+    /// normal close as an abnormal STREAM_TERMINATED error.
+    #[tokio::test]
+    #[spec("CHAT-008")]
+    async fn test_close_session_delivers_stream_end_to_subscribers() {
+        let adapter = create_mock_adapter(0);
+        let manager = ChatSessionManager::new(Some(adapter));
+        let session = manager.create_session(None).await;
+        let session_id = session.session_id.clone();
+
+        let mut delta_rx = manager
+            .get_delta_stream(&session_id)
+            .await
+            .expect("active session must expose a delta stream");
+        manager.close_session(&session_id).await.unwrap();
+
+        let delta = tokio::time::timeout(std::time::Duration::from_secs(5), delta_rx.recv())
+            .await
+            .expect("subscriber must receive a terminal delta promptly")
+            .expect("stream must not close without a delta");
+        assert!(
+            matches!(
+                delta.delta,
+                MessageDeltaContent::StreamEnd {
+                    reason: StreamEndReason::SessionClosed
+                }
+            ),
+            "normal close must end the stream with StreamEndReason::SessionClosed"
         );
 
         manager.shutdown().await;

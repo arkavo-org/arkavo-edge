@@ -58,8 +58,8 @@ pub use planes::{
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{
-    AgentConfig, BudgetYamlConfig, KasYamlConfig, ModerationResult, PolicyId, PreflightFeature,
-    PreflightModerator, build_moderator_from_config, load_agent_config,
+    AgentConfig, BudgetYamlConfig, KasTrustedRootYaml, KasYamlConfig, ModerationResult, PolicyId,
+    PreflightFeature, PreflightModerator, build_moderator_from_config, load_agent_config,
 };
 pub use prompt_advisor::{AdvisorIssue, DynamicSnapshot, PromptAdvice, PromptAdvisor};
 pub use provider_info::LlmInfo;
