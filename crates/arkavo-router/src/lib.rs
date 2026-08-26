@@ -1081,7 +1081,12 @@ impl Router {
 
         // Pre-flight moderation check (before any LLM inference)
         if let Some(preflight) = &self.preflight {
-            match preflight.check(task_description) {
+            let gate_start = std::time::Instant::now();
+            let moderation = preflight.check(task_description);
+            arkavo_observability::subsystem_timing::global_timing()
+                .dispatch_gate
+                .record(gate_start.elapsed().as_millis() as u64);
+            match moderation {
                 preflight::ModerationResult::Allow => {}
                 preflight::ModerationResult::Block {
                     policy_id, reason, ..

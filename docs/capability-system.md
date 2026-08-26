@@ -15,7 +15,7 @@ The Capability System bridges the gap between **specifications** (what Arkavo ca
 │  │   (specs/)   │ ◄───────────────────────► │ (examples/)  │   │
 │  │              │                           │              │   │
 │  │ • 60+ YAML   │   ┌────────────────┐      │ • 25+ demos  │   │
-│  │ • 510+ BDD   │   │ cargo run --   │      │ • AGENTS.md  │   │
+│  │ • 751 BDD    │   │ cargo run --   │      │ • AGENTS.md  │   │
 │  │   scenarios  │   │ capabilities   │      │ • tasks.json │   │
 │  │ • Invariants │   └───────┬────────┘      │ • README.md  │   │
 │  │ • References │           │               │              │   │

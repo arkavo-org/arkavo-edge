@@ -202,7 +202,9 @@ impl CostOrchestrator {
         // budget-store error — fails closed: the route is denied, never
         // authorized. Engine-time actual usage reconciles this reservation
         // against the real spend (see `record_actual_spending`; issue #587).
-        self.budget_tracker
+        let budget_start = std::time::Instant::now();
+        let reservation = self
+            .budget_tracker
             .try_spend(
                 agent_id.to_string(),
                 decision.recommended_model.provider().to_string(),
@@ -210,19 +212,22 @@ impl CostOrchestrator {
                 TokenUsage::new(estimated.input, estimated.output),
                 estimated_token_cost,
             )
-            .await
-            .map_err(|e| {
-                // Fail closed on ANY reservation failure, but don't discard the
-                // cause: an over-limit denial and a budget-store/persistence
-                // error both deny here yet mean very different things to an
-                // operator. Log and surface the underlying error instead of
-                // collapsing every failure into a bare "cannot afford".
-                tracing::warn!(error = %e, "budget reservation denied for agent {agent_id}");
-                Error::BudgetExceeded(format!(
-                    "Agent {agent_id} reservation denied for estimated cost ${:.4}: {e}",
-                    decision.estimated_cost_usd
-                ))
-            })?;
+            .await;
+        arkavo_observability::subsystem_timing::global_timing()
+            .dispatch_gate
+            .record(budget_start.elapsed().as_millis() as u64);
+        reservation.map_err(|e| {
+            // Fail closed on ANY reservation failure, but don't discard the
+            // cause: an over-limit denial and a budget-store/persistence
+            // error both deny here yet mean very different things to an
+            // operator. Log and surface the underlying error instead of
+            // collapsing every failure into a bare "cannot afford".
+            tracing::warn!(error = %e, "budget reservation denied for agent {agent_id}");
+            Error::BudgetExceeded(format!(
+                "Agent {agent_id} reservation denied for estimated cost ${:.4}: {e}",
+                decision.estimated_cost_usd
+            ))
+        })?;
 
         let mut routing_metrics = self.routing_metrics.write().await;
         routing_metrics.record_routing(&classification, &decision);

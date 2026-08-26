@@ -13,8 +13,10 @@
 //! format is implemented via [`write_kit_tdf`] / [`read_kit_tdf`] and
 //! their path-based / one-shot variants. KAS-gated unwrap (spec §6.3)
 //! is implemented via [`unwrap_manifest_kas_gated`] with embedded-policy
-//! verification + KAS health check before decrypt. Out of scope for
-//! now: `.tdf`-aware auto-launch — that lands in the final slice.
+//! verification + KAS health check before decrypt. `.tdf`-aware
+//! auto-launch landed with SK-061/062 in `arkavo-agui`'s swarm flight
+//! registry (`launch_from_tdf_path`), which dispatches through this
+//! module's unwrap helpers.
 //!
 //! Agent identity binding: every policy builder accepts an optional
 //! agent DID that is added to the policy's dissemination list. Callers

@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
 version: 0.87.0
-last_updated: 2026-06-28
+last_updated: 2026-08-26
 
 components:
   - name: trusted-agent
@@ -940,7 +940,7 @@ components:
 stats:
   total_specs: 80
   total_scenarios: 751
-  critical_scenarios: 204
+  critical_scenarios: 211
   coverage_areas:
     - authentication
     - authorization
