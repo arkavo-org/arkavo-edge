@@ -155,6 +155,14 @@ impl UpstreamConnection {
 
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(key.clone(), tx);
+        // Re-check after inserting: the reader task may have observed
+        // upstream EOF between the first check and the insert and already
+        // cleared pending — without this the request would hang until the
+        // timeout instead of failing fast.
+        if !self.connected.load(Ordering::SeqCst) {
+            self.pending.lock().await.remove(&key);
+            return Err(UpstreamError::Closed);
+        }
         if let Err(e) = self.write_line(&request).await {
             self.pending.lock().await.remove(&key);
             return Err(e);
@@ -212,5 +220,46 @@ impl std::fmt::Debug for UpstreamConnection {
             .field("connected", &self.connected.load(Ordering::SeqCst))
             .field("timeout", &self.timeout)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    /// Regression: after the upstream exits, a request must fail fast with
+    /// `Closed` — never hang for the full timeout because the reader task
+    /// cleared `pending` before the request was inserted.
+    #[tokio::test]
+    async fn request_fails_closed_fast_after_upstream_exit() {
+        // `true` exits immediately without reading or writing anything.
+        let conn = UpstreamConnection::spawn("true", &[], &HashMap::new(), None).unwrap();
+
+        // Wait for the reader task to observe EOF and mark disconnected.
+        for _ in 0..200 {
+            if !conn.connected.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !conn.connected.load(Ordering::SeqCst),
+            "reader task must mark the connection closed after upstream EOF"
+        );
+
+        let start = Instant::now();
+        let err = conn
+            .request(&json!(1), "tools/call", None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, UpstreamError::Closed),
+            "request after upstream exit must fail with Closed, got {err}"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "request after upstream exit must fail fast, not wait out the timeout"
+        );
     }
 }
