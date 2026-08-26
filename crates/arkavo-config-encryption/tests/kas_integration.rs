@@ -52,7 +52,7 @@ mod kas_tests {
         assert!(!encrypted.encrypted_data.is_empty());
         assert_eq!(
             encrypted.policy_manifest.kas_url,
-            "https://100.arkavo.net/kas/v2/rewrap"
+            "https://platform.arkavo.net/kas/v2/rewrap"
         );
     }
 
@@ -105,7 +105,7 @@ mod kas_tests {
     async fn test_decrypt_with_kas_client() {
         // This test requires:
         // 1. ARKAVO_KAS_TOKEN environment variable with valid OAuth token
-        // 2. Network access to https://100.arkavo.net
+        // 2. Network access to https://platform.arkavo.net
 
         let token = std::env::var("ARKAVO_KAS_TOKEN")
             .expect("ARKAVO_KAS_TOKEN environment variable required for KAS integration test");

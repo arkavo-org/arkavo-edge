@@ -48,7 +48,7 @@ council:
 # OpenTDF encryption for sensitive insights
 encryption:
   enabled: true
-  kas_url: "https://100.arkavo.net"
+  kas_url: "https://platform.arkavo.net"
   policy_namespace: "https://arkavo.net/attr"
   default_attributes:
     council: "hyperforum"

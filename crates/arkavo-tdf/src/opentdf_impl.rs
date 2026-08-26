@@ -47,7 +47,7 @@ impl OpenTdfConfig {
 impl Default for OpenTdfConfig {
     fn default() -> Self {
         Self {
-            kas_url: "https://kas.arkavo.net".to_string(),
+            kas_url: "https://platform.arkavo.net".to_string(),
             segment_size: 2 * 1024 * 1024,
         }
     }
