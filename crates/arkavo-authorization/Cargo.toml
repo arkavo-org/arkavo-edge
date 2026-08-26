@@ -4,36 +4,30 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "OpenTDF Authorization v2 integration for Arkavo - Connect protocol client for entitlement-based access control"
+description = "AuthZEN PEP for Arkavo MCP tools/call and tools/list with CWT $token"
 repository.workspace = true
-keywords = ["authorization", "opentdf", "connect-rpc", "abac", "security"]
+keywords = ["authorization", "authzen", "cwt", "mcp", "security"]
 categories = ["authentication", "web-programming::http-client"]
 
 [dependencies]
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "time"] }
+tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
 thiserror = { workspace = true }
 url = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 lru = { workspace = true }
 tracing = { workspace = true }
-
-# Optional gRPC support
-tonic = { workspace = true, optional = true }
-prost = { workspace = true, optional = true }
+coset = "0.3"
+ciborium = "0.2"
+p256 = { version = "0.13", features = ["ecdsa"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
 wiremock = "0.6"
 arkavo-test-macros = { path = "../arkavo-test-macros" }
-
-[features]
-default = ["connect"]
-connect = []
-grpc = ["tonic", "prost"]
 
 [lints]
 workspace = true

@@ -1,15 +1,16 @@
-use crate::types::{Action, Decision, EntityIdentifier, Resource};
+use crate::types::Decision;
 use lru::LruCache;
-use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct CacheKey {
-    entity_id: String,
+    pdp_origin: String,
+    subject_id: String,
     action_name: String,
-    resource_fqns: BTreeSet<String>,
+    resource_type: String,
+    resource_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -28,8 +29,7 @@ impl DecisionCache {
     ///
     /// # Panics
     ///
-    /// This function will panic if unable to create a NonZeroUsize with value 1000,
-    /// which should never happen in practice.
+    /// Panics only if `NonZeroUsize::new(1000)` fails, which cannot happen.
     pub fn new(capacity: usize, default_ttl: Duration) -> Self {
         let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(1000).unwrap());
         Self {
@@ -38,18 +38,24 @@ impl DecisionCache {
         }
     }
 
-    /// Gets a cached decision for the given entity, action, and resource.
-    ///
     /// # Panics
     ///
-    /// This function will panic if the cache mutex is poisoned.
+    /// Panics if the cache mutex is poisoned.
     pub fn get(
         &self,
-        entity: &EntityIdentifier,
-        action: &Action,
-        resource: &Resource,
+        pdp_origin: &str,
+        subject_id: &str,
+        action_name: &str,
+        resource_type: &str,
+        resource_id: &str,
     ) -> Option<Decision> {
-        let key = Self::make_key(entity, action, resource);
+        let key = Self::make_key(
+            pdp_origin,
+            subject_id,
+            action_name,
+            resource_type,
+            resource_id,
+        );
 
         let mut cache = self.cache.lock().unwrap();
         if let Some(entry) = cache.get(&key) {
@@ -61,20 +67,27 @@ impl DecisionCache {
         None
     }
 
-    /// Puts a decision into the cache for the given entity, action, and resource.
-    ///
     /// # Panics
     ///
-    /// This function will panic if the cache mutex is poisoned.
+    /// Panics if the cache mutex is poisoned.
+    #[allow(clippy::too_many_arguments)]
     pub fn put(
         &self,
-        entity: &EntityIdentifier,
-        action: &Action,
-        resource: &Resource,
+        pdp_origin: &str,
+        subject_id: &str,
+        action_name: &str,
+        resource_type: &str,
+        resource_id: &str,
         decision: Decision,
         ttl: Option<Duration>,
     ) {
-        let key = Self::make_key(entity, action, resource);
+        let key = Self::make_key(
+            pdp_origin,
+            subject_id,
+            action_name,
+            resource_type,
+            resource_id,
+        );
         let ttl = ttl.unwrap_or(self.default_ttl);
         let entry = CacheEntry {
             decision,
@@ -85,21 +98,17 @@ impl DecisionCache {
         cache.put(key, entry);
     }
 
-    /// Clears all entries from the cache.
-    ///
     /// # Panics
     ///
-    /// This function will panic if the cache mutex is poisoned.
+    /// Panics if the cache mutex is poisoned.
     pub fn clear(&self) {
         let mut cache = self.cache.lock().unwrap();
         cache.clear();
     }
 
-    /// Evicts expired entries from the cache.
-    ///
     /// # Panics
     ///
-    /// This function will panic if the cache mutex is poisoned.
+    /// Panics if the cache mutex is poisoned.
     pub fn evict_expired(&self) {
         let now = Instant::now();
         let mut cache = self.cache.lock().unwrap();
@@ -115,17 +124,19 @@ impl DecisionCache {
         }
     }
 
-    fn make_key(entity: &EntityIdentifier, action: &Action, resource: &Resource) -> CacheKey {
-        let resource_fqns = resource
-            .attribute_value_fqns
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>();
-
+    fn make_key(
+        pdp_origin: &str,
+        subject_id: &str,
+        action_name: &str,
+        resource_type: &str,
+        resource_id: &str,
+    ) -> CacheKey {
         CacheKey {
-            entity_id: entity.id.clone(),
-            action_name: action.name.clone(),
-            resource_fqns,
+            pdp_origin: pdp_origin.to_string(),
+            subject_id: subject_id.to_string(),
+            action_name: action_name.to_string(),
+            resource_type: resource_type.to_string(),
+            resource_id: resource_id.to_string(),
         }
     }
 
@@ -153,89 +164,99 @@ mod tests {
     #[test]
     fn test_cache_basic_operations() {
         let cache = DecisionCache::new(100, Duration::from_mins(1));
+        let pdp = "https://kas.arkavo.net";
 
-        let entity = EntityIdentifier {
-            id: "user123".to_string(),
-            entity_type: crate::types::EntityType::Subject,
-            attributes: None,
-        };
+        assert!(
+            cache
+                .get(pdp, "user123", "tools/call", "tool", "git_commit")
+                .is_none()
+        );
 
-        let action = Action::execute_tool();
-        let resource = Resource::mcp_tool("git.commit");
-
-        // Cache miss
-        assert!(cache.get(&entity, &action, &resource).is_none());
-
-        // Put and get
-        cache.put(&entity, &action, &resource, Decision::Permit, None);
+        cache.put(
+            pdp,
+            "user123",
+            "tools/call",
+            "tool",
+            "git_commit",
+            Decision::Permit,
+            None,
+        );
         assert_eq!(
-            cache.get(&entity, &action, &resource),
+            cache.get(pdp, "user123", "tools/call", "tool", "git_commit"),
             Some(Decision::Permit)
         );
 
-        // Clear
         cache.clear();
-        assert!(cache.get(&entity, &action, &resource).is_none());
+        assert!(
+            cache
+                .get(pdp, "user123", "tools/call", "tool", "git_commit")
+                .is_none()
+        );
     }
 
     #[test]
     fn test_cache_expiration() {
         let cache = DecisionCache::new(100, Duration::from_mins(1));
+        let pdp = "https://kas.arkavo.net";
 
-        let entity = EntityIdentifier {
-            id: "user123".to_string(),
-            entity_type: crate::types::EntityType::Subject,
-            attributes: None,
-        };
-
-        let action = Action::execute_tool();
-        let resource = Resource::mcp_tool("git.commit");
-
-        // Put with very short TTL
         cache.put(
-            &entity,
-            &action,
-            &resource,
+            pdp,
+            "user123",
+            "tools/call",
+            "tool",
+            "git_commit",
             Decision::Permit,
             Some(Duration::from_millis(1)),
         );
-
-        // Wait for expiration
         std::thread::sleep(Duration::from_millis(2));
-
-        // Should be expired
-        assert!(cache.get(&entity, &action, &resource).is_none());
+        assert!(
+            cache
+                .get(pdp, "user123", "tools/call", "tool", "git_commit")
+                .is_none()
+        );
     }
 
     #[test]
-    fn test_cache_key_uniqueness() {
+    fn test_cache_key_includes_pdp_origin() {
         let cache = DecisionCache::new(100, Duration::from_mins(1));
 
-        let entity1 = EntityIdentifier {
-            id: "user123".to_string(),
-            entity_type: crate::types::EntityType::Subject,
-            attributes: None,
-        };
-
-        let entity2 = EntityIdentifier {
-            id: "user456".to_string(),
-            entity_type: crate::types::EntityType::Subject,
-            attributes: None,
-        };
-
-        let action = Action::execute_tool();
-        let resource = Resource::mcp_tool("git.commit");
-
-        // Different entities should have different cache entries
-        cache.put(&entity1, &action, &resource, Decision::Permit, None);
-        cache.put(&entity2, &action, &resource, Decision::Deny, None);
+        cache.put(
+            "https://pdp-a",
+            "user123",
+            "tools/call",
+            "tool",
+            "git_commit",
+            Decision::Permit,
+            None,
+        );
+        cache.put(
+            "https://pdp-b",
+            "user123",
+            "tools/call",
+            "tool",
+            "git_commit",
+            Decision::Deny,
+            None,
+        );
 
         assert_eq!(
-            cache.get(&entity1, &action, &resource),
+            cache.get(
+                "https://pdp-a",
+                "user123",
+                "tools/call",
+                "tool",
+                "git_commit"
+            ),
             Some(Decision::Permit)
         );
         assert_eq!(
-            cache.get(&entity2, &action, &resource),
+            cache.get(
+                "https://pdp-b",
+                "user123",
+                "tools/call",
+                "tool",
+                "git_commit"
+            ),
             Some(Decision::Deny)
         );
     }

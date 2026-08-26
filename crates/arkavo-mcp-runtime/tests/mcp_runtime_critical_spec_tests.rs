@@ -57,6 +57,54 @@ async fn mcp_server_creation_initializes_state_and_serves_requests() {
         .expect("list_tools result should be an array")
         .clone();
     assert!(result_tools.iter().any(|v| v.as_str() == Some("echo")));
+
+    let ping = server
+        .handle_rpc_request(RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(2)),
+            method: "ping".to_string(),
+            params: None,
+        })
+        .await;
+    assert!(ping.error.is_none());
+
+    let call = server
+        .handle_rpc_request(RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(3)),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({"name": "echo", "arguments": {"msg": "hi"}})),
+        })
+        .await;
+    assert!(call.error.is_none());
+
+    let listed = server
+        .handle_rpc_request(RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(4)),
+            method: "tools/list".to_string(),
+            params: Some(serde_json::json!({})),
+        })
+        .await;
+    assert!(listed.error.is_none());
+    assert!(
+        listed
+            .result
+            .as_ref()
+            .and_then(|v| v.get("tools"))
+            .and_then(|v| v.as_array())
+            .is_some()
+    );
+
+    let note = server
+        .handle_rpc_request(RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: None,
+            method: "notifications/initialized".to_string(),
+            params: None,
+        })
+        .await;
+    assert!(note.error.is_none());
 }
 
 #[cfg(unix)]

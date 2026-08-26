@@ -176,9 +176,8 @@ impl PolicyBridge {
         auth_client: &AuthorizationClient,
         tool_name: &str,
     ) -> Result<Decision> {
-        let token = std::env::var("CLAUDE_CODE_SESSION_ACCESS_TOKEN")
-            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
-            .unwrap_or_default();
+        // Subject credential MUST be an Arkavo CWT. ANTHROPIC_API_KEY is not a CWT.
+        let token = std::env::var("CLAUDE_CODE_SESSION_ACCESS_TOKEN").unwrap_or_default();
 
         if token.is_empty() {
             warn!("No auth token available for authorization check, denying tool: {tool_name}");
