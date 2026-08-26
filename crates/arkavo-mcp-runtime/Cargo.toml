@@ -11,6 +11,7 @@ categories = ["network-programming", "asynchronous"]
 
 [dependencies]
 arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-authorization = { path = "../arkavo-authorization" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["llm-remote"] }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-validation = { path = "../arkavo-validation" }

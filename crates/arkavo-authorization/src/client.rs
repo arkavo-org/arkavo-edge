@@ -1,74 +1,190 @@
 use crate::cache::DecisionCache;
 use crate::config::AuthorizationConfig;
+use crate::cwt_subject::{sarc_tools_call, sarc_tools_list, token_map, trust_anchor_ok};
+use crate::cwt_verify::CwtVerifier;
 use crate::error::{AuthorizationError, Result};
-use crate::types::{
-    Action, CreateEntityChainsFromTokensRequest, CreateEntityChainsFromTokensResponse, Decision,
-    DecisionRequest, EntityIdentifier, GetDecisionBulkRequest, GetDecisionBulkResponse,
-    GetDecisionRequest, GetDecisionResponse, McpToolMapping, Resource,
-};
-use base64::{Engine as _, engine::general_purpose};
+use crate::pep::{is_hardcoded_mapped, is_pass_through, subject_cwt_from, tool_name_from_params};
+use crate::types::{AuthzenEvaluationResponse, Decision, McpToolMapping};
 use reqwest::{Client, StatusCode};
+use serde_json::Value;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+use url::Url;
+
+const TOKEN_REFRESH_MARGIN: Duration = Duration::from_secs(60);
+
+struct CachedToken {
+    token: String,
+    expires_at: Instant,
+}
+
+#[derive(serde::Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    #[serde(default)]
+    expires_in: u64,
+}
+
+#[derive(serde::Deserialize)]
+struct AuthzenDiscovery {
+    policy_decision_point: Option<String>,
+    access_evaluation_endpoint: Option<String>,
+}
 
 pub struct AuthorizationClient {
     config: AuthorizationConfig,
     http_client: Client,
     cache: Arc<DecisionCache>,
+    verifier: CwtVerifier,
+    token_cache: Mutex<Option<CachedToken>>,
+    evaluation_url: Mutex<Option<Url>>,
 }
 
 impl AuthorizationClient {
     pub fn new(config: AuthorizationConfig) -> Result<Self> {
         let http_client = Client::builder()
             .timeout(config.timeout)
+            .redirect(reqwest::redirect::Policy::none())
             .danger_accept_invalid_certs(false)
             .build()
             .map_err(|e| AuthorizationError::ConfigError(e.to_string()))?;
 
-        let cache = Arc::new(DecisionCache::new(1000, config.cache_ttl));
+        let mut verifier = if let Some(url) = config.cose_keys_url() {
+            CwtVerifier::new(url, config.oidc_issuer.clone())
+        } else {
+            CwtVerifier::with_static_keys(vec![])
+        };
+        if let Some(iss) = &config.oidc_issuer {
+            verifier = verifier.with_expected_issuer(iss.clone());
+        }
+        verifier = verifier.with_audiences(config.expected_audiences());
 
         Ok(Self {
+            cache: Arc::new(DecisionCache::new(1000, config.cache_ttl)),
             config,
             http_client,
-            cache,
+            verifier,
+            token_cache: Mutex::new(None),
+            evaluation_url: Mutex::new(None),
         })
     }
 
+    #[must_use]
+    pub fn with_verifier(mut self, verifier: CwtVerifier) -> Self {
+        self.verifier = verifier;
+        self
+    }
+
     pub async fn authorize_mcp_tool(&self, token: &str, tool_name: &str) -> Result<Decision> {
-        // Check if it's a safe diagnostic tool
-        if McpToolMapping::is_safe_diagnostic(tool_name) {
-            info!(
-                event = "auth_decision",
-                action = "permit",
-                resource = tool_name,
-                "Safe diagnostic tool allowed"
-            );
+        match self
+            .authorize_mcp_method(
+                "tools/call",
+                Some(&serde_json::json!({ "name": tool_name })),
+                Some(token),
+            )
+            .await
+        {
+            Ok(d) => Ok(d),
+            Err(AuthorizationError::Denied) => Ok(Decision::Deny),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn authorize_mcp_method(
+        &self,
+        method: &str,
+        params: Option<&Value>,
+        subject_cwt: Option<&str>,
+    ) -> Result<Decision> {
+        if is_pass_through(method) {
             return Ok(Decision::Permit);
         }
-
-        // Get entity from token
-        let entity = self.resolve_entity_from_token(token).await?;
-
-        // Create resource for MCP tool
-        let resource = McpToolMapping::tool_to_resource(tool_name);
-        let action = Action::execute_tool();
-
-        // Check cache first
-        if let Some(cached) = self.cache.get(&entity, &action, &resource) {
-            info!(event = "auth_decision", action = ?cached, resource = tool_name, "Authorization cache hit");
-            return Ok(cached);
+        if !is_hardcoded_mapped(method) {
+            info!(
+                event = "auth_decision",
+                action = "deny",
+                method,
+                "Unknown MCP method denied"
+            );
+            return Err(AuthorizationError::Denied);
         }
 
-        // Make authorization request
-        let decision = self.get_decision(&entity, &action, &resource).await?;
+        let token = subject_cwt_from(subject_cwt).ok_or_else(|| {
+            AuthorizationError::Mapping(
+                "missing subject CWT (Authorization Bearer or CLAUDE_CODE_SESSION_ACCESS_TOKEN)"
+                    .into(),
+            )
+        })?;
 
-        // Cache the decision
-        let ttl = Self::extract_token_ttl(token);
-        self.cache
-            .put(&entity, &action, &resource, decision.clone(), Some(ttl));
+        if method == "tools/call" {
+            let tool_name = tool_name_from_params(params)?;
+            if McpToolMapping::is_safe_diagnostic(tool_name)
+                || self
+                    .config
+                    .safe_diagnostic_tools
+                    .iter()
+                    .any(|t| t == tool_name)
+            {
+                info!(
+                    event = "auth_decision",
+                    action = "permit",
+                    resource = tool_name,
+                    "Safe diagnostic tool allowed"
+                );
+                return Ok(Decision::Permit);
+            }
+        }
 
-        Ok(decision)
+        let claims = self.verifier.verify(&token).await?;
+        let token_json = token_map(&claims);
+        let platform = self.config.platform_audience.as_deref();
+        let (action_name, resource_type, resource_id, sarc) = if method == "tools/list" {
+            let slug = self.config.mcp_server_slug();
+            let sarc = sarc_tools_list(&claims, &self.config.mcp_resource_id, &slug, platform)?;
+            ("tools/list", "mcp_server", slug, sarc)
+        } else {
+            let tool_name = tool_name_from_params(params)?;
+            let slug = crate::cwt_subject::tool_value_slug(tool_name);
+            let sarc = sarc_tools_call(&claims, tool_name, platform);
+            ("tools/call", "tool", slug, sarc)
+        };
+
+        if !trust_anchor_ok(&sarc, &token_json) {
+            return Err(AuthorizationError::Mapping(
+                "subject.id does not equal $token.sub".into(),
+            ));
+        }
+
+        let pdp = self.config.pdp_origin();
+        if let Some(cached) =
+            self.cache
+                .get(&pdp, &claims.sub, action_name, resource_type, &resource_id)
+        {
+            info!(event = "auth_decision", action = ?cached, method, "Authorization cache hit");
+            return match cached {
+                Decision::Permit => Ok(Decision::Permit),
+                Decision::Deny => Err(AuthorizationError::Denied),
+            };
+        }
+
+        let decision = self.evaluate(&sarc).await?;
+        let ttl =
+            DecisionCache::calculate_ttl_from_token(Some(i64::try_from(claims.exp).unwrap_or(0)));
+        self.cache.put(
+            &pdp,
+            &claims.sub,
+            action_name,
+            resource_type,
+            &resource_id,
+            decision.clone(),
+            Some(ttl),
+        );
+        match decision {
+            Decision::Permit => Ok(Decision::Permit),
+            Decision::Deny => Err(AuthorizationError::Denied),
+        }
     }
 
     pub async fn authorize_mcp_tools_bulk(
@@ -76,183 +192,61 @@ impl AuthorizationClient {
         token: &str,
         tool_names: Vec<&str>,
     ) -> Result<Vec<(String, Decision)>> {
-        // Filter out safe diagnostic tools
         let mut results = Vec::new();
-        let mut tools_to_check = Vec::new();
-
-        for tool_name in &tool_names {
-            if McpToolMapping::is_safe_diagnostic(tool_name) {
-                results.push(((*tool_name).to_string(), Decision::Permit));
-            } else {
-                tools_to_check.push(*tool_name);
+        for tool_name in tool_names {
+            match self.authorize_mcp_tool(token, tool_name).await {
+                Ok(d) => results.push((tool_name.to_string(), d)),
+                Err(AuthorizationError::Denied) => {
+                    results.push((tool_name.to_string(), Decision::Deny));
+                }
+                Err(e) => return Err(e),
             }
         }
-
-        if tools_to_check.is_empty() {
-            return Ok(results);
-        }
-
-        // Get entity from token
-        let entity = self.resolve_entity_from_token(token).await?;
-
-        // Build bulk request
-        let decision_requests: Vec<DecisionRequest> = tools_to_check
-            .iter()
-            .map(|tool_name| DecisionRequest {
-                entity_identifier: entity.clone(),
-                action: Action::execute_tool(),
-                resource: McpToolMapping::tool_to_resource(tool_name),
-            })
-            .collect();
-
-        // Make bulk authorization request
-        let response = self.get_decision_bulk(decision_requests).await?;
-
-        // Process responses and cache
-        let ttl = Self::extract_token_ttl(token);
-        for (tool_name, decision_response) in tools_to_check.iter().zip(response.decision_responses)
-        {
-            let decision = decision_response.decision;
-
-            // Cache each decision
-            self.cache.put(
-                &entity,
-                &decision_response.action,
-                &decision_response.resource,
-                decision.clone(),
-                Some(ttl),
-            );
-
-            results.push(((*tool_name).to_string(), decision));
-        }
-
         Ok(results)
     }
 
-    async fn resolve_entity_from_token(&self, token: &str) -> Result<EntityIdentifier> {
-        let url = self
-            .config
-            .entity_resolution_v2_url("CreateEntityChainsFromTokens");
-
-        let request = CreateEntityChainsFromTokensRequest {
-            tokens: vec![token.to_string()],
-        };
-
-        let response = self
-            .http_client
-            .post(url)
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {token}"))
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| {
-                error!("Entity resolution request failed: {}", e);
-                AuthorizationError::EntityResolutionError(e.to_string())
-            })?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            error!("Entity resolution failed with status {}: {}", status, body);
-            return Err(AuthorizationError::EntityResolutionError(format!(
-                "Status {status}: {body}"
-            )));
-        }
-
-        let ers_response: CreateEntityChainsFromTokensResponse = response.json().await?;
-
-        let entity_chain = ers_response
-            .entity_chains
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                AuthorizationError::EntityResolutionError("No entity chains returned".to_string())
-            })?;
-
-        let entity = entity_chain.entities.into_iter().next().ok_or_else(|| {
-            AuthorizationError::EntityResolutionError("No entities in chain".to_string())
-        })?;
-
-        Ok(entity)
-    }
-
-    pub async fn get_decision(
-        &self,
-        entity: &EntityIdentifier,
-        action: &Action,
-        resource: &Resource,
-    ) -> Result<Decision> {
-        let url = self.config.authorization_v2_url("GetDecision");
-
-        let request = GetDecisionRequest {
-            entity_identifier: entity.clone(),
-            action: action.clone(),
-            resource: resource.clone(),
-        };
-
-        let response = self.make_connect_request(&url, &request).await?;
-
-        let decision_response: GetDecisionResponse = response.json().await?;
-        Ok(decision_response.decision)
-    }
-
-    async fn get_decision_bulk(
-        &self,
-        decision_requests: Vec<DecisionRequest>,
-    ) -> Result<GetDecisionBulkResponse> {
-        let url = self.config.authorization_v2_url("GetDecisionBulk");
-
-        let request = GetDecisionBulkRequest { decision_requests };
-
-        let response = self.make_connect_request(&url, &request).await?;
-
-        let bulk_response: GetDecisionBulkResponse = response.json().await?;
-        Ok(bulk_response)
-    }
-
-    async fn make_connect_request<T: serde::Serialize + Sync>(
-        &self,
-        url: &url::Url,
-        body: &T,
-    ) -> Result<reqwest::Response> {
+    async fn evaluate(&self, sarc: &Value) -> Result<Decision> {
+        let url = self.evaluation_endpoint().await?;
+        let service = self.service_bearer().await?;
         let mut retries = 0;
-
         loop {
             let response = self
                 .http_client
                 .post(url.clone())
                 .header("Content-Type", "application/json")
-                .header("Connect-Protocol-Version", "1")
-                .json(body)
+                .header("Authorization", format!("Bearer {service}"))
+                .json(sarc)
                 .send()
                 .await;
 
             match response {
-                Ok(resp) if resp.status().is_success() => return Ok(resp),
-                Ok(resp) if resp.status() == StatusCode::UNAUTHORIZED => {
-                    info!(
-                        event = "auth_decision",
-                        action = "deny",
-                        reason = "unauthorized",
-                        "Authorization denied: 401"
-                    );
-                    return Err(AuthorizationError::InvalidToken("Unauthorized".to_string()));
+                Ok(resp) if resp.status().is_success() => {
+                    let parsed: AuthzenEvaluationResponse = resp.json().await?;
+                    if required_obligations_nonempty(parsed.context.as_ref()) {
+                        info!(
+                            event = "auth_decision",
+                            action = "deny",
+                            reason = "obligations",
+                            "Fail closed on required obligations"
+                        );
+                        return Err(AuthorizationError::Denied);
+                    }
+                    return if parsed.decision {
+                        Ok(Decision::Permit)
+                    } else {
+                        Ok(Decision::Deny)
+                    };
                 }
-                Ok(resp) if resp.status() == StatusCode::FORBIDDEN => {
-                    info!(
-                        event = "auth_decision",
-                        action = "deny",
-                        reason = "forbidden",
-                        "Authorization denied: 403"
-                    );
-                    return Err(AuthorizationError::Denied);
+                Ok(resp) if resp.status() == StatusCode::UNAUTHORIZED => {
+                    return Err(AuthorizationError::PdpUnavailable(
+                        "PEP service CWT rejected by PDP (401)".into(),
+                    ));
                 }
                 Ok(resp)
                     if resp.status().is_server_error() && retries < self.config.max_retries =>
                 {
                     warn!(
-                        "Server error, retrying... (attempt {}/{})",
+                        "PDP server error, retrying... (attempt {}/{})",
                         retries + 1,
                         self.config.max_retries
                     );
@@ -262,41 +256,120 @@ impl AuthorizationClient {
                 Ok(resp) => {
                     let status = resp.status();
                     let body = resp.text().await.unwrap_or_default();
-                    error!("Request failed with status {}: {}", status, body);
-                    return Err(AuthorizationError::InvalidResponse(format!(
-                        "Status {status}: {body}"
+                    error!("AuthZEN evaluation failed: {status} {body}");
+                    return Err(AuthorizationError::PdpUnavailable(format!(
+                        "Status {status}"
                     )));
                 }
                 Err(e) if retries < self.config.max_retries => {
-                    warn!(
-                        "Request error, retrying... (attempt {}/{}): {}",
-                        retries + 1,
-                        self.config.max_retries,
-                        e
-                    );
+                    warn!("AuthZEN request error, retrying: {e}");
                     retries += 1;
                     tokio::time::sleep(Duration::from_millis(100 * (1 << retries))).await;
                 }
-                Err(e) => return Err(AuthorizationError::HttpError(e)),
+                Err(e) => return Err(AuthorizationError::PdpUnavailable(e.to_string())),
             }
         }
     }
 
-    fn extract_token_ttl(token: &str) -> Duration {
-        // Parse JWT to get expiration
-        let parts: Vec<&str> = token.split('.').collect();
-        if parts.len() != 3 {
-            return Duration::from_mins(1);
+    async fn evaluation_endpoint(&self) -> Result<Url> {
+        if let Some(u) = &self.config.evaluation_endpoint {
+            return Ok(u.clone());
         }
-
-        if let Ok(decoded) = general_purpose::URL_SAFE_NO_PAD.decode(parts[1])
-            && let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&decoded)
-            && let Some(exp) = claims.get("exp").and_then(|v| v.as_i64())
         {
-            return DecisionCache::calculate_ttl_from_token(Some(exp));
+            let cached = self.evaluation_url.lock().await;
+            if let Some(u) = cached.as_ref() {
+                return Ok(u.clone());
+            }
         }
+        let well_known = format!(
+            "{}/.well-known/authzen-configuration",
+            self.config.pdp_origin()
+        );
+        let resp = self
+            .http_client
+            .get(&well_known)
+            .send()
+            .await
+            .map_err(|e| AuthorizationError::PdpUnavailable(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(AuthorizationError::PdpUnavailable(format!(
+                "discovery HTTP {}",
+                resp.status()
+            )));
+        }
+        let disc: AuthzenDiscovery = resp
+            .json()
+            .await
+            .map_err(|e| AuthorizationError::PdpUnavailable(format!("discovery JSON: {e}")))?;
+        if let Some(pdp) = &disc.policy_decision_point {
+            let want = self.config.pdp_origin();
+            if pdp.trim_end_matches('/') != want {
+                return Err(AuthorizationError::PdpUnavailable(
+                    "policy_decision_point mismatch".into(),
+                ));
+            }
+        }
+        let endpoint = disc.access_evaluation_endpoint.ok_or_else(|| {
+            AuthorizationError::PdpUnavailable("missing access_evaluation_endpoint".into())
+        })?;
+        let url =
+            Url::parse(&endpoint).map_err(|e| AuthorizationError::PdpUnavailable(e.to_string()))?;
+        *self.evaluation_url.lock().await = Some(url.clone());
+        Ok(url)
+    }
 
-        Duration::from_mins(1)
+    async fn service_bearer(&self) -> Result<String> {
+        if let Some(t) = &self.config.service_token {
+            return Ok(t.clone());
+        }
+        let (token_url, client_id, client_secret) = match (
+            &self.config.token_url,
+            &self.config.client_id,
+            &self.config.client_secret,
+        ) {
+            (Some(u), Some(id), Some(sec)) => (u, id, sec),
+            _ => {
+                return Err(AuthorizationError::PdpUnavailable(
+                    "AUTHZEN_TOKEN_URL / AUTHZEN_CLIENT_ID / AUTHZEN_CLIENT_SECRET required".into(),
+                ));
+            }
+        };
+        let mut cache = self.token_cache.lock().await;
+        if let Some(cached) = cache.as_ref()
+            && Instant::now() < cached.expires_at
+        {
+            return Ok(cached.token.clone());
+        }
+        let resp = self
+            .http_client
+            .post(token_url)
+            .form(&[
+                ("grant_type", "client_credentials"),
+                ("client_id", client_id.as_str()),
+                ("client_secret", client_secret.as_str()),
+            ])
+            .send()
+            .await
+            .map_err(|e| AuthorizationError::PdpUnavailable(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(AuthorizationError::PdpUnavailable(format!(
+                "token endpoint HTTP {}",
+                resp.status()
+            )));
+        }
+        let parsed: TokenResponse = resp
+            .json()
+            .await
+            .map_err(|e| AuthorizationError::PdpUnavailable(e.to_string()))?;
+        let ttl = Duration::from_secs(parsed.expires_in.max(120));
+        let expires_at = Instant::now() + ttl.saturating_sub(TOKEN_REFRESH_MARGIN);
+        let token = parsed.access_token.clone();
+        *cache = Some(CachedToken {
+            token: parsed.access_token,
+            expires_at,
+        });
+        drop(cache);
+        Ok(token)
     }
 
     pub fn clear_cache(&self) {
@@ -306,4 +379,12 @@ impl AuthorizationClient {
     pub fn evict_expired_cache(&self) {
         self.cache.evict_expired();
     }
+}
+
+fn required_obligations_nonempty(context: Option<&Value>) -> bool {
+    context
+        .and_then(|c| c.get("obligations"))
+        .and_then(|o| o.get("required"))
+        .and_then(Value::as_array)
+        .is_some_and(|a| !a.is_empty())
 }

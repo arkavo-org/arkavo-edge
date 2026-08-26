@@ -149,4 +149,6 @@ pub mod error_codes {
     pub const METHOD_NOT_FOUND: i32 = -32601;
     pub const INVALID_PARAMS: i32 = -32602;
     pub const INTERNAL_ERROR: i32 = -32603;
+    /// AuthZEN deny (draft-arkavo-authzen-cwt-00).
+    pub const AUTHORIZATION_DENIED: i32 = -32001;
 }
