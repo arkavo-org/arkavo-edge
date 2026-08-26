@@ -89,7 +89,7 @@ arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["ki
 # Direct llama.cpp handle for LlamaTokenEstimator (real tokenizer); only under llama-cpp.
 arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 arkavo-budget = { path = "../arkavo-budget" }
-arkavo-router = { path = "../arkavo-router", features = ["advisor-persistence", "persistence"] }
+arkavo-router = { path = "../arkavo-router", default-features = false, features = ["advisor-persistence", "persistence"] }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-crypto = { path = "../arkavo-crypto" }
