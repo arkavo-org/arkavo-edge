@@ -13,6 +13,8 @@ mod gguf_header;
 mod index;
 mod key;
 mod pack;
+mod read_at;
+mod reader;
 mod writer;
 
 pub use error::GgufTdfError;
@@ -21,6 +23,8 @@ pub use gguf_header::{GgufHeader, HeaderTensor, MAX_TENSOR_NAME_BYTES, identify,
 pub use index::{SegmentMap, build_index, validate_index};
 pub use key::{PayloadKeyUnwrapper, PayloadKeyWrapper, WrappedKey};
 pub use pack::{PlannedSegment, plan_segments};
+pub use read_at::VirtualGguf;
+pub use reader::GgufTdfArchive;
 pub use writer::{ProtectOptions, ProtectReport, protect};
 
 /// Profile identifier carried in `manifest.gguf.profile`.
