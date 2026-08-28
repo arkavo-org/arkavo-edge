@@ -10,10 +10,12 @@
 mod error;
 mod ggml_type;
 mod gguf_header;
+mod pack;
 
 pub use error::GgufTdfError;
 pub use ggml_type::{block_traits, tensor_nbytes};
 pub use gguf_header::{GgufHeader, HeaderTensor, MAX_TENSOR_NAME_BYTES, identify, parse_header};
+pub use pack::{PlannedSegment, plan_segments};
 
 /// Profile identifier carried in `manifest.gguf.profile`.
 pub const PROFILE: &str = "gguf-tdf/1";
