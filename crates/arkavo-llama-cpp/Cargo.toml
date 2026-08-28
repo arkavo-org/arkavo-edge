@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 arkavo-llama-cpp-sys = { path = "../arkavo-llama-cpp-sys" }
+libc = { workspace = true }
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
