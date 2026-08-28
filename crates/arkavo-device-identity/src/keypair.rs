@@ -363,6 +363,38 @@ mod tests {
         let _ = delete_keypair();
     }
 
+    #[spec("DEVICE-007")]
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+    fn agent_did_differs_from_device_did() {
+        let _g = KEYCHAIN_MUTEX.lock().unwrap();
+        let _ = delete_keypair();
+        let _ = delete_agent_keypair();
+
+        let device_kp = arkavo_crypto::AgentKeypair::generate();
+        store_keypair(&device_kp.to_bytes()).unwrap();
+        let agent_kp = arkavo_crypto::AgentKeypair::generate();
+        store_agent_keypair(&agent_kp.to_bytes()).unwrap();
+
+        let device_did = arkavo_crypto::AgentKeypair::from_bytes(&get_keypair().unwrap().unwrap())
+            .unwrap()
+            .public_key()
+            .to_did_key();
+        let agent_did =
+            arkavo_crypto::AgentKeypair::from_bytes(&get_agent_keypair().unwrap().unwrap())
+                .unwrap()
+                .public_key()
+                .to_did_key();
+
+        assert_ne!(
+            device_did, agent_did,
+            "agent DID must differ from device DID"
+        );
+
+        let _ = delete_keypair();
+        let _ = delete_agent_keypair();
+    }
+
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     fn test_keypair_storage() {

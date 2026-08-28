@@ -1031,6 +1031,7 @@ dependencies = [
 name = "arkavo-device-identity"
 version = "0.89.4"
 dependencies = [
+ "arkavo-crypto",
  "arkavo-test-macros",
  "dirs 5.0.1",
  "hex",

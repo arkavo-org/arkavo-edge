@@ -70,7 +70,10 @@ impl AgentDescriptor {
         self
     }
 
-    /// Set the entitlements (capabilities) for authorization.
+    /// Set the entitlements for authorization: attribute FQNs (e.g.
+    /// `https://arkavo.ai/attr/tdf/value/decrypt`), the vocabulary authnz-rs
+    /// delegates from the human's stored entitlement list. This URL's `rpc=`
+    /// parameter is for local pairing only and grants nothing on its own.
     #[must_use]
     pub fn with_entitlements(mut self, entitlements: Vec<String>) -> Self {
         self.entitlements = entitlements;
@@ -285,7 +288,7 @@ mod tests {
             "test123".to_string(),
         )
         .with_name("test-agent")
-        .with_entitlements(vec!["agent.capability.chat".to_string()]);
+        .with_entitlements(vec!["https://arkavo.ai/attr/tdf/value/decrypt".to_string()]);
 
         let url = descriptor.to_authorization_url();
 

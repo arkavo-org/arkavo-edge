@@ -939,7 +939,7 @@ components:
 
 stats:
   total_specs: 80
-  total_scenarios: 751
+  total_scenarios: 752
   critical_scenarios: 204
   coverage_areas:
     - authentication
