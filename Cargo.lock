@@ -808,6 +808,7 @@ dependencies = [
  "arkavo-dataflow",
  "arkavo-device-identity",
  "arkavo-events",
+ "arkavo-gguf-tdf",
  "arkavo-git",
  "arkavo-gossip",
  "arkavo-hrm",
@@ -841,6 +842,7 @@ dependencies = [
  "hf-hub 0.5.0 (git+https://github.com/huggingface/hf-hub?rev=cc015aa814e46ef880b57e6c955674f9fcc5084b)",
  "libc",
  "mdns-sd",
+ "opentdf",
  "rand 0.8.6",
  "regex",
  "reqwest 0.12.28",
@@ -7736,6 +7738,7 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 [[package]]
 name = "opentdf"
 version = "0.14.2"
+source = "git+https://github.com/arkavo-org/opentdf-rs?rev=ead8fdcdd792a118bcde1c57767ca6aedde58a99#ead8fdcdd792a118bcde1c57767ca6aedde58a99"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",
@@ -7759,6 +7762,7 @@ dependencies = [
 [[package]]
 name = "opentdf-crypto"
 version = "0.14.2"
+source = "git+https://github.com/arkavo-org/opentdf-rs?rev=ead8fdcdd792a118bcde1c57767ca6aedde58a99#ead8fdcdd792a118bcde1c57767ca6aedde58a99"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -7789,6 +7793,7 @@ dependencies = [
 [[package]]
 name = "opentdf-kas"
 version = "0.14.2"
+source = "git+https://github.com/arkavo-org/opentdf-rs?rev=ead8fdcdd792a118bcde1c57767ca6aedde58a99#ead8fdcdd792a118bcde1c57767ca6aedde58a99"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -7804,6 +7809,7 @@ dependencies = [
 [[package]]
 name = "opentdf-protocol"
 version = "0.14.2"
+source = "git+https://github.com/arkavo-org/opentdf-rs?rev=ead8fdcdd792a118bcde1c57767ca6aedde58a99#ead8fdcdd792a118bcde1c57767ca6aedde58a99"
 dependencies = [
  "base64 0.22.1",
  "chrono",
