@@ -1,6 +1,8 @@
 //! Reader, header binding, root signature, and `read_at`.
 //!
-//! Covers conformance tests T2–T8, T10, T11, T16, and T17.
+//! Covers conformance tests T2–T11, T13, T16, and T17. Spec T5 (a wrong key
+//! on a multi-segment read) is covered jointly by `t5_...`, which catches the
+//! wrong key at unlock, and `t6_...`, which proves the mid-copy zeroize.
 
 mod common;
 
@@ -489,6 +491,61 @@ fn t17_equal_size_member_swap_is_caught_by_the_root_signature() {
         "GGUFTDF_ROOT_MISMATCH",
         "GMAC does not bind order; the root HMAC must catch the swap"
     );
+}
+
+/// T13: an archive carrying ZIP64 structures loads.
+///
+/// The ZIP64 extra field (0x0001) is forced on every member so the reader's
+/// parse path is exercised without writing a 4 GiB file, which is what the
+/// spec's "synthetic; need not be a 4 GiB file" allows.
+#[test]
+fn t13_reads_an_archive_with_zip64_extra_fields() {
+    use std::io::Write;
+
+    let f = build(4096);
+    let zip64 = f.archive.with_extension("zip64");
+
+    let mut file = File::open(&f.archive).unwrap();
+    let entries: Vec<(String, u64, u64)> = {
+        let mut zip = zip::ZipArchive::new(File::open(&f.archive).unwrap()).unwrap();
+        (0..zip.len())
+            .map(|i| {
+                let e = zip.by_index(i).unwrap();
+                (e.name().to_string(), e.data_start(), e.size())
+            })
+            .collect()
+    };
+
+    {
+        let out = File::create(&zip64).unwrap();
+        let mut writer = zip::ZipWriter::new(out);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .large_file(true);
+        for (name, start, size) in &entries {
+            let mut buf = vec![0u8; *size as usize];
+            file.seek(SeekFrom::Start(*start)).unwrap();
+            file.read_exact(&mut buf).unwrap();
+            writer.start_file::<_, ()>(name.as_str(), options).unwrap();
+            writer.write_all(&buf).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    // Every member must actually carry a ZIP64 extra field now.
+    let raw = std::fs::read(&zip64).unwrap();
+    assert!(
+        raw.windows(2).any(|w| w == [0x01, 0x00]),
+        "the rebuilt archive should contain ZIP64 extra field headers"
+    );
+
+    let mut vg = GgufTdfArchive::open(&zip64)
+        .unwrap()
+        .unlock(&f.kas)
+        .unwrap();
+    let mut whole = vec![0u8; f.source_bytes.len()];
+    assert_eq!(vg.read_at(0, &mut whole), f.source_bytes.len());
+    assert_eq!(whole, f.source_bytes);
 }
 
 #[test]
