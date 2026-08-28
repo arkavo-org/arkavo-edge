@@ -95,3 +95,11 @@ scenarios:
       - condition: Platform not supported
         expected: Returns DeviceIdentityError::UnsupportedPlatform
     changed: "2025-01-31"
+
+  - id: DEVICE-007
+    name: Agent keypair is distinct from device keypair
+    criticality: high
+    given: ["a device keypair exists"]
+    when: "an agent keypair is created"
+    then: ["the device keypair is unchanged", "the agent DID differs from the device DID", "deleting the agent keypair leaves the device keypair"]
+    refs: ["crates/arkavo-device-identity/src/keypair.rs"]

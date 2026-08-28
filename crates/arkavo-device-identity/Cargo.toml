@@ -27,6 +27,7 @@ dirs = "5.0"
 
 [dev-dependencies]
 serde_json.workspace = true
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [features]
 default = []
