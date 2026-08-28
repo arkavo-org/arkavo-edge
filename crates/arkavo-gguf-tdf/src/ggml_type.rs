@@ -18,14 +18,18 @@ use crate::error::GgufTdfError;
 pub fn block_traits(ggml_type: u32) -> Option<(u64, u64)> {
     const QK_K: u64 = 256;
     let traits = match ggml_type {
-        0 => (1, 4),                                           // F32
-        1 => (1, 2),                                           // F16
-        2 => (32, 2 + 16),                                     // Q4_0
-        3 => (32, 2 + 2 + 16),                                 // Q4_1
-        6 => (32, 2 + 4 + 16),                                 // Q5_0
-        7 => (32, 2 + 2 + 4 + 16),                             // Q5_1
-        8 => (32, 2 + 32),                                     // Q8_0
-        9 => (32, 4 + 4 + 32),                                 // Q8_1
+        0 => (1, 4),               // F32
+        1 => (1, 2),               // F16
+        2 => (32, 2 + 16),         // Q4_0
+        3 => (32, 2 + 2 + 16),     // Q4_1
+        6 => (32, 2 + 4 + 16),     // Q5_0
+        7 => (32, 2 + 2 + 4 + 16), // Q5_1
+        8 => (32, 2 + 32),         // Q8_0
+        // Q8_1: two ggml_half scales, not two floats. gguf-py's
+        // GGML_QUANT_SIZES still says 4 + 4 + 32 = 40; ggml's own
+        // static_assert says 2 * sizeof(ggml_half) + QK8_1 = 36, and
+        // ggml_type_size is what the loader actually uses.
+        9 => (32, 2 + 2 + 32),                                 // Q8_1
         10 => (QK_K, 2 + 2 + QK_K / 16 + QK_K / 4),            // Q2_K
         11 => (QK_K, 2 + QK_K / 4 + QK_K / 8 + 12),            // Q3_K
         12 => (QK_K, 2 + 2 + QK_K / 2 + 12),                   // Q4_K
@@ -96,6 +100,7 @@ mod tests {
         assert_eq!(block_traits(8), Some((32, 34))); // Q8_0
         assert_eq!(block_traits(12), Some((256, 144))); // Q4_K
         assert_eq!(block_traits(14), Some((256, 210))); // Q6_K
+        assert_eq!(block_traits(9), Some((32, 36))); // Q8_1: half scales
         assert_eq!(block_traits(15), Some((256, 292))); // Q8_K
         assert_eq!(block_traits(29), Some((256, 56))); // IQ1_M
         assert_eq!(block_traits(30), Some((1, 2))); // BF16

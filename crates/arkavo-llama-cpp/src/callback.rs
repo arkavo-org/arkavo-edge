@@ -4,6 +4,10 @@
 
 use std::os::raw::{c_char, c_int, c_void};
 
+/// Buffer size requested for the cookie stream. Large enough that a
+/// multi-gigabyte sequential load makes thousands of callbacks, not millions.
+const STDIO_BUFFER_BYTES: usize = 1 << 20;
+
 struct Cookie {
     // Fat pointer to the caller's `FnMut`; lifetime is guaranteed by
     // `StdioCookieFile` not outliving `from_callback`'s stack frame.
@@ -49,6 +53,17 @@ impl StdioCookieFile {
         let file = unsafe { open_cookie_file(cookie.as_mut()) };
         if file.is_null() {
             return Err("failed to create stdio cookie FILE* for callback reader".to_string());
+        }
+
+        // A cookie stream has no file descriptor, so libc cannot size its
+        // buffer from st_blksize and falls back to BUFSIZ (1 KiB on macOS).
+        // That would mean millions of `read_at` calls for a multi-gigabyte
+        // model. Ask for a 1 MiB buffer so large freads refill in big chunks.
+        // Failure is not fatal: it only costs more, smaller callbacks.
+        // SAFETY: `file` is a live stream we just created and have not read
+        // from yet, which is when setvbuf must be called.
+        unsafe {
+            libc::setvbuf(file, std::ptr::null_mut(), libc::_IOFBF, STDIO_BUFFER_BYTES);
         }
         Ok(Self {
             file,
@@ -247,6 +262,52 @@ unsafe extern "C" {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_reads_are_served_from_a_large_stdio_buffer() {
+        // llama.cpp reads tensors with one big fread each, which stdio passes
+        // straight through to the cookie. The GGUF header parse, though, is
+        // many small reads, and those are served from the stdio buffer. With
+        // the libc default for a descriptor-less stream (BUFSIZ, 1 KiB on
+        // macOS) a 4 MiB span would refill thousands of times; setvbuf makes
+        // it a handful.
+        let data = vec![0x5Au8; 4 * 1024 * 1024];
+        let mut calls = 0usize;
+        let mut read_at = |offset: u64, buf: &mut [u8]| -> usize {
+            calls += 1;
+            let start = offset as usize;
+            if start >= data.len() {
+                return 0;
+            }
+            let n = buf.len().min(data.len() - start);
+            buf[..n].copy_from_slice(&data[start..start + n]);
+            n
+        };
+
+        {
+            let file = StdioCookieFile::open(data.len() as u64, &mut read_at).unwrap();
+            let mut chunk = [0u8; 64];
+            let mut total = 0usize;
+            unsafe {
+                loop {
+                    let n = libc::fread(chunk.as_mut_ptr().cast(), 1, chunk.len(), file.file);
+                    if n == 0 {
+                        break;
+                    }
+                    assert!(chunk[..n].iter().all(|b| *b == 0x5A));
+                    total += n;
+                }
+            }
+            assert_eq!(total, data.len());
+        }
+
+        // 4 MiB through a 1 MiB buffer is a handful of refills. The libc
+        // default would be in the thousands.
+        assert!(
+            calls <= 16,
+            "expected a few large refills, got {calls} callbacks"
+        );
+    }
 
     #[test]
     fn cookie_file_seek_end_and_read() {

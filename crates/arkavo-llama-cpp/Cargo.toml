@@ -9,6 +9,8 @@ libc = { workspace = true }
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+# Pins the GGUF packer's transcribed quant table against ggml itself.
+arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf" }
 criterion = { workspace = true }
 glob = { workspace = true }
 

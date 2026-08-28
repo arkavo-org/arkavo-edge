@@ -1250,6 +1250,7 @@ version = "0.89.4"
 name = "arkavo-llama-cpp"
 version = "0.89.4"
 dependencies = [
+ "arkavo-gguf-tdf",
  "arkavo-llama-cpp-sys",
  "arkavo-test-macros",
  "criterion",

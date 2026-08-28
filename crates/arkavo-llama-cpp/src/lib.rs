@@ -393,6 +393,10 @@ impl LlamaModel {
         // SAFETY: cookie FILE* was rewound if a GPU attempt consumed bytes.
         let cpu_model = unsafe { ffi::llama_model_load_from_file_ptr(file.as_ptr(), cpu_params) };
         if cpu_model.is_null() {
+            // Both attempts failed, so the bytes are not a loadable model
+            // rather than the GPU being unusable. Restoring the previous
+            // status keeps one bad archive from disabling GPU for the process.
+            GPU_STATUS.store(gpu_status, Ordering::Relaxed);
             Err("Failed to load model (CPU attempt failed)".to_string())
         } else {
             eprintln!("✓ CPU-only model loaded successfully");
