@@ -68,6 +68,9 @@ pub enum GgufTdfError {
     #[error("GGUFTDF_PAYLOAD_FORBIDDEN: archive contains 0.payload alongside profile members")]
     PayloadForbidden,
 
+    #[error("GGUFTDF_CRYPTO: {0}")]
+    Crypto(String),
+
     #[error("GGUFTDF_BAD_INDEX: I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -96,6 +99,7 @@ impl GgufTdfError {
             Self::MtmdUnsupported => "GGUFTDF_MTMD_UNSUPPORTED",
             Self::SiblingRefused => "GGUFTDF_SIBLING_REFUSED",
             Self::PayloadForbidden => "GGUFTDF_PAYLOAD_FORBIDDEN",
+            Self::Crypto(_) => "GGUFTDF_CRYPTO",
         }
     }
 }
@@ -179,6 +183,7 @@ mod tests {
             GgufTdfError::PayloadForbidden.code(),
             "GGUFTDF_PAYLOAD_FORBIDDEN"
         );
+        assert_eq!(GgufTdfError::Crypto("x".into()).code(), "GGUFTDF_CRYPTO");
     }
 
     #[test]

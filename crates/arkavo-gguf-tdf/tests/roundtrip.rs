@@ -590,3 +590,21 @@ fn open_rejects_a_file_that_is_not_a_zip() {
         "GGUFTDF_NOT_ZIP"
     );
 }
+
+#[test]
+fn open_rejects_a_concatenated_payload_member() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("payload.gguf.tdf");
+    let mut builder = TdfMultiEntryBuilder::new(&path).unwrap();
+    builder.add_member("0.payload", b"concatenated").unwrap();
+    builder.add_member("header", b"x").unwrap();
+    let manifest = TdfManifest::new("header".to_string(), "https://kas.invalid".to_string());
+    builder
+        .finish_with_manifest("0.manifest.json", &manifest)
+        .unwrap();
+
+    assert_eq!(
+        expect_err(GgufTdfArchive::open(&path)).code(),
+        "GGUFTDF_PAYLOAD_FORBIDDEN"
+    );
+}

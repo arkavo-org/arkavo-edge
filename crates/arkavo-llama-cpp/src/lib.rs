@@ -56,7 +56,6 @@ use std::ffi::CString;
 #[cfg(not(target_env = "musl"))]
 use std::os::raw::{c_char, c_void};
 #[cfg(not(target_env = "musl"))]
-#[cfg(not(target_env = "musl"))]
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 // Global flag to control llama.cpp logging

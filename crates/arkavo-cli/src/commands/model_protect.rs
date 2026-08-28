@@ -50,9 +50,7 @@ pub async fn run(args: ProtectArgs<'_>) -> Result<()> {
 
     let kas_url = args.kas_url.unwrap_or(DEFAULT_KAS_URL);
 
-    // Resolve through the Connect endpoints rather than the deprecated
-    // /kas/v2 REST path. `from_config` also validates the resolved URL, which
-    // matters because it can come from a remotely fetched well-known document.
+    // The resolved URL can come from a remote well-known document.
     let config = opentdf::kas_discovery::OpentdfConfiguration::for_kas_connect(kas_url);
     let endpoints = opentdf::kas_discovery::KasEndpoints::from_config(&config)
         .with_context(|| format!("cannot resolve KAS endpoints for {kas_url}"))?;

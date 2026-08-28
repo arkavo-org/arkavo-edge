@@ -166,6 +166,55 @@ fn t1_packs_a_tiny_gguf_into_profile_members() {
     assert_ne!(wrapper.key(), [0u8; 32]);
 }
 
+fn partial_path(dest: &std::path::Path) -> std::path::PathBuf {
+    let mut name = dest.as_os_str().to_os_string();
+    name.push(".partial");
+    std::path::PathBuf::from(name)
+}
+
+#[test]
+fn successful_wrap_does_not_leave_a_partial_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = common::synthetic_gguf(&[("a", 0, [64, 1, 1, 1])], None);
+    let source = common::write_gguf(dir.path(), "model.gguf", &bytes);
+    let dest = dir.path().join("model.gguf.tdf");
+    std::fs::write(partial_path(&dest), b"stale-partial").unwrap();
+    protect(
+        &source,
+        &dest,
+        &MockWrapper::new(),
+        &ProtectOptions::default(),
+    )
+    .unwrap();
+    assert!(dest.is_file());
+    assert!(
+        !partial_path(&dest).exists(),
+        "a successful wrap must rename the staging file away"
+    );
+}
+
+#[test]
+fn a_failed_commit_does_not_replace_dest_and_cleans_staging() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = common::synthetic_gguf(&[("a", 0, [64, 1, 1, 1])], None);
+    let source = common::write_gguf(dir.path(), "model.gguf", &bytes);
+    let dest = dir.path().join("model.gguf.tdf");
+    std::fs::create_dir(&dest).unwrap();
+
+    let err = protect(
+        &source,
+        &dest,
+        &MockWrapper::new(),
+        &ProtectOptions::default(),
+    )
+    .expect_err("rename onto a directory must fail");
+    assert!(dest.is_dir(), "pre-existing dest must be left alone: {err}");
+    assert!(
+        !partial_path(&dest).exists(),
+        "staging must be removed after a failed commit: {err}"
+    );
+}
+
 #[test]
 fn manifest_is_the_last_member_so_the_root_signature_covers_every_tag() {
     let dir = tempfile::tempdir().unwrap();

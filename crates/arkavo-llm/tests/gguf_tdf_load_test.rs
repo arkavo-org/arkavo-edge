@@ -3,7 +3,7 @@
 #![cfg(feature = "llama-cpp")]
 
 use arkavo_llm::gguf_tdf::is_protected_model_path;
-use arkavo_llm::{Error, LlamaCppProvider, SamplingConfig};
+use arkavo_llm::{Error, LlamaCppProvider, ModelRegistry, SamplingConfig};
 
 /// `expect_err` needs `Debug` on the success type, which the provider does
 /// not implement.
@@ -78,4 +78,14 @@ fn a_protected_model_never_falls_back_to_a_sibling_plaintext() {
 fn plain_gguf_paths_are_not_treated_as_protected() {
     assert!(!is_protected_model_path("/models/gemma.gguf"));
     assert!(is_protected_model_path("/models/gemma.gguf.tdf"));
+}
+
+#[test]
+fn registry_load_refuses_a_protected_path_without_a_key() {
+    let registry = ModelRegistry::new();
+    let err = expect_err(
+        registry.load("protected", "/tmp/does-not-exist/model.gguf.tdf"),
+        "registry must not open a .gguf.tdf with from_file",
+    );
+    assert!(err.to_string().contains("GGUFTDF_KAS_DENIED"), "got: {err}");
 }

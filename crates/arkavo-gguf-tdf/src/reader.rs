@@ -36,7 +36,10 @@ impl GgufTdfArchive {
     /// No payload key is needed and none is requested.
     pub fn open(path: &Path) -> Result<Self, GgufTdfError> {
         let mut file = File::open(path)?;
-        let members = TdfMemberIndex::open(&mut file).map_err(|_| GgufTdfError::NotZip)?;
+        let members = TdfMemberIndex::open(&mut file).map_err(map_member_open_error)?;
+        if members.contains("0.payload") {
+            return Err(GgufTdfError::PayloadForbidden);
+        }
 
         let manifest = read_manifest(&mut file, &members)?;
         let index = manifest
@@ -126,6 +129,15 @@ impl GgufTdfArchive {
             header_plain,
             hashes,
         ))
+    }
+}
+
+fn map_member_open_error(err: opentdf::TdfError) -> GgufTdfError {
+    match err {
+        opentdf::TdfError::ZipError(zip::result::ZipError::InvalidArchive(_)) => {
+            GgufTdfError::NotZip
+        }
+        other => other.into(),
     }
 }
 
@@ -274,4 +286,26 @@ fn verify_root_signature(
         return Err(GgufTdfError::RootMismatch);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_zip_magic_is_not_zip() {
+        let err = map_member_open_error(opentdf::TdfError::ZipError(
+            zip::result::ZipError::InvalidArchive("Invalid zip header"),
+        ));
+        assert_eq!(err.code(), "GGUFTDF_NOT_ZIP");
+    }
+
+    #[test]
+    fn a_stored_layout_violation_is_not_reported_as_not_zip() {
+        let err = map_member_open_error(opentdf::TdfError::InvalidStructure {
+            reason: "member 'header' is not Stored".to_string(),
+            expected: Some("compression method 0".to_string()),
+        });
+        assert_eq!(err.code(), "GGUFTDF_BAD_INDEX");
+    }
 }

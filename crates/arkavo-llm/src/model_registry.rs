@@ -81,6 +81,14 @@ impl ModelRegistry {
             return Ok(());
         }
 
+        if crate::gguf_tdf::is_protected_model_path(path) {
+            return Err(Error::Config(format!(
+                "GGUFTDF_KAS_DENIED: {path} is a protected model and needs a \
+                 KAS rewrap; load it with LlamaCppProvider::new_protected after \
+                 recovering the payload key"
+            )));
+        }
+
         let model = LlamaModel::from_file(path)
             .map_err(|e| Error::Config(format!("Failed to load model from {path}: {e}")))?;
 

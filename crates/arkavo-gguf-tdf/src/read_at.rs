@@ -45,7 +45,6 @@ impl VirtualGguf {
         header_plain: Zeroizing<Vec<u8>>,
         hashes: Vec<String>,
     ) -> Self {
-        let max_segment = index.max_segment as usize;
         Self {
             file,
             members,
@@ -53,8 +52,8 @@ impl VirtualGguf {
             map,
             encryption,
             header_plain,
-            scratch: Zeroizing::new(Vec::with_capacity(max_segment)),
-            cipher: Vec::with_capacity(max_segment + crate::SEGMENT_OVERHEAD as usize),
+            scratch: Zeroizing::new(Vec::new()),
+            cipher: Vec::new(),
             hashes,
             cached: None,
             failed: None,

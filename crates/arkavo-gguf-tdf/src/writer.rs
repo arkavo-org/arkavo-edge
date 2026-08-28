@@ -15,7 +15,7 @@ use opentdf::{Segment, TdfEncryption, TdfManifest, TdfMultiEntryBuilder};
 use rand::RngCore;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
 /// OpenTDF specification version whose crypto and manifest semantics this
@@ -81,18 +81,67 @@ pub fn protect(
 
     let wrapped = wrapper.wrap(&payload_key)?;
     let encryption = TdfEncryption::with_payload_key(payload_key.as_ref())
-        .map_err(|e| GgufTdfError::BadIndex(format!("payload key rejected: {e}")))?;
+        .map_err(|e| GgufTdfError::Crypto(format!("payload key rejected: {e}")))?;
 
-    let mut builder = TdfMultiEntryBuilder::new(dest)
-        .map_err(|e| GgufTdfError::BadIndex(format!("cannot create {}: {e}", dest.display())))?;
+    let staging = staging_path(dest);
+    if staging.exists() {
+        std::fs::remove_file(&staging)?;
+    }
+
+    let written = write_archive(
+        &mut file,
+        &staging,
+        &plan,
+        &index,
+        &payload_key,
+        &wrapped,
+        &encryption,
+        opts,
+        virtual_size,
+        header.data_offset,
+    );
+    match written {
+        Ok(report) => {
+            if let Err(err) = std::fs::rename(&staging, dest) {
+                let _ = std::fs::remove_file(&staging);
+                return Err(err.into());
+            }
+            Ok(report)
+        }
+        Err(err) => {
+            let _ = std::fs::remove_file(&staging);
+            Err(err)
+        }
+    }
+}
+
+fn staging_path(dest: &Path) -> PathBuf {
+    let mut name = dest.as_os_str().to_os_string();
+    name.push(".partial");
+    PathBuf::from(name)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_archive(
+    file: &mut BufReader<File>,
+    dest: &Path,
+    plan: &[crate::pack::PlannedSegment],
+    index: &opentdf::GgufIndex,
+    payload_key: &[u8; 32],
+    wrapped: &crate::key::WrappedKey,
+    encryption: &TdfEncryption,
+    opts: &ProtectOptions,
+    virtual_size: u64,
+    header_bytes: u64,
+) -> Result<ProtectReport, GgufTdfError> {
+    let mut builder = TdfMultiEntryBuilder::new(dest)?;
 
     let mut rows = Vec::with_capacity(plan.len());
     let mut tags = Vec::with_capacity(plan.len());
-    // One reusable plaintext buffer, sized to the largest planned segment.
     let scratch_len = plan.iter().map(|s| s.plain()).max().unwrap_or(0) as usize;
     let mut scratch = Zeroizing::new(vec![0u8; scratch_len]);
 
-    for segment in &plan {
+    for segment in plan {
         let len = segment.plain() as usize;
         let plaintext = &mut scratch[..len];
         file.seek(SeekFrom::Start(segment.start))?;
@@ -100,7 +149,7 @@ pub fn protect(
 
         let encrypted = encryption
             .encrypt_segment(plaintext)
-            .map_err(|e| GgufTdfError::BadIndex(format!("segment encrypt failed: {e}")))?;
+            .map_err(|e| GgufTdfError::Crypto(format!("segment encrypt failed: {e}")))?;
 
         builder.add_member(&segment.entry(), &encrypted.bytes)?;
         rows.push(Segment {
@@ -112,13 +161,13 @@ pub fn protect(
     }
     drop(scratch);
 
-    let manifest = build_manifest(&payload_key, &wrapped, index, rows, &tags, opts)?;
+    let manifest = build_manifest(payload_key, wrapped, index.clone(), rows, &tags, opts)?;
     let archive_bytes = builder.finish_with_manifest(MANIFEST_ENTRY, &manifest)?;
 
     Ok(ProtectReport {
         segments: plan.len(),
         virtual_size,
-        header_bytes: header.data_offset,
+        header_bytes,
         archive_bytes,
     })
 }
