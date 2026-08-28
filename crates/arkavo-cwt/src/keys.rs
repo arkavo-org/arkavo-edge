@@ -8,6 +8,7 @@
 use crate::{Claims, CwtError, VerifyOptions, verify::verify};
 use coset::{CborSerializable, CoseKey, CoseKeySet, Label};
 use p256::EncodedPoint;
+use p256::FieldBytes;
 use p256::ecdsa::VerifyingKey;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -78,16 +79,28 @@ fn param(key: &CoseKey, label: i64) -> Option<&ciborium::Value> {
 }
 
 fn verifying_key(key: &CoseKey) -> Result<VerifyingKey, CwtError> {
-    let coordinate = |label: i64, name: &str| {
-        param(key, label)
+    // `generic-array`'s `From<&[T]> for &GenericArray<T, N>` panics on a length
+    // mismatch, so each coordinate is checked against the P-256 field width
+    // before conversion. Leading-zero-stripped coordinates (a classic COSE/JOSE
+    // interop bug) must be rejected, not repaired by left-padding.
+    let coordinate = |label: i64, name: &str| -> Result<FieldBytes, CwtError> {
+        let bytes = param(key, label)
             .and_then(ciborium::Value::as_bytes)
-            .ok_or_else(|| CwtError::KeySet(format!("COSE key is missing its {name} coordinate")))
+            .ok_or_else(|| {
+                CwtError::KeySet(format!("COSE key is missing its {name} coordinate"))
+            })?;
+        // `FieldBytes::from_exact_iter` returns `None` on a length mismatch
+        // instead of panicking, unlike `GenericArray`'s `From<&[T]>`.
+        FieldBytes::from_exact_iter(bytes.iter().copied()).ok_or_else(|| {
+            CwtError::KeySet(format!(
+                "COSE key {name} coordinate is {} bytes, expected 32",
+                bytes.len()
+            ))
+        })
     };
-    let point = EncodedPoint::from_affine_coordinates(
-        coordinate(EC2_X, "x")?.as_slice().into(),
-        coordinate(EC2_Y, "y")?.as_slice().into(),
-        false,
-    );
+    let x = coordinate(EC2_X, "x")?;
+    let y = coordinate(EC2_Y, "y")?;
+    let point = EncodedPoint::from_affine_coordinates(&x, &y, false);
     VerifyingKey::from_encoded_point(&point)
         .map_err(|e| CwtError::KeySet(format!("COSE key is not a valid P-256 point: {e}")))
 }
@@ -157,5 +170,58 @@ impl CachedKeySet {
             fetched_at: Instant::now(),
         });
         Ok(keys)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use coset::CoseKeyBuilder;
+    use p256::ecdsa::SigningKey;
+
+    /// A structurally valid COSE_Key whose `x` (or `y`) coordinate is 31 bytes
+    /// — the shape a leading-zero-stripped coordinate produces — must be
+    /// rejected through the crate's public parse path, not panic the process.
+    /// `generic-array`'s `From<&[T]>` panics on this input; the fix routes the
+    /// length check through `CwtError::KeySet` instead.
+    fn cose_key_with(x: Vec<u8>, y: Vec<u8>) -> Vec<u8> {
+        let key = CoseKeyBuilder::new_ec2_pub_key(coset::iana::EllipticCurve::P_256, x, y)
+            .algorithm(coset::iana::Algorithm::ES256)
+            .key_id(vec![0xAA; 32])
+            .build();
+        CoseKeySet(vec![key]).to_vec().expect("encode key set")
+    }
+
+    fn valid_coordinates() -> (Vec<u8>, Vec<u8>) {
+        let vk = *SigningKey::random(&mut rand::rngs::OsRng).verifying_key();
+        let point = vk.to_encoded_point(false);
+        (
+            point.x().expect("x coordinate").to_vec(),
+            point.y().expect("y coordinate").to_vec(),
+        )
+    }
+
+    #[test]
+    fn from_cbor_rejects_31_byte_x_coordinate_without_panicking() {
+        let (x, y) = valid_coordinates();
+        let bytes = cose_key_with(x[..31].to_vec(), y);
+
+        match KeySet::from_cbor(&bytes) {
+            Err(CwtError::KeySet(_)) => {}
+            Err(other) => panic!("expected CwtError::KeySet, got {other:?}"),
+            Ok(_) => panic!("31-byte x must be rejected, not accepted"),
+        }
+    }
+
+    #[test]
+    fn from_cbor_rejects_31_byte_y_coordinate_without_panicking() {
+        let (x, y) = valid_coordinates();
+        let bytes = cose_key_with(x, y[..31].to_vec());
+
+        match KeySet::from_cbor(&bytes) {
+            Err(CwtError::KeySet(_)) => {}
+            Err(other) => panic!("expected CwtError::KeySet, got {other:?}"),
+            Ok(_) => panic!("31-byte y must be rejected, not accepted"),
+        }
     }
 }
