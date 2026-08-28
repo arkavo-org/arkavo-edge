@@ -146,6 +146,43 @@ impl LlamaCppProvider {
         )
     }
 
+    /// Load a KAS-protected `.gguf.tdf` model with an already-recovered
+    /// payload key.
+    ///
+    /// KAS rewrap is asynchronous and this constructor is not, so the caller
+    /// performs the round-trip in the runtime it already owns and passes the
+    /// key in. Nothing here contacts a KAS or falls back to a plaintext model.
+    pub fn new_protected(
+        model_name: String,
+        model_path: String,
+        config: SamplingConfig,
+        payload_key: [u8; 32],
+    ) -> Result<Self> {
+        init_llama_logging();
+
+        if config.debug || std::env::var_os("ARKAVO_DEBUG").is_some() {
+            arkavo_llama_cpp::set_debug_logging(true);
+            crate::llamacpp_streaming::set_debug(true);
+        }
+
+        test_minimal_init()
+            .map_err(|e| Error::Config(format!("FFI initialization test failed: {e}")))?;
+
+        let model = crate::gguf_tdf::load_with_payload_key(&model_path, payload_key)?;
+
+        Ok(Self {
+            model: Some(Arc::new(model)),
+            registry: None,
+            name: model_name,
+            config,
+            // A protected model has no callback-capable mmproj path yet.
+            mtmd_ctx: None,
+            conversation_id: None,
+            gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
+            template_parse_info: std::sync::Mutex::new(None),
+        })
+    }
+
     pub fn new_with_config(
         model_name: String,
         model_path: String,
@@ -153,6 +190,17 @@ impl LlamaCppProvider {
         config: SamplingConfig,
     ) -> Result<Self> {
         init_llama_logging();
+
+        // A protected model needs a payload key from KAS, which this
+        // synchronous constructor cannot obtain. Fail closed rather than
+        // reaching for a sibling plaintext `.gguf`.
+        if crate::gguf_tdf::is_protected_model_path(&model_path) {
+            return Err(Error::Config(format!(
+                "GGUFTDF_KAS_DENIED: {model_path} is a protected model and needs a \
+                 KAS rewrap; load it with LlamaCppProvider::new_protected after \
+                 recovering the payload key"
+            )));
+        }
 
         // Benign llama.cpp load/runtime chatter is quiet by default; ARKAVO_DEBUG (or an
         // explicit config flag) restores full verbosity across both the ggml/llama log

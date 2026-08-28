@@ -1275,6 +1275,7 @@ dependencies = [
  "arkavo-budget",
  "arkavo-deepseek",
  "arkavo-gemini",
+ "arkavo-gguf-tdf",
  "arkavo-gossip",
  "arkavo-kimi",
  "arkavo-kv-cache",
