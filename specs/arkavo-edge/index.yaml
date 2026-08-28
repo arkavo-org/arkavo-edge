@@ -246,6 +246,17 @@ components:
       - Single-use challenges
       - Credentials never logged
 
+  - name: agent-cwt
+    file: agent-cwt.spec.yaml
+    module: arkavo_cwt
+    description: COSE_Sign1/ES256 verification of the agent CWT against the published COSE key set
+    criticality: critical
+    scenario_count: 3
+    invariants:
+      - ES256 only
+      - Keys matched on raw kid bytes from the published COSE key set
+      - Unknown kid refreshes the key set at most once per ttl
+
   - name: llm-core
     file: llm-core.spec.yaml
     module: arkavo_llm
@@ -938,8 +949,8 @@ components:
       - Sampling caps are recorded in the ledger, never silent
 
 stats:
-  total_specs: 80
-  total_scenarios: 754
+  total_specs: 81
+  total_scenarios: 757
   critical_scenarios: 204
   coverage_areas:
     - authentication

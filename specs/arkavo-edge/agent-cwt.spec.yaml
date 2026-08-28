@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Agent CWT verification
+module: arkavo_cwt
+version: 0.89.4
+
+invariants:
+  - The agent verifies its own credential rather than treating it as an opaque bearer string
+  - ES256 only; any other COSE algorithm is refused before a key is even looked up
+  - Signing keys come from the issuer's published COSE key set, matched on raw kid bytes
+  - An unknown kid never turns into a key-set fetch per verification
+
+scenarios:
+  - id: ACWT-001
+    name: Verify an ES256 agent CWT and read its Arkavo claims
+    criticality: critical
+    given:
+      - A COSE key set publishing the issuer's ES256 P-256 key under a raw 32-byte kid
+      - A CWT signed by that key, tag-61 prefixed around an untagged COSE_Sign1
+    when: verify() is called with the issuer, audience and current time
+    then:
+      - The COSE_Sign1 signature verifies under the published key
+      - iss, sub, aud, exp and iat are decoded from their integer claim keys
+      - arkavo_account_id, arkavo_roles and arkavo_entitlements are decoded from their text claim keys
+      - act yields the human principals the agent acts for
+      - The same token without the tag-61 prefix verifies identically
+    refs:
+      - crates/arkavo-cwt/src/verify.rs
+      - crates/arkavo-cwt/src/claims.rs
+      - crates/arkavo-cwt/src/keys.rs
+
+  - id: ACWT-002
+    name: Reject a wrong key, an expired token and a wrong audience
+    criticality: critical
+    given:
+      - A published key set and tokens minted against it
+    when: verify() is called on a token signed by another key, on an expired token, and with an audience the token does not carry
+    then:
+      - A signature made by a different key is refused as BadSignature
+      - A token whose exp precedes now beyond the allowed skew is refused as Expired
+      - An audience absent from the token's aud is refused as AudienceMismatch
+    refs:
+      - crates/arkavo-cwt/src/verify.rs
+
+  - id: ACWT-003
+    name: Cached key set refreshes on an unknown kid at most once per ttl
+    criticality: high
+    given:
+      - A CachedKeySet pointed at the issuer's /.well-known/cose-keys endpoint
+      - A key rotation, so the first response omits the kid the token names
+    when: verify() is called on a token whose kid is absent from the cached key set
+    then:
+      - An elapsed ttl triggers one re-fetch, which picks up the rotated key and verifies
+      - Within the ttl no re-fetch happens and the unknown kid is reported
+      - Repeated verification of an unknown kid does not repeat the fetch
+    refs:
+      - crates/arkavo-cwt/src/keys.rs

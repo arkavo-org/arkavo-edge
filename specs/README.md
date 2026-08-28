@@ -28,6 +28,7 @@ specs/
     ├── dataflow.spec.yaml      # 6 scenarios
     ├── task-orchestration.spec.yaml # 8 scenarios
     ├── agent-auth.spec.yaml    # 6 scenarios
+    ├── agent-cwt.spec.yaml     # 3 scenarios
     ├── llm-core.spec.yaml      # 6 scenarios
     ├── github.spec.yaml        # 5 scenarios
     ├── git.spec.yaml           # 6 scenarios
