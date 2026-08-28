@@ -97,7 +97,7 @@ mod tests {
             "test_token".to_string(),
             "did:key:z6MkTest".to_string(),
             Utc::now() + Duration::hours(1),
-            vec!["agent.capability.chat".to_string()],
+            vec!["https://arkavo.ai/attr/tdf/value/decrypt".to_string()],
         );
 
         // Store
@@ -162,11 +162,10 @@ mod tests {
             "did:key:z6MkSecure".to_string(),
             expires,
             vec![
-                "agent.capability.chat".to_string(),
-                "agent.capability.read".to_string(),
+                "https://arkavo.ai/attr/tdf/value/decrypt".to_string(),
+                "https://arkavo.ai/attr/action/value/read".to_string(),
             ],
-        )
-        .with_delegation_jwt(Some("delegation.jwt.value".to_string()));
+        );
 
         store_token(&token).await.unwrap();
 
@@ -192,8 +191,16 @@ mod tests {
         assert_eq!(parsed.did, token.did);
         assert_eq!(parsed.expires_at.timestamp(), token.expires_at.timestamp());
         assert_eq!(parsed.entitlements, token.entitlements);
-        assert_eq!(parsed.delegation_jwt, token.delegation_jwt);
         assert!(parsed.stored_at <= Utc::now());
+
+        // Regression guard for C1: unlike `TokenResponse`, `StoredToken` must
+        // keep chrono's default RFC3339 string encoding on disk. Changing it
+        // would orphan tokens already written by installed builds.
+        let raw: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            raw["expires_at"].is_string(),
+            "StoredToken.expires_at must stay RFC3339 on disk, not an integer"
+        );
 
         delete_token().await.unwrap();
     }

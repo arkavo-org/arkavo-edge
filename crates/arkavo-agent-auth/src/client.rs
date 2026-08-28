@@ -6,6 +6,7 @@ use crate::{
 };
 use arkavo_crypto::AgentKeypair;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use chrono::Utc;
 use std::time::Duration;
 
 fn percent_encode(input: &str) -> String {
@@ -55,15 +56,21 @@ impl AgentAuthClient {
         );
 
         let response = self.http_client.get(&url).send().await?;
+        let status = response.status();
 
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
+        if status == reqwest::StatusCode::FORBIDDEN {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AgentAuthError::Forbidden(body));
+        }
+
+        if status == reqwest::StatusCode::NOT_FOUND {
             return Err(AgentAuthError::NotAuthorized);
         }
 
-        if !response.status().is_success() {
+        if !status.is_success() {
             return Err(AgentAuthError::ChallengeRequest(format!(
                 "Server returned status {}",
-                response.status()
+                status
             )));
         }
 
@@ -76,9 +83,18 @@ impl AgentAuthClient {
         let url = format!("{}/agents/token", self.config.base_url);
 
         let response = self.http_client.post(&url).json(request).send().await?;
+        let status = response.status();
 
-        if !response.status().is_success() {
-            let status = response.status();
+        if status == reqwest::StatusCode::FORBIDDEN {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AgentAuthError::Forbidden(body));
+        }
+
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(AgentAuthError::NotAuthorized);
+        }
+
+        if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             return Err(AgentAuthError::TokenRequest(format!(
                 "Server returned status {}: {}",
@@ -121,6 +137,14 @@ impl AgentAuthClient {
                 Err(AgentAuthError::NotAuthorized) => {
                     tracing::info!(event = "auth_decision", action = "deny", subject = %did, "Agent not authorized");
                     return Err(AgentAuthError::NotAuthorized);
+                }
+                Err(AgentAuthError::Forbidden(reason)) => {
+                    // Revoked/expired delegation: burning retries against a
+                    // server that will keep saying no just delays the human
+                    // finding out the agent needs to be re-trusted.
+                    tracing::info!(event = "auth_decision", action = "deny", subject = %did, reason = %reason, "Agent delegation revoked");
+                    storage::delete_token().await.ok();
+                    return Err(AgentAuthError::Forbidden(reason));
                 }
                 Err(e) => last_error = Some(e),
             }
@@ -165,8 +189,7 @@ impl AgentAuthClient {
             did.to_string(),
             token_response.expires_at,
             token_response.entitlements,
-        )
-        .with_delegation_jwt(token_response.delegation_jwt);
+        );
 
         // Store locally
         storage::store_token(&stored_token).await?;
@@ -175,15 +198,18 @@ impl AgentAuthClient {
     }
 
     /// Get a valid token, either from cache or by authenticating.
+    ///
+    /// A cached token is reused only while it is neither expired nor within
+    /// the last third of its lifetime; "refresh" always means re-running the
+    /// challenge-response flow, since there are no refresh tokens.
     pub async fn get_token(&self, keypair: &AgentKeypair) -> Result<StoredToken, AgentAuthError> {
-        // Check for cached token
         if let Some(token) = storage::load_token().await?
             && !token.is_expired()
+            && !token.needs_refresh(Utc::now())
         {
             return Ok(token);
         }
 
-        // Authenticate
         self.authenticate(keypair).await
     }
 
@@ -205,15 +231,15 @@ impl Default for AgentAuthClient {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use arkavo_crypto::{AgentKeypair, AgentPublicKey};
+    use arkavo_crypto::AgentKeypair;
     use arkavo_test_macros::spec;
-    use wiremock::Respond;
     use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use crate::test_helpers::TEST_LOCK;
+    use crate::test_helpers::{TEST_LOCK, ValidatingTokenResponder};
 
     #[test]
     fn test_client_creation() {
@@ -229,51 +255,6 @@ mod tests {
 
         let client = AgentAuthClient::with_config(config);
         assert!(client.is_ok());
-    }
-
-    /// Wiremock responder that validates the Ed25519 signature on the token
-    /// request before returning a token response.
-    struct ValidatingTokenResponder {
-        public_key: AgentPublicKey,
-        challenge: Vec<u8>,
-    }
-
-    impl ValidatingTokenResponder {
-        fn new(public_key: AgentPublicKey, challenge: Vec<u8>) -> Self {
-            Self {
-                public_key,
-                challenge,
-            }
-        }
-    }
-
-    impl Respond for ValidatingTokenResponder {
-        fn respond(&self, request: &Request) -> ResponseTemplate {
-            let body: TokenRequest = match serde_json::from_slice(&request.body) {
-                Ok(b) => b,
-                Err(_) => return ResponseTemplate::new(400).set_body_string("invalid json"),
-            };
-
-            if body.challenge != BASE64_STANDARD.encode(&self.challenge) {
-                return ResponseTemplate::new(400).set_body_string("challenge mismatch");
-            }
-
-            let signature = match BASE64_STANDARD.decode(&body.signature) {
-                Ok(s) => s,
-                Err(_) => return ResponseTemplate::new(400).set_body_string("bad signature"),
-            };
-
-            if self.public_key.verify(&self.challenge, &signature).is_err() {
-                return ResponseTemplate::new(401).set_body_string("invalid signature");
-            }
-
-            ResponseTemplate::new(200).set_body_json(TokenResponse {
-                token: "mock-token-123".to_string(),
-                expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
-                entitlements: vec!["agent.capability.chat".to_string()],
-                delegation_jwt: Some("mock-delegation-jwt".to_string()),
-            })
-        }
     }
 
     /// Test AAUTH-001: Request authentication token.
@@ -324,11 +305,7 @@ mod tests {
         assert_eq!(stored.did, did);
         assert_eq!(
             stored.entitlements,
-            vec!["agent.capability.chat".to_string()]
-        );
-        assert_eq!(
-            stored.delegation_jwt,
-            Some("mock-delegation-jwt".to_string())
+            vec!["https://arkavo.ai/attr/tdf/value/decrypt".to_string()]
         );
         assert!(!stored.is_expired());
 
@@ -339,5 +316,58 @@ mod tests {
         assert_eq!(loaded.token, stored.token);
 
         let _ = storage::delete_token().await;
+    }
+
+    /// Regression test for C1/C4: a 403 from `/agents/challenge` (revoked
+    /// delegation) must map to `AgentAuthError::Forbidden`, must not be
+    /// retried, and must clear any stored token immediately.
+    #[tokio::test]
+    #[spec("AAUTH-007")]
+    async fn forbidden_challenge_maps_to_forbidden_and_clears_token() {
+        let _g = TEST_LOCK.lock().await;
+        storage::delete_token().await.unwrap();
+
+        let keypair = AgentKeypair::generate();
+        let stale = StoredToken::new(
+            "stale-token".into(),
+            keypair.public_key().to_did_key(),
+            Utc::now() + chrono::Duration::minutes(15),
+            vec![],
+        );
+        storage::store_token(&stale).await.unwrap();
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Delegation revoked"))
+            .mount(&server)
+            .await;
+
+        let client = AgentAuthClient::with_config(AgentAuthConfig::new(server.uri())).unwrap();
+        let err = client.authenticate(&keypair).await.unwrap_err();
+        assert!(matches!(err, AgentAuthError::Forbidden(_)));
+        assert!(storage::load_token().await.unwrap().is_none());
+
+        storage::delete_token().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn not_found_challenge_is_not_authorized_yet() {
+        let _g = TEST_LOCK.lock().await;
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = AgentAuthClient::with_config(AgentAuthConfig::new(server.uri())).unwrap();
+        assert!(matches!(
+            client
+                .authenticate(&AgentKeypair::generate())
+                .await
+                .unwrap_err(),
+            AgentAuthError::NotAuthorized
+        ));
     }
 }

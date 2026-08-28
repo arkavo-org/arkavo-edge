@@ -240,7 +240,7 @@ components:
     module: arkavo_agent_auth
     description: Agent authentication and token management
     criticality: critical
-    scenario_count: 6
+    scenario_count: 7
     invariants:
       - Tokens stored encrypted
       - Single-use challenges
@@ -939,7 +939,7 @@ components:
 
 stats:
   total_specs: 80
-  total_scenarios: 752
+  total_scenarios: 753
   critical_scenarios: 204
   coverage_areas:
     - authentication
