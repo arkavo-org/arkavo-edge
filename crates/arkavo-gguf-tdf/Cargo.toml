@@ -24,17 +24,16 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
-# Real KAS rewrap. Without this feature callers inject their own
-# PayloadKeyWrapper / PayloadKeyUnwrapper implementations.
-arkavo-tdf = { path = "../arkavo-tdf", features = ["kas"], optional = true }
-
 [dev-dependencies]
 tempfile = { workspace = true }
 zip = { version = "2.2", default-features = false }
 
 [features]
 default = []
-kas = ["dep:arkavo-tdf"]
+# RSA-OAEP wrapping against a fetched KAS public key. The KAS round-trips
+# themselves are async and belong to the caller, which already owns a runtime;
+# this crate stays synchronous and KAS-transport agnostic.
+kas = ["opentdf/kas-client"]
 
 [lints]
 workspace = true

@@ -1121,7 +1121,6 @@ dependencies = [
 name = "arkavo-gguf-tdf"
 version = "0.89.4"
 dependencies = [
- "arkavo-tdf",
  "base64 0.22.1",
  "hmac",
  "opentdf",

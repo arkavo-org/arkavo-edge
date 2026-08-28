@@ -7,8 +7,8 @@
 mod common;
 
 use arkavo_gguf_tdf::{
-    GgufTdfArchive, GgufTdfError, PayloadKeyUnwrapper, PayloadKeyWrapper, ProtectOptions,
-    VirtualGguf, WrappedKey, protect,
+    GgufTdfArchive, GgufTdfError, PayloadKeyUnwrapper, PayloadKeyWrapper, PreResolvedKey,
+    ProtectOptions, VirtualGguf, WrappedKey, protect,
 };
 use base64::Engine as _;
 use opentdf::{TdfManifest, TdfMemberIndex, TdfMultiEntryBuilder};
@@ -546,6 +546,38 @@ fn t13_reads_an_archive_with_zip64_extra_fields() {
     let mut whole = vec![0u8; f.source_bytes.len()];
     assert_eq!(vg.read_at(0, &mut whole), f.source_bytes.len());
     assert_eq!(whole, f.source_bytes);
+}
+
+/// A key the caller already recovered from KAS unlocks the archive, which is
+/// the shape `arkavo-llm` uses: the async rewrap happens in the caller's
+/// runtime, and the synchronous read path receives only the resulting key.
+#[test]
+fn a_pre_resolved_key_unlocks_the_archive() {
+    let f = build(4096);
+    let key = f
+        .kas
+        .unwrap_key(&TdfManifest::new(
+            "header".to_string(),
+            "https://kas.invalid".to_string(),
+        ))
+        .unwrap();
+
+    let mut vg = GgufTdfArchive::open(&f.archive)
+        .unwrap()
+        .unlock(&PreResolvedKey::new(key))
+        .unwrap();
+
+    let mut buf = [0u8; 4];
+    assert_eq!(vg.read_at(0, &mut buf), 4);
+    assert_eq!(&buf, b"GGUF");
+
+    // A wrong pre-resolved key still fails closed.
+    let wrong = expect_err(
+        GgufTdfArchive::open(&f.archive)
+            .unwrap()
+            .unlock(&PreResolvedKey::new([0x22; 32])),
+    );
+    assert_eq!(wrong.code(), "GGUFTDF_TAG_MISMATCH");
 }
 
 #[test]

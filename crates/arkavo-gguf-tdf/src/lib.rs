@@ -21,7 +21,9 @@ pub use error::GgufTdfError;
 pub use ggml_type::{block_traits, tensor_nbytes};
 pub use gguf_header::{GgufHeader, HeaderTensor, MAX_TENSOR_NAME_BYTES, identify, parse_header};
 pub use index::{SegmentMap, build_index, validate_index};
-pub use key::{PayloadKeyUnwrapper, PayloadKeyWrapper, WrappedKey};
+#[cfg(feature = "kas")]
+pub use key::RsaOaepWrapper;
+pub use key::{PayloadKeyUnwrapper, PayloadKeyWrapper, PreResolvedKey, WrappedKey};
 pub use pack::{PlannedSegment, plan_segments};
 pub use read_at::VirtualGguf;
 pub use reader::GgufTdfArchive;
