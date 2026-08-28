@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod agent_config;
+pub mod agent_config_parse;
 pub mod chat;
 pub mod dataflow;
 pub mod mesh;

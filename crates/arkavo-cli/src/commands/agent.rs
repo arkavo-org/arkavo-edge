@@ -495,9 +495,11 @@ fn run_agent_with_options(
     }
 }
 
-pub(crate) use super::agent_config::{
-    AgentConfig, DEFAULT_AGENT_ENTITLEMENTS, parse_agents_config,
-};
+// `pub`, not `pub(crate)`: `tests/mcp_agent_integration_test.rs`,
+// `tests/mcp_server_test.rs`, and `tests/regression_issue_157.rs` reach
+// these through this exact path (`arkavo_cli::commands::agent::...`) as
+// external integration-test crates, which only see the crate's public API.
+pub use super::agent_config::{AgentConfig, DEFAULT_AGENT_ENTITLEMENTS, parse_agents_config};
 
 /// Check if a tool's input schema has required arguments
 fn has_required_args(schema: &serde_json::Value) -> bool {

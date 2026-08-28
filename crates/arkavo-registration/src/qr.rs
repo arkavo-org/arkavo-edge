@@ -204,8 +204,8 @@ mod tests {
         )
         .with_name("test-agent")
         .with_entitlements(vec![
-            "agent.capability.chat".to_string(),
-            "agent.capability.tools".to_string(),
+            "https://arkavo.ai/attr/tdf/value/decrypt".to_string(),
+            "https://arkavo.ai/attr/action/value/read".to_string(),
         ]);
 
         let qr_string = generate_authorization_qr_string(&descriptor).unwrap();
@@ -225,13 +225,15 @@ mod tests {
             "url123".to_string(),
         )
         .with_name("my-agent")
-        .with_entitlements(vec!["agent.capability.chat".to_string()]);
+        .with_entitlements(vec!["https://arkavo.ai/attr/tdf/value/decrypt".to_string()]);
 
         let url = descriptor.to_authorization_url();
         assert!(url.starts_with("arkavo://agent/authorize?did="));
         assert!(url.contains("did%3Akey%3Az6Mk")); // URL-encoded DID:key
         assert!(url.contains("name=my-agent"));
-        assert!(url.contains("entitlements=agent.capability.chat"));
+        assert!(
+            url.contains("entitlements=https%3A%2F%2Farkavo.ai%2Fattr%2Ftdf%2Fvalue%2Fdecrypt")
+        );
     }
 
     #[spec("QREG-002")]
