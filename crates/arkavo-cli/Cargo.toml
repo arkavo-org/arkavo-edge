@@ -69,6 +69,7 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-registration = { path = "../arkavo-registration" }
 arkavo-agent-auth = { path = "../arkavo-agent-auth" }
+arkavo-cwt = { path = "../arkavo-cwt" }
 arkavo-config-encryption = { path = "../arkavo-config-encryption" }
 arkavo-config-bundle = { path = "../arkavo-config-bundle" }
 base64 = { workspace = true }

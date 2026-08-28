@@ -805,6 +805,7 @@ dependencies = [
  "arkavo-context",
  "arkavo-critic",
  "arkavo-crypto",
+ "arkavo-cwt",
  "arkavo-dataflow",
  "arkavo-device-identity",
  "arkavo-events",

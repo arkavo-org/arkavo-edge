@@ -945,10 +945,15 @@ pub async fn start_agent_server(
                     refresh_keypair,
                     Duration::from_secs(30),
                     move |state| {
+                        use arkavo_agent_auth::RefreshState;
+                        // The agent validates its own credential on receipt.
+                        // Async, so it cannot run inline in this sync callback.
+                        if matches!(&state, RefreshState::Authenticated { .. }) {
+                            tokio::spawn(super::agent_cwt_verify::verify_stored_token());
+                        }
                         if !trust_log {
                             return;
                         }
-                        use arkavo_agent_auth::RefreshState;
                         match state {
                             RefreshState::WaitingForApproval => {
                                 println!("[trust] waiting for approval in the Arkavo app");
