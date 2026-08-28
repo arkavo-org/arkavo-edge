@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 arkavo-config-bundle = { path = "../arkavo-config-bundle" }
+arkavo-agent-auth = { path = "../arkavo-agent-auth" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }

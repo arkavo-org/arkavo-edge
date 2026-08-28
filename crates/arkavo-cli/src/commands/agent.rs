@@ -923,6 +923,55 @@ pub async fn start_agent_server(
     // Peers are added dynamically via mDNS discovery
     let mut gossip_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
+    // Keep the agent's own authnz-rs identity current: this proves
+    // `agent_did` via challenge-response and holds a short-lived CWT,
+    // independent of whether A2A gossip is enabled. Runs for the life of
+    // the server; aborted alongside the other background tasks on shutdown.
+    //
+    // Trust-state output follows the same gate as the QR block above
+    // (`!quiet || show_trust_qr`): a `--trust` user needs to see "waiting for
+    // approval" and the eventual "authenticated" confirmation even when
+    // `quiet` is otherwise on, since that's the whole point of `--trust`.
+    let trust_log = !quiet || show_trust_qr;
+    match arkavo_agent_auth::AgentAuthClient::with_config(
+        arkavo_agent_auth::AgentAuthConfig::from_env(),
+    ) {
+        Ok(auth_client) => {
+            let auth_client = Arc::new(auth_client);
+            let refresh_keypair = agent_keypair.clone();
+            gossip_handles.push(tokio::spawn(async move {
+                arkavo_agent_auth::run_refresh_loop(
+                    auth_client,
+                    refresh_keypair,
+                    Duration::from_secs(30),
+                    move |state| {
+                        if !trust_log {
+                            return;
+                        }
+                        use arkavo_agent_auth::RefreshState;
+                        match state {
+                            RefreshState::WaitingForApproval => {
+                                println!("[trust] waiting for approval in the Arkavo app");
+                            }
+                            RefreshState::Authenticated { expires_at } => {
+                                println!("[trust] authenticated; token expires at {expires_at}");
+                            }
+                            RefreshState::Revoked => {
+                                println!("[trust] agent delegation revoked; re-run --trust");
+                            }
+                        }
+                    },
+                )
+                .await;
+            }));
+        }
+        Err(e) => {
+            if trust_log {
+                eprintln!("Warning: could not start agent identity refresh loop: {e}");
+            }
+        }
+    }
+
     if config.a2a_enabled {
         // Start anti-entropy background task (5s interval)
         let learning_bus_ae = learning_bus.clone();

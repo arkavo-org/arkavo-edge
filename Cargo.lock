@@ -871,6 +871,7 @@ dependencies = [
 name = "arkavo-config-encryption"
 version = "0.89.4"
 dependencies = [
+ "arkavo-agent-auth",
  "arkavo-config-bundle",
  "arkavo-test-macros",
  "base64 0.22.1",

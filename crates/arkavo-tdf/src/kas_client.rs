@@ -39,6 +39,13 @@ pub struct ArkavoKasConfig {
     pub client_secret: Option<String>,
     /// Request timeout in seconds
     pub timeout_secs: u64,
+    /// A pre-obtained bearer token (e.g. an agent's short-lived CWT from
+    /// authnz-rs) that, when set, is returned by `acquire_token` unchanged
+    /// instead of running the `client_credentials` OAuth flow. This is how
+    /// a delegated agent's own identity replaces the shared service
+    /// credential; non-delegated server workloads leave this unset and keep
+    /// using OAuth.
+    pub bearer_token: Option<String>,
 }
 
 impl ArkavoKasConfig {
@@ -51,6 +58,7 @@ impl ArkavoKasConfig {
             client_id: client_id.into(),
             client_secret: None,
             timeout_secs: 30,
+            bearer_token: None,
         }
     }
 
@@ -81,6 +89,14 @@ impl ArkavoKasConfig {
         self.timeout_secs = secs;
         self
     }
+
+    /// Set a pre-obtained bearer token, short-circuiting the OAuth flow in
+    /// `acquire_token`.
+    #[must_use]
+    pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
+        self.bearer_token = Some(token.into());
+        self
+    }
 }
 
 impl Default for ArkavoKasConfig {
@@ -91,6 +107,7 @@ impl Default for ArkavoKasConfig {
             client_id: String::new(),
             client_secret: None,
             timeout_secs: 30,
+            bearer_token: None,
         }
     }
 }
@@ -168,6 +185,14 @@ impl ArkavoKasClient {
     /// Tokens are cached and reused until near expiration.
     #[allow(clippy::missing_panics_doc)] // RwLock poisoning is unrecoverable
     pub async fn acquire_token(&self) -> Result<String, TdfError> {
+        // A delegated agent's own CWT (from authnz-rs) replaces the shared
+        // client_credentials flow entirely; there is nothing to cache or
+        // refresh here since the agent's identity refresh loop already owns
+        // that lifecycle.
+        if let Some(token) = &self.config.bearer_token {
+            return Ok(token.clone());
+        }
+
         // Check cache first
         {
             let cache = self.access_token.read().unwrap();
@@ -275,8 +300,14 @@ impl ArkavoKasClient {
         // Convert arkavo-tdf manifest to opentdf manifest
         let opentdf_manifest = self.to_opentdf_manifest(manifest)?;
 
-        // Create or get KAS client
-        let kas_client = opentdf::kas::KasClient::new(&self.config.kas_url, &token)
+        // Create or get KAS client. `kas_url` is a bare base URL
+        // (e.g. `https://100.arkavo.net`), which is exactly what the legacy
+        // REST discovery escape hatch expects: it derives the same
+        // `/kas/v2/*` paths this crate has always talked to, without
+        // fetching `/.well-known/opentdf-configuration`.
+        let kas_config =
+            opentdf::kas_discovery::OpentdfConfiguration::for_kas_legacy_rest(&self.config.kas_url);
+        let kas_client = opentdf::kas::KasClient::new(&kas_config, &token)
             .map_err(|e| TdfError::Kas(format!("Failed to create KAS client: {e}")))?;
 
         // Perform rewrap
@@ -503,5 +534,27 @@ mod tests {
         assert_eq!(config.oauth_url, ARKAVO_OAUTH_URL);
         assert_eq!(config.kas_url, ARKAVO_KAS_URL);
         assert!(config.client_id.is_empty());
+    }
+}
+
+/// `ArkavoKasClient` and `acquire_token` only exist behind the `kas` feature
+/// (see the `#[cfg(feature = "kas")]` blocks above), so this test module is
+/// gated the same way: `cargo test -p arkavo-tdf --features kas`.
+#[cfg(all(test, feature = "kas"))]
+mod kas_feature_tests {
+    use super::*;
+
+    /// An agent's stored CWT (the `bearer_token`) must short-circuit the
+    /// OAuth `client_credentials` flow entirely: `acquire_token` returns it
+    /// unchanged without ever contacting `oauth_url`. The bogus
+    /// `http://127.0.0.1:1` OAuth URL below would fail any real connection
+    /// attempt, so this test also proves no such attempt happens.
+    #[tokio::test]
+    async fn bearer_token_short_circuits_oauth() {
+        let cfg = ArkavoKasConfig::new("unused")
+            .with_oauth_url("http://127.0.0.1:1")
+            .with_bearer_token("cwt-bytes");
+        let client = ArkavoKasClient::new(cfg).unwrap();
+        assert_eq!(client.acquire_token().await.unwrap(), "cwt-bytes");
     }
 }

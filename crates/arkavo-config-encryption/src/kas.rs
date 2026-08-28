@@ -48,12 +48,24 @@ impl KasConfig {
     /// Reads:
     /// - `ARKAVO_KAS_URL` (optional, defaults to production KAS)
     /// - `ARKAVO_IDENTITY_URL` (optional, defaults to production Identity)
-    /// - `ARKAVO_KAS_TOKEN` (optional)
+    /// - `ARKAVO_KAS_TOKEN` (optional; when unset, falls back to a stored,
+    ///   not-yet-expired agent CWT from `arkavo-agent-auth`, so a delegated
+    ///   agent's own identity is used in place of an explicitly configured
+    ///   service credential)
     pub fn from_env() -> Self {
         let url = env::var(KAS_URL_ENV).unwrap_or_else(|_| DEFAULT_KAS_URL.to_string());
         let identity_url =
             env::var(IDENTITY_URL_ENV).unwrap_or_else(|_| DEFAULT_IDENTITY_URL.to_string());
-        let token = env::var(KAS_TOKEN_ENV).ok();
+        let token = env::var(KAS_TOKEN_ENV).ok().or_else(|| {
+            // `load_token_blocking` stays sync (std::fs, no runtime) so this
+            // constructor never needs `block_on`/`block_in_place`, which
+            // would panic on a current-thread runtime. See task-4-corrections
+            // C1.
+            arkavo_agent_auth::load_token_blocking()
+                .ok()
+                .flatten()
+                .map(|stored| stored.token)
+        });
 
         Self {
             url,
@@ -143,5 +155,93 @@ mod tests {
     fn test_identity_url() {
         let config = KasConfig::production();
         assert_eq!(config.identity_url(), DEFAULT_IDENTITY_URL);
+    }
+}
+
+/// Tests for the C1 stored-agent-token fallback in `KasConfig::from_env`.
+/// Separate module (rather than folding into `tests` above) because these
+/// tests touch process env vars and the real on-disk agent token file, so
+/// they need to be serialized against each other the way `arkavo-agent-auth`
+/// serializes its own storage tests.
+#[cfg(test)]
+mod agent_token_fallback_tests {
+    use super::*;
+    use arkavo_agent_auth::{StoredToken, delete_token, store_token};
+    use chrono::{Duration, Utc};
+    use tokio::sync::Mutex;
+
+    static TOKEN_TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+    /// SAFETY: guarded by `TOKEN_TEST_LOCK`, so no other test in this
+    /// process reads or writes `KAS_TOKEN_ENV` concurrently.
+    unsafe fn clear_kas_token_env() {
+        unsafe {
+            std::env::remove_var(KAS_TOKEN_ENV);
+        }
+    }
+
+    #[tokio::test]
+    async fn from_env_falls_back_to_stored_agent_token_when_unset() {
+        let _guard = TOKEN_TEST_LOCK.lock().await;
+        unsafe { clear_kas_token_env() };
+        let _ = delete_token().await;
+
+        let stored = StoredToken::new(
+            "agent-cwt-bytes".to_string(),
+            "did:key:z6MkConfigEncryptionTest".to_string(),
+            Utc::now() + Duration::minutes(15),
+            vec!["https://arkavo.ai/attr/tdf/value/decrypt".to_string()],
+        );
+        store_token(&stored).await.unwrap();
+
+        let config = KasConfig::from_env();
+        assert_eq!(config.token, Some("agent-cwt-bytes".to_string()));
+
+        delete_token().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn from_env_ignores_expired_stored_agent_token() {
+        let _guard = TOKEN_TEST_LOCK.lock().await;
+        unsafe { clear_kas_token_env() };
+        let _ = delete_token().await;
+
+        let stored = StoredToken::new(
+            "expired-agent-cwt".to_string(),
+            "did:key:z6MkConfigEncryptionExpired".to_string(),
+            Utc::now() - Duration::minutes(1),
+            vec![],
+        );
+        store_token(&stored).await.unwrap();
+
+        let config = KasConfig::from_env();
+        assert_eq!(config.token, None);
+
+        delete_token().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn from_env_prefers_kas_token_env_over_stored_agent_token() {
+        let _guard = TOKEN_TEST_LOCK.lock().await;
+        let _ = delete_token().await;
+
+        let stored = StoredToken::new(
+            "agent-cwt-should-be-ignored".to_string(),
+            "did:key:z6MkConfigEncryptionEnvWins".to_string(),
+            Utc::now() + Duration::minutes(15),
+            vec![],
+        );
+        store_token(&stored).await.unwrap();
+
+        // SAFETY: guarded by `TOKEN_TEST_LOCK`.
+        unsafe {
+            std::env::set_var(KAS_TOKEN_ENV, "explicit-env-token");
+        }
+
+        let config = KasConfig::from_env();
+        assert_eq!(config.token, Some("explicit-env-token".to_string()));
+
+        unsafe { clear_kas_token_env() };
+        delete_token().await.unwrap();
     }
 }

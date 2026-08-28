@@ -9,7 +9,7 @@ pub use client::AgentAuthClient;
 pub use config::AgentAuthConfig;
 pub use error::AgentAuthError;
 pub use refresh::{RefreshState, run_refresh_loop};
-pub use storage::{delete_token, load_token, store_token};
+pub use storage::{delete_token, load_token, load_token_blocking, store_token};
 pub use types::{ChallengeResponse, StoredToken, TokenRequest, TokenResponse};
 
 #[cfg(test)]
