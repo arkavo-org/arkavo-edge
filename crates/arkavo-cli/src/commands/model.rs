@@ -44,6 +44,32 @@ enum ModelSubcommand {
         name: Option<String>,
     },
 
+    /// Wrap a GGUF into a KAS-gated .gguf.tdf archive
+    Protect {
+        /// Path to the source .gguf file
+        path: PathBuf,
+
+        /// Output archive path (default: <source>.tdf)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// KAS base URL to wrap the payload key to
+        #[arg(long)]
+        kas_url: Option<String>,
+
+        /// Maximum plaintext bytes per weight segment (default 4 MiB)
+        #[arg(long)]
+        max_segment: Option<u64>,
+
+        /// Policy data attribute FQN; repeatable
+        #[arg(long = "attribute")]
+        attributes: Vec<String>,
+
+        /// Delete the plaintext source after a successful wrap
+        #[arg(long)]
+        delete_source: bool,
+    },
+
     /// Add a local model file
     Add {
         /// Path to the model file
@@ -189,7 +215,6 @@ fn list_local_gguf_models() -> Vec<(String, String, PathBuf, u64)> {
     found_models
 }
 
-#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 pub async fn run(cmd: &ModelCommand) -> Result<()> {
     match &cmd.command {
         ModelSubcommand::List => {
@@ -356,6 +381,25 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
             println!("\nModel ready! Run 'arkavo' to start.");
+        }
+
+        ModelSubcommand::Protect {
+            path,
+            output,
+            kas_url,
+            max_segment,
+            attributes,
+            delete_source,
+        } => {
+            super::model_protect::run(super::model_protect::ProtectArgs {
+                path,
+                output: output.as_deref(),
+                kas_url: kas_url.as_deref(),
+                max_segment: *max_segment,
+                attributes,
+                delete_source: *delete_source,
+            })
+            .await?;
         }
 
         ModelSubcommand::Add { path, name } => {

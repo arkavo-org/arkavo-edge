@@ -3,6 +3,7 @@ pub mod chat;
 pub mod dataflow;
 pub mod mesh;
 pub mod model;
+pub mod model_protect;
 pub mod rlm_integration;
 pub mod security_audit;
 pub mod task;

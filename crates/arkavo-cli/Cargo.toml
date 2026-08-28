@@ -44,6 +44,9 @@ kas = ["arkavo-protocol/kas", "arkavo-server/kas"]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }
 arkavo-git = { path = "../arkavo-git" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
+# `arkavo model protect` wraps GGUF weights and needs the RSA-OAEP key wrap.
+arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf", features = ["kas"] }
+opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", rev = "ead8fdcdd792a118bcde1c57767ca6aedde58a99", default-features = false, features = ["rustls-tls", "kas-client"] }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
