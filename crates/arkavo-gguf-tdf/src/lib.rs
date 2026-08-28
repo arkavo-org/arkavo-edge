@@ -9,9 +9,11 @@
 
 mod error;
 mod ggml_type;
+mod gguf_header;
 
 pub use error::GgufTdfError;
 pub use ggml_type::{block_traits, tensor_nbytes};
+pub use gguf_header::{GgufHeader, HeaderTensor, MAX_TENSOR_NAME_BYTES, identify, parse_header};
 
 /// Profile identifier carried in `manifest.gguf.profile`.
 pub const PROFILE: &str = "gguf-tdf/1";
