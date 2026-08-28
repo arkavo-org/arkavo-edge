@@ -122,16 +122,35 @@ mod tests {
     /// around an untagged COSE_Sign1, ES256, raw-bytes `kid` in the protected
     /// header, integer claim keys plus the `arkavo_*` text claims.
     fn mint(signer: &SigningKey, kid: &[u8], aud: &[&str], exp: i64, tagged: bool) -> String {
-        let payload = Value::Map(vec![
+        let aud = Value::Array(aud.iter().map(|a| Value::Text((*a).into())).collect());
+        let act = Some(Value::Array(vec![Value::Map(vec![(
+            Value::Text("sub".into()),
+            Value::Text("did:key:zHumanPrincipal".into()),
+        )])]));
+        mint_claims(signer, kid, aud, exp, act, None, tagged)
+    }
+
+    /// Mint with full control over the shapes the review found untested:
+    /// `aud` as either the agent shape (`Value::Array`) or the bare-text shape
+    /// other token types use, `act` optionally omitted entirely (its documented
+    /// absence when no actors are configured, not an empty array), and an
+    /// arbitrary `arkavo_npe` payload.
+    fn mint_claims(
+        signer: &SigningKey,
+        kid: &[u8],
+        aud: Value,
+        exp: i64,
+        act: Option<Value>,
+        npe: Option<Value>,
+        tagged: bool,
+    ) -> String {
+        let mut fields = vec![
             (Value::Integer(1.into()), Value::Text(ISS.into())),
             (
                 Value::Integer(2.into()),
                 Value::Text("did:key:zAgentUnderTest".into()),
             ),
-            (
-                Value::Integer(3.into()),
-                Value::Array(aud.iter().map(|a| Value::Text((*a).into())).collect()),
-            ),
+            (Value::Integer(3.into()), aud),
             (Value::Integer(4.into()), Value::Integer(exp.into())),
             (Value::Integer(6.into()), Value::Integer((NOW - 60).into())),
             (
@@ -149,14 +168,14 @@ mod tests {
                     Value::Text("https://arkavo.ai/attr/repo/write".into()),
                 ]),
             ),
-            (
-                Value::Text("act".into()),
-                Value::Array(vec![Value::Map(vec![(
-                    Value::Text("sub".into()),
-                    Value::Text("did:key:zHumanPrincipal".into()),
-                )])]),
-            ),
-        ]);
+        ];
+        if let Some(act) = act {
+            fields.push((Value::Text("act".into()), act));
+        }
+        if let Some(npe) = npe {
+            fields.push((Value::Text("arkavo_npe".into()), npe));
+        }
+        let payload = Value::Map(fields);
         let mut payload_bytes = Vec::new();
         ciborium::into_writer(&payload, &mut payload_bytes).expect("encode claims");
 
@@ -337,5 +356,76 @@ mod tests {
             before + 1,
             "the key set must be re-fetched at most once per ttl"
         );
+    }
+
+    /// authnz-contract.md: agent tokens carry `arkavo_npe: {type: "agent",
+    /// delegation_id, depth, chain}` and omit `act` entirely when no actors
+    /// are configured (not an empty array). Before this test the mint helper
+    /// never emitted `arkavo_npe`, so no test drove `Claims::to_json` — the
+    /// crate's largest function — through a real, signed agent-shaped token.
+    #[test]
+    fn accepts_agent_shaped_token_with_npe_and_no_act() {
+        let signer = new_key();
+        let kid = [0x55u8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+
+        let npe = Value::Map(vec![
+            (Value::Text("type".into()), Value::Text("agent".into())),
+            (
+                Value::Text("delegation_id".into()),
+                Value::Text("did:key:zAgentUnderTest".into()),
+            ),
+            (Value::Text("depth".into()), Value::Integer(1.into())),
+            (
+                Value::Text("chain".into()),
+                Value::Array(vec![
+                    Value::Text("did:key:zRootPrincipal".into()),
+                    Value::Text("did:key:zAgentUnderTest".into()),
+                ]),
+            ),
+        ]);
+        let aud = Value::Array(vec![Value::Text("arkavo-kas".into())]);
+        let token = mint_claims(&signer, &kid, aud, NOW + 600, None, Some(npe), true);
+
+        let claims = verify(&token, &keys, &opts(Some("arkavo-kas"))).expect("verify agent CWT");
+
+        assert!(
+            claims.actors.is_empty(),
+            "act must be absent, not a bogus empty array: {:?}",
+            claims.actors
+        );
+        assert_eq!(
+            claims.npe,
+            Some(serde_json::json!({
+                "type": "agent",
+                "delegation_id": "did:key:zAgentUnderTest",
+                "depth": 1,
+                "chain": ["did:key:zRootPrincipal", "did:key:zAgentUnderTest"],
+            })),
+            "arkavo_npe must survive into the JSON claims unchanged"
+        );
+    }
+
+    /// authnz-contract.md: "Agent-token `aud` is ALWAYS a CBOR array ...
+    /// Other token types use a bare text string — a verifier must accept
+    /// both." This mints the non-agent, bare-text shape (the array shape is
+    /// already exercised by every other test in this module).
+    #[test]
+    fn accepts_bare_text_audience_for_non_agent_token() {
+        let signer = new_key();
+        let kid = [0x66u8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+
+        let aud = Value::Text("arkavo-kas".into());
+        let token = mint_claims(&signer, &kid, aud, NOW + 600, None, None, true);
+
+        let claims = verify(&token, &keys, &opts(Some("arkavo-kas")))
+            .expect("verify token with bare-text aud");
+
+        assert_eq!(claims.aud, vec!["arkavo-kas".to_string()]);
+        assert!(claims.actors.is_empty());
+        assert!(claims.npe.is_none());
     }
 }
