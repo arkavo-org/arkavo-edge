@@ -2,7 +2,7 @@
 ///
 /// Future: This will be used by `arkavo models list` command and
 /// `.arkavo/AGENTS.md` configuration for remote model subsets.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Load API keys from .arkavo/AGENTS.md if present
 ///
@@ -47,6 +47,30 @@ pub fn load_api_keys_from_config() {
     }
 }
 
+/// Extension identifying a KAS-protected model (`gguf-tdf/1`).
+const PROTECTED_EXTENSION: &str = ".gguf.tdf";
+
+/// Prefers a protected `.gguf.tdf` over a sibling plaintext `.gguf`.
+///
+/// Wrapping a model is additive, so `model.gguf` and `model.gguf.tdf` often
+/// sit side by side. Discovery must not hand back the plaintext and quietly
+/// bypass KAS; a TDF-capable loader has to see the protected artifact.
+pub fn prefer_protected_model(path: &Path) -> PathBuf {
+    let name = path.to_string_lossy();
+    if name.to_lowercase().ends_with(PROTECTED_EXTENSION) {
+        return path.to_path_buf();
+    }
+    let protected = PathBuf::from(format!("{name}{}", ".tdf"));
+    if name.to_lowercase().ends_with(".gguf") && protected.exists() {
+        tracing::info!(
+            "preferring protected model {:?} over the sibling plaintext",
+            protected
+        );
+        return protected;
+    }
+    path.to_path_buf()
+}
+
 /// Find a GGUF model file, preferring specific models but accepting any available
 ///
 /// Priority:
@@ -74,7 +98,7 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
         let snapshots_dir = cache.join(&repo_cache_name).join("snapshots");
         if let Some(path) = find_file_in_dir(&snapshots_dir, filename) {
             tracing::debug!("find_gguf_model: found in local cache at {:?}", path);
-            return Ok(path);
+            return Ok(prefer_protected_model(&path));
         }
     }
 
@@ -89,7 +113,7 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
                 "find_gguf_model: downloaded/found via hf_hub API at {:?}",
                 path
             );
-            return Ok(path);
+            return Ok(prefer_protected_model(&path));
         }
         Err(e) => {
             tracing::debug!("find_gguf_model: hf_hub API failed: {}", e);
@@ -110,7 +134,7 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown")
         );
-        return Ok(path);
+        return Ok(prefer_protected_model(&path));
     }
 
     // 5. Nothing found - provide helpful error
@@ -392,5 +416,63 @@ mod tests {
                 assert!(e.contains("Download with:"));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod protected_model_tests {
+    use super::*;
+
+    /// T12/T14: when both artifacts exist, discovery must select the
+    /// protected one. Handing back the plaintext would silently bypass KAS.
+    #[test]
+    fn prefers_the_protected_artifact_when_both_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("model.gguf");
+        let protected = dir.path().join("model.gguf.tdf");
+        std::fs::write(&plain, b"GGUF").unwrap();
+        std::fs::write(&protected, b"PK\x03\x04").unwrap();
+
+        assert_eq!(prefer_protected_model(&plain), protected);
+    }
+
+    #[test]
+    fn keeps_the_plaintext_when_no_protected_sibling_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("model.gguf");
+        std::fs::write(&plain, b"GGUF").unwrap();
+
+        assert_eq!(prefer_protected_model(&plain), plain);
+    }
+
+    #[test]
+    fn a_protected_path_is_returned_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let protected = dir.path().join("model.gguf.tdf");
+        std::fs::write(&protected, b"PK\x03\x04").unwrap();
+
+        assert_eq!(prefer_protected_model(&protected), protected);
+        // And it must not look for `model.gguf.tdf.tdf`.
+        assert!(!dir.path().join("model.gguf.tdf.tdf").exists());
+    }
+
+    #[test]
+    fn extension_matching_is_case_insensitive() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("Model.GGUF");
+        let protected = dir.path().join("Model.GGUF.tdf");
+        std::fs::write(&plain, b"GGUF").unwrap();
+        std::fs::write(&protected, b"PK\x03\x04").unwrap();
+
+        assert_eq!(prefer_protected_model(&plain), protected);
+    }
+
+    #[test]
+    fn a_non_gguf_path_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = dir.path().join("notes.txt");
+        std::fs::write(&other, b"hello").unwrap();
+
+        assert_eq!(prefer_protected_model(&other), other);
     }
 }
