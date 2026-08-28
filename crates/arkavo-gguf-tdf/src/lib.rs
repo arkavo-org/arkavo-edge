@@ -11,13 +11,17 @@ mod error;
 mod ggml_type;
 mod gguf_header;
 mod index;
+mod key;
 mod pack;
+mod writer;
 
 pub use error::GgufTdfError;
 pub use ggml_type::{block_traits, tensor_nbytes};
 pub use gguf_header::{GgufHeader, HeaderTensor, MAX_TENSOR_NAME_BYTES, identify, parse_header};
 pub use index::{SegmentMap, build_index, validate_index};
+pub use key::{PayloadKeyUnwrapper, PayloadKeyWrapper, WrappedKey};
 pub use pack::{PlannedSegment, plan_segments};
+pub use writer::{ProtectOptions, ProtectReport, protect};
 
 /// Profile identifier carried in `manifest.gguf.profile`.
 pub const PROFILE: &str = "gguf-tdf/1";

@@ -100,6 +100,16 @@ impl GgufTdfError {
     }
 }
 
+impl From<opentdf::TdfError> for GgufTdfError {
+    fn from(err: opentdf::TdfError) -> Self {
+        match err {
+            opentdf::TdfError::IoError(io) => Self::Io(io),
+            opentdf::TdfError::ZipError(zip) => zip.into(),
+            other => Self::BadIndex(format!("TDF archive error: {other}")),
+        }
+    }
+}
+
 impl From<zip::result::ZipError> for GgufTdfError {
     fn from(err: zip::result::ZipError) -> Self {
         match err {

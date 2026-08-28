@@ -30,6 +30,7 @@ arkavo-tdf = { path = "../arkavo-tdf", features = ["kas"], optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+zip = { version = "2.2", default-features = false }
 
 [features]
 default = []
