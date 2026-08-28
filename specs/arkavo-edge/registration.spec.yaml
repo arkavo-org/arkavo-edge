@@ -179,3 +179,16 @@ scenarios:
       - condition: Concurrent verify calls with same challenge
         expected: First succeeds, subsequent return "Challenge not found"
     changed: "2025-01-31"
+
+  - id: REG-013
+    name: Local pairing grants no entitlements
+    criticality: high
+    given:
+      - RegistrationService completes a full challenge-response pairing
+    when: verify_challenge succeeds
+    then:
+      - Registration record carries device_id, public_key, verified, timestamp only
+      - No entitlement, scope, or grant is produced by challenge-response pairing
+      - Agent authorization is obtained separately via authnz-rs DID-proof CWT issuance
+    refs: [crates/arkavo-protocol/src/registration/mod.rs]
+    changed: "2026-08-28"

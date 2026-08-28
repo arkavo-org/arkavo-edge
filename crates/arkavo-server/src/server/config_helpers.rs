@@ -46,10 +46,6 @@ pub struct AgentMetadata {
     /// DID:key identifier derived from the agent's device keypair.
     /// Shared across all protocols (A2A, gossip, metrics, UCP).
     pub did: Option<String>,
-    /// ES256-signed delegation JWT binding human DID → agent DID.
-    pub delegation_jwt: Option<String>,
-    /// Entitlements granted via human delegation (from JWT scope claim).
-    pub delegated_entitlements: Vec<String>,
     /// Bare MCP tool names this agent is granted by its SwarmKit role
     /// (from `persona.mcp_tools`). Empty for an unspecialized agent (no
     /// filtering applied). When non-empty, the agent loop filters its

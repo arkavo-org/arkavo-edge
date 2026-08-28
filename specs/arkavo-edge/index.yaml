@@ -57,7 +57,7 @@ components:
     module: arkavo_protocol::registration
     description: Device and agent onboarding with challenge-response
     criticality: critical
-    scenario_count: 12
+    scenario_count: 13
     invariants:
       - Challenge IDs are SHA-256 unique
       - 300-second TTL on challenges
@@ -939,7 +939,7 @@ components:
 
 stats:
   total_specs: 80
-  total_scenarios: 753
+  total_scenarios: 754
   critical_scenarios: 204
   coverage_areas:
     - authentication
