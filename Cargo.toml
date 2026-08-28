@@ -32,6 +32,7 @@ members = [
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
+    "crates/arkavo-gguf-tdf",
     "crates/arkavo-mcp-code-search",
     "crates/arkavo-browser",
     "crates/arkavo-mcp-workspace",
@@ -389,3 +390,13 @@ too_many_lines = "allow"
 # Deny warnings in CI to catch TODO placeholders and other issues
 deny-warnings = true
 
+
+# TEMPORARY (feature/gguf-tdf): build against the local opentdf-rs working
+# tree, which carries the additive multi-entry segment APIs this branch needs
+# (branch feature/gguf-tdf-segments). REMOVE before opening the PR and pin the
+# `opentdf` git dependency at the merged upstream commit instead.
+[patch."https://github.com/arkavo-org/opentdf-rs"]
+opentdf = { path = "../opentdf-rs" }
+opentdf-protocol = { path = "../opentdf-rs/crates/protocol" }
+opentdf-crypto = { path = "../opentdf-rs/crates/crypto" }
+opentdf-kas = { path = "../opentdf-rs/crates/kas" }

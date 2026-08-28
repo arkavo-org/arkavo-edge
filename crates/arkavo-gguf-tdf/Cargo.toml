@@ -1,0 +1,39 @@
+[package]
+name = "arkavo-gguf-tdf"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "gguf-tdf/1 profile: protect GGUF weights as OpenTDF archives and serve a virtual GGUF via read_at"
+repository.workspace = true
+keywords = ["gguf", "opentdf", "tdf", "llama", "encryption"]
+categories = ["cryptography"]
+
+[dependencies]
+opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", default-features = false, features = ["rustls-tls"] }
+zip = { version = "2.2", default-features = false }
+hmac = "0.12"
+sha2 = { workspace = true }
+rand = { workspace = true }
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+# Real KAS rewrap. Without this feature callers inject their own
+# PayloadKeyWrapper / PayloadKeyUnwrapper implementations.
+arkavo-tdf = { path = "../arkavo-tdf", features = ["kas"], optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+default = []
+kas = ["dep:arkavo-tdf"]
+
+[lints]
+workspace = true
