@@ -8,8 +8,10 @@
 //! virtual linear GGUF through `read_at` and contains no TDF, AES, or KAS code.
 
 mod error;
+mod ggml_type;
 
 pub use error::GgufTdfError;
+pub use ggml_type::{block_traits, tensor_nbytes};
 
 /// Profile identifier carried in `manifest.gguf.profile`.
 pub const PROFILE: &str = "gguf-tdf/1";
