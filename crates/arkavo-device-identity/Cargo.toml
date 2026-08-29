@@ -33,4 +33,7 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 [features]
 default = []
 linux-keyring = ["dep:keyring"]
+# Exposes `test_utils`'s RAII guard so dependent crates' tests can protect
+# the developer's real keypair slots instead of deleting them.
+test-utils = []
 windows-credential = ["dep:windows"]

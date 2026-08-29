@@ -5,6 +5,9 @@ use uuid::Uuid;
 pub mod keypair;
 pub mod storage;
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
+
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceIdentityError {
     #[error("Storage error: {0}")]

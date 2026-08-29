@@ -74,6 +74,7 @@ pub fn display_welcome_verbose() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_device_identity::test_utils::KeypairSlotGuard;
     use std::sync::Mutex;
 
     // Serializes tests that touch the on-disk keypair slots.
@@ -86,9 +87,10 @@ mod tests {
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     fn welcome_uses_agent_keypair_not_device_keypair() {
-        let _g = KEYCHAIN_MUTEX.lock().unwrap();
-        let _ = keypair::delete_keypair();
-        let _ = keypair::delete_agent_keypair();
+        let _lock = KEYCHAIN_MUTEX.lock().unwrap();
+        // Restores the developer's real slots on drop, including after a
+        // failing assertion below.
+        let _slots = KeypairSlotGuard::capture();
 
         display_welcome_verbose().expect("welcome flow should succeed");
 
@@ -100,9 +102,6 @@ mod tests {
             keypair::get_keypair().unwrap().is_none(),
             "welcome flow must not create or touch the device keypair slot"
         );
-
-        let _ = keypair::delete_keypair();
-        let _ = keypair::delete_agent_keypair();
     }
 
     /// Regression (R22): entitlements advertised by the welcome QR must come

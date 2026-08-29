@@ -104,6 +104,7 @@ libc = { workspace = true }
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
 
 [dev-dependencies]
+arkavo-device-identity = { path = "../arkavo-device-identity", features = ["test-utils"] }
 tempfile = { workspace = true }
 reqwest = { workspace = true }
 tokio-tungstenite = { workspace = true }
