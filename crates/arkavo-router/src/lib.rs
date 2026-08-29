@@ -162,6 +162,8 @@ impl RouterEvent {
 }
 
 #[cfg(feature = "llama-cpp")]
+use arkavo_identity::IdentitySession;
+#[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
 use arkavo_llm::{Message, Role};
 use arkavo_mcp_tools::ToolRegistry;
@@ -188,6 +190,9 @@ pub struct Router {
     /// Cached local models — loaded once, reused across requests.
     #[cfg(feature = "llama-cpp")]
     model_registry: Arc<ModelRegistry>,
+    /// OIDC session used to unwrap `.gguf.tdf` models through platform KAS.
+    #[cfg(feature = "llama-cpp")]
+    identity: Arc<IdentitySession>,
     /// Temporarily excluded models: name → (when, consecutive_failures).
     /// Cooldown duration doubles each consecutive failure, resets on success.
     model_cooldowns: Arc<RwLock<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
@@ -283,6 +288,8 @@ impl Router {
             model_learning,
             #[cfg(feature = "llama-cpp")]
             model_registry: Arc::new(ModelRegistry::new()),
+            #[cfg(feature = "llama-cpp")]
+            identity: Arc::new(IdentitySession::new()),
             model_cooldowns: Arc::new(RwLock::new(std::collections::HashMap::new())),
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
@@ -338,6 +345,8 @@ impl Router {
             model_learning,
             #[cfg(feature = "llama-cpp")]
             model_registry: Arc::new(ModelRegistry::new()),
+            #[cfg(feature = "llama-cpp")]
+            identity: Arc::new(IdentitySession::new()),
             model_cooldowns: Arc::new(RwLock::new(std::collections::HashMap::new())),
             metrics: Arc::new(RwLock::new(RoutingMetrics::new())),
             connectivity: Arc::new(ConnectivityChecker::new()),
@@ -1415,6 +1424,8 @@ impl Router {
             model_learning: self.model_learning.clone(),
             #[cfg(feature = "llama-cpp")]
             model_registry: self.model_registry.clone(),
+            #[cfg(feature = "llama-cpp")]
+            identity: self.identity.clone(),
             model_cooldowns: self.model_cooldowns.clone(),
             metrics: self.metrics.clone(),
             connectivity: self.connectivity.clone(),

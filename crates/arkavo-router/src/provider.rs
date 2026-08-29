@@ -153,11 +153,7 @@ impl super::Router {
                 "Loading model into registry (first use)"
             );
 
-            self.model_registry
-                .load(registry_name, &model_path.to_string_lossy())
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to load {registry_name}: {e}"))
-                })?;
+            self.ensure_loaded(registry_name, &model_path).await?;
 
             // Pre-warm the context pool so the first inference avoids allocation latency
             #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -230,13 +226,7 @@ impl super::Router {
         let model_path = model_discovery::find_gguf_model(repo, file)
             .await
             .map_err(Error::ModelExecution)?;
-        if !self.model_registry.is_loaded(registry_name) {
-            self.model_registry
-                .load(registry_name, &model_path.to_string_lossy())
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to load {registry_name}: {e}"))
-                })?;
-        }
+        self.ensure_loaded(registry_name, &model_path).await?;
         let execution_config = arkavo_llm::SamplingConfig {
             temperature: 0.1,
             top_p: 0.9,
@@ -337,15 +327,7 @@ impl super::Router {
                             .unwrap_or("local-model")
                             .to_string();
 
-                        if !self.model_registry.is_loaded(&model_name) {
-                            self.model_registry
-                                .load(&model_name, &model_path.to_string_lossy())
-                                .map_err(|e| {
-                                    Error::ModelExecution(format!(
-                                        "Failed to load fallback model: {e}"
-                                    ))
-                                })?;
-                        }
+                        self.ensure_loaded(&model_name, &model_path).await?;
 
                         let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
                             self.model_registry.clone(),

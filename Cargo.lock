@@ -1802,6 +1802,7 @@ dependencies = [
  "arkavo-critic",
  "arkavo-gemini",
  "arkavo-gguf-tdf",
+ "arkavo-identity",
  "arkavo-llm",
  "arkavo-mcp",
  "arkavo-mcp-tools",
