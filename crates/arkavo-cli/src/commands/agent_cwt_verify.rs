@@ -36,7 +36,13 @@ pub(crate) async fn verify_stored_token() {
         }
     };
 
-    let issuer = std::env::var("ARKAVO_AUTH_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
+    // `match` rather than `unwrap_or_else`: the zero-config CI grep treats
+    // `unwrap` as a prefix of `unwrap_or_else` and would flag this optional
+    // override as a required env var.
+    let issuer = match std::env::var("ARKAVO_AUTH_ISSUER") {
+        Ok(v) => v,
+        Err(_) => DEFAULT_ISSUER.to_string(),
+    };
     let opts = VerifyOptions {
         expected_iss: &issuer,
         // Nothing on the edge knows the issuer's configured AGENT_TOKEN_AUDIENCES.
