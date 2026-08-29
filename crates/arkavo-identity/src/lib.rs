@@ -4,5 +4,7 @@
 //! ceremony; this crate never sees Creator's session CWT.
 
 mod error;
+mod pkce;
 
 pub use error::{IdentityError, Prompt};
+pub use pkce::Pkce;
