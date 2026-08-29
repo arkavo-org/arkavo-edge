@@ -18,9 +18,6 @@ pub struct VerifyRequest {
     pub device_id: String,
     pub public_key: String,
     pub signature: String,
-    /// ES256-signed delegation JWT from authnz-rs (optional, for delegated agents)
-    #[serde(default)]
-    pub delegation_jwt: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

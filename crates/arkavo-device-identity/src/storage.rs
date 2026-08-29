@@ -328,6 +328,8 @@ pub fn delete() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    use crate::test_utils::{DeviceIdFileGuard, device_id_file_path};
     use std::sync::Mutex;
 
     // Mutex to serialize tests that access the system keychain
@@ -337,6 +339,7 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_get_or_create() {
         let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _file = DeviceIdFileGuard::capture();
         let _ = delete();
         // Small delay to ensure keychain operations complete
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -355,6 +358,7 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_store_and_retrieve() {
         let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _file = DeviceIdFileGuard::capture();
         let _ = delete();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
@@ -377,22 +381,14 @@ mod tests {
         use std::fs;
 
         let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _file = DeviceIdFileGuard::capture();
         let _ = delete();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        #[cfg(target_os = "macos")]
-        let storage_path = {
-            let mut path = dirs::home_dir().unwrap();
-            path.push("Library/Application Support/arkavo/device_id");
-            path
-        };
-
-        #[cfg(target_os = "linux")]
-        let storage_path = {
-            let mut path = dirs::data_local_dir().unwrap();
-            path.push("arkavo/device_id");
-            path
-        };
+        let storage_path = device_id_file_path();
+        if let Some(parent) = storage_path.parent() {
+            fs::create_dir_all(parent).expect("Failed to create device_id directory");
+        }
 
         fs::write(&storage_path, "invalid_hex_data").expect("Failed to write malformed data");
 
@@ -412,22 +408,14 @@ mod tests {
         use std::fs;
 
         let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _file = DeviceIdFileGuard::capture();
         let _ = delete();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        #[cfg(target_os = "macos")]
-        let storage_path = {
-            let mut path = dirs::home_dir().unwrap();
-            path.push("Library/Application Support/arkavo/device_id");
-            path
-        };
-
-        #[cfg(target_os = "linux")]
-        let storage_path = {
-            let mut path = dirs::data_local_dir().unwrap();
-            path.push("arkavo/device_id");
-            path
-        };
+        let storage_path = device_id_file_path();
+        if let Some(parent) = storage_path.parent() {
+            fs::create_dir_all(parent).expect("Failed to create device_id directory");
+        }
 
         let wrong_size_data = hex::encode([0u8; 8]);
         fs::write(&storage_path, wrong_size_data).expect("Failed to write wrong size data");
@@ -445,6 +433,7 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_delete_nonexistent() {
         let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _file = DeviceIdFileGuard::capture();
         let _ = delete();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
@@ -456,6 +445,7 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_get_nonexistent() {
         let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _file = DeviceIdFileGuard::capture();
         let _ = delete();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
@@ -463,5 +453,34 @@ mod tests {
         assert!(result.is_none());
 
         let _ = delete();
+    }
+
+    /// Regression: `storage` tests used to `delete()` the developer's real
+    /// `device_id` file with no restore. The guard must put the original
+    /// bytes back even if the test body panics or leaves a different value.
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn device_id_file_guard_restores_existing_bytes() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _outer = DeviceIdFileGuard::capture();
+
+        let path = device_id_file_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, b"sentinel-device-id").unwrap();
+
+        {
+            let _inner = DeviceIdFileGuard::capture();
+            assert!(
+                !path.exists(),
+                "capture must clear the device_id file for the test"
+            );
+        }
+
+        assert_eq!(
+            std::fs::read(&path).expect("guard must restore the sentinel"),
+            b"sentinel-device-id"
+        );
     }
 }

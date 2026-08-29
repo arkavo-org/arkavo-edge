@@ -27,8 +27,13 @@ dirs = "5.0"
 
 [dev-dependencies]
 serde_json.workspace = true
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-crypto = { path = "../arkavo-crypto" }
 
 [features]
 default = []
 linux-keyring = ["dep:keyring"]
+# Exposes `test_utils`'s RAII guard so dependent crates' tests can protect
+# the developer's real keypair slots instead of deleting them.
+test-utils = []
 windows-credential = ["dep:windows"]

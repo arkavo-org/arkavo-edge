@@ -50,14 +50,15 @@ scenarios:
     criticality: high
     given:
       - AgentDescriptor created
-      - Entitlements specified
+      - Entitlements specified as attribute FQNs (e.g. https://arkavo.ai/attr/tdf/value/decrypt),
+        the vocabulary authnz-rs delegates from the human's stored entitlement list
     when: with_entitlements() called
     then:
       - Entitlements URL-encoded in authorization URL
       - Multiple entitlements comma-separated
       - Entitlements preserved through serialization
     refs: [crates/arkavo-registration/src/lib.rs:75-78]
-    changed: "2026-03-19"
+    changed: "2026-08-28"
 
   - id: QREG-004
     name: Sign and verify challenge

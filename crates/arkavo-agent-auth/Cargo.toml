@@ -21,6 +21,12 @@ tracing = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
+[features]
+default = []
+# Exposes `test_utils`'s RAII guard so dependent crates' tests can protect
+# the developer's real agent token instead of deleting it.
+test-utils = []
+
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

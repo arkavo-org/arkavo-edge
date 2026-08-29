@@ -6,6 +6,7 @@ use crate::{
 };
 use arkavo_crypto::AgentKeypair;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use chrono::Utc;
 use std::time::Duration;
 
 fn percent_encode(input: &str) -> String {
@@ -55,15 +56,21 @@ impl AgentAuthClient {
         );
 
         let response = self.http_client.get(&url).send().await?;
+        let status = response.status();
 
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
+        if status == reqwest::StatusCode::FORBIDDEN {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AgentAuthError::Forbidden(body));
+        }
+
+        if status == reqwest::StatusCode::NOT_FOUND {
             return Err(AgentAuthError::NotAuthorized);
         }
 
-        if !response.status().is_success() {
+        if !status.is_success() {
             return Err(AgentAuthError::ChallengeRequest(format!(
                 "Server returned status {}",
-                response.status()
+                status
             )));
         }
 
@@ -76,9 +83,18 @@ impl AgentAuthClient {
         let url = format!("{}/agents/token", self.config.base_url);
 
         let response = self.http_client.post(&url).json(request).send().await?;
+        let status = response.status();
 
-        if !response.status().is_success() {
-            let status = response.status();
+        if status == reqwest::StatusCode::FORBIDDEN {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AgentAuthError::Forbidden(body));
+        }
+
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(AgentAuthError::NotAuthorized);
+        }
+
+        if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             return Err(AgentAuthError::TokenRequest(format!(
                 "Server returned status {}: {}",
@@ -121,6 +137,14 @@ impl AgentAuthClient {
                 Err(AgentAuthError::NotAuthorized) => {
                     tracing::info!(event = "auth_decision", action = "deny", subject = %did, "Agent not authorized");
                     return Err(AgentAuthError::NotAuthorized);
+                }
+                Err(AgentAuthError::Forbidden(reason)) => {
+                    // Revoked/expired delegation: burning retries against a
+                    // server that will keep saying no just delays the human
+                    // finding out the agent needs to be re-trusted.
+                    tracing::info!(event = "auth_decision", action = "deny", subject = %did, reason = %reason, "Agent delegation revoked");
+                    storage::delete_token().await.ok();
+                    return Err(AgentAuthError::Forbidden(reason));
                 }
                 Err(e) => last_error = Some(e),
             }
@@ -165,8 +189,7 @@ impl AgentAuthClient {
             did.to_string(),
             token_response.expires_at,
             token_response.entitlements,
-        )
-        .with_delegation_jwt(token_response.delegation_jwt);
+        );
 
         // Store locally
         storage::store_token(&stored_token).await?;
@@ -175,15 +198,27 @@ impl AgentAuthClient {
     }
 
     /// Get a valid token, either from cache or by authenticating.
+    ///
+    /// A cached token is reused only while it belongs to this keypair's DID
+    /// and is neither expired nor within the last third of its lifetime;
+    /// "refresh" always means re-running the challenge-response flow, since
+    /// there are no refresh tokens.
     pub async fn get_token(&self, keypair: &AgentKeypair) -> Result<StoredToken, AgentAuthError> {
-        // Check for cached token
-        if let Some(token) = storage::load_token().await?
-            && !token.is_expired()
-        {
-            return Ok(token);
+        let did = keypair.public_key().to_did_key();
+
+        if let Some(token) = storage::load_token().await? {
+            if token.did == did && !token.is_expired() && !token.needs_refresh(Utc::now()) {
+                return Ok(token);
+            }
+            if token.did != did {
+                // A CWT is minted for the DID that proved possession of the
+                // key. Once the agent keypair is regenerated the stored token
+                // authorizes a discarded identity, so it is dropped here
+                // rather than presented for the rest of its 15 minutes.
+                storage::delete_token().await?;
+            }
         }
 
-        // Authenticate
         self.authenticate(keypair).await
     }
 
@@ -205,15 +240,16 @@ impl Default for AgentAuthClient {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use arkavo_crypto::{AgentKeypair, AgentPublicKey};
+    use arkavo_crypto::AgentKeypair;
     use arkavo_test_macros::spec;
-    use wiremock::Respond;
     use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use crate::test_helpers::TEST_LOCK;
+    use crate::test_helpers::{TEST_LOCK, ValidatingTokenResponder};
+    use crate::test_utils::TokenFileGuard;
 
     #[test]
     fn test_client_creation() {
@@ -231,51 +267,6 @@ mod tests {
         assert!(client.is_ok());
     }
 
-    /// Wiremock responder that validates the Ed25519 signature on the token
-    /// request before returning a token response.
-    struct ValidatingTokenResponder {
-        public_key: AgentPublicKey,
-        challenge: Vec<u8>,
-    }
-
-    impl ValidatingTokenResponder {
-        fn new(public_key: AgentPublicKey, challenge: Vec<u8>) -> Self {
-            Self {
-                public_key,
-                challenge,
-            }
-        }
-    }
-
-    impl Respond for ValidatingTokenResponder {
-        fn respond(&self, request: &Request) -> ResponseTemplate {
-            let body: TokenRequest = match serde_json::from_slice(&request.body) {
-                Ok(b) => b,
-                Err(_) => return ResponseTemplate::new(400).set_body_string("invalid json"),
-            };
-
-            if body.challenge != BASE64_STANDARD.encode(&self.challenge) {
-                return ResponseTemplate::new(400).set_body_string("challenge mismatch");
-            }
-
-            let signature = match BASE64_STANDARD.decode(&body.signature) {
-                Ok(s) => s,
-                Err(_) => return ResponseTemplate::new(400).set_body_string("bad signature"),
-            };
-
-            if self.public_key.verify(&self.challenge, &signature).is_err() {
-                return ResponseTemplate::new(401).set_body_string("invalid signature");
-            }
-
-            ResponseTemplate::new(200).set_body_json(TokenResponse {
-                token: "mock-token-123".to_string(),
-                expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
-                entitlements: vec!["agent.capability.chat".to_string()],
-                delegation_jwt: Some("mock-delegation-jwt".to_string()),
-            })
-        }
-    }
-
     /// Test AAUTH-001: Request authentication token.
     /// Test AAUTH-005: Complete challenge-response auth.
     ///
@@ -287,8 +278,8 @@ mod tests {
     #[spec("AAUTH-001", "AAUTH-005")]
     #[tokio::test]
     async fn test_authenticate_challenge_response_flow() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = storage::delete_token().await;
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
 
         let mock_server = MockServer::start().await;
 
@@ -324,11 +315,7 @@ mod tests {
         assert_eq!(stored.did, did);
         assert_eq!(
             stored.entitlements,
-            vec!["agent.capability.chat".to_string()]
-        );
-        assert_eq!(
-            stored.delegation_jwt,
-            Some("mock-delegation-jwt".to_string())
+            vec!["https://arkavo.ai/attr/tdf/value/decrypt".to_string()]
         );
         assert!(!stored.is_expired());
 
@@ -337,7 +324,156 @@ mod tests {
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(loaded.token, stored.token);
+    }
 
-        let _ = storage::delete_token().await;
+    /// Regression test for C1/C4: a 403 from `/agents/challenge` (revoked
+    /// delegation) must map to `AgentAuthError::Forbidden`, must not be
+    /// retried, and must clear any stored token immediately.
+    #[tokio::test]
+    #[spec("AAUTH-007")]
+    async fn forbidden_challenge_maps_to_forbidden_and_clears_token() {
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
+
+        let keypair = AgentKeypair::generate();
+        let stale = StoredToken::new(
+            "stale-token".into(),
+            keypair.public_key().to_did_key(),
+            Utc::now() + chrono::Duration::minutes(15),
+            vec![],
+        );
+        storage::store_token(&stale).await.unwrap();
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Delegation revoked"))
+            .mount(&server)
+            .await;
+
+        let client = AgentAuthClient::with_config(AgentAuthConfig::new(server.uri())).unwrap();
+        let err = client.authenticate(&keypair).await.unwrap_err();
+        assert!(matches!(err, AgentAuthError::Forbidden(_)));
+        assert!(storage::load_token().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn not_found_challenge_is_not_authorized_yet() {
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = AgentAuthClient::with_config(AgentAuthConfig::new(server.uri())).unwrap();
+        assert!(matches!(
+            client
+                .authenticate(&AgentKeypair::generate())
+                .await
+                .unwrap_err(),
+            AgentAuthError::NotAuthorized
+        ));
+    }
+
+    /// AAUTH-007 names both legs: "GET /agents/challenge *or* POST
+    /// /agents/token returns 403". The challenge leg is covered above; this is
+    /// the token leg, where the challenge succeeds and the server refuses only
+    /// once the signed proof arrives.
+    #[tokio::test]
+    #[spec("AAUTH-007")]
+    async fn forbidden_token_endpoint_maps_to_forbidden_and_clears_token() {
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
+
+        let keypair = AgentKeypair::generate();
+        let stale = StoredToken::new(
+            "stale-token".into(),
+            keypair.public_key().to_did_key(),
+            Utc::now() + chrono::Duration::minutes(15),
+            vec![],
+        );
+        storage::store_token(&stale).await.unwrap();
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ChallengeResponse {
+                challenge: BASE64_STANDARD.encode(b"token-leg-challenge"),
+                nonce: "nonce-token-403".to_string(),
+            }))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/agents/token"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Delegation revoked"))
+            .mount(&server)
+            .await;
+
+        let client = AgentAuthClient::with_config(AgentAuthConfig::new(server.uri())).unwrap();
+        let err = client.authenticate(&keypair).await.unwrap_err();
+        assert!(matches!(err, AgentAuthError::Forbidden(_)));
+        assert!(storage::load_token().await.unwrap().is_none());
+    }
+
+    /// Regression: a stored token is bound to the DID it was minted for. After
+    /// the agent keypair is regenerated the stored token belongs to a discarded
+    /// identity, so `get_token` must treat it as absent — drop it and re-run
+    /// the challenge-response — instead of presenting it for up to 15 minutes.
+    #[tokio::test]
+    async fn stored_token_for_another_did_is_discarded_and_reauthenticated() {
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
+
+        let keypair = AgentKeypair::generate();
+        let did = keypair.public_key().to_did_key();
+
+        // Fresh and nowhere near its refresh point: only the DID mismatch can
+        // make `get_token` reject it.
+        let orphaned = StoredToken::new(
+            "token-for-the-old-keypair".into(),
+            "did:key:z6MkRegeneratedAway".into(),
+            Utc::now() + chrono::Duration::minutes(15),
+            vec![],
+        );
+        storage::store_token(&orphaned).await.unwrap();
+
+        let challenge = b"did-mismatch-challenge".to_vec();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ChallengeResponse {
+                challenge: BASE64_STANDARD.encode(&challenge),
+                nonce: "nonce-did-mismatch".to_string(),
+            }))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/agents/token"))
+            .respond_with(ValidatingTokenResponder::new(
+                keypair.public_key(),
+                challenge,
+            ))
+            .mount(&server)
+            .await;
+
+        let client = AgentAuthClient::with_config(AgentAuthConfig::new(server.uri())).unwrap();
+        let token = client.get_token(&keypair).await.unwrap();
+
+        assert_eq!(
+            token.did, did,
+            "the returned token must name the current DID"
+        );
+        assert_eq!(token.token, "mock-token-123");
+
+        let on_disk = storage::load_token().await.unwrap().unwrap();
+        assert_eq!(on_disk.did, did);
+        assert_ne!(
+            on_disk.token, "token-for-the-old-keypair",
+            "the orphaned token must not survive on disk"
+        );
     }
 }

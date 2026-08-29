@@ -1,4 +1,7 @@
 pub mod agent;
+pub mod agent_config;
+pub mod agent_config_parse;
+pub mod agent_cwt_verify;
 pub mod chat;
 pub mod dataflow;
 pub mod mesh;

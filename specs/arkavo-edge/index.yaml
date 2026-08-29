@@ -57,7 +57,7 @@ components:
     module: arkavo_protocol::registration
     description: Device and agent onboarding with challenge-response
     criticality: critical
-    scenario_count: 12
+    scenario_count: 13
     invariants:
       - Challenge IDs are SHA-256 unique
       - 300-second TTL on challenges
@@ -174,7 +174,7 @@ components:
     module: arkavo_device_identity
     description: Device ID management and secure storage
     criticality: high
-    scenario_count: 6
+    scenario_count: 7
     invariants:
       - Device ID unique per installation
       - Persists across restarts
@@ -240,11 +240,22 @@ components:
     module: arkavo_agent_auth
     description: Agent authentication and token management
     criticality: critical
-    scenario_count: 6
+    scenario_count: 7
     invariants:
       - Tokens stored encrypted
       - Single-use challenges
       - Credentials never logged
+
+  - name: agent-cwt
+    file: agent-cwt.spec.yaml
+    module: arkavo_cwt
+    description: COSE_Sign1/ES256 verification of the agent CWT against the published COSE key set
+    criticality: critical
+    scenario_count: 3
+    invariants:
+      - ES256 only
+      - Keys matched on raw kid bytes from the published COSE key set
+      - Unknown kid refreshes the key set at most once per ttl
 
   - name: llm-core
     file: llm-core.spec.yaml
@@ -938,8 +949,8 @@ components:
       - Sampling caps are recorded in the ledger, never silent
 
 stats:
-  total_specs: 80
-  total_scenarios: 751
+  total_specs: 81
+  total_scenarios: 757
   critical_scenarios: 204
   coverage_areas:
     - authentication

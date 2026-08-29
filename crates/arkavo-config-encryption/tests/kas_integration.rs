@@ -167,8 +167,17 @@ mod kas_tests {
         let decryptor = ConfigBundleDecryptor::new(credential);
 
         // Create KAS client
+        //
+        // `rewrap_url()` is the full legacy rewrap endpoint; `for_kas_legacy_rest`
+        // wants the bare base and re-derives the `/kas/v2/*` paths itself.
+        let kas_base = kas
+            .rewrap_url()
+            .trim_end_matches("/kas/v2/rewrap")
+            .trim_end_matches('/');
+        let kas_config =
+            opentdf::kas_discovery::OpentdfConfiguration::for_kas_legacy_rest(kas_base);
         let kas_client =
-            opentdf::KasClient::new(kas.rewrap_url(), &token).expect("Failed to create KAS client");
+            opentdf::kas::KasClient::new(&kas_config, &token).expect("Failed to create KAS client");
 
         println!("✓ KAS client created");
         println!("  KAS URL: {}", kas.rewrap_url());

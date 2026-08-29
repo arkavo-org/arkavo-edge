@@ -48,6 +48,7 @@ members = [
     "crates/arkavo-registration",
     "crates/arkavo-agent",
     "crates/arkavo-agent-auth",
+    "crates/arkavo-cwt",
     "crates/arkavo-tdf",
     "crates/arkavo-tdf-iroh",
     "crates/arkavo-mcp-mesh",
@@ -130,6 +131,7 @@ default-members = [
     "crates/arkavo-crypto",
     "crates/arkavo-registration",
     "crates/arkavo-agent-auth",
+    "crates/arkavo-cwt",
     "crates/arkavo-hrm",
     "crates/arkavo-agent",
     "crates/arkavo-critic",
@@ -153,7 +155,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.89.4"
+version = "0.90.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -181,6 +183,8 @@ jsonschema = { version = "0.45", default-features = false, features = ["resolve-
 thiserror = "2.0.12"
 tempfile = "3.20"
 reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json", "stream", "blocking"] }
+coset = "0.4"
+ciborium = "0.2"
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.41", default-features = false, features = ["serde", "clock", "std"] }

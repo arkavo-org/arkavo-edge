@@ -2,7 +2,7 @@
 
 feature: Agent Authentication and Tokens
 module: arkavo_agent_auth
-version: 0.57.2
+version: 0.58.0
 
 invariants:
   - Tokens are stored encrypted at rest
@@ -54,18 +54,18 @@ scenarios:
     refs: [crates/arkavo-agent-auth/src/storage.rs]
 
   - id: AAUTH-004
-    name: Refresh expired token
+    name: Refresh at two-thirds token lifetime
     criticality: high
     given:
-      - Token near expiration
-      - Refresh token available
-    when: refresh_token() called
+      - Agent holds a CWT with a known stored_at/expires_at
+      - No refresh tokens exist in this design
+    when: run_refresh_loop() polls StoredToken::needs_refresh()
     then:
-      - Refresh request sent
-      - New token received
-      - Old token replaced
-      - Storage updated
-    refs: [crates/arkavo-agent-auth/src/client.rs]
+      - needs_refresh() is false before two-thirds of the token lifetime elapses
+      - needs_refresh() is true from the two-thirds boundary onward
+      - Refresh re-runs the DID challenge-response flow, not a token exchange
+      - New token replaces the old one in storage
+    refs: [crates/arkavo-agent-auth/src/refresh.rs, crates/arkavo-agent-auth/src/types.rs]
 
   - id: AAUTH-005
     name: Complete challenge-response auth
@@ -95,10 +95,24 @@ scenarios:
       - Subsequent loads fail
     refs: [crates/arkavo-agent-auth/src/storage.rs]
     edge_cases:
-      - condition: Auth server unreachable
-        expected: Returns AgentAuthError::ConnectionFailed
-      - condition: Invalid credentials
-        expected: Returns AgentAuthError::AuthenticationFailed
+      - condition: No delegation row yet (human hasn't approved the agent's DID)
+        expected: Returns AgentAuthError::NotAuthorized
+      - condition: Delegation revoked or expired
+        expected: Returns AgentAuthError::Forbidden, clears stored token
       - condition: Token storage corrupted
         expected: Deletes corrupted data, returns error
-    changed: "2025-01-31"
+    changed: "2026-08-28"
+
+  - id: AAUTH-007
+    name: Revoked delegation (403) clears the stored token
+    criticality: high
+    given:
+      - A stored token exists on disk
+      - The human has revoked (or the CWT lifetime has been exceeded past) the agent's delegation
+    when: GET /agents/challenge or POST /agents/token returns 403
+    then:
+      - AgentAuthClient::authenticate returns AgentAuthError::Forbidden
+      - The retry/backoff loop is short-circuited, not exhausted
+      - The stored token is deleted before the error is returned
+      - A subsequent load_token() returns None
+    refs: [crates/arkavo-agent-auth/src/client.rs, crates/arkavo-agent-auth/src/error.rs]
