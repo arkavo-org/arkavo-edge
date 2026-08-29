@@ -166,7 +166,8 @@ mod tests {
 #[cfg(test)]
 mod agent_token_fallback_tests {
     use super::*;
-    use arkavo_agent_auth::{StoredToken, delete_token, store_token};
+    use arkavo_agent_auth::test_utils::TokenFileGuard;
+    use arkavo_agent_auth::{StoredToken, store_token};
     use chrono::{Duration, Utc};
     use tokio::sync::Mutex;
 
@@ -182,9 +183,9 @@ mod agent_token_fallback_tests {
 
     #[tokio::test]
     async fn from_env_falls_back_to_stored_agent_token_when_unset() {
-        let _guard = TOKEN_TEST_LOCK.lock().await;
+        let _lock = TOKEN_TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
         unsafe { clear_kas_token_env() };
-        let _ = delete_token().await;
 
         let stored = StoredToken::new(
             "agent-cwt-bytes".to_string(),
@@ -196,15 +197,13 @@ mod agent_token_fallback_tests {
 
         let config = KasConfig::from_env();
         assert_eq!(config.token, Some("agent-cwt-bytes".to_string()));
-
-        delete_token().await.unwrap();
     }
 
     #[tokio::test]
     async fn from_env_ignores_expired_stored_agent_token() {
-        let _guard = TOKEN_TEST_LOCK.lock().await;
+        let _lock = TOKEN_TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
         unsafe { clear_kas_token_env() };
-        let _ = delete_token().await;
 
         let stored = StoredToken::new(
             "expired-agent-cwt".to_string(),
@@ -216,14 +215,12 @@ mod agent_token_fallback_tests {
 
         let config = KasConfig::from_env();
         assert_eq!(config.token, None);
-
-        delete_token().await.unwrap();
     }
 
     #[tokio::test]
     async fn from_env_prefers_kas_token_env_over_stored_agent_token() {
-        let _guard = TOKEN_TEST_LOCK.lock().await;
-        let _ = delete_token().await;
+        let _lock = TOKEN_TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
 
         let stored = StoredToken::new(
             "agent-cwt-should-be-ignored".to_string(),
@@ -242,6 +239,5 @@ mod agent_token_fallback_tests {
         assert_eq!(config.token, Some("explicit-env-token".to_string()));
 
         unsafe { clear_kas_token_env() };
-        delete_token().await.unwrap();
     }
 }

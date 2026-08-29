@@ -5,6 +5,9 @@ mod refresh;
 mod storage;
 mod types;
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
+
 pub use client::AgentAuthClient;
 pub use config::AgentAuthConfig;
 pub use error::AgentAuthError;

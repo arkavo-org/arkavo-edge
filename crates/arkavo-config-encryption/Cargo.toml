@@ -21,6 +21,7 @@ rand = { workspace = true }
 base64 = { workspace = true }
 
 [dev-dependencies]
+arkavo-agent-auth = { path = "../arkavo-agent-auth", features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 
