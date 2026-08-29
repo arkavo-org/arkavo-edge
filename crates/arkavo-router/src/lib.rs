@@ -21,6 +21,8 @@ pub mod preflight;
 pub mod prompt_advisor;
 pub mod provider;
 pub mod provider_info;
+#[cfg(feature = "llama-cpp")]
+pub(crate) mod provider_protected;
 pub(crate) mod quality_gate;
 pub mod response;
 pub mod rlm;
@@ -63,6 +65,8 @@ pub use preflight::{
 };
 pub use prompt_advisor::{AdvisorIssue, DynamicSnapshot, PromptAdvice, PromptAdvisor};
 pub use provider_info::LlmInfo;
+#[cfg(feature = "llama-cpp")]
+pub use provider_protected::{ProtectedLoadError, recover_payload_key};
 pub use rlm::{
     RlmConfig, RlmContextManager, RlmDecompositionResult, RlmProbeResult, RlmSearchResult,
     RlmStats, SharedRlmManager, create_rlm_manager, create_rlm_manager_with_config,
