@@ -68,6 +68,7 @@ arkavo-hrm = { path = "../arkavo-hrm" }
 arkavo-ucp = { path = "../arkavo-ucp" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
+arkavo-identity = { path = "../arkavo-identity" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-registration = { path = "../arkavo-registration" }
