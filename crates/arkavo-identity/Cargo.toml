@@ -24,7 +24,8 @@ ciborium = "0.2"
 
 [dev-dependencies]
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
+reqwest = { workspace = true }
 
 [lints]
 workspace = true
