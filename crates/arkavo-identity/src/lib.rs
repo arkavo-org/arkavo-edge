@@ -3,6 +3,7 @@
 //! The CLI is public client `arkavo-edge`. Arkavo Creator runs the passkey
 //! ceremony; this crate never sees Creator's session CWT.
 
+mod broker;
 mod discovery;
 mod error;
 mod loopback;
@@ -10,6 +11,7 @@ mod pkce;
 mod store;
 mod token;
 
+pub use broker::{CLIENT_ID, CREATOR_BUNDLE_ID, SCOPE, authorize_url, creator_url, launch_creator};
 pub use discovery::{
     DEFAULT_IDENTITY_HOST, DEFAULT_PLATFORM_URL, IdentityEndpoints, discover, host_of,
 };
