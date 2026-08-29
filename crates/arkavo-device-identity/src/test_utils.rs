@@ -9,6 +9,10 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+/// A keypair slot's previous contents, captured so they can be restored:
+/// the file's bytes and its mtime, if the slot existed at all.
+type SavedSlotContent = Option<(Vec<u8>, Option<SystemTime>)>;
+
 /// RAII guard that empties both keypair slots for the duration of a test and
 /// restores their previous contents when it drops.
 ///
@@ -17,7 +21,7 @@ use std::time::SystemTime;
 /// destructor. Bind it *after* the test's serialising mutex guard so the files
 /// are back before another test can take the lock.
 pub struct KeypairSlotGuard {
-    saved: Vec<(PathBuf, Option<(Vec<u8>, Option<SystemTime>)>)>,
+    saved: Vec<(PathBuf, SavedSlotContent)>,
 }
 
 impl KeypairSlotGuard {
