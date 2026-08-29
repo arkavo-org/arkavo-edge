@@ -7,21 +7,42 @@ pub const CLIENT_ID: &str = "arkavo-edge";
 pub const SCOPE: &str = "openid offline_access";
 
 pub fn authorize_url(endpoints: &IdentityEndpoints, pkce: &Pkce, redirect_uri: &str) -> String {
-    let query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("response_type", "code")
-        .append_pair("client_id", CLIENT_ID)
-        .append_pair("redirect_uri", redirect_uri)
-        .append_pair("scope", SCOPE)
-        .append_pair("code_challenge", &pkce.challenge)
-        .append_pair("code_challenge_method", "S256")
-        .append_pair("state", &pkce.state)
-        .finish();
+    // Query encoding must use %20 for space, not form-urlencoded `+`.
+    let query = [
+        ("response_type", "code"),
+        ("client_id", CLIENT_ID),
+        ("redirect_uri", redirect_uri),
+        ("scope", SCOPE),
+        ("code_challenge", pkce.challenge.as_str()),
+        ("code_challenge_method", "S256"),
+        ("state", pkce.state.as_str()),
+    ]
+    .into_iter()
+    .map(|(k, v)| format!("{}={}", percent_encode(k), percent_encode(v)))
+    .collect::<Vec<_>>()
+    .join("&");
     let base = endpoints.authorization_endpoint.trim_end_matches('?');
     if base.contains('?') {
         format!("{base}&{query}")
     } else {
         format!("{base}?{query}")
     }
+}
+
+fn percent_encode(input: &str) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                let _ = write!(encoded, "%{byte:02X}");
+            }
+        }
+    }
+    encoded
 }
 
 pub fn creator_url(authorize_query_url: &str) -> String {
@@ -86,8 +107,12 @@ mod tests {
         let url = authorize_url(&ep, &pkce, "http://127.0.0.1:52171/cb");
         assert!(url.contains("response_type=code"));
         assert!(
-            url.contains("scope=openid%20offline_access")
-                || url.contains("scope=openid+offline_access")
+            url.contains("scope=openid%20offline_access"),
+            "scope must use %20, got {url}"
+        );
+        assert!(
+            !url.contains("scope=openid+offline_access"),
+            "scope must not use +, got {url}"
         );
         assert!(url.contains("code_challenge=c"));
     }

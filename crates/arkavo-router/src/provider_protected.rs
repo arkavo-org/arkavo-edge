@@ -394,6 +394,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unauthenticated_twice_is_identity_token_rejected() {
+        let session = FakeSession {
+            login_required: false,
+            invalidates: AtomicUsize::new(0),
+        };
+        let recover = ScriptedRecover::new(vec![
+            Err(ProtectedLoadError::Unauthenticated("401".into())),
+            Err(ProtectedLoadError::Unauthenticated("401".into())),
+        ]);
+        let registry = FakeRegistry::default();
+        let err = load_protected_path(
+            &session,
+            &recover,
+            &registry,
+            "gemma",
+            Path::new("/models/gemma.gguf.tdf"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, "GGUFTDF_KAS_DENIED: identity token rejected by KAS");
+        assert_eq!(recover.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(session.invalidates.load(Ordering::SeqCst), 1);
+        assert_eq!(registry.load_protected_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(registry.load_plain_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn not_entitled_does_not_retry() {
         let session = FakeSession {
             login_required: false,

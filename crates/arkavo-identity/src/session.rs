@@ -39,7 +39,7 @@ pub struct IdentitySession {
     http: reqwest::Client,
     platform_url: String,
     identity_host: String,
-    token_path: PathBuf,
+    token_path: Option<PathBuf>,
     clock: Arc<dyn Clock>,
     launcher: Arc<dyn Launcher>,
     ceremony: tokio::sync::Mutex<()>,
@@ -80,17 +80,20 @@ impl IdentitySession {
         let http = reqwest::Client::builder()
             .use_rustls_tls()
             .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        Self::with_config(SessionConfig {
+        Self {
             http,
             platform_url: env_or("ARKAVO_PLATFORM_URL", DEFAULT_PLATFORM_URL),
             identity_host: env_or("ARKAVO_IDENTITY_HOST", DEFAULT_IDENTITY_HOST),
-            token_path: crate::store::token_path()
-                .unwrap_or_else(|_| PathBuf::from("identity_token")),
+            token_path: crate::store::token_path().ok(),
             clock: Arc::new(SystemClock),
             launcher: Arc::new(CreatorLauncher),
-        })
+            ceremony: tokio::sync::Mutex::new(()),
+            cache: Mutex::new(None),
+            force_refresh: AtomicBool::new(false),
+        }
     }
 
     pub fn with_config(cfg: SessionConfig) -> Self {
@@ -98,7 +101,7 @@ impl IdentitySession {
             http: cfg.http,
             platform_url: cfg.platform_url,
             identity_host: cfg.identity_host,
-            token_path: cfg.token_path,
+            token_path: Some(cfg.token_path),
             clock: cfg.clock,
             launcher: cfg.launcher,
             ceremony: tokio::sync::Mutex::new(()),
@@ -107,13 +110,28 @@ impl IdentitySession {
         }
     }
 
+    fn token_file(&self) -> Result<PathBuf, IdentityError> {
+        self.token_path
+            .clone()
+            .ok_or_else(|| IdentityError::Store("Could not determine data directory".into()))
+    }
+
     pub async fn bearer(&self, prompt: Prompt) -> Result<String, IdentityError> {
+        let path = self.token_file()?;
         let _guard = self.ceremony.lock().await;
         let force = self.force_refresh.load(Ordering::SeqCst);
         if !force && let Some(token) = self.cached_access() {
             return Ok(token);
         }
-        let stored = crate::store::load(&self.token_path)?;
+        let stored = match crate::store::load(&path) {
+            Ok(tokens) => tokens,
+            Err(IdentityError::Store(msg)) if msg.contains("parse token file") => {
+                let _ = crate::store::delete(&path);
+                self.clear_cache();
+                None
+            }
+            Err(e) => return Err(e),
+        };
         if !force
             && let Some(tokens) = stored.as_ref()
             && !tokens.access_token.is_empty()
@@ -127,9 +145,17 @@ impl IdentitySession {
             .and_then(|t| t.refresh_token.clone())
             .filter(|s| !s.is_empty())
         {
-            let access = self.refresh_and_persist(&refresh_token).await?;
-            self.force_refresh.store(false, Ordering::SeqCst);
-            return Ok(access);
+            match self.refresh_and_persist(&refresh_token).await {
+                Ok(access) => {
+                    self.force_refresh.store(false, Ordering::SeqCst);
+                    return Ok(access);
+                }
+                Err(IdentityError::Token(_) | IdentityError::Transport(_)) => {
+                    let _ = crate::store::delete(&path);
+                    self.clear_cache();
+                }
+                Err(e) => return Err(e),
+            }
         }
         match prompt {
             Prompt::Never => Err(IdentityError::LoginRequired("run 'arkavo login'".into())),
@@ -147,10 +173,11 @@ impl IdentitySession {
     }
 
     pub async fn logout(&self) -> Result<(), IdentityError> {
+        let path = self.token_file()?;
         let _guard = self.ceremony.lock().await;
         self.force_refresh.store(false, Ordering::SeqCst);
         self.clear_cache();
-        crate::store::delete(&self.token_path)
+        crate::store::delete(&path)
     }
 
     pub fn invalidate(&self) {
@@ -193,7 +220,7 @@ impl IdentitySession {
         if tokens.refresh_token.is_none() {
             tokens.refresh_token = Some(refresh_token.to_owned());
         }
-        crate::store::save(&tokens, &self.token_path)?;
+        crate::store::save(&tokens, &self.token_file()?)?;
         self.remember(&tokens);
         Ok(tokens.access_token)
     }
@@ -228,7 +255,7 @@ impl IdentitySession {
                     &pkce.verifier,
                 )
                 .await?;
-                crate::store::save(&tokens, &self.token_path)?;
+                crate::store::save(&tokens, &self.token_file()?)?;
                 self.remember(&tokens);
                 Ok(tokens.access_token)
             }
@@ -309,45 +336,7 @@ mod tests {
         Arc<AtomicUsize>,
         tokio::task::JoinHandle<()>,
     ) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let posts = Arc::new(AtomicUsize::new(0));
-        let posts_task = posts.clone();
-        let well_known = serde_json::json!({
-            "idp": {
-                "issuer": format!("http://{addr}"),
-                "authorization_endpoint": format!("http://{addr}/oauth/authorize"),
-                "token_endpoint": format!("http://{addr}/oauth/token"),
-            },
-            "kas": { "uri": "https://platform.arkavo.net" }
-        })
-        .to_string();
-        let token_body = serde_json::json!({
-            "access_token": access,
-            "refresh_token": refresh,
-            "expires_in": 3600,
-        })
-        .to_string();
-        let handle = tokio::spawn(async move {
-            loop {
-                let Ok((mut stream, _)) = listener.accept().await else {
-                    break;
-                };
-                let well_known = well_known.clone();
-                let token_body = token_body.clone();
-                let posts_task = posts_task.clone();
-                tokio::spawn(async move {
-                    let req = read_request(&mut stream).await;
-                    if req.starts_with("POST ") {
-                        posts_task.fetch_add(1, Ordering::SeqCst);
-                        write_json(&mut stream, &token_body).await;
-                    } else {
-                        write_json(&mut stream, &well_known).await;
-                    }
-                });
-            }
-        });
-        (addr, posts, handle)
+        serve_idp_token_status(access, refresh, 200, "").await
     }
 
     async fn read_request(stream: &mut tokio::net::TcpStream) -> String {
@@ -387,13 +376,78 @@ mod tests {
     }
 
     async fn write_json(stream: &mut tokio::net::TcpStream, body: &str) {
+        write_json_status(stream, 200, body).await;
+    }
+
+    async fn write_json_status(stream: &mut tokio::net::TcpStream, status: u16, body: &str) {
+        let reason = if (200..300).contains(&status) {
+            "OK"
+        } else {
+            "Error"
+        };
         let header = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         );
         let _ = stream.write_all(header.as_bytes()).await;
         let _ = stream.write_all(body.as_bytes()).await;
         let _ = stream.shutdown().await;
+    }
+
+    async fn serve_idp_token_status(
+        access: &str,
+        refresh: &str,
+        token_status: u16,
+        token_body: &str,
+    ) -> (
+        std::net::SocketAddr,
+        Arc<AtomicUsize>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let posts = Arc::new(AtomicUsize::new(0));
+        let posts_task = posts.clone();
+        let well_known = serde_json::json!({
+            "idp": {
+                "issuer": format!("http://{addr}"),
+                "authorization_endpoint": format!("http://{addr}/oauth/authorize"),
+                "token_endpoint": format!("http://{addr}/oauth/token"),
+            },
+            "kas": { "uri": "https://platform.arkavo.net" }
+        })
+        .to_string();
+        let success_body = serde_json::json!({
+            "access_token": access,
+            "refresh_token": refresh,
+            "expires_in": 3600,
+        })
+        .to_string();
+        let token_body = if token_status == 200 {
+            success_body
+        } else {
+            token_body.to_owned()
+        };
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let well_known = well_known.clone();
+                let token_body = token_body.clone();
+                let posts_task = posts_task.clone();
+                tokio::spawn(async move {
+                    let req = read_request(&mut stream).await;
+                    if req.starts_with("POST ") {
+                        posts_task.fetch_add(1, Ordering::SeqCst);
+                        write_json_status(&mut stream, token_status, &token_body).await;
+                    } else {
+                        write_json(&mut stream, &well_known).await;
+                    }
+                });
+            }
+        });
+        (addr, posts, handle)
     }
 
     #[tokio::test]
@@ -506,5 +560,82 @@ mod tests {
         assert_eq!(posts.load(Ordering::SeqCst), 1);
         assert!(!called.load(Ordering::SeqCst));
         handle.abort();
+    }
+
+    #[tokio::test]
+    async fn dead_refresh_never_prompt_is_login_required_and_file_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity_token");
+        crate::store::save(
+            &StoredTokens {
+                access_token: "old".into(),
+                refresh_token: Some("r1".into()),
+                expires_at: 1000,
+            },
+            &path,
+        )
+        .unwrap();
+        let (addr, posts, handle) =
+            serve_idp_token_status("new", "r2", 400, r#"{"error":"invalid_grant"}"#).await;
+        let called = Arc::new(AtomicBool::new(false));
+        let launcher = Arc::new(FlagLauncher {
+            called: called.clone(),
+        });
+        let session = session(
+            path.clone(),
+            950,
+            launcher,
+            format!("http://{addr}"),
+            "127.0.0.1".into(),
+        );
+        let err = session
+            .bearer(Prompt::Never)
+            .await
+            .expect_err("dead refresh + Never must fail");
+        match err {
+            IdentityError::LoginRequired(_) => {
+                assert!(
+                    err.kas_denied_message().contains("run 'arkavo login'"),
+                    "{}",
+                    err.kas_denied_message()
+                );
+            }
+            other => panic!("expected LoginRequired, got {other:?}"),
+        }
+        assert!(!path.exists(), "dead refresh must delete the token file");
+        assert!(
+            !called.load(Ordering::SeqCst),
+            "launcher must not run on Prompt::Never"
+        );
+        assert_eq!(posts.load(Ordering::SeqCst), 1);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn corrupt_store_never_prompt_is_login_required_and_file_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity_token");
+        std::fs::write(&path, b"not-json{{{").unwrap();
+        let called = Arc::new(AtomicBool::new(false));
+        let launcher = Arc::new(FlagLauncher {
+            called: called.clone(),
+        });
+        let session = session(
+            path.clone(),
+            0,
+            launcher,
+            "http://127.0.0.1:1".into(),
+            "127.0.0.1".into(),
+        );
+        let err = session
+            .bearer(Prompt::Never)
+            .await
+            .expect_err("corrupt store + Never must fail");
+        match err {
+            IdentityError::LoginRequired(_) => {}
+            other => panic!("expected LoginRequired, got {other:?}"),
+        }
+        assert!(!path.exists(), "corrupt store must delete the token file");
+        assert!(!called.load(Ordering::SeqCst));
     }
 }

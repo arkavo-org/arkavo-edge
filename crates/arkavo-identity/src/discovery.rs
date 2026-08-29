@@ -44,11 +44,18 @@ pub fn host_of(url: &str) -> Result<String, IdentityError> {
 }
 
 fn pin_host(url: &str, identity_host: &str) -> Result<(), IdentityError> {
-    let host = host_of(url)?;
-    if host.eq_ignore_ascii_case(identity_host) {
+    let parsed = url::Url::parse(url).map_err(|e| IdentityError::Transport(e.to_string()))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| IdentityError::Transport(format!("URL is missing a host: {url}")))?;
+    if !host.eq_ignore_ascii_case(identity_host) {
+        return Err(IdentityError::UntrustedIdentityEndpoint(host.to_owned()));
+    }
+    let loopback = host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost");
+    if parsed.scheme() == "https" || loopback {
         Ok(())
     } else {
-        Err(IdentityError::UntrustedIdentityEndpoint(host))
+        Err(IdentityError::UntrustedIdentityEndpoint(host.to_owned()))
     }
 }
 
@@ -221,6 +228,34 @@ mod tests {
             host_of("not a url"),
             Err(IdentityError::Transport(_))
         ));
+    }
+
+    #[test]
+    fn pin_host_refuses_http_identity_arkavo_net() {
+        let err = pin_host(
+            "http://identity.arkavo.net/oauth/authorize",
+            "identity.arkavo.net",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                IdentityError::UntrustedIdentityEndpoint(ref host) if host == "identity.arkavo.net"
+            ),
+            "http identity host must be refused, got {err:?}"
+        );
+        let err = pin_host(
+            "http://identity.arkavo.net/oauth/token",
+            "identity.arkavo.net",
+        )
+        .unwrap_err();
+        assert!(matches!(err, IdentityError::UntrustedIdentityEndpoint(_)));
+    }
+
+    #[test]
+    fn pin_host_allows_http_loopback() {
+        pin_host("http://127.0.0.1:9/oauth/token", "127.0.0.1").unwrap();
+        pin_host("http://localhost/oauth/token", "localhost").unwrap();
     }
 
     #[test]
