@@ -1,6 +1,6 @@
 //! `gguf-tdf/1` — Arkavo profile of OpenTDF zip TDF for GGUF model files.
 //!
-//! Spec: `specifications/gguf-tdf/draft-arkavo-gguf-tdf-00.md`.
+//! Spec: `specifications/gguf-tdf/draft-arkavo-gguf-tdf-01.md`.
 //!
 //! At rest the artifact is ciphertext plus a plaintext manifest and index. At
 //! load, extra plaintext is bounded by `headerBytes + maxSegment`: one
