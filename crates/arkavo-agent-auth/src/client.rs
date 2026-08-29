@@ -199,15 +199,24 @@ impl AgentAuthClient {
 
     /// Get a valid token, either from cache or by authenticating.
     ///
-    /// A cached token is reused only while it is neither expired nor within
-    /// the last third of its lifetime; "refresh" always means re-running the
-    /// challenge-response flow, since there are no refresh tokens.
+    /// A cached token is reused only while it belongs to this keypair's DID
+    /// and is neither expired nor within the last third of its lifetime;
+    /// "refresh" always means re-running the challenge-response flow, since
+    /// there are no refresh tokens.
     pub async fn get_token(&self, keypair: &AgentKeypair) -> Result<StoredToken, AgentAuthError> {
-        if let Some(token) = storage::load_token().await?
-            && !token.is_expired()
-            && !token.needs_refresh(Utc::now())
-        {
-            return Ok(token);
+        let did = keypair.public_key().to_did_key();
+
+        if let Some(token) = storage::load_token().await? {
+            if token.did == did && !token.is_expired() && !token.needs_refresh(Utc::now()) {
+                return Ok(token);
+            }
+            if token.did != did {
+                // A CWT is minted for the DID that proved possession of the
+                // key. Once the agent keypair is regenerated the stored token
+                // authorizes a discarded identity, so it is dropped here
+                // rather than presented for the rest of its 15 minutes.
+                storage::delete_token().await?;
+            }
         }
 
         self.authenticate(keypair).await
@@ -240,6 +249,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use crate::test_helpers::{TEST_LOCK, ValidatingTokenResponder};
+    use crate::test_utils::TokenFileGuard;
 
     #[test]
     fn test_client_creation() {
@@ -268,8 +278,8 @@ mod tests {
     #[spec("AAUTH-001", "AAUTH-005")]
     #[tokio::test]
     async fn test_authenticate_challenge_response_flow() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = storage::delete_token().await;
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
 
         let mock_server = MockServer::start().await;
 
@@ -314,8 +324,6 @@ mod tests {
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(loaded.token, stored.token);
-
-        let _ = storage::delete_token().await;
     }
 
     /// Regression test for C1/C4: a 403 from `/agents/challenge` (revoked
@@ -324,8 +332,8 @@ mod tests {
     #[tokio::test]
     #[spec("AAUTH-007")]
     async fn forbidden_challenge_maps_to_forbidden_and_clears_token() {
-        let _g = TEST_LOCK.lock().await;
-        storage::delete_token().await.unwrap();
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
 
         let keypair = AgentKeypair::generate();
         let stale = StoredToken::new(
@@ -347,13 +355,13 @@ mod tests {
         let err = client.authenticate(&keypair).await.unwrap_err();
         assert!(matches!(err, AgentAuthError::Forbidden(_)));
         assert!(storage::load_token().await.unwrap().is_none());
-
-        storage::delete_token().await.unwrap();
     }
 
     #[tokio::test]
     async fn not_found_challenge_is_not_authorized_yet() {
-        let _g = TEST_LOCK.lock().await;
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
+
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/agents/challenge"))
@@ -369,5 +377,103 @@ mod tests {
                 .unwrap_err(),
             AgentAuthError::NotAuthorized
         ));
+    }
+
+    /// AAUTH-007 names both legs: "GET /agents/challenge *or* POST
+    /// /agents/token returns 403". The challenge leg is covered above; this is
+    /// the token leg, where the challenge succeeds and the server refuses only
+    /// once the signed proof arrives.
+    #[tokio::test]
+    #[spec("AAUTH-007")]
+    async fn forbidden_token_endpoint_maps_to_forbidden_and_clears_token() {
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
+
+        let keypair = AgentKeypair::generate();
+        let stale = StoredToken::new(
+            "stale-token".into(),
+            keypair.public_key().to_did_key(),
+            Utc::now() + chrono::Duration::minutes(15),
+            vec![],
+        );
+        storage::store_token(&stale).await.unwrap();
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ChallengeResponse {
+                challenge: BASE64_STANDARD.encode(b"token-leg-challenge"),
+                nonce: "nonce-token-403".to_string(),
+            }))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/agents/token"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Delegation revoked"))
+            .mount(&server)
+            .await;
+
+        let client = AgentAuthClient::with_config(AgentAuthConfig::new(server.uri())).unwrap();
+        let err = client.authenticate(&keypair).await.unwrap_err();
+        assert!(matches!(err, AgentAuthError::Forbidden(_)));
+        assert!(storage::load_token().await.unwrap().is_none());
+    }
+
+    /// Regression: a stored token is bound to the DID it was minted for. After
+    /// the agent keypair is regenerated the stored token belongs to a discarded
+    /// identity, so `get_token` must treat it as absent — drop it and re-run
+    /// the challenge-response — instead of presenting it for up to 15 minutes.
+    #[tokio::test]
+    async fn stored_token_for_another_did_is_discarded_and_reauthenticated() {
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
+
+        let keypair = AgentKeypair::generate();
+        let did = keypair.public_key().to_did_key();
+
+        // Fresh and nowhere near its refresh point: only the DID mismatch can
+        // make `get_token` reject it.
+        let orphaned = StoredToken::new(
+            "token-for-the-old-keypair".into(),
+            "did:key:z6MkRegeneratedAway".into(),
+            Utc::now() + chrono::Duration::minutes(15),
+            vec![],
+        );
+        storage::store_token(&orphaned).await.unwrap();
+
+        let challenge = b"did-mismatch-challenge".to_vec();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ChallengeResponse {
+                challenge: BASE64_STANDARD.encode(&challenge),
+                nonce: "nonce-did-mismatch".to_string(),
+            }))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/agents/token"))
+            .respond_with(ValidatingTokenResponder::new(
+                keypair.public_key(),
+                challenge,
+            ))
+            .mount(&server)
+            .await;
+
+        let client = AgentAuthClient::with_config(AgentAuthConfig::new(server.uri())).unwrap();
+        let token = client.get_token(&keypair).await.unwrap();
+
+        assert_eq!(
+            token.did, did,
+            "the returned token must name the current DID"
+        );
+        assert_eq!(token.token, "mock-token-123");
+
+        let on_disk = storage::load_token().await.unwrap().unwrap();
+        assert_eq!(on_disk.did, did);
+        assert_ne!(
+            on_disk.token, "token-for-the-old-keypair",
+            "the orphaned token must not survive on disk"
+        );
     }
 }

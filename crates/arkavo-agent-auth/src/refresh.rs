@@ -63,7 +63,8 @@ mod tests {
     use crate::config::AgentAuthConfig;
     use crate::storage;
     use crate::test_helpers::{TEST_LOCK, ValidatingTokenResponder};
-    use crate::types::ChallengeResponse;
+    use crate::test_utils::TokenFileGuard;
+    use crate::types::{ChallengeResponse, StoredToken};
     use arkavo_test_macros::spec;
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
     use std::sync::Mutex;
@@ -73,8 +74,8 @@ mod tests {
     #[tokio::test]
     #[spec("AAUTH-004")]
     async fn refresh_loop_reports_waiting_then_authenticated() {
-        let _g = TEST_LOCK.lock().await;
-        storage::delete_token().await.unwrap();
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
 
         let server = MockServer::start().await;
         let keypair = AgentKeypair::generate();
@@ -134,7 +135,72 @@ mod tests {
                 "expected the loop to reach Authenticated after approval, saw {seen:?}"
             );
         }
+    }
 
-        storage::delete_token().await.unwrap();
+    /// AAUTH-004: "New token replaces the old one in storage." The state
+    /// machine reaching `Authenticated` says nothing about what is on disk —
+    /// a refresh that silently kept serving the old CWT would look identical.
+    /// This pins the file itself.
+    #[tokio::test]
+    #[spec("AAUTH-004")]
+    async fn refresh_replaces_the_stored_token_on_disk() {
+        let _lock = TEST_LOCK.lock().await;
+        let _file = TokenFileGuard::capture();
+
+        let keypair = AgentKeypair::generate();
+        let did = keypair.public_key().to_did_key();
+
+        // Past two-thirds of a 15-minute lifetime but not yet expired, so the
+        // loop must re-run the challenge-response rather than reuse this.
+        let mut stale = StoredToken::new(
+            "stale-cwt".to_string(),
+            did.clone(),
+            Utc::now() + chrono::Duration::minutes(1),
+            vec![],
+        );
+        stale.stored_at = Utc::now() - chrono::Duration::minutes(14);
+        storage::store_token(&stale).await.unwrap();
+
+        let server = MockServer::start().await;
+        let challenge = b"refresh-replaces-challenge".to_vec();
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ChallengeResponse {
+                challenge: BASE64_STANDARD.encode(&challenge),
+                nonce: "nonce-replaces".to_string(),
+            }))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/agents/token"))
+            .respond_with(ValidatingTokenResponder::new(
+                keypair.public_key(),
+                challenge,
+            ))
+            .mount(&server)
+            .await;
+
+        let client =
+            Arc::new(AgentAuthClient::with_config(AgentAuthConfig::new(server.uri())).unwrap());
+        let handle = tokio::spawn(run_refresh_loop(
+            client,
+            Arc::new(keypair),
+            Duration::from_millis(20),
+            |_| {},
+        ));
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        handle.abort();
+
+        let on_disk = storage::load_token()
+            .await
+            .unwrap()
+            .expect("a refreshed token must be on disk");
+        assert_eq!(
+            on_disk.token, "mock-token-123",
+            "the refreshed token must replace the old one in storage"
+        );
+        assert_eq!(on_disk.did, did);
+        assert!(on_disk.stored_at > stale.stored_at);
     }
 }
