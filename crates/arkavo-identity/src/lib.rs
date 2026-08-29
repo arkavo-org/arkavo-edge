@@ -4,10 +4,12 @@
 //! ceremony; this crate never sees Creator's session CWT.
 
 mod broker;
+pub mod cwt;
 mod discovery;
 mod error;
 mod loopback;
 mod pkce;
+mod session;
 mod store;
 mod token;
 
@@ -20,5 +22,6 @@ pub use loopback::{
     BoundCallback, CALLBACK_DEADLINE, Callback, LOOPBACK_PORTS, bind, wait_for_callback,
 };
 pub use pkce::Pkce;
+pub use session::{Clock, IdentitySession, Launcher, SessionConfig};
 pub use store::{StoredTokens, delete, load, save, token_path};
 pub use token::{exchange_code, refresh};
