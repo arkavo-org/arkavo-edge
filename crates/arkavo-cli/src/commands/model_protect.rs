@@ -9,7 +9,7 @@ use arkavo_gguf_tdf::{DEFAULT_MAX_SEGMENT, ProtectOptions, RsaOaepWrapper, prote
 use std::path::{Path, PathBuf};
 
 /// Default KAS when the caller does not name one.
-const DEFAULT_KAS_URL: &str = "https://kas.arkavo.net";
+const DEFAULT_KAS_URL: &str = "https://platform.arkavo.net";
 
 /// Arguments for the protect subcommand.
 pub struct ProtectArgs<'a> {
@@ -107,6 +107,11 @@ pub async fn run(args: ProtectArgs<'_>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_kas_is_platform() {
+        assert_eq!(DEFAULT_KAS_URL, "https://platform.arkavo.net");
+    }
 
     #[test]
     fn default_output_appends_tdf_to_the_whole_name() {
