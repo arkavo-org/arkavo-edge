@@ -76,13 +76,16 @@ impl Default for IdentitySession {
 }
 
 impl IdentitySession {
+    /// # Panics
+    ///
+    /// Panics if the rustls HTTP client cannot be built (does not happen in practice).
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
             .use_rustls_tls()
             .timeout(Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("reqwest rustls client");
         Self {
             http,
             platform_url: env_or("ARKAVO_PLATFORM_URL", DEFAULT_PLATFORM_URL),
@@ -150,7 +153,7 @@ impl IdentitySession {
                     self.force_refresh.store(false, Ordering::SeqCst);
                     return Ok(access);
                 }
-                Err(IdentityError::Token(_) | IdentityError::Transport(_)) => {
+                Err(IdentityError::Token(_)) => {
                     let _ = crate::store::delete(&path);
                     self.clear_cache();
                 }
@@ -559,6 +562,93 @@ mod tests {
         assert_eq!(third, "new");
         assert_eq!(posts.load(Ordering::SeqCst), 1);
         assert!(!called.load(Ordering::SeqCst));
+        handle.abort();
+    }
+
+    async fn serve_idp_token_drop() -> (
+        std::net::SocketAddr,
+        Arc<AtomicUsize>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let posts = Arc::new(AtomicUsize::new(0));
+        let posts_task = posts.clone();
+        let well_known = serde_json::json!({
+            "idp": {
+                "issuer": format!("http://{addr}"),
+                "authorization_endpoint": format!("http://{addr}/oauth/authorize"),
+                "token_endpoint": format!("http://{addr}/oauth/token"),
+            },
+            "kas": { "uri": "https://platform.arkavo.net" }
+        })
+        .to_string();
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let well_known = well_known.clone();
+                let posts_task = posts_task.clone();
+                tokio::spawn(async move {
+                    let req = read_request(&mut stream).await;
+                    if req.starts_with("POST ") {
+                        posts_task.fetch_add(1, Ordering::SeqCst);
+                        // Accept then close with no HTTP response → Transport.
+                        drop(stream);
+                    } else {
+                        write_json(&mut stream, &well_known).await;
+                    }
+                });
+            }
+        });
+        (addr, posts, handle)
+    }
+
+    #[tokio::test]
+    async fn transport_error_on_refresh_keeps_token_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity_token");
+        crate::store::save(
+            &StoredTokens {
+                access_token: "old".into(),
+                refresh_token: Some("r1".into()),
+                expires_at: 1000,
+            },
+            &path,
+        )
+        .unwrap();
+        let (addr, posts, handle) = serve_idp_token_drop().await;
+        let called = Arc::new(AtomicBool::new(false));
+        let launcher = Arc::new(FlagLauncher {
+            called: called.clone(),
+        });
+        let session = session(
+            path.clone(),
+            950,
+            launcher,
+            format!("http://{addr}"),
+            "127.0.0.1".into(),
+        );
+        let err = session
+            .bearer(Prompt::Never)
+            .await
+            .expect_err("transport blip + Never must fail");
+        match err {
+            IdentityError::Transport(_) => {}
+            other => panic!("expected Transport, got {other:?}"),
+        }
+        assert!(
+            path.exists(),
+            "network blip must not delete the refresh token file"
+        );
+        let stored = crate::store::load(&path).unwrap().unwrap();
+        assert_eq!(stored.refresh_token.as_deref(), Some("r1"));
+        assert!(
+            !called.load(Ordering::SeqCst),
+            "launcher must not run on Prompt::Never"
+        );
+        assert_eq!(posts.load(Ordering::SeqCst), 1);
         handle.abort();
     }
 
