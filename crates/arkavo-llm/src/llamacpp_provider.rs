@@ -197,8 +197,7 @@ impl LlamaCppProvider {
         if crate::gguf_tdf::is_protected_model_path(&model_path) {
             return Err(Error::Config(format!(
                 "GGUFTDF_KAS_DENIED: {model_path} is a protected model and needs a \
-                 KAS rewrap; load it with LlamaCppProvider::new_protected after \
-                 recovering the payload key"
+                 KAS rewrap; run 'arkavo login' then retry"
             )));
         }
 

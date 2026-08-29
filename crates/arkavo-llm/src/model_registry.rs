@@ -84,14 +84,34 @@ impl ModelRegistry {
         if crate::gguf_tdf::is_protected_model_path(path) {
             return Err(Error::Config(format!(
                 "GGUFTDF_KAS_DENIED: {path} is a protected model and needs a \
-                 KAS rewrap; load it with LlamaCppProvider::new_protected after \
-                 recovering the payload key"
+                 KAS rewrap; run 'arkavo login' then retry"
             )));
         }
 
         let model = LlamaModel::from_file(path)
             .map_err(|e| Error::Config(format!("Failed to load model from {path}: {e}")))?;
 
+        self.register_loaded(name, model)
+    }
+
+    /// Load a KAS-protected `.gguf.tdf` model with an already-recovered
+    /// payload key and register it.
+    ///
+    /// KAS rewrap is asynchronous and this method is not, so the caller
+    /// performs the round-trip in the runtime it already owns and passes the
+    /// key in. Nothing here contacts a KAS or falls back to a plaintext model.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub fn load_protected(&self, name: &str, path: &str, payload_key: [u8; 32]) -> Result<()> {
+        if self.is_loaded(name) {
+            return Ok(());
+        }
+
+        let model = crate::gguf_tdf::load_with_payload_key(path, payload_key)?;
+        self.register_loaded(name, model)
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    fn register_loaded(&self, name: &str, model: LlamaModel) -> Result<()> {
         let model_arc = Arc::new(model);
 
         {
@@ -114,6 +134,14 @@ impl ModelRegistry {
     /// Stub for non-llama-cpp builds
     #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
     pub fn load(&self, _name: &str, _path: &str) -> Result<()> {
+        Err(Error::Config(
+            "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
+        ))
+    }
+
+    /// Stub for non-llama-cpp builds
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    pub fn load_protected(&self, _name: &str, _path: &str, _payload_key: [u8; 32]) -> Result<()> {
         Err(Error::Config(
             "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
         ))

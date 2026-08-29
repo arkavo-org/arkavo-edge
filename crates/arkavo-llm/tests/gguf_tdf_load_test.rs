@@ -31,7 +31,7 @@ fn the_sync_constructor_refuses_a_protected_model() {
     let msg = err.to_string();
     assert!(msg.contains("GGUFTDF_KAS_DENIED"), "got: {msg}");
     assert!(
-        msg.contains("new_protected"),
+        msg.contains("arkavo login"),
         "error should name the way in: {msg}"
     );
 }
@@ -88,4 +88,14 @@ fn registry_load_refuses_a_protected_path_without_a_key() {
         "registry must not open a .gguf.tdf with from_file",
     );
     assert!(err.to_string().contains("GGUFTDF_KAS_DENIED"), "got: {err}");
+}
+
+#[test]
+fn registry_load_protected_refuses_a_missing_archive() {
+    let registry = ModelRegistry::new();
+    let err = expect_err(
+        registry.load_protected("p", "/nonexistent/model.gguf.tdf", [0u8; 32]),
+        "missing archive",
+    );
+    assert!(err.to_string().contains("Failed to open") || err.to_string().contains("GGUFTDF"));
 }
