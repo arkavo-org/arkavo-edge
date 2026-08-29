@@ -8,6 +8,7 @@ mod error;
 mod loopback;
 mod pkce;
 mod store;
+mod token;
 
 pub use discovery::{
     DEFAULT_IDENTITY_HOST, DEFAULT_PLATFORM_URL, IdentityEndpoints, discover, host_of,
@@ -18,3 +19,4 @@ pub use loopback::{
 };
 pub use pkce::Pkce;
 pub use store::{StoredTokens, delete, load, save, token_path};
+pub use token::{exchange_code, refresh};
