@@ -40,11 +40,10 @@ pub fn verify(
         None => return Err(CwtError::UnsupportedAlgorithm("none".into())),
     }
 
-    let kid = if sign1.protected.header.key_id.is_empty() {
-        &sign1.unprotected.key_id
-    } else {
-        &sign1.protected.header.key_id
-    };
+    // authnz-contract.md puts `kid` in the protected header. An unprotected
+    // `kid` is not covered by the signature, so honouring one would widen the
+    // accepted input surface for no gain.
+    let kid = &sign1.protected.header.key_id;
     if kid.is_empty() {
         return Err(CwtError::MissingKid);
     }
@@ -107,7 +106,10 @@ mod tests {
     use arkavo_test_macros::spec;
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use ciborium::Value;
-    use coset::{CborSerializable, CoseKeyBuilder, CoseKeySet, CoseSign1Builder, HeaderBuilder};
+    use coset::{
+        CborSerializable, CoseKeyBuilder, CoseKeySet, CoseSign1, CoseSign1Builder, Header,
+        HeaderBuilder,
+    };
     use p256::ecdsa::{Signature, SigningKey, VerifyingKey, signature::Signer};
     use std::time::Duration;
 
@@ -144,15 +146,35 @@ mod tests {
         npe: Option<Value>,
         tagged: bool,
     ) -> String {
+        let payload = claims_cbor(ISS, aud, exp, NOW - 60, act, npe);
+        encode_sign1(
+            signer,
+            es256_protected(kid),
+            Header::default(),
+            payload,
+            tagged,
+        )
+    }
+
+    /// The CBOR claims map an authnz-rs agent CWT carries: integer claim keys
+    /// for the registered claims, literal text keys for the `arkavo_*` set.
+    fn claims_cbor(
+        iss: &str,
+        aud: Value,
+        exp: i64,
+        iat: i64,
+        act: Option<Value>,
+        npe: Option<Value>,
+    ) -> Vec<u8> {
         let mut fields = vec![
-            (Value::Integer(1.into()), Value::Text(ISS.into())),
+            (Value::Integer(1.into()), Value::Text(iss.into())),
             (
                 Value::Integer(2.into()),
                 Value::Text("did:key:zAgentUnderTest".into()),
             ),
             (Value::Integer(3.into()), aud),
             (Value::Integer(4.into()), Value::Integer(exp.into())),
-            (Value::Integer(6.into()), Value::Integer((NOW - 60).into())),
+            (Value::Integer(6.into()), Value::Integer(iat.into())),
             (
                 Value::Text("arkavo_account_id".into()),
                 Value::Text("acct-42".into()),
@@ -175,17 +197,32 @@ mod tests {
         if let Some(npe) = npe {
             fields.push((Value::Text("arkavo_npe".into()), npe));
         }
-        let payload = Value::Map(fields);
-        let mut payload_bytes = Vec::new();
-        ciborium::into_writer(&payload, &mut payload_bytes).expect("encode claims");
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&Value::Map(fields), &mut bytes).expect("encode claims");
+        bytes
+    }
 
-        let protected = HeaderBuilder::new()
+    /// The protected header authnz-rs emits: ES256 plus the raw-bytes `kid`.
+    fn es256_protected(kid: &[u8]) -> Header {
+        HeaderBuilder::new()
             .algorithm(coset::iana::Algorithm::ES256)
             .key_id(kid.to_vec())
-            .build();
+            .build()
+    }
+
+    /// Sign `payload` under the given headers and return the client-facing
+    /// encoding: base64url-no-pad, optionally tag-61 prefixed.
+    fn encode_sign1(
+        signer: &SigningKey,
+        protected: Header,
+        unprotected: Header,
+        payload: Vec<u8>,
+        tagged: bool,
+    ) -> String {
         let sign1 = CoseSign1Builder::new()
             .protected(protected)
-            .payload(payload_bytes)
+            .unprotected(unprotected)
+            .payload(payload)
             .create_signature(b"", |data| {
                 let sig: Signature = signer.sign(data);
                 sig.to_bytes().to_vec()
@@ -427,5 +464,164 @@ mod tests {
         assert_eq!(claims.aud, vec!["arkavo-kas".to_string()]);
         assert!(claims.actors.is_empty());
         assert!(claims.npe.is_none());
+    }
+
+    /// agent-cwt.spec.yaml invariant: "ES256 only; any other COSE algorithm is
+    /// refused before a key is even looked up." Nothing pinned that; a verifier
+    /// that honoured the token's own `alg` would let an attacker pick a weaker
+    /// one, or none at all.
+    #[test]
+    fn refuses_any_algorithm_other_than_es256() {
+        let signer = new_key();
+        let kid = [0x77u8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+        let aud = Value::Array(vec![Value::Text("arkavo-kas".into())]);
+
+        let eddsa = encode_sign1(
+            &signer,
+            HeaderBuilder::new()
+                .algorithm(coset::iana::Algorithm::EdDSA)
+                .key_id(kid.to_vec())
+                .build(),
+            Header::default(),
+            claims_cbor(ISS, aud.clone(), NOW + 600, NOW - 60, None, None),
+            true,
+        );
+        assert!(matches!(
+            verify(&eddsa, &keys, &opts(Some("arkavo-kas"))),
+            Err(CwtError::UnsupportedAlgorithm(_))
+        ));
+
+        let no_alg = encode_sign1(
+            &signer,
+            HeaderBuilder::new().key_id(kid.to_vec()).build(),
+            Header::default(),
+            claims_cbor(ISS, aud, NOW + 600, NOW - 60, None, None),
+            true,
+        );
+        assert!(matches!(
+            verify(&no_alg, &keys, &opts(Some("arkavo-kas"))),
+            Err(CwtError::UnsupportedAlgorithm(_))
+        ));
+    }
+
+    /// A correctly signed token minted by some other issuer must not be
+    /// accepted just because its signature verifies under a key we publish.
+    #[test]
+    fn refuses_a_wrong_issuer() {
+        let signer = new_key();
+        let kid = [0x88u8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+
+        let token = encode_sign1(
+            &signer,
+            es256_protected(&kid),
+            Header::default(),
+            claims_cbor(
+                "https://identity.attacker.example",
+                Value::Array(vec![Value::Text("arkavo-kas".into())]),
+                NOW + 600,
+                NOW - 60,
+                None,
+                None,
+            ),
+            true,
+        );
+
+        assert!(matches!(
+            verify(&token, &keys, &opts(Some("arkavo-kas"))),
+            Err(CwtError::IssuerMismatch { .. })
+        ));
+    }
+
+    /// A token whose `iat` is beyond the allowed skew has not been issued yet;
+    /// accepting it would let a clock-skewed or forged token extend its own
+    /// window past the 15-minute agent CWT lifetime.
+    #[test]
+    fn refuses_a_token_issued_in_the_future() {
+        let signer = new_key();
+        let kid = [0x99u8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+
+        let token = encode_sign1(
+            &signer,
+            es256_protected(&kid),
+            Header::default(),
+            claims_cbor(
+                ISS,
+                Value::Array(vec![Value::Text("arkavo-kas".into())]),
+                NOW + 600,
+                NOW + 31,
+                None,
+                None,
+            ),
+            true,
+        );
+
+        assert!(matches!(
+            verify(&token, &keys, &opts(Some("arkavo-kas"))),
+            Err(CwtError::IssuedInFuture { .. })
+        ));
+    }
+
+    /// Flipping one byte of the signed payload must be caught. Without this the
+    /// suite could pass with the signature check reduced to a no-op: every other
+    /// rejection test fails on a header, a clock or a claim comparison.
+    #[test]
+    fn refuses_a_tampered_payload() {
+        let signer = new_key();
+        let kid = [0xAAu8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+
+        let token = mint(&signer, &kid, &["arkavo-kas"], NOW + 600, true);
+        assert!(verify(&token, &keys, &opts(Some("arkavo-kas"))).is_ok());
+
+        let bytes = URL_SAFE_NO_PAD.decode(&token).expect("decode token");
+        let body = bytes.strip_prefix(&[0xD8u8, 0x3D][..]).expect("tag 61");
+        let mut sign1 = CoseSign1::from_slice(body).expect("parse COSE_Sign1");
+        sign1.payload.as_mut().expect("attached payload")[0] ^= 0x01;
+        let tampered = URL_SAFE_NO_PAD.encode(sign1.to_vec().expect("re-encode"));
+
+        assert!(matches!(
+            verify(&tampered, &keys, &opts(Some("arkavo-kas"))),
+            Err(CwtError::BadSignature)
+        ));
+    }
+
+    /// authnz-contract.md: "`kid`: in the **protected** header." An unprotected
+    /// `kid` is not covered by the signature, so it is not accepted even as a
+    /// lookup hint.
+    #[test]
+    fn refuses_a_kid_carried_only_in_the_unprotected_header() {
+        let signer = new_key();
+        let kid = [0xBBu8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+
+        let token = encode_sign1(
+            &signer,
+            HeaderBuilder::new()
+                .algorithm(coset::iana::Algorithm::ES256)
+                .build(),
+            HeaderBuilder::new().key_id(kid.to_vec()).build(),
+            claims_cbor(
+                ISS,
+                Value::Array(vec![Value::Text("arkavo-kas".into())]),
+                NOW + 600,
+                NOW - 60,
+                None,
+                None,
+            ),
+            true,
+        );
+
+        assert!(matches!(
+            verify(&token, &keys, &opts(Some("arkavo-kas"))),
+            Err(CwtError::MissingKid)
+        ));
     }
 }
