@@ -3,9 +3,12 @@
 //! Spec: `specifications/gguf-tdf/draft-arkavo-gguf-tdf-01.md`.
 //!
 //! At rest the artifact is ciphertext plus a plaintext manifest and index. At
-//! load, extra plaintext is bounded by `headerBytes + maxSegment`: one
-//! retained GGUF header plus one cached weight segment. The executor sees a
-//! virtual linear GGUF through `read_at` and contains no TDF, AES, or KAS code.
+//! load, extra plaintext is the retained GGUF header plus up to
+//! `DEFAULT_CACHED_SEGMENTS` decrypted weight segments held by the reader's
+//! LRU cache plus up to `DEFAULT_PREFETCH_DEPTH` more held by the
+//! decrypt-ahead worker: `headerBytes + (cached + prefetch) * maxSegment`,
+//! defaults 8 + 4. The executor sees a virtual linear GGUF through `read_at`
+//! and contains no TDF, AES, or KAS code.
 
 mod error;
 mod ggml_type;

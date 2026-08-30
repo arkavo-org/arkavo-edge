@@ -15,8 +15,8 @@
 mod common;
 
 use arkavo_gguf_tdf::{
-    GgufTdfArchive, GgufTdfError, PayloadKeyUnwrapper, PayloadKeyWrapper, ProtectOptions,
-    WrappedKey, protect,
+    DEFAULT_CACHED_SEGMENTS, DEFAULT_PREFETCH_DEPTH, GgufTdfArchive, GgufTdfError,
+    PayloadKeyUnwrapper, PayloadKeyWrapper, ProtectOptions, WrappedKey, protect,
 };
 use base64::Engine as _;
 use opentdf::TdfManifest;
@@ -117,7 +117,10 @@ fn real_model_round_trips_byte_for_byte() {
 }
 
 /// I2: extra anonymous plaintext during a full read stays near
-/// `headerBytes + maxSegment`, not near the file size.
+/// `headerBytes + (DEFAULT_CACHED_SEGMENTS + DEFAULT_PREFETCH_DEPTH) *
+/// maxSegment`, not near the file size. `unlock` (used here) opens the
+/// reader's LRU cache and decrypt-ahead worker at those defaults, so that is
+/// the bound this test guards.
 ///
 /// Measured as process RSS growth across a whole-file sequential read. The
 /// archive is opened before the baseline is taken so the zip's own file-backed
@@ -163,10 +166,14 @@ fn load_working_set_stays_bounded() {
     peak = peak.max(resident_bytes().unwrap_or(baseline));
 
     let growth = peak.saturating_sub(baseline);
-    // The bound is headerBytes + maxSegment plus room for the ciphertext
-    // copy-out and allocator slack. The point of the assertion is that growth
-    // tracks the segment size rather than the model size.
-    let bound = report.header_bytes + opts.max_segment * 4 + (16 << 20);
+    // The bound is headerBytes + (cached + prefetch) * maxSegment -- the
+    // reader's LRU cache plus the decrypt-ahead worker's window -- plus room
+    // for the ciphertext copy-out and allocator slack. The point of the
+    // assertion is that growth tracks the segment size rather than the model
+    // size.
+    let bound = report.header_bytes
+        + (DEFAULT_CACHED_SEGMENTS + DEFAULT_PREFETCH_DEPTH) as u64 * opts.max_segment
+        + (16 << 20);
     assert!(
         growth < bound,
         "RSS grew {growth} bytes reading a {} byte model; bound is {bound}",
