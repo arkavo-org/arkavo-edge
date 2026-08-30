@@ -76,7 +76,11 @@ pub fn resolve_gguf_path(path: &Path) -> PathBuf {
     if path.exists() {
         return path.to_path_buf();
     }
-    let protected = PathBuf::from(format!("{name}.tdf"));
+    // Build the sibling from the OsStr so a non-UTF-8 path still names the
+    // real file on disk.
+    let mut protected = path.as_os_str().to_os_string();
+    protected.push(".tdf");
+    let protected = PathBuf::from(protected);
     if name.to_lowercase().ends_with(".gguf") && protected.exists() {
         tracing::info!(
             "plaintext {:?} is absent; using protected sibling {:?}",
@@ -212,27 +216,28 @@ fn get_hf_cache_dir() -> Option<PathBuf> {
 }
 
 /// Recursively find a GGUF artifact, preferring plaintext over `.gguf.tdf`.
+///
+/// One pass over the tree: the first plaintext `.gguf` wins immediately; the
+/// first `.gguf.tdf` seen is kept as the fallback. A large HF cache is not
+/// walked twice.
 fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
-    find_artifact_in_dir(dir, false).or_else(|| find_artifact_in_dir(dir, true))
+    let mut protected = None;
+    find_artifact_in_dir(dir, &mut protected).or(protected)
 }
 
-fn find_artifact_in_dir(dir: &std::path::Path, protected: bool) -> Option<PathBuf> {
-    tracing::debug!(
-        "find_artifact_in_dir: scanning {:?} protected={}",
-        dir,
-        protected
-    );
+/// Returns the first plaintext GGUF under `dir`; records the first protected
+/// artifact in `protected` when no plaintext has been found yet.
+fn find_artifact_in_dir(dir: &std::path::Path, protected: &mut Option<PathBuf>) -> Option<PathBuf> {
+    tracing::debug!("find_artifact_in_dir: scanning {:?}", dir);
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() {
-                let matches = if protected {
-                    is_protected_gguf(&path)
-                } else {
-                    is_plaintext_gguf(&path)
-                };
-                if matches {
+                if is_plaintext_gguf(&path) {
                     return Some(path);
+                }
+                if protected.is_none() && is_protected_gguf(&path) {
+                    *protected = Some(path);
                 }
             } else if path.is_dir()
                 && let Some(found) = find_artifact_in_dir(&path, protected)

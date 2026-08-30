@@ -76,6 +76,15 @@ pub async fn run(args: ProtectArgs<'_>) -> Result<()> {
     let report = protect(args.path, &dest, &wrapper, &opts)
         .with_context(|| format!("cannot protect {}", args.path.display()))?;
 
+    // Structural read-back (no KAS round-trip): a truncated or malformed
+    // archive must be caught before the only plaintext copy can be removed.
+    arkavo_gguf_tdf::GgufTdfArchive::open(&dest).with_context(|| {
+        format!(
+            "wrote {} but it failed to reopen; the source was not deleted",
+            dest.display()
+        )
+    })?;
+
     println!("  wrote      {}", dest.display());
     println!("  segments   {}", report.segments);
     println!("  header     {} bytes", report.header_bytes);

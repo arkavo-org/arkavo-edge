@@ -162,6 +162,15 @@ fn read_from_cookie(cookie: &mut Cookie, buf: &mut [u8]) -> usize {
     got
 }
 
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly",
+    target_os = "android"
+))]
 unsafe extern "C" fn cookie_read_bsd(cookie: *mut c_void, buf: *mut c_char, n: c_int) -> c_int {
     if cookie.is_null() || buf.is_null() || n <= 0 {
         return 0;
@@ -171,6 +180,15 @@ unsafe extern "C" fn cookie_read_bsd(cookie: *mut c_void, buf: *mut c_char, n: c
     read_from_cookie(cookie, slice) as c_int
 }
 
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly",
+    target_os = "android"
+))]
 unsafe extern "C" fn cookie_seek_bsd(
     cookie: *mut c_void,
     offset: libc::off_t,

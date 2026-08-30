@@ -44,7 +44,7 @@ pub mod memory;
 pub mod speculative;
 
 // Cookie FILE* reader for llama_model_load_from_file_ptr (no llama.cpp patch)
-#[cfg(not(target_env = "musl"))]
+#[cfg(all(unix, not(target_env = "musl")))]
 mod callback;
 
 // Real implementation for non-musl targets
@@ -331,6 +331,7 @@ impl LlamaModel {
     ///
     /// Uses `funopen`/`fopencookie` and `llama_model_load_from_file_ptr` with
     /// `LLAMA_LOAD_MODE_NONE` so llama.cpp never mmaps and never sees TDF.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     pub fn from_callback<F>(virtual_size: u64, mut read_at: F) -> Result<Self, String>
     where
         F: FnMut(u64, &mut [u8]) -> usize,
@@ -361,6 +362,7 @@ impl LlamaModel {
         }
     }
 
+    #[cfg(unix)]
     fn load_from_cookie(file: &callback::StdioCookieFile) -> Result<*mut ffi::llama_model, String> {
         let gpu_status = GPU_STATUS.load(Ordering::Relaxed);
         let try_gpu = gpu_status != 2;
