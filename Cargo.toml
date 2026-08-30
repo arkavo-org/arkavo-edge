@@ -393,8 +393,10 @@ too_many_lines = "allow"
 deny-warnings = true
 
 
-# gguf-tdf: AES-GCM at opt-level 0 runs ~7 MB/s (software AES), which makes a
-# multi-GB protected load look like a hang. Keep the crypto path optimized in dev.
+# gguf-tdf: keep the AES-GCM path optimized in dev builds. At opt-level 0
+# software AES runs ~7 MB/s and a multi-GB protected load looks like a hang.
+# Hardware AES on aarch64 additionally needs `--cfg aes_armv8`
+# (.cargo/config.toml).
 [profile.dev.package.aes]
 opt-level = 3
 [profile.dev.package.aes-gcm]
