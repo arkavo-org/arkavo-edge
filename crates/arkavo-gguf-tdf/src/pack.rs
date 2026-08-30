@@ -4,6 +4,7 @@
 //! members. The plan is computed from the header alone, so a writer never
 //! loads weights.
 
+use crate::MAX_MAX_SEGMENT;
 use crate::error::GgufTdfError;
 use crate::gguf_header::GgufHeader;
 use opentdf::GgufSegmentKind;
@@ -172,7 +173,9 @@ fn validate_inputs(
     if align < 8 || !align.is_power_of_two() {
         return Err(GgufTdfError::BadAlign(align));
     }
-    if max_segment < align || !max_segment.is_multiple_of(align) {
+    // Mirrors `validate_index`'s cap (spec §9.4 invariant 9): a writer must
+    // not be able to produce an index that a reader would then refuse.
+    if max_segment < align || !max_segment.is_multiple_of(align) || max_segment > MAX_MAX_SEGMENT {
         return Err(GgufTdfError::BadMaxSegment(max_segment));
     }
 

@@ -7,7 +7,7 @@
 use crate::error::GgufTdfError;
 use crate::gguf_header::{GgufHeader, MAX_TENSOR_NAME_BYTES};
 use crate::pack::PlannedSegment;
-use crate::{PROFILE, SEGMENT_OVERHEAD};
+use crate::{MAX_HEADER_BYTES, MAX_MAX_SEGMENT, PROFILE, SEGMENT_OVERHEAD};
 use opentdf::TdfMemberIndex;
 use opentdf::{GgufIndex, GgufSegment, GgufSegmentKind, GgufTensor, IntegrityInformation};
 use std::collections::HashSet;
@@ -132,14 +132,29 @@ pub fn validate_index(
     if index.alignment < 8 || !index.alignment.is_power_of_two() {
         return Err(GgufTdfError::BadAlign(index.alignment));
     }
-    // Invariant 9.
-    if !index.max_segment.is_multiple_of(index.alignment) || index.max_segment < index.alignment {
+    // Invariant 9. The upper bound is checked here too, ahead of every other
+    // invariant, so a writer cannot produce and a reader cannot accept an
+    // index that would let `ensure_segment` plan a scratch buffer past the
+    // small-cache promise this profile makes (spec §13.3).
+    if !index.max_segment.is_multiple_of(index.alignment)
+        || index.max_segment < index.alignment
+        || index.max_segment > MAX_MAX_SEGMENT
+    {
         return Err(GgufTdfError::BadMaxSegment(index.max_segment));
     }
     if index.header_bytes == 0 || !index.header_bytes.is_multiple_of(index.alignment) {
         return Err(GgufTdfError::BadHeader(format!(
             "headerBytes {} must be non-zero and a multiple of {}",
             index.header_bytes, index.alignment
+        )));
+    }
+    // Checked before anything below touches the zip or the integrity rows,
+    // so a header size this absurd is rejected on the index alone, before
+    // `decrypt_header` would otherwise allocate a plaintext buffer for it.
+    if index.header_bytes > MAX_HEADER_BYTES {
+        return Err(GgufTdfError::BadHeader(format!(
+            "headerBytes {} exceeds the {MAX_HEADER_BYTES} byte cap",
+            index.header_bytes
         )));
     }
     if index.virtual_size < index.header_bytes {

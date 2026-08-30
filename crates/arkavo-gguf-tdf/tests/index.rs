@@ -1,7 +1,8 @@
 //! Hybrid index construction and the §9.4 open-time invariants.
 
 use arkavo_gguf_tdf::{
-    GgufHeader, HeaderTensor, SegmentMap, build_index, plan_segments, validate_index,
+    GgufHeader, HeaderTensor, MAX_HEADER_BYTES, MAX_MAX_SEGMENT, SegmentMap, build_index,
+    plan_segments, validate_index,
 };
 use opentdf::{
     GgufIndex, GgufSegmentKind, IntegrityInformation, RootSignature, Segment, TdfManifest,
@@ -288,6 +289,57 @@ fn rejects_duplicate_tensor_names() {
             .unwrap_err()
             .code(),
         "GGUFTDF_BAD_INDEX"
+    );
+}
+
+// Task 10: absurd `headerBytes` / `maxSegment` are refused before anything
+// downstream allocates a buffer sized from them.
+
+#[test]
+fn rejects_max_segment_over_the_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut index = appendix_a_index();
+    let integrity = integrity_for(&index);
+    let members = members_for(dir.path(), &index);
+
+    // Stays a multiple of the fixture's 32-byte alignment.
+    index.max_segment = MAX_MAX_SEGMENT + 32;
+    assert_eq!(
+        validate_index(&index, &integrity, &members)
+            .unwrap_err()
+            .code(),
+        "GGUFTDF_BAD_MAX_SEGMENT"
+    );
+}
+
+/// `members` is built from the *pristine* index, so the real "header" zip
+/// member stays a few bytes even though `index.header_bytes` is mutated to
+/// exceed the cap afterward — the point of the cap is exactly that no test
+/// (and no reader) has to construct a real ~1 GiB member to prove this.
+///
+/// `virtual_size` and `segments[0].plain` are raised to match, so that
+/// *without* the cap this reaches invariant 5 (the member's real on-disk
+/// size disagreeing with the manifest's claim) rather than an earlier,
+/// unrelated check — proving the new cap, not a pre-existing one, is what
+/// now catches it first.
+#[test]
+fn rejects_header_bytes_over_the_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let pristine = appendix_a_index();
+    let members = members_for(dir.path(), &pristine);
+
+    let mut index = pristine;
+    let huge = MAX_HEADER_BYTES + 32;
+    index.header_bytes = huge;
+    index.segments[0].plain = huge;
+    index.virtual_size = huge;
+    let integrity = integrity_for(&index);
+
+    assert_eq!(
+        validate_index(&index, &integrity, &members)
+            .unwrap_err()
+            .code(),
+        "GGUFTDF_BAD_HEADER"
     );
 }
 

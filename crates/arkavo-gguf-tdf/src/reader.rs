@@ -11,7 +11,10 @@ use crate::index::{SegmentMap, validate_index};
 use crate::key::PayloadKeyUnwrapper;
 use crate::prefetch::Prefetcher;
 use crate::read_at::VirtualGguf;
-use crate::{MANIFEST_ENTRY, MANIFEST_ENTRY_FALLBACK, PROFILE};
+use crate::{
+    MANIFEST_ENTRY, MANIFEST_ENTRY_FALLBACK, MAX_HEADER_BYTES, MAX_MANIFEST_BYTES, PROFILE,
+    SEGMENT_OVERHEAD,
+};
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
 use opentdf::{GgufIndex, TdfEncryption, TdfManifest, TdfMemberIndex};
@@ -212,6 +215,13 @@ fn read_manifest(file: &mut File, members: &TdfMemberIndex) -> Result<TdfManifes
             .ok_or(GgufTdfError::NoManifest)?,
     };
 
+    if location.size > MAX_MANIFEST_BYTES {
+        return Err(GgufTdfError::BadIndex(format!(
+            "manifest member is {} bytes, over the {MAX_MANIFEST_BYTES} byte cap",
+            location.size
+        )));
+    }
+
     let mut json = vec![0u8; location.size as usize];
     file.seek(SeekFrom::Start(location.data_start))?;
     file.read_exact(&mut json)?;
@@ -233,10 +243,6 @@ fn decrypt_header(
         .get(crate::HEADER_ENTRY)
         .ok_or_else(|| GgufTdfError::BadIndex("archive has no header member".to_string()))?;
 
-    let mut member = vec![0u8; location.size as usize];
-    file.seek(SeekFrom::Start(location.data_start))?;
-    file.read_exact(&mut member)?;
-
     let row = manifest
         .encryption_information
         .integrity_information
@@ -246,6 +252,16 @@ fn decrypt_header(
     let plain_len = row
         .segment_size
         .ok_or_else(|| GgufTdfError::BadIndex("header row omits segmentSize".to_string()))?;
+
+    // Checked before either buffer below is allocated. `validate_index`
+    // already bounds `headerBytes`, but this function does not assume its
+    // caller ran that check, so it enforces the same cap on the two sizes
+    // it is about to allocate from.
+    check_header_size_caps(plain_len, location.size)?;
+
+    let mut member = vec![0u8; location.size as usize];
+    file.seek(SeekFrom::Start(location.data_start))?;
+    file.read_exact(&mut member)?;
 
     let mut plaintext = Zeroizing::new(vec![0u8; plain_len as usize]);
     let tag = encryption
@@ -262,6 +278,24 @@ fn decrypt_header(
     }
 
     Ok(plaintext)
+}
+
+/// Task 10 cap, split out so both branches are unit-testable without a real
+/// multi-hundred-MiB or multi-GiB fixture: `plain_len` is the row's claimed
+/// `segmentSize`, `member_len` the header member's on-disk size.
+fn check_header_size_caps(plain_len: u64, member_len: u64) -> Result<(), GgufTdfError> {
+    if plain_len > MAX_HEADER_BYTES {
+        return Err(GgufTdfError::BadIndex(format!(
+            "header row claims segmentSize {plain_len}, over the {MAX_HEADER_BYTES} byte cap"
+        )));
+    }
+    let member_cap = MAX_HEADER_BYTES + SEGMENT_OVERHEAD;
+    if member_len > member_cap {
+        return Err(GgufTdfError::BadIndex(format!(
+            "header member is {member_len} bytes, over the {member_cap} byte cap"
+        )));
+    }
+    Ok(())
 }
 
 /// Spec §9.5: bind the plaintext index to the authenticated header.
@@ -363,6 +397,69 @@ mod tests {
             reason: "member 'header' is not Stored".to_string(),
             expected: Some("compression method 0".to_string()),
         });
+        assert_eq!(err.code(), "GGUFTDF_BAD_INDEX");
+    }
+
+    // Task 10: absurd header/segment sizes are refused before allocating.
+    // `check_header_size_caps` is exercised directly for both branches
+    // because the second (a member whose on-disk size itself exceeds the
+    // cap) needs a real >1 GiB zip member to reach through `decrypt_header`
+    // — infeasible as a test fixture. The first branch also gets a
+    // `decrypt_header`-level test below, with a real (tiny) member and a
+    // manifest row that only lies about `segmentSize`.
+
+    #[test]
+    fn header_size_caps_accept_values_at_the_boundary() {
+        check_header_size_caps(MAX_HEADER_BYTES, MAX_HEADER_BYTES + SEGMENT_OVERHEAD)
+            .expect("exactly at the cap must be accepted");
+    }
+
+    #[test]
+    fn header_size_caps_reject_a_segment_size_claim_over_the_cap() {
+        let err = check_header_size_caps(MAX_HEADER_BYTES + 1, 64).unwrap_err();
+        assert_eq!(err.code(), "GGUFTDF_BAD_INDEX");
+    }
+
+    #[test]
+    fn header_size_caps_reject_a_member_size_over_the_cap() {
+        let err = check_header_size_caps(64, MAX_HEADER_BYTES + SEGMENT_OVERHEAD + 1).unwrap_err();
+        assert_eq!(err.code(), "GGUFTDF_BAD_INDEX");
+    }
+
+    #[test]
+    fn decrypt_header_refuses_a_segment_size_claim_over_the_cap_before_allocating() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bare-header.zip");
+        let encryption = TdfEncryption::with_payload_key(&[0x5A; 32]).unwrap();
+        let encrypted = encryption.encrypt_segment(b"a tiny real header").unwrap();
+
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        let mut zip = zip::ZipWriter::new(File::create(&path).unwrap());
+        zip.start_file(crate::HEADER_ENTRY, options).unwrap();
+        zip.write_all(&encrypted.bytes).unwrap();
+        zip.finish().unwrap();
+
+        let mut file = File::open(&path).unwrap();
+        let members = opentdf::TdfMemberIndex::open(&mut file).unwrap();
+
+        let mut manifest = TdfManifest::new(
+            crate::HEADER_ENTRY.to_string(),
+            "https://kas.invalid".to_string(),
+        );
+        manifest
+            .encryption_information
+            .integrity_information
+            .segments = vec![opentdf::Segment {
+            hash: base64::engine::general_purpose::STANDARD.encode(encrypted.tag),
+            // The member on disk is a few bytes; only the claim is absurd.
+            segment_size: Some(MAX_HEADER_BYTES + 32),
+            encrypted_segment_size: Some(MAX_HEADER_BYTES + 32 + SEGMENT_OVERHEAD),
+        }];
+
+        let err = decrypt_header(&mut file, &members, &manifest, &encryption).unwrap_err();
         assert_eq!(err.code(), "GGUFTDF_BAD_INDEX");
     }
 }

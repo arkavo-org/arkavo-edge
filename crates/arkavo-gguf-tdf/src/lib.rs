@@ -40,6 +40,29 @@ pub const DEFAULT_MAX_SEGMENT: u64 = 4_194_304;
 /// AES-GCM per-segment overhead: a 12-byte IV plus a 16-byte tag.
 pub const SEGMENT_OVERHEAD: u64 = 28;
 
+/// Upper bound on `gguf.headerBytes` and on a header row's claimed
+/// `segmentSize`, checked before any buffer sized from either is allocated.
+///
+/// 1 GiB: the largest known tokenizer-heavy GGUF headers (vocab plus merges
+/// KV blocks) are tens of MiB; this is an order of magnitude beyond that,
+/// not a realistic model header.
+pub const MAX_HEADER_BYTES: u64 = 1 << 30;
+
+/// Upper bound on `gguf.maxSegment`, checked before a writer can plan
+/// segments past it or a reader can accept an index declaring it.
+///
+/// 256 MiB: 64x `DEFAULT_MAX_SEGMENT`, beyond which the "one segment at a
+/// time" scratch bound this profile promises stops being small.
+pub const MAX_MAX_SEGMENT: u64 = 256 << 20;
+
+/// Upper bound on the `0.manifest.json` / `manifest.json` zip member,
+/// checked before `read_manifest` allocates a buffer for it.
+///
+/// 64 MiB: a manifest is JSON metadata (index, tensor names, integrity
+/// rows), not weights; even a multi-thousand-tensor model's manifest is low
+/// single-digit MiB.
+pub const MAX_MANIFEST_BYTES: u64 = 64 << 20;
+
 /// Decrypted weight segments a reader keeps by default (spec §13.3). Extra
 /// plaintext at load is `headerBytes + DEFAULT_CACHED_SEGMENTS * maxSegment`.
 pub const DEFAULT_CACHED_SEGMENTS: usize = 8;

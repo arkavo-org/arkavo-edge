@@ -1,7 +1,7 @@
 //! Segment packing (spec §11). The Appendix A vector is the primary check:
 //! it is what distinguishes a conforming `>=` while-condition from `>`.
 
-use arkavo_gguf_tdf::{GgufHeader, HeaderTensor, plan_segments};
+use arkavo_gguf_tdf::{GgufHeader, HeaderTensor, MAX_MAX_SEGMENT, plan_segments};
 use opentdf::GgufSegmentKind;
 
 fn header(alignment: u64, data_offset: u64, tensors: Vec<HeaderTensor>) -> GgufHeader {
@@ -176,6 +176,18 @@ fn rejects_max_segment_that_is_not_a_multiple_of_alignment() {
     // Also rejected below the alignment.
     assert_eq!(
         plan_segments(&h, 256, 16).unwrap_err().code(),
+        "GGUFTDF_BAD_MAX_SEGMENT"
+    );
+}
+
+/// Task 10: a writer must not be able to plan what a reader would refuse.
+#[test]
+fn rejects_max_segment_over_the_cap() {
+    let h = header(32, 64, vec![tensor("a", 0, 64)]);
+    assert_eq!(
+        plan_segments(&h, 256, MAX_MAX_SEGMENT + 32)
+            .unwrap_err()
+            .code(),
         "GGUFTDF_BAD_MAX_SEGMENT"
     );
 }

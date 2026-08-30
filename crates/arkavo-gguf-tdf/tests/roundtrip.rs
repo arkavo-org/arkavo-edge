@@ -883,3 +883,46 @@ fn a_read_outside_the_prefetch_window_does_not_race_the_worker() {
         assert_eq!(&head, &f.source_bytes[base as usize..base as usize + 32]);
     }
 }
+
+/// Task 10 lock-in: a manifest that claims a header `segmentSize` disagreeing
+/// with the index's declared `plain` is already rejected by an existing,
+/// unrelated invariant (`validate_index`'s `segmentSize == plain` check,
+/// spec §9.4) before `unlock` — and so before `decrypt_header` — is ever
+/// reached. `decrypt_header`'s own cap (`reader.rs` unit tests) is the
+/// defense for the path this integration test cannot reach without a real
+/// multi-gigabyte or hand-forged-zip fixture: an index whose header segment
+/// genuinely, consistently claims to be that large. Kept as a lock-in that
+/// the overall system still fails closed, cheaply, on this claim.
+#[test]
+fn header_segment_size_claim_over_the_cap_fails_without_allocating() {
+    let f = build(4096);
+    let dest = f.archive.with_file_name("huge-header-claim.gguf.tdf");
+    rewrite_manifest(&f.archive, &dest, |v| {
+        v["encryptionInformation"]["integrityInformation"]["segments"][0]["segmentSize"] =
+            serde_json::json!(2u64 * arkavo_gguf_tdf::MAX_HEADER_BYTES);
+    });
+
+    let result = GgufTdfArchive::open(&dest).and_then(|a| a.unlock(&f.kas));
+    assert_eq!(expect_err(result).code(), "GGUFTDF_BAD_INDEX");
+}
+
+/// Task 10: a manifest member over the cap is refused by `read_manifest`
+/// before it allocates a buffer for it. The `policy` field is opaque
+/// (base64) to every check `open` runs, so padding it to push the
+/// re-serialized manifest past the cap disturbs nothing else — this is a
+/// genuine, real on-disk oversized member, not a claim.
+#[test]
+fn manifest_member_over_the_cap_is_refused_before_allocating() {
+    let f = build(4096);
+    let dest = f.archive.with_file_name("huge-manifest.gguf.tdf");
+
+    let padding = "A".repeat((arkavo_gguf_tdf::MAX_MANIFEST_BYTES + 1024) as usize);
+    rewrite_manifest(&f.archive, &dest, |v| {
+        v["encryptionInformation"]["policy"] = serde_json::json!(padding);
+    });
+
+    assert_eq!(
+        expect_err(GgufTdfArchive::open(&dest)).code(),
+        "GGUFTDF_BAD_INDEX"
+    );
+}
