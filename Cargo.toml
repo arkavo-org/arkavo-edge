@@ -392,3 +392,22 @@ too_many_lines = "allow"
 # Deny warnings in CI to catch TODO placeholders and other issues
 deny-warnings = true
 
+
+# gguf-tdf: AES-GCM at opt-level 0 runs ~7 MB/s (software AES), which makes a
+# multi-GB protected load look like a hang. Keep the crypto path optimized in dev.
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
+[profile.dev.package.ctr]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3
+[profile.dev.package.polyval]
+opt-level = 3
+[profile.dev.package.cipher]
+opt-level = 3
+[profile.dev.package.opentdf-crypto]
+opt-level = 3
+[profile.dev.package.arkavo-gguf-tdf]
+opt-level = 3
