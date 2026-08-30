@@ -116,7 +116,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     i += 1;
                 } else {
                     return Err(
-                        "--model requires a model name (e.g., ministral-3b, qwen3.5-0.8b)".into(),
+                        "--model requires a model name (e.g., ministral-3b, tinystories-15m)"
+                            .into(),
                     );
                 }
             }
@@ -149,7 +150,7 @@ fn print_usage() {
     println!("    arkavo chat --agent-id code-analyzer-agent\n");
     println!("OPTIONS:");
     println!(
-        "    --model <NAME>         Override model (e.g., ministral-3b, qwen3.5-0.8b, glm-4.7-flash)"
+        "    --model <NAME>         Override model (e.g., tinystories-15m, ministral-3b, qwen3.5-0.8b)"
     );
     println!("    --agent-id <ID>        Chat directly with a mesh agent via A2A");
     println!("    --prompt <TEXT>         One-shot query (exits after response)");

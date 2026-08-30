@@ -26,9 +26,9 @@ pub(crate) fn detail_level_for_model(
 ) -> arkavo_mcp_tools::DetailLevel {
     use crate::decision::ModelChoice;
     match model {
-        ModelChoice::LocalQwen3 | ModelChoice::LocalGemma270M => {
-            arkavo_mcp_tools::DetailLevel::NameOnly
-        }
+        ModelChoice::LocalQwen3
+        | ModelChoice::LocalGemma270M
+        | ModelChoice::LocalTinyStories15M => arkavo_mcp_tools::DetailLevel::NameOnly,
         ModelChoice::LocalGemma4E2B
         | ModelChoice::LocalMinistral3B
         | ModelChoice::LocalGemma4B

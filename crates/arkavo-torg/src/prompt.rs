@@ -63,6 +63,7 @@ pub fn format_prompt(policy: &str, format: ModelFormat) -> String {
             // GLM-4 format (ChatML variant)
             format!("[gMASK]<sop><|system|>\n{TORG_SYSTEM_PROMPT}<|user|>\n{policy}<|assistant|>\n")
         }
+        ModelFormat::Completion => policy.to_string(),
     }
 }
 

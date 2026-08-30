@@ -61,6 +61,10 @@ DerivedData/
 # Downloaded model files for arkavo-memory
 crates/arkavo-memory/models/
 
+# Local model conversion artifacts (TinyStories GGUF, llama2.c checkpoints)
+/models/
+**/__pycache__/
+
 # Autoresearch sweep/burst result files
 *_sweep_results.*
 *_burst_results.*

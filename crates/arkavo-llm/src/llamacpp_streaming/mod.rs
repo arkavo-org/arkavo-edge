@@ -106,6 +106,7 @@ fn stop_sequences_for_format(format: ModelFormat) -> &'static [&'static str] {
         ModelFormat::Gemma4 => &["<|turn>user"],
         ModelFormat::MistralV3 => &["[INST]"],
         ModelFormat::GLM4 => &["<|user|>"],
+        ModelFormat::Completion => &[],
     }
 }
 

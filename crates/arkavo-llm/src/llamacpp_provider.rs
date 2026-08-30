@@ -443,153 +443,166 @@ impl LlamaCppProvider {
             template_chat_format,
             template_chat_parser_str,
             template_generation_prompt,
-        ) = match model.chat_templates() {
-            Ok(tmpls) => {
-                let inputs = ChatInputs {
-                    tools: self.config.chat_tools.clone(),
-                    tool_choice: self.config.chat_tool_choice,
-                    enable_thinking,
-                    add_generation_prompt: true,
-                    // Cap the grammar at one tool call per inference. Prevents the
-                    // runaway-batch failure mode (repetition-prone models emit the
-                    // same `<|tool_call>` block dozens of times in a single
-                    // response) at the grammar layer, before the downstream
-                    // degenerate-batch dedup has to clean up.
-                    parallel_tool_calls: false,
-                };
-                match tmpls.apply_with_meta(&llama_messages, &meta, &inputs) {
-                    Ok(result) => {
-                        if crate::llamacpp_streaming::is_debug() {
-                            if let Ok(s) = std::str::from_utf8(&result.prompt) {
-                                eprintln!("Chat template output (Jinja):\n{s}");
-                            }
-                            eprintln!(
-                                "✓ Template from GGUF metadata (enable_thinking={enable_thinking})"
-                            );
-                            if result.grammar.is_some() {
+        ) = if format == ModelFormat::Completion {
+            let bytes = apply_chat_template_with_format(&llama_messages, true, format)
+                .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
+            (bytes, None, false, None, false, Vec::new(), 0, None, None)
+        } else {
+            match model.chat_templates() {
+                Ok(tmpls) => {
+                    let inputs = ChatInputs {
+                        tools: self.config.chat_tools.clone(),
+                        tool_choice: self.config.chat_tool_choice,
+                        enable_thinking,
+                        add_generation_prompt: true,
+                        // Cap the grammar at one tool call per inference. Prevents the
+                        // runaway-batch failure mode (repetition-prone models emit the
+                        // same `<|tool_call>` block dozens of times in a single
+                        // response) at the grammar layer, before the downstream
+                        // degenerate-batch dedup has to clean up.
+                        parallel_tool_calls: false,
+                    };
+                    match tmpls.apply_with_meta(&llama_messages, &meta, &inputs) {
+                        Ok(result) => {
+                            if crate::llamacpp_streaming::is_debug() {
+                                if let Ok(s) = std::str::from_utf8(&result.prompt) {
+                                    eprintln!("Chat template output (Jinja):\n{s}");
+                                }
                                 eprintln!(
-                                    "  grammar: {} bytes, lazy={}",
-                                    result.grammar.as_ref().map_or(0, |g| g.len()),
-                                    result.grammar_lazy
+                                    "✓ Template from GGUF metadata (enable_thinking={enable_thinking})"
                                 );
-                            }
-                            if result.thinking_forced_open {
-                                eprintln!("  thinking_forced_open=true");
-                            }
-                        }
-                        // Pass the template grammar and triggers through.
-                        // Token triggers are converted to word triggers in
-                        // add_grammar_lazy_with_triggers to avoid the
-                        // token_to_piece mismatch issue.
-                        if result.grammar.is_some() && crate::llamacpp_streaming::is_debug() {
-                            eprintln!(
-                                "  grammar: {} bytes, lazy={}, {} triggers",
-                                result.grammar.as_ref().map_or(0, |g| g.len()),
-                                result.grammar_lazy,
-                                result.grammar_triggers.len(),
-                            );
-                            if let Some(ref g) = result.grammar {
-                                eprintln!("  grammar full:\n{g}");
-                            }
-                            for (i, t) in result.grammar_triggers.iter().enumerate() {
-                                eprintln!(
-                                    "  trigger[{i}]: type={:?} value={:?} token={}",
-                                    t.trigger_type, t.value, t.token
-                                );
-                            }
-                        }
-                        // Only use lazy grammars (trigger-activated). Non-lazy grammars
-                        // (e.g., Gemma 4) require full sampler pipeline integration that
-                        // our standalone grammar sampler doesn't support. For those models,
-                        // we skip grammar-constrained generation and rely on the native
-                        // PEG output parser instead.
-                        let (grammar, lazy, triggers) =
-                            if result.grammar_lazy && !result.grammar_triggers.is_empty() {
-                                (result.grammar, true, Some(result.grammar_triggers))
-                            } else {
-                                (None, false, None)
-                            };
-                        (
-                            result.prompt,
-                            grammar,
-                            lazy,
-                            triggers,
-                            result.thinking_forced_open,
-                            result.additional_stops,
-                            result.format,
-                            result.parser_str,
-                            result.generation_prompt,
-                        )
-                    }
-                    Err(e) => {
-                        let err_str = e.clone();
-                        // Some templates (e.g. Ministral) reject system role entirely.
-                        // Retry with system messages converted to user messages.
-                        if err_str.contains("system") || err_str.contains("System") {
-                            tracing::info!(
-                                "Template rejects system role, converting to user prefix"
-                            );
-                            let fixed: Vec<Message> = messages
-                                .iter()
-                                .map(|m| {
-                                    if m.role == Role::System {
-                                        Message::user(format!(
-                                            "[System Instructions] {}",
-                                            m.content
-                                        ))
-                                    } else {
-                                        m.clone()
-                                    }
-                                })
-                                .collect();
-                            let (fixed_llama, _fixed_cstrings) =
-                                Self::messages_to_llama_chat_static(&fixed)?;
-                            let fixed_meta = Self::build_chat_meta(&fixed, &self.name);
-                            match tmpls.apply_with_meta(&fixed_llama, &fixed_meta, &inputs) {
-                                Ok(result) => (
-                                    result.prompt,
-                                    None,
-                                    false,
-                                    None,
-                                    result.thinking_forced_open,
-                                    result.additional_stops,
-                                    result.format,
-                                    result.parser_str,
-                                    result.generation_prompt,
-                                ),
-                                Err(e2) => {
-                                    tracing::warn!(
-                                        "Jinja retry also failed: {e2}, falling back to legacy"
+                                if result.grammar.is_some() {
+                                    eprintln!(
+                                        "  grammar: {} bytes, lazy={}",
+                                        result.grammar.as_ref().map_or(0, |g| g.len()),
+                                        result.grammar_lazy
                                     );
-                                    let bytes =
-                                        apply_chat_template_with_format(&fixed_llama, true, format)
-                                            .map_err(|e| {
-                                                Error::Config(format!(
-                                                    "Failed to apply chat template: {e}"
-                                                ))
-                                            })?;
-                                    (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                                }
+                                if result.thinking_forced_open {
+                                    eprintln!("  thinking_forced_open=true");
                                 }
                             }
-                        } else {
-                            tracing::warn!(
-                                "Jinja template apply failed: {e}, falling back to legacy"
-                            );
-                            let bytes =
-                                apply_chat_template_with_format(&llama_messages, true, format)
-                                    .map_err(|e| {
-                                        Error::Config(format!("Failed to apply chat template: {e}"))
-                                    })?;
-                            (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                            // Pass the template grammar and triggers through.
+                            // Token triggers are converted to word triggers in
+                            // add_grammar_lazy_with_triggers to avoid the
+                            // token_to_piece mismatch issue.
+                            if result.grammar.is_some() && crate::llamacpp_streaming::is_debug() {
+                                eprintln!(
+                                    "  grammar: {} bytes, lazy={}, {} triggers",
+                                    result.grammar.as_ref().map_or(0, |g| g.len()),
+                                    result.grammar_lazy,
+                                    result.grammar_triggers.len(),
+                                );
+                                if let Some(ref g) = result.grammar {
+                                    eprintln!("  grammar full:\n{g}");
+                                }
+                                for (i, t) in result.grammar_triggers.iter().enumerate() {
+                                    eprintln!(
+                                        "  trigger[{i}]: type={:?} value={:?} token={}",
+                                        t.trigger_type, t.value, t.token
+                                    );
+                                }
+                            }
+                            // Only use lazy grammars (trigger-activated). Non-lazy grammars
+                            // (e.g., Gemma 4) require full sampler pipeline integration that
+                            // our standalone grammar sampler doesn't support. For those models,
+                            // we skip grammar-constrained generation and rely on the native
+                            // PEG output parser instead.
+                            let (grammar, lazy, triggers) =
+                                if result.grammar_lazy && !result.grammar_triggers.is_empty() {
+                                    (result.grammar, true, Some(result.grammar_triggers))
+                                } else {
+                                    (None, false, None)
+                                };
+                            (
+                                result.prompt,
+                                grammar,
+                                lazy,
+                                triggers,
+                                result.thinking_forced_open,
+                                result.additional_stops,
+                                result.format,
+                                result.parser_str,
+                                result.generation_prompt,
+                            )
+                        }
+                        Err(e) => {
+                            let err_str = e.clone();
+                            // Some templates (e.g. Ministral) reject system role entirely.
+                            // Retry with system messages converted to user messages.
+                            if err_str.contains("system") || err_str.contains("System") {
+                                tracing::info!(
+                                    "Template rejects system role, converting to user prefix"
+                                );
+                                let fixed: Vec<Message> = messages
+                                    .iter()
+                                    .map(|m| {
+                                        if m.role == Role::System {
+                                            Message::user(format!(
+                                                "[System Instructions] {}",
+                                                m.content
+                                            ))
+                                        } else {
+                                            m.clone()
+                                        }
+                                    })
+                                    .collect();
+                                let (fixed_llama, _fixed_cstrings) =
+                                    Self::messages_to_llama_chat_static(&fixed)?;
+                                let fixed_meta = Self::build_chat_meta(&fixed, &self.name);
+                                match tmpls.apply_with_meta(&fixed_llama, &fixed_meta, &inputs) {
+                                    Ok(result) => (
+                                        result.prompt,
+                                        None,
+                                        false,
+                                        None,
+                                        result.thinking_forced_open,
+                                        result.additional_stops,
+                                        result.format,
+                                        result.parser_str,
+                                        result.generation_prompt,
+                                    ),
+                                    Err(e2) => {
+                                        tracing::warn!(
+                                            "Jinja retry also failed: {e2}, falling back to legacy"
+                                        );
+                                        let bytes = apply_chat_template_with_format(
+                                            &fixed_llama,
+                                            true,
+                                            format,
+                                        )
+                                        .map_err(|e| {
+                                            Error::Config(format!(
+                                                "Failed to apply chat template: {e}"
+                                            ))
+                                        })?;
+                                        (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                                    }
+                                }
+                            } else {
+                                tracing::warn!(
+                                    "Jinja template apply failed: {e}, falling back to legacy"
+                                );
+                                let bytes =
+                                    apply_chat_template_with_format(&llama_messages, true, format)
+                                        .map_err(|e| {
+                                            Error::Config(format!(
+                                                "Failed to apply chat template: {e}"
+                                            ))
+                                        })?;
+                                (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                            }
                         }
                     }
                 }
-            }
-            Err(e) => {
-                tracing::warn!("Chat templates init failed: {e}, falling back to legacy");
-                let bytes = apply_chat_template_with_format(&llama_messages, true, format)
-                    .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
-                (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                Err(e) => {
+                    tracing::warn!("Chat templates init failed: {e}, falling back to legacy");
+                    let bytes = apply_chat_template_with_format(&llama_messages, true, format)
+                        .map_err(|e| {
+                            Error::Config(format!("Failed to apply chat template: {e}"))
+                        })?;
+                    (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                }
             }
         };
 

@@ -72,6 +72,9 @@ pub enum ModelChoice {
     /// Legacy: Gemma-3-12B (if cached)
     LocalGemma12B,
     LocalDeepSeekCoder,
+    /// Karpathy llama2.c TinyStories 15M — story completion only, not an
+    /// agent routing arm. Selected explicitly via `--model tinystories-15m`.
+    LocalTinyStories15M,
     /// DeepSeek V3.2 - daily driver with tool support
     DeepSeekV32,
     /// DeepSeek V3.2-Speciale - planning/reasoning only (no tools)
@@ -134,6 +137,7 @@ impl ModelChoice {
             Self::LocalGemma4B => "gemma-3-4b-it",
             Self::LocalGemma12B => "gemma-3-12b-it",
             Self::LocalDeepSeekCoder => "deepseek-coder-v2-lite-instruct",
+            Self::LocalTinyStories15M => "tinystories-15m",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek-chat",
             Self::KimiK2 => "kimi-k2.5",
             Self::Glm52 => "glm-5.2",
@@ -163,6 +167,7 @@ impl ModelChoice {
             | Self::LocalGemma4B
             | Self::LocalGemma12B => "gemma",
             Self::LocalDeepSeekCoder | Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
+            Self::LocalTinyStories15M => "llama",
             Self::GeminiFlash
             | Self::Gemini35Flash
             | Self::Gemini35FlashMinimal
@@ -197,6 +202,7 @@ impl ModelChoice {
             "gemma-3-4b-it" => Some(Self::LocalGemma4B),
             "gemma-3-12b-it" => Some(Self::LocalGemma12B),
             "deepseek-coder-v2-lite-instruct" => Some(Self::LocalDeepSeekCoder),
+            "tinystories-15m" | "tinystories" | "stories15m" => Some(Self::LocalTinyStories15M),
             "deepseek-chat" => Some(Self::DeepSeekV32),
             "kimi-k2.5" => Some(Self::KimiK2),
             "grok-4.6-xhigh" | "grok-4.6-x-high" | "grok46-xhigh" | "grok-xhigh" => {
@@ -254,6 +260,7 @@ impl ModelChoice {
                 | Self::LocalGemma4B
                 | Self::LocalGemma12B
                 | Self::LocalDeepSeekCoder
+                | Self::LocalTinyStories15M
         )
     }
 
@@ -406,6 +413,7 @@ impl ModelChoice {
             | Self::LocalGemma4B
             | Self::LocalGemma12B => "local-gemma",
             Self::LocalDeepSeekCoder => "local-deepseek",
+            Self::LocalTinyStories15M => "local-tinystories",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
             Self::KimiK2 => "kimi",
             Self::Glm52 => "zhipu",
@@ -417,7 +425,9 @@ impl ModelChoice {
     pub fn capability(&self) -> PlannerTier {
         match self {
             // Small: < 2B parameters
-            Self::LocalQwen3 | Self::LocalGemma270M => PlannerTier::Small,
+            Self::LocalQwen3 | Self::LocalGemma270M | Self::LocalTinyStories15M => {
+                PlannerTier::Small
+            }
             // Medium: 2-7B parameters
             Self::LocalGemma4E2B
             | Self::LocalMinistral3B
@@ -471,6 +481,7 @@ impl ModelChoice {
             Self::LocalGemma4B => Some("unsloth/gemma-3-4b-it-GGUF"),
             Self::LocalGemma12B => Some("unsloth/gemma-3-12b-it-GGUF"),
             Self::LocalDeepSeekCoder => Some("bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF"),
+            Self::LocalTinyStories15M => Some("arkavo/tinystories-15m"),
             _ => None,
         }
     }
@@ -494,6 +505,7 @@ impl ModelChoice {
             Self::LocalGemma4B => Some("gemma-3-4b-it-Q4_0.gguf"),
             Self::LocalGemma12B => Some("gemma-3-12b-it-Q4_0.gguf"),
             Self::LocalDeepSeekCoder => Some("DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf"),
+            Self::LocalTinyStories15M => Some("stories15M.gguf"),
             _ => None,
         }
     }
@@ -531,6 +543,7 @@ impl ModelChoice {
             Self::LocalGemma4B => 2_500_000_000,
             Self::LocalGemma12B => 7_000_000_000,
             Self::LocalDeepSeekCoder => 9_000_000_000,
+            Self::LocalTinyStories15M => 98_000_000,
             _ => 0,
         }
     }
@@ -636,6 +649,7 @@ impl ModelChoice {
             Self::LocalGemma4B => "Gemma 4B",
             Self::LocalGemma12B => "Gemma 12B",
             Self::LocalDeepSeekCoder => "DeepSeek Coder",
+            Self::LocalTinyStories15M => "TinyStories 15M",
             Self::GeminiFlash => "Gemini Flash",
             Self::Gemini35Flash => "Gemini 3.5 Flash (low)",
             Self::Gemini35FlashMinimal => "Gemini 3.5 Flash (minimal)",
@@ -966,7 +980,8 @@ impl RoutingDecision {
             | ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B
-            | ModelChoice::LocalDeepSeekCoder => 0.0,
+            | ModelChoice::LocalDeepSeekCoder
+            | ModelChoice::LocalTinyStories15M => 0.0,
         }
     }
 
@@ -1002,6 +1017,7 @@ impl RoutingDecision {
             ModelChoice::LocalGemma4B => Duration::from_secs(2),
             ModelChoice::LocalGemma12B => Duration::from_secs(5),
             ModelChoice::LocalDeepSeekCoder => Duration::from_secs(4),
+            ModelChoice::LocalTinyStories15M => Duration::from_millis(200),
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => Duration::from_secs(5),
             ModelChoice::KimiK2 => Duration::from_secs(5),
             // GLM-5.2 reasons before answering; budget extra wall-clock on
@@ -1645,6 +1661,16 @@ mod tests {
             Some(ModelChoice::LocalMinistral8B)
         );
         assert_eq!(ModelChoice::from_name("unknown-model"), None);
+        assert_eq!(
+            ModelChoice::from_name("tinystories-15m"),
+            Some(ModelChoice::LocalTinyStories15M)
+        );
+        assert_eq!(
+            ModelChoice::from_name("stories15m"),
+            Some(ModelChoice::LocalTinyStories15M)
+        );
+        assert!(ModelChoice::LocalTinyStories15M.is_local());
+        assert!(!ModelChoice::ALL_LOCAL.contains(&ModelChoice::LocalTinyStories15M));
         // Round-trip: name -> from_name -> name
         for model in [
             ModelChoice::LocalQwen3,
@@ -1653,6 +1679,7 @@ mod tests {
             ModelChoice::LocalQwen36A3B,
             ModelChoice::LocalGlm47Flash,
             ModelChoice::KimiK2,
+            ModelChoice::LocalTinyStories15M,
         ] {
             assert_eq!(
                 ModelChoice::from_name(model.name()),
