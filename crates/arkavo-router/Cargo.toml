@@ -44,13 +44,16 @@ arkavo-torg-circuits = { path = "../arkavo-torg-circuits" }
 arkavo-critic = { path = "../arkavo-critic" }
 arkavo-memory = { path = "../arkavo-memory", default-features = false, optional = true }
 arkavo-tdf = { path = "../arkavo-tdf", optional = true, features = ["opentdf"] }
+arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf", optional = true, features = ["kas"] }
+arkavo-identity = { path = "../arkavo-identity", optional = true }
+opentdf = { version = "0.15.0", default-features = false, features = ["rustls-tls", "kas-client"], optional = true }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
 default = ["llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai"]
 critic = []
 advisor-persistence = ["dep:arkavo-memory"]
-llama-cpp = ["arkavo-llm/llama-cpp"]
+llama-cpp = ["arkavo-llm/llama-cpp", "dep:arkavo-gguf-tdf", "dep:opentdf", "dep:arkavo-identity"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 deepseek = ["arkavo-llm/deepseek"]
 kimi = ["arkavo-llm/kimi"]

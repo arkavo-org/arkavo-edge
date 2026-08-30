@@ -68,6 +68,8 @@ mod gemini_adapter;
 pub use gemini_adapter::GeminiProvider;
 
 #[cfg(feature = "llama-cpp")]
+pub mod gguf_tdf;
+#[cfg(feature = "llama-cpp")]
 pub mod llamacpp_provider;
 #[cfg(feature = "llama-cpp")]
 mod llamacpp_streaming;

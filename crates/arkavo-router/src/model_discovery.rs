@@ -2,7 +2,7 @@
 ///
 /// Future: This will be used by `arkavo models list` command and
 /// `.arkavo/AGENTS.md` configuration for remote model subsets.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Load API keys from .arkavo/AGENTS.md if present
 ///
@@ -47,6 +47,51 @@ pub fn load_api_keys_from_config() {
     }
 }
 
+/// Extension identifying a KAS-protected model (`gguf-tdf/1`).
+const PROTECTED_EXTENSION: &str = ".gguf.tdf";
+
+fn is_protected_gguf(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.to_lowercase().ends_with(PROTECTED_EXTENSION))
+}
+
+fn is_plaintext_gguf(path: &Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("gguf"))
+}
+
+/// Resolves a GGUF path, keeping plaintext when it is present.
+///
+/// Wrapping is additive (`model.gguf` next to `model.gguf.tdf`). Production
+/// load still uses `LlamaModel::from_file`, so a sibling TDF must not displace
+/// a loadable plaintext file. Fall back to `.gguf.tdf` only when the plaintext
+/// path is missing (for example after `--delete-source`).
+pub fn resolve_gguf_path(path: &Path) -> PathBuf {
+    let name = path.to_string_lossy();
+    if name.to_lowercase().ends_with(PROTECTED_EXTENSION) {
+        return path.to_path_buf();
+    }
+    if path.exists() {
+        return path.to_path_buf();
+    }
+    // Build the sibling from the OsStr so a non-UTF-8 path still names the
+    // real file on disk.
+    let mut protected = path.as_os_str().to_os_string();
+    protected.push(".tdf");
+    let protected = PathBuf::from(protected);
+    if name.to_lowercase().ends_with(".gguf") && protected.exists() {
+        tracing::info!(
+            "plaintext {:?} is absent; using protected sibling {:?}",
+            path,
+            protected
+        );
+        return protected;
+    }
+    path.to_path_buf()
+}
+
 /// Find a GGUF model file, preferring specific models but accepting any available
 ///
 /// Priority:
@@ -74,7 +119,7 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
         let snapshots_dir = cache.join(&repo_cache_name).join("snapshots");
         if let Some(path) = find_file_in_dir(&snapshots_dir, filename) {
             tracing::debug!("find_gguf_model: found in local cache at {:?}", path);
-            return Ok(path);
+            return Ok(resolve_gguf_path(&path));
         }
     }
 
@@ -89,7 +134,7 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
                 "find_gguf_model: downloaded/found via hf_hub API at {:?}",
                 path
             );
-            return Ok(path);
+            return Ok(resolve_gguf_path(&path));
         }
         Err(e) => {
             tracing::debug!("find_gguf_model: hf_hub API failed: {}", e);
@@ -99,7 +144,7 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
     // 3. Scan cache for any GGUF in the preferred repo
     if let Some(path) = scan_cache_for_gguf(&api, repo_id).await {
         tracing::debug!("find_gguf_model: found via cache scan at {:?}", path);
-        return Ok(path);
+        return Ok(resolve_gguf_path(&path));
     }
 
     // 4. Fallback: use ANY available .gguf file from cache
@@ -110,7 +155,7 @@ pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, S
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown")
         );
-        return Ok(path);
+        return Ok(resolve_gguf_path(&path));
     }
 
     // 5. Nothing found - provide helpful error
@@ -170,33 +215,38 @@ fn get_hf_cache_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".cache").join("huggingface").join("hub"))
 }
 
-/// Recursively find the first .gguf file in a directory
+/// Recursively find a GGUF artifact, preferring plaintext over `.gguf.tdf`.
+///
+/// One pass over the tree: the first plaintext `.gguf` wins immediately; the
+/// first `.gguf.tdf` seen is kept as the fallback. A large HF cache is not
+/// walked twice.
 fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
-    tracing::debug!("find_gguf_in_dir: scanning {:?}", dir);
+    let mut protected = None;
+    find_artifact_in_dir(dir, &mut protected).or(protected)
+}
+
+/// Returns the first plaintext GGUF under `dir`; records the first protected
+/// artifact in `protected` when no plaintext has been found yet.
+fn find_artifact_in_dir(dir: &std::path::Path, protected: &mut Option<PathBuf>) -> Option<PathBuf> {
+    tracing::debug!("find_artifact_in_dir: scanning {:?}", dir);
     if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let is_file = path.is_file();
-            let ext = path.extension().and_then(|s| s.to_str());
-            tracing::debug!(
-                "find_gguf_in_dir: entry {:?} is_file={} ext={:?}",
-                path.file_name(),
-                is_file,
-                ext
-            );
-            if is_file && ext == Some("gguf") {
-                tracing::debug!("find_gguf_in_dir: found GGUF at {:?}", path);
-                return Some(path);
+        let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for path in paths {
+            if path.is_file() {
+                if is_plaintext_gguf(&path) {
+                    return Some(path);
+                }
+                if protected.is_none() && is_protected_gguf(&path) {
+                    *protected = Some(path);
+                }
             } else if path.is_dir()
-                && let Some(found) = find_gguf_in_dir(&path)
+                && let Some(found) = find_artifact_in_dir(&path, protected)
             {
                 return Some(found);
             }
         }
-    } else {
-        tracing::debug!("find_gguf_in_dir: failed to read dir {:?}", dir);
     }
-    tracing::debug!("find_gguf_in_dir: no GGUF found in {:?}", dir);
     None
 }
 
@@ -229,13 +279,25 @@ pub fn is_model_cached(repo_id: &str, filename: &str) -> bool {
 
 /// Find a specific file in a directory tree
 fn find_file_in_dir(dir: &std::path::Path, filename: &str) -> Option<PathBuf> {
+    if let Some(found) = find_named_in_dir(dir, filename) {
+        return Some(found);
+    }
+    let lower = filename.to_lowercase();
+    if lower.ends_with(".gguf") && !lower.ends_with(PROTECTED_EXTENSION) {
+        let protected_name = format!("{filename}.tdf");
+        return find_named_in_dir(dir, &protected_name);
+    }
+    None
+}
+
+fn find_named_in_dir(dir: &std::path::Path, filename: &str) -> Option<PathBuf> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() && path.file_name().and_then(|s| s.to_str()) == Some(filename) {
                 return Some(path);
             } else if path.is_dir()
-                && let Some(found) = find_file_in_dir(&path, filename)
+                && let Some(found) = find_named_in_dir(&path, filename)
             {
                 return Some(found);
             }
@@ -289,13 +351,19 @@ pub fn find_mmproj_for_model(model_path: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
-/// Scan entire HuggingFace cache for any .gguf file
+/// Scan the HuggingFace cache for any **plaintext** `.gguf`.
 ///
-/// This is the ultimate fallback when no specific model is found.
-/// Prefers TØRG-compatible models (Qwen3, Ministral) over others.
+/// This is the fallback the routing classifier and response judge use. They
+/// construct `LlamaCppProvider` synchronously and cannot rewrap a protected
+/// model, so a `.gguf.tdf` is never a candidate here — a cache holding only
+/// protected models yields `None` and the caller falls back to rule-based
+/// classification instead of failing router init.
 pub async fn find_any_gguf() -> Option<PathBuf> {
     let cache = get_hf_cache_dir()?;
+    find_any_plain_gguf_in(&cache)
+}
 
+fn find_any_plain_gguf_in(cache: &Path) -> Option<PathBuf> {
     // Priority order: prefer smallest models first — classifier/judge need speed, not quality.
     // Loading large models here wastes memory (bypasses per-agent memory budget).
     use crate::decision::ModelChoice;
@@ -309,30 +377,34 @@ pub async fn find_any_gguf() -> Option<PathBuf> {
     .filter_map(ModelChoice::cache_dir_name)
     .collect();
 
-    // Check preferred repos first
     for repo_name in &preferred_repos {
         let repo_path = cache.join(repo_name.as_str());
         if repo_path.exists()
-            && let Some(gguf) = find_gguf_in_dir(&repo_path)
+            && let Some(gguf) = find_plain_gguf_in_dir(&repo_path)
         {
             return Some(gguf);
         }
     }
 
-    // Fallback: scan all model repositories
-    if let Ok(entries) = std::fs::read_dir(&cache) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir()
-                && path.file_name()?.to_str()?.starts_with("models--")
-                && let Some(gguf) = find_gguf_in_dir(&path)
-            {
-                return Some(gguf);
-            }
-        }
-    }
+    let mut repos: Vec<PathBuf> = std::fs::read_dir(cache)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_dir()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("models--"))
+        })
+        .collect();
+    repos.sort();
+    repos.iter().find_map(|p| find_plain_gguf_in_dir(p))
+}
 
-    None
+/// Recursively find a plaintext `.gguf`, ignoring `.gguf.tdf`.
+fn find_plain_gguf_in_dir(dir: &Path) -> Option<PathBuf> {
+    let mut ignored = None;
+    find_artifact_in_dir(dir, &mut ignored)
 }
 
 #[cfg(test)]
@@ -385,12 +457,191 @@ mod tests {
         match result {
             Ok(path) => {
                 assert!(path.exists());
-                assert_eq!(path.extension().unwrap(), "gguf");
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                assert!(
+                    name.to_lowercase().ends_with(".gguf")
+                        || name.to_lowercase().ends_with(PROTECTED_EXTENSION),
+                    "unexpected model artifact {name}"
+                );
             }
             Err(e) => {
                 // Expected if model not cached and no network
                 assert!(e.contains("Download with:"));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod protected_model_tests {
+    use super::*;
+
+    /// Wrapping is additive: a sibling `.gguf.tdf` must not displace a
+    /// loadable plaintext GGUF. Production load still uses `from_file`.
+    #[test]
+    fn keeps_the_plaintext_when_both_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("model.gguf");
+        let protected = dir.path().join("model.gguf.tdf");
+        std::fs::write(&plain, b"GGUF").unwrap();
+        std::fs::write(&protected, b"PK\x03\x04").unwrap();
+
+        assert_eq!(resolve_gguf_path(&plain), plain);
+    }
+
+    #[test]
+    fn keeps_the_plaintext_when_no_protected_sibling_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("model.gguf");
+        std::fs::write(&plain, b"GGUF").unwrap();
+
+        assert_eq!(resolve_gguf_path(&plain), plain);
+    }
+
+    #[test]
+    fn falls_back_to_the_protected_artifact_when_plaintext_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("model.gguf");
+        let protected = dir.path().join("model.gguf.tdf");
+        std::fs::write(&protected, b"PK\x03\x04").unwrap();
+
+        assert_eq!(resolve_gguf_path(&plain), protected);
+    }
+
+    #[test]
+    fn a_protected_path_is_returned_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let protected = dir.path().join("model.gguf.tdf");
+        std::fs::write(&protected, b"PK\x03\x04").unwrap();
+
+        assert_eq!(resolve_gguf_path(&protected), protected);
+        assert!(!dir.path().join("model.gguf.tdf.tdf").exists());
+    }
+
+    #[test]
+    fn extension_matching_is_case_insensitive() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("Model.GGUF");
+        let protected = dir.path().join("Model.GGUF.tdf");
+        std::fs::write(&plain, b"GGUF").unwrap();
+        std::fs::write(&protected, b"PK\x03\x04").unwrap();
+
+        assert_eq!(resolve_gguf_path(&plain), plain);
+        std::fs::remove_file(&plain).unwrap();
+        assert_eq!(resolve_gguf_path(&plain), protected);
+    }
+
+    #[test]
+    fn a_non_gguf_path_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = dir.path().join("notes.txt");
+        std::fs::write(&other, b"hello").unwrap();
+
+        assert_eq!(resolve_gguf_path(&other), other);
+    }
+
+    #[test]
+    fn find_gguf_in_dir_keeps_plaintext_when_both_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("model.gguf"), b"GGUF").unwrap();
+        std::fs::write(dir.path().join("model.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        let found = find_gguf_in_dir(dir.path()).expect("plaintext GGUF must be found");
+        assert_eq!(found.file_name().unwrap(), "model.gguf");
+    }
+
+    #[test]
+    fn find_gguf_in_dir_finds_protected_when_that_is_all_there_is() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("model.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        let found = find_gguf_in_dir(dir.path()).expect("protected artifact must be found");
+        assert_eq!(found.file_name().unwrap(), "model.gguf.tdf");
+    }
+
+    #[test]
+    fn find_file_in_dir_falls_back_to_the_protected_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("model.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        let found = find_file_in_dir(dir.path(), "model.gguf").expect("tdf sibling");
+        assert_eq!(found.file_name().unwrap(), "model.gguf.tdf");
+    }
+
+    /// The classifier/judge load synchronously and cannot rewrap: a cache
+    /// holding only protected models must yield nothing, not a `.gguf.tdf`.
+    #[test]
+    fn find_any_gguf_ignores_protected_models() {
+        let cache = tempfile::tempdir().unwrap();
+        let repo = cache
+            .path()
+            .join("models--unsloth--Qwen3.5-0.8B-GGUF/snapshots/x");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("Qwen3.5-0.8B-Q4_K_M.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        assert_eq!(find_any_plain_gguf_in(cache.path()), None);
+    }
+
+    #[test]
+    fn find_any_gguf_prefers_a_plaintext_qwen_over_other_plaintext_models() {
+        let cache = tempfile::tempdir().unwrap();
+        let other = cache.path().join("models--org--other/snapshots/x");
+        let qwen = cache
+            .path()
+            .join("models--unsloth--Qwen3.5-0.8B-GGUF/snapshots/x");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::create_dir_all(&qwen).unwrap();
+        std::fs::write(other.join("other.gguf"), b"GGUF").unwrap();
+        std::fs::write(qwen.join("Qwen3.5-0.8B-Q4_K_M.gguf"), b"GGUF").unwrap();
+        // A protected sibling next to the preferred plaintext changes nothing.
+        std::fs::write(qwen.join("Qwen3.5-0.8B-Q4_K_M.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        let found = find_any_plain_gguf_in(cache.path()).unwrap();
+        assert_eq!(found.file_name().unwrap(), "Qwen3.5-0.8B-Q4_K_M.gguf");
+    }
+
+    #[test]
+    fn find_any_gguf_falls_back_to_any_plaintext_repo_when_preferred_ones_are_protected() {
+        let cache = tempfile::tempdir().unwrap();
+        let other = cache.path().join("models--org--other/snapshots/x");
+        let qwen = cache
+            .path()
+            .join("models--unsloth--Qwen3.5-0.8B-GGUF/snapshots/x");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::create_dir_all(&qwen).unwrap();
+        std::fs::write(other.join("other.gguf"), b"GGUF").unwrap();
+        std::fs::write(qwen.join("Qwen3.5-0.8B-Q4_K_M.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        let found = find_any_plain_gguf_in(cache.path()).unwrap();
+        assert_eq!(found.file_name().unwrap(), "other.gguf");
+    }
+
+    /// Precedence is tree-wide, not per directory: a protected artifact seen
+    /// first must not shadow a plaintext GGUF found later in a sibling dir.
+    #[test]
+    fn plaintext_in_a_later_directory_beats_protected_seen_earlier() {
+        let root = tempfile::tempdir().unwrap();
+        let a = root.path().join("a-protected");
+        let b = root.path().join("b-plain");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(a.join("model.gguf.tdf"), b"PK\x03\x04").unwrap();
+        std::fs::write(b.join("model.gguf"), b"GGUF").unwrap();
+
+        let found = find_gguf_in_dir(root.path()).expect("plaintext must be found");
+        assert_eq!(found, b.join("model.gguf"));
+    }
+
+    /// And the fallback still works when the protected file is the only one,
+    /// nested deeper than the directory scanned.
+    #[test]
+    fn protected_in_a_nested_directory_is_found_when_nothing_plain_exists() {
+        let root = tempfile::tempdir().unwrap();
+        let deep = root.path().join("a/snapshots/x");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("model.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        let found = find_gguf_in_dir(root.path()).expect("protected must be found");
+        assert_eq!(found, deep.join("model.gguf.tdf"));
     }
 }

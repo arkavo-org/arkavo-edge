@@ -217,10 +217,35 @@ impl ConversationManager {
             .search("conversation_session", 10, Some("conversation"))
             .await?;
 
-        if let Some(latest_session) = sessions.first()
-            && let Ok(session) =
-                serde_json::from_str::<ConversationSession>(&latest_session.memory.content)
-        {
+        // `search` ranks hits by vector-similarity score, not recency:
+        // every conversation-session memory is stored with the same
+        // placeholder zero-vector embedding, so ties in that score are
+        // broken by internal search order, which is not the same as
+        // insertion order and is not stable across runs (this is what let
+        // `sessions.first()` pick a stale-but-compatible session over a
+        // newer, incompatible one). Pick the newest session by its own
+        // (updated_at, created_at) instead. On a full tie, fall back to
+        // the storage-level `memory.created_at`: it is set by a second,
+        // later `Utc::now()` call at store time (see
+        // `start_session_with_metadata`), so it still separates
+        // same-tick sessions in practice. `memory.id` is a random UUIDv4
+        // and carries no ordering information, so it is not used as a
+        // tiebreak. `max_by_key` returns the *last* equally-maximal
+        // element, so a fully tied pair still resolves deterministically,
+        // to whichever hit is last among the (also tied) search results.
+        let session = sessions
+            .iter()
+            .filter_map(|hit| {
+                serde_json::from_str::<ConversationSession>(&hit.memory.content)
+                    .ok()
+                    .map(|parsed| (parsed, hit.memory.created_at))
+            })
+            .max_by_key(|(parsed, memory_created_at)| {
+                (parsed.updated_at, parsed.created_at, *memory_created_at)
+            })
+            .map(|(parsed, _)| parsed);
+
+        if let Some(session) = session {
             // Check compatibility if metadata provided
             let mut compatible = true;
             let mut incompatibility_reason = String::new();
@@ -841,6 +866,103 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(incompatible_restore, None);
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-016")]
+    async fn test_restore_last_session_with_compatibility_ties_pick_newest() {
+        // Regression test for CI runs 33285570140 / 33285930549: when two
+        // sessions share the same (updated_at, created_at) tick,
+        // `memory_storage.search(..)` does not return them in insertion
+        // order (it ranks by vector-similarity score, and every
+        // conversation-session memory shares the same placeholder
+        // zero-vector embedding, so the tie is broken by internal search
+        // order, not recency). `sessions.first()` therefore could pick
+        // the older, compatible session instead of the newer,
+        // incompatible one.
+        //
+        // Build both sessions by hand, with identical session-level
+        // timestamps, and store them via the same `Memory` shape
+        // `start_session_with_metadata` uses (see that function), in
+        // compatible-first order. The incompatible session is the true
+        // latest (it was stored second, and its storage-level
+        // `memory.created_at` is later), so restoring with the
+        // compatible-only metadata must return `None`.
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage.clone()).unwrap();
+
+        let tied_at = Utc::now();
+
+        let compatible_id = Uuid::new_v4();
+        let compatible_session = ConversationSession {
+            id: compatible_id,
+            created_at: tied_at,
+            updated_at: tied_at,
+            model: "test-model-v1".to_string(),
+            title: None,
+            chat_template_hash: Some(ConversationManager::calculate_hash("chat-template-v1")),
+            system_prompt_hash: Some(ConversationManager::calculate_hash("system-prompt-v1")),
+            model_size_hint: Some("7B".to_string()),
+        };
+        let compatible_memory_at = tied_at;
+        storage
+            .store(Memory {
+                id: Uuid::new_v4(),
+                content: serde_json::to_string(&compatible_session).unwrap(),
+                metadata: Some(json!({
+                    "type": "conversation_session",
+                    "session_id": compatible_id,
+                    "model": compatible_session.model,
+                })),
+                category: Some("conversation".to_string()),
+                embedding: vec![0.0; 384],
+                created_at: compatible_memory_at,
+                updated_at: compatible_memory_at,
+            })
+            .await
+            .unwrap();
+
+        let incompatible_id = Uuid::new_v4();
+        let incompatible_session = ConversationSession {
+            id: incompatible_id,
+            created_at: tied_at,
+            updated_at: tied_at,
+            model: "other-model-v1".to_string(),
+            title: None,
+            chat_template_hash: Some(ConversationManager::calculate_hash("chat-template-v2")),
+            system_prompt_hash: Some(ConversationManager::calculate_hash("system-prompt-v2")),
+            model_size_hint: None,
+        };
+        // Stored second: its own Utc::now() call at store time lands
+        // strictly after the compatible session's, exactly as it would
+        // via two sequential `start_session_with_metadata` calls.
+        let incompatible_memory_at = tied_at + chrono::Duration::seconds(1);
+        storage
+            .store(Memory {
+                id: Uuid::new_v4(),
+                content: serde_json::to_string(&incompatible_session).unwrap(),
+                metadata: Some(json!({
+                    "type": "conversation_session",
+                    "session_id": incompatible_id,
+                    "model": incompatible_session.model,
+                })),
+                category: Some("conversation".to_string()),
+                embedding: vec![0.0; 384],
+                created_at: incompatible_memory_at,
+                updated_at: incompatible_memory_at,
+            })
+            .await
+            .unwrap();
+
+        let restored = manager
+            .restore_last_session_with_compatibility(
+                Some("chat-template-v1"),
+                Some("system-prompt-v1"),
+                Some("test-model-v2"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(restored, None);
     }
 
     #[tokio::test]

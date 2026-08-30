@@ -43,6 +43,10 @@ pub mod memory;
 #[cfg(not(target_env = "musl"))]
 pub mod speculative;
 
+// Cookie FILE* reader for llama_model_load_from_file_ptr (no llama.cpp patch)
+#[cfg(all(unix, not(target_env = "musl")))]
+mod callback;
+
 // Real implementation for non-musl targets
 #[cfg(not(target_env = "musl"))]
 pub use arkavo_llama_cpp_sys as ffi;
@@ -51,7 +55,6 @@ pub use arkavo_llama_cpp_sys as ffi;
 use std::ffi::CString;
 #[cfg(not(target_env = "musl"))]
 use std::os::raw::{c_char, c_void};
-#[cfg(not(target_env = "musl"))]
 #[cfg(not(target_env = "musl"))]
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -317,6 +320,88 @@ impl LlamaModel {
                 ptr: cpu_model,
                 path: path.to_string(),
             })
+        }
+    }
+
+    /// Load a virtual linear GGUF through `read_at` without a filesystem path.
+    ///
+    /// `read_at(offset, buf)` copies bytes of the virtual GGUF into `buf` and
+    /// returns the count (0 on EOF or error). `virtual_size` is that GGUF's
+    /// length — not a zip/TDF length.
+    ///
+    /// Uses `funopen`/`fopencookie` and `llama_model_load_from_file_ptr` with
+    /// `LLAMA_LOAD_MODE_NONE` so llama.cpp never mmaps and never sees TDF.
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    pub fn from_callback<F>(virtual_size: u64, mut read_at: F) -> Result<Self, String>
+    where
+        F: FnMut(u64, &mut [u8]) -> usize,
+    {
+        if virtual_size == 0 {
+            return Err("virtual GGUF size must be greater than zero".to_string());
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = read_at;
+            return Err("callback model load requires funopen/fopencookie (Unix)".to_string());
+        }
+
+        #[cfg(unix)]
+        {
+            // SAFETY: Null return is checked immediately after this call
+            unsafe {
+                ffi::llama_backend_init();
+            }
+
+            let file = callback::StdioCookieFile::open(virtual_size, &mut read_at)?;
+            let ptr = Self::load_from_cookie(&file)?;
+            Ok(Self {
+                ptr,
+                path: format!("<callback:{virtual_size}>"),
+            })
+        }
+    }
+
+    #[cfg(unix)]
+    fn load_from_cookie(file: &callback::StdioCookieFile) -> Result<*mut ffi::llama_model, String> {
+        let gpu_status = GPU_STATUS.load(Ordering::Relaxed);
+        let try_gpu = gpu_status != 2;
+        let none = ffi::llama_load_mode_LLAMA_LOAD_MODE_NONE;
+
+        if try_gpu {
+            // SAFETY: Null return is checked immediately after this call
+            let mut params = unsafe { ffi::llama_model_default_params() };
+            params.n_gpu_layers = -1;
+            params.main_gpu = 0;
+            params.load_mode = none;
+
+            // SAFETY: `file` is a live cookie FILE*; llama.cpp does not fclose it.
+            let model = unsafe { ffi::llama_model_load_from_file_ptr(file.as_ptr(), params) };
+            if !model.is_null() {
+                GPU_STATUS.store(1, Ordering::Relaxed);
+                return Ok(model);
+            }
+            GPU_STATUS.store(2, Ordering::Relaxed);
+            eprintln!("⚠ GPU model loading failed, falling back to CPU-only mode");
+            file.rewind()?;
+        }
+
+        // SAFETY: Null return is checked immediately after this call
+        let mut cpu_params = unsafe { ffi::llama_model_default_params() };
+        cpu_params.n_gpu_layers = 0;
+        cpu_params.load_mode = none;
+
+        // SAFETY: cookie FILE* was rewound if a GPU attempt consumed bytes.
+        let cpu_model = unsafe { ffi::llama_model_load_from_file_ptr(file.as_ptr(), cpu_params) };
+        if cpu_model.is_null() {
+            // Both attempts failed, so the bytes are not a loadable model
+            // rather than the GPU being unusable. Restoring the previous
+            // status keeps one bad archive from disabling GPU for the process.
+            GPU_STATUS.store(gpu_status, Ordering::Relaxed);
+            Err("Failed to load model (CPU attempt failed)".to_string())
+        } else {
+            eprintln!("✓ CPU-only model loaded successfully");
+            Ok(cpu_model)
         }
     }
 
@@ -2422,5 +2507,50 @@ mod tests {
 
         cap_tool_calls(&mut calls);
         assert_eq!(calls.len(), 3);
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn from_callback_rejects_zero_virtual_size() {
+        let err = match LlamaModel::from_callback(0, |_offset, _buf| 0) {
+            Ok(_) => panic!("expected error for zero virtual size"),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_lowercase().contains("virtual"),
+            "error should mention virtual size, got: {err}"
+        );
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn from_callback_rejects_non_gguf_bytes() {
+        let prev_gpu = GPU_STATUS.load(Ordering::Relaxed);
+        let data = *b"NOTGGUF-padding-so-the-reader-has-length";
+        let mut reads_at_zero = 0usize;
+        let err = match LlamaModel::from_callback(data.len() as u64, |offset, buf| {
+            if offset == 0 {
+                reads_at_zero += 1;
+            }
+            let start = offset as usize;
+            if start >= data.len() {
+                return 0;
+            }
+            let n = buf.len().min(data.len() - start);
+            buf[..n].copy_from_slice(&data[start..start + n]);
+            n
+        }) {
+            Ok(_) => panic!("expected error for non-GGUF bytes"),
+            Err(e) => e,
+        };
+        GPU_STATUS.store(prev_gpu, Ordering::Relaxed);
+        assert!(
+            err.to_lowercase().contains("failed to load"),
+            "expected load failure, got: {err}"
+        );
+        assert!(
+            reads_at_zero >= 2,
+            "CPU retry must rewind so magic is read twice, got {reads_at_zero} reads at offset 0"
+        );
     }
 }

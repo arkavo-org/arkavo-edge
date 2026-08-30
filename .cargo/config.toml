@@ -17,3 +17,13 @@ quiet = false
 # macOS CI uses: RUSTFLAGS="-C link-arg=-fuse-ld=lld" (when lld is available)
 # Windows CI uses rust-lld via the linker config below (only in CI)
 # These are not enabled locally as lld may not be installed
+
+# aes 0.8 only uses the ARMv8 AES instructions when this cfg is set; without
+# it every aarch64 build (release included) runs bitsliced software AES-GCM at
+# ~200 MB/s, which makes a multi-GB .gguf.tdf load take tens of seconds.
+# x86_64 selects AES-NI at runtime and needs nothing here. CI jobs that set
+# RUSTFLAGS in the environment must repeat the cfg there (env RUSTFLAGS
+# replaces this table). polyval (the GHASH half of AES-GCM) has the same
+# gate, polyval_armv8; without it GCM is still ~75 % software.
+[target.'cfg(target_arch = "aarch64")']
+rustflags = ["--cfg", "aes_armv8", "--cfg", "polyval_armv8"]

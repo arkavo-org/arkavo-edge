@@ -1,0 +1,112 @@
+//! `gguf-tdf/1` — Arkavo profile of OpenTDF zip TDF for GGUF model files.
+//!
+//! Spec: `specifications/gguf-tdf/draft-arkavo-gguf-tdf-01.md`.
+//!
+//! At rest the artifact is ciphertext plus a plaintext manifest and index. At
+//! load, extra plaintext is the retained GGUF header plus up to
+//! `DEFAULT_CACHED_SEGMENTS` decrypted weight segments held by the reader's
+//! LRU cache plus up to `DEFAULT_PREFETCH_DEPTH` more held by the
+//! decrypt-ahead worker: `headerBytes + (cached + prefetch) * maxSegment`,
+//! defaults 8 + 4. The executor sees a virtual linear GGUF through `read_at`
+//! and contains no TDF, AES, or KAS code.
+
+mod error;
+mod ggml_type;
+mod gguf_header;
+mod index;
+mod key;
+mod pack;
+mod prefetch;
+mod read_at;
+mod reader;
+mod segment_cache;
+mod writer;
+
+pub use error::GgufTdfError;
+pub use ggml_type::{block_traits, tensor_nbytes};
+pub use gguf_header::{GgufHeader, HeaderTensor, MAX_TENSOR_NAME_BYTES, identify, parse_header};
+pub use index::{SegmentMap, build_index, validate_index};
+#[cfg(feature = "kas")]
+pub use key::RsaOaepWrapper;
+pub use key::{PayloadKeyUnwrapper, PayloadKeyWrapper, PreResolvedKey, WrappedKey};
+pub use pack::{PlannedSegment, plan_segments};
+pub use read_at::VirtualGguf;
+pub use reader::GgufTdfArchive;
+pub use writer::{ProtectOptions, ProtectReport, protect};
+
+/// Profile identifier carried in `manifest.gguf.profile`.
+pub const PROFILE: &str = "gguf-tdf/1";
+
+/// Default maximum plaintext size of a non-header segment (4 MiB).
+pub const DEFAULT_MAX_SEGMENT: u64 = 4_194_304;
+
+/// AES-GCM per-segment overhead: a 12-byte IV plus a 16-byte tag.
+pub const SEGMENT_OVERHEAD: u64 = 28;
+
+/// Upper bound on `gguf.headerBytes` and on a header row's claimed
+/// `segmentSize`, checked before any buffer sized from either is allocated.
+///
+/// 1 GiB: the largest known tokenizer-heavy GGUF headers (vocab plus merges
+/// KV blocks) are tens of MiB; this is an order of magnitude beyond that,
+/// not a realistic model header.
+pub const MAX_HEADER_BYTES: u64 = 1 << 30;
+
+/// Upper bound on `gguf.maxSegment`, checked before a writer can plan
+/// segments past it or a reader can accept an index declaring it.
+///
+/// 256 MiB: 64x `DEFAULT_MAX_SEGMENT`, beyond which the "one segment at a
+/// time" scratch bound this profile promises stops being small.
+pub const MAX_MAX_SEGMENT: u64 = 256 << 20;
+
+/// Upper bound on the `0.manifest.json` / `manifest.json` zip member,
+/// checked before `read_manifest` allocates a buffer for it.
+///
+/// 64 MiB: a manifest is JSON metadata (index, tensor names, integrity
+/// rows), not weights; even a multi-thousand-tensor model's manifest is low
+/// single-digit MiB.
+pub const MAX_MANIFEST_BYTES: u64 = 64 << 20;
+
+/// Decrypted weight segments a reader keeps by default (spec §13.3). Extra
+/// plaintext at load is `headerBytes + DEFAULT_CACHED_SEGMENTS * maxSegment`.
+pub const DEFAULT_CACHED_SEGMENTS: usize = 8;
+
+/// Segments the decrypt-ahead worker keeps in flight by default (spec §13.3).
+///
+/// The worker holds up to this many decrypted segments beyond the reader
+/// cache, so the plaintext bound becomes `headerBytes +
+/// (DEFAULT_CACHED_SEGMENTS + DEFAULT_PREFETCH_DEPTH) * maxSegment`. Zero
+/// disables the worker.
+pub const DEFAULT_PREFETCH_DEPTH: usize = 4;
+
+/// Zip member holding encrypted segment 0, the GGUF header.
+pub const HEADER_ENTRY: &str = "header";
+
+/// Manifest member this profile writes.
+pub const MANIFEST_ENTRY: &str = "0.manifest.json";
+
+/// Manifest member readers accept as a fallback.
+pub const MANIFEST_ENTRY_FALLBACK: &str = "manifest.json";
+
+/// File extension identifying a protected model.
+pub const EXTENSION: &str = ".gguf.tdf";
+
+/// Zip member name for weight segment `id`.
+pub fn entry_name(id: u64) -> String {
+    if id == 0 {
+        HEADER_ENTRY.to_string()
+    } else {
+        format!("s/{id}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entry_names_match_the_profile_grammar() {
+        assert_eq!(entry_name(0), "header");
+        assert_eq!(entry_name(1), "s/1");
+        assert_eq!(entry_name(4095), "s/4095");
+    }
+}

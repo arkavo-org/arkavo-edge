@@ -66,6 +66,24 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "chat" => commands::chat::execute(&args[1..]),
         "task" => commands::task::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),
+        "login" | "logout" => {
+            let is_login = args[0] == "login";
+            let run_async = async {
+                if is_login {
+                    commands::login::execute_login().await
+                } else {
+                    commands::login::execute_logout().await
+                }
+            };
+
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => handle.block_on(run_async),
+                Err(_) => {
+                    let runtime = tokio::runtime::Runtime::new()?;
+                    runtime.block_on(run_async)
+                }
+            }
+        }
         // Hidden commands (still accessible, just not in main help)
         "terminal" => commands::terminal::execute(&args[1..]),
         #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
@@ -172,6 +190,7 @@ fn print_usage() {
     println!("    chat           Conversational chat");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
+    println!("{}", commands::login::login_help());
     println!();
     println!("Run 'arkavo <command> --help' for detailed options");
     println!();

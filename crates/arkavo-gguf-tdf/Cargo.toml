@@ -1,0 +1,39 @@
+[package]
+name = "arkavo-gguf-tdf"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "gguf-tdf/1 profile: protect GGUF weights as OpenTDF archives and serve a virtual GGUF via read_at"
+repository.workspace = true
+keywords = ["gguf", "opentdf", "tdf", "llama", "encryption"]
+categories = ["cryptography"]
+
+[dependencies]
+opentdf = { version = "0.15.0", default-features = false, features = ["rustls-tls"] }
+zip = { version = "2.2", default-features = false }
+rand = { workspace = true }
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+reqwest = { workspace = true }
+zip = { version = "2.2", default-features = false }
+
+[features]
+default = []
+# RSA-OAEP wrapping against a fetched KAS public key. The KAS round-trips
+# themselves are async and belong to the caller, which already owns a runtime;
+# this crate stays synchronous and KAS-transport agnostic.
+kas = ["opentdf/kas-client"]
+
+[lints]
+workspace = true

@@ -32,6 +32,8 @@ members = [
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
+    "crates/arkavo-gguf-tdf",
+    "crates/arkavo-identity",
     "crates/arkavo-mcp-code-search",
     "crates/arkavo-browser",
     "crates/arkavo-mcp-workspace",
@@ -126,6 +128,7 @@ default-members = [
     "crates/arkavo-snpe",
     "crates/arkavo-orchestrator",
     "crates/arkavo-device-identity",
+    "crates/arkavo-identity",
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
     "crates/arkavo-registration",
@@ -153,7 +156,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.89.4"
+version = "0.90.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -389,3 +392,24 @@ too_many_lines = "allow"
 # Deny warnings in CI to catch TODO placeholders and other issues
 deny-warnings = true
 
+
+# gguf-tdf: keep the AES-GCM path optimized in dev builds. At opt-level 0
+# software AES runs ~7 MB/s and a multi-GB protected load looks like a hang.
+# Hardware AES on aarch64 additionally needs `--cfg aes_armv8`
+# (.cargo/config.toml).
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
+[profile.dev.package.ctr]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3
+[profile.dev.package.polyval]
+opt-level = 3
+[profile.dev.package.cipher]
+opt-level = 3
+[profile.dev.package.opentdf-crypto]
+opt-level = 3
+[profile.dev.package.arkavo-gguf-tdf]
+opt-level = 3
