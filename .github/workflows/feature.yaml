@@ -583,7 +583,7 @@ jobs:
           CXXFLAGS_x86_64_unknown_linux_musl: "-static"
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
           # For glibc build, ensure static linking of OpenMP
-          RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++ --cfg aes_armv8"
+          RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++ --cfg aes_armv8 --cfg polyval_armv8"
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
