@@ -1308,3 +1308,46 @@ In addition to the original Step 2: fix the Security-notes nit — "tampered or 
 ## Execution order (amended)
 
 1 ✓, 4+5 ✓, 2 → 3 → 10 → 9 (gguf-tdf crate, sequential), then 8, 11, 12 (independent crates, sequential dispatches), then 7.
+
+---
+
+## Audit follow-ups (arkavo-gguf-tdf vs opentdf-rs, 2026-08-30)
+
+### Task 13: Hardware GHASH (`--cfg polyval_armv8`) — dispatched inline, see ledger
+
+### Task 14: Use the library's root-signature verifier instead of a hand-rolled HMAC
+
+**Why:** `crates/arkavo-gguf-tdf/src/reader.rs:318-352` recomputes `HMAC-SHA256(payloadKey, concat(tags))` with direct `hmac` + `sha2` dependencies. `opentdf::manifest::IntegrityInformationExt::verify_root_signature(&self, gmac_tags: &[Vec<u8>], payload_key: &[u8]) -> Result<(), String>` (already imported in `writer.rs:13`) does the same with a constant-time compare and a `Zeroizing` aggregate. The audit classified this as the crate's only unnecessary bypass. The library verifier does **not** check that each tag is 16 bytes — that check stays downstream (spec §10.4; T17 must keep failing `RootMismatch` on a bad row).
+
+**Files:**
+- Modify: `crates/arkavo-gguf-tdf/src/reader.rs` (`verify_root_signature`, imports)
+- Modify: `crates/arkavo-gguf-tdf/Cargo.toml` (remove `hmac`, `sha2` if no other use — grep first; commit `Cargo.lock` if it changes)
+- Test: existing `t17_equal_size_member_swap_is_caught_by_the_root_signature` and `t5/t6` in `tests/roundtrip.rs` must keep passing; add `root_signature_row_that_is_not_16_bytes_is_root_mismatch` in `tests/roundtrip.rs` using `rewrite_manifest` to set one `integrityInformation.segments[k].hash` to base64 of 15 bytes and assert `unlock` fails `RootMismatch`.
+
+- [ ] **Step 1:** write the new test; run `cargo test -p arkavo-gguf-tdf --test roundtrip root_signature_row` — Expected: passes already (the current code checks length) — this is a lock-in test; keep it.
+- [ ] **Step 2:** replace the body of `verify_root_signature` with:
+
+```rust
+    let integrity = &manifest.encryption_information.integrity_information;
+    let mut tags = Vec::with_capacity(integrity.segments.len());
+    for row in &integrity.segments {
+        let tag = base64::engine::general_purpose::STANDARD
+            .decode(&row.hash)
+            .map_err(|_| GgufTdfError::RootMismatch)?;
+        // The library concatenates whatever it is given; the profile requires
+        // exactly one 16-byte GMAC per row (§10.4), so enforce that here.
+        if tag.len() != 16 {
+            return Err(GgufTdfError::RootMismatch);
+        }
+        tags.push(tag);
+    }
+    integrity
+        .verify_root_signature(&tags, payload_key)
+        .map_err(|_| GgufTdfError::RootMismatch)
+```
+
+  with `use opentdf::manifest::IntegrityInformationExt;` and the `hmac`/`sha2`/`ct_eq` imports removed if now unused.
+- [ ] **Step 3:** `cargo test -p arkavo-gguf-tdf && cargo clippy -p arkavo-gguf-tdf --all-targets -- -D warnings`; remove the two deps from `Cargo.toml` if `grep -rn "hmac\|sha2" crates/arkavo-gguf-tdf/src` is empty; `cargo build -p arkavo-gguf-tdf` to refresh `Cargo.lock`.
+- [ ] **Step 4:** commit `Verify the root signature through opentdf instead of a local HMAC` (mention opentdf-rs#100 item 2 as the API that would also retire the row decoding).
+
+Related upstream work (not in this plan): opentdf-rs#99 (in-place segment decrypt — fix in progress on branch `fix/decrypt-segment-in-place`; when merged, bump the `opentdf` rev in `crates/arkavo-cli/Cargo.toml` and the workspace), opentdf-rs#100 (verify-side APIs).
