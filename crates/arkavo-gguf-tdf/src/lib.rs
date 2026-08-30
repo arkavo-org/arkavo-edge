@@ -15,6 +15,7 @@ mod key;
 mod pack;
 mod read_at;
 mod reader;
+mod segment_cache;
 mod writer;
 
 pub use error::GgufTdfError;
@@ -37,6 +38,10 @@ pub const DEFAULT_MAX_SEGMENT: u64 = 4_194_304;
 
 /// AES-GCM per-segment overhead: a 12-byte IV plus a 16-byte tag.
 pub const SEGMENT_OVERHEAD: u64 = 28;
+
+/// Decrypted weight segments a reader keeps by default (spec §13.3). Extra
+/// plaintext at load is `headerBytes + DEFAULT_CACHED_SEGMENTS * maxSegment`.
+pub const DEFAULT_CACHED_SEGMENTS: usize = 8;
 
 /// Zip member holding encrypted segment 0, the GGUF header.
 pub const HEADER_ENTRY: &str = "header";

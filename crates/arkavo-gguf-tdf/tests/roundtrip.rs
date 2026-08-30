@@ -608,3 +608,118 @@ fn open_rejects_a_concatenated_payload_member() {
         "GGUFTDF_PAYLOAD_FORBIDDEN"
     );
 }
+
+/// Reads that revisit segments must not decrypt them again while they are
+/// cached; a cache of one must (that is the draft-00 reader behaviour).
+#[test]
+fn cached_segments_are_not_decrypted_twice() {
+    // 64 B segments: the fixture's 8 KiB token_embd alone spans >100 segments.
+    let f = build(64);
+
+    let mut one = GgufTdfArchive::open(&f.archive)
+        .unwrap()
+        .unlock_with_cache(&f.kas, 1)
+        .unwrap();
+    let mut eight = GgufTdfArchive::open(&f.archive)
+        .unwrap()
+        .unlock_with_cache(&f.kas, 8)
+        .unwrap();
+    let base = one.header_bytes();
+    let mut buf = [0u8; 16];
+
+    // Touch segments 1, 2, 3, 1, 2, 3 (weight offsets base+0, +64, +128).
+    for pass in 0..2 {
+        for seg in 0..3u64 {
+            let off = base + seg * 64;
+            assert_eq!(one.read_at(off, &mut buf), 16, "pass {pass} seg {seg}");
+            assert_eq!(eight.read_at(off, &mut buf), 16);
+        }
+    }
+    assert_eq!(
+        one.segments_decrypted(),
+        6,
+        "single-entry cache re-decrypts"
+    );
+    assert_eq!(eight.segments_decrypted(), 3, "LRU serves the second pass");
+    assert_eq!(
+        GgufTdfArchive::open(&f.archive)
+            .unwrap()
+            .unlock(&f.kas)
+            .unwrap()
+            .segments_decrypted(),
+        0
+    );
+}
+
+/// Bytes served through the LRU are identical to the source for every
+/// offset, including reads that span several cached and uncached segments.
+#[test]
+fn lru_reader_serves_identical_bytes_across_segment_spans() {
+    let f = build(64);
+    let mut vg = GgufTdfArchive::open(&f.archive)
+        .unwrap()
+        .unlock_with_cache(&f.kas, 4)
+        .unwrap();
+    let base = vg.header_bytes();
+    let total = f.source_bytes.len() as u64;
+    // Forward, then backward, then a large span.
+    let mut got = vec![0u8; 200];
+    for start in [base, base + 64, base + 130, base + 64, base] {
+        let n = vg.read_at(start, &mut got);
+        let end = (start + n as u64).min(total) as usize;
+        assert_eq!(&got[..n], &f.source_bytes[start as usize..end]);
+    }
+    let mut span = vec![0u8; 1024];
+    let n = vg.read_at(base, &mut span);
+    assert_eq!(
+        &span[..n],
+        &f.source_bytes[base as usize..base as usize + n]
+    );
+    assert!(
+        vg.segments_decrypted() > 4,
+        "span must have walked past the cache"
+    );
+}
+
+/// A tag failure clears the whole cache, not just the current segment.
+#[test]
+fn tag_failure_clears_every_cached_segment() {
+    use std::io::Write;
+
+    let f = build(64);
+    // Flip one ciphertext byte in s/3 (third weight member) on a copy.
+    let corrupted = f.archive.with_extension("corrupt.tdf");
+    std::fs::copy(&f.archive, &corrupted).unwrap();
+    let data_start = {
+        let mut file = File::open(&corrupted).unwrap();
+        let members = TdfMemberIndex::open(&mut file).unwrap();
+        members.get("s/3").unwrap().data_start
+    };
+    {
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&corrupted)
+            .unwrap();
+        // Offset 20 is inside the ciphertext, past the 12-byte IV.
+        file.seek(SeekFrom::Start(data_start + 20)).unwrap();
+        let mut byte = [0u8; 1];
+        file.read_exact(&mut byte).unwrap();
+        byte[0] ^= 0x01;
+        file.seek(SeekFrom::Start(data_start + 20)).unwrap();
+        file.write_all(&byte).unwrap();
+    }
+
+    let mut vg = GgufTdfArchive::open(&corrupted)
+        .unwrap()
+        .unlock_with_cache(&f.kas, 8)
+        .unwrap();
+    let base = vg.header_bytes();
+    let mut buf = [0u8; 16];
+    assert_eq!(vg.read_at(base, &mut buf), 16); // s/1 cached
+    assert_eq!(vg.read_at(base + 64, &mut buf), 16); // s/2 cached
+    assert_eq!(vg.read_at(base + 128, &mut buf), 0); // s/3 fails
+    assert!(matches!(vg.error(), Some(GgufTdfError::TagMismatch)));
+    assert_eq!(vg.cached_segments(), 0, "cache must be cleared on failure");
+    assert_eq!(vg.read_at(base, &mut buf), 0, "failure is sticky");
+}

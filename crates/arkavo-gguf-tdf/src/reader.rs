@@ -96,9 +96,17 @@ impl GgufTdfArchive {
     /// Verifies the header's GMAC, binds the plaintext index to the
     /// authenticated header, and checks the root signature, all before any
     /// caller can read a weight byte.
-    pub fn unlock(
+    pub fn unlock(self, unwrapper: &dyn PayloadKeyUnwrapper) -> Result<VirtualGguf, GgufTdfError> {
+        self.unlock_with_cache(unwrapper, crate::DEFAULT_CACHED_SEGMENTS)
+    }
+
+    /// `unlock` with an explicit number of decrypted weight segments to keep
+    /// (spec §13.3). Extra plaintext is `headerBytes + cached_segments *
+    /// maxSegment`. `cached_segments == 0` is treated as 1.
+    pub fn unlock_with_cache(
         mut self,
         unwrapper: &dyn PayloadKeyUnwrapper,
+        cached_segments: usize,
     ) -> Result<VirtualGguf, GgufTdfError> {
         let payload_key = Zeroizing::new(unwrapper.unwrap_key(&self.manifest)?);
 
@@ -128,6 +136,7 @@ impl GgufTdfArchive {
             encryption,
             header_plain,
             hashes,
+            cached_segments,
         ))
     }
 }
