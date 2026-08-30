@@ -101,11 +101,6 @@ impl VirtualGguf {
     /// the bytes already written to `dst` in this call are zeroized, so a
     /// caller never observes a partial plaintext for a segment that did not
     /// authenticate.
-    ///
-    /// # Panics
-    ///
-    /// Never in practice: `ensure_segment` always inserts or promotes `id`
-    /// into the cache before this reads it back, or returns early on error.
     pub fn read_at(&mut self, offset: u64, dst: &mut [u8]) -> usize {
         if self.failed.is_some() || dst.is_empty() {
             return 0;
@@ -133,21 +128,51 @@ impl VirtualGguf {
 
             let start = self.map.start_of(id);
             let local = (position - start) as usize;
-            let plaintext = if id == 0 {
-                self.header_plain.as_slice()
+            // Computed without borrowing `self.cache`, so the failure branch
+            // below is free to clear it: for id 0 this is the retained
+            // header's own length; otherwise it's the length `ensure_segment`
+            // sized the cache slot to when this segment was decrypted, which
+            // is exactly what's cached under `id` right now.
+            let plain_len = if id == 0 {
+                self.header_plain.len()
             } else {
-                // ensure_segment just inserted or promoted `id`.
-                self.cache.get(id).expect("segment was just cached")
+                self.index
+                    .segments
+                    .get(id)
+                    .map(|s| s.plain as usize)
+                    .unwrap_or(0)
             };
-            if local >= plaintext.len() {
+            if local >= plain_len {
                 dst[..written].zeroize();
+                self.cache.clear();
                 self.failed = Some(GgufTdfError::BadIndex(
                     "segment map disagrees with the decrypted segment length".to_string(),
                 ));
                 return 0;
             }
 
-            let n = (len - written).min(plaintext.len() - local);
+            let plaintext = if id == 0 {
+                self.header_plain.as_slice()
+            } else {
+                match self.cache.get(id) {
+                    Some(plain) => plain,
+                    None => {
+                        // ensure_segment just inserted or promoted `id`, so
+                        // this should be unreachable; read_at is driven from
+                        // llama.cpp's FFI read callback, where unwinding
+                        // across the boundary is undefined behaviour, so fail
+                        // closed instead of panicking.
+                        dst[..written].zeroize();
+                        self.cache.clear();
+                        self.failed = Some(GgufTdfError::BadIndex(format!(
+                            "segment {id} vanished from the cache immediately after being cached"
+                        )));
+                        return 0;
+                    }
+                }
+            };
+
+            let n = (len - written).min(plain_len - local);
             dst[written..written + n].copy_from_slice(&plaintext[local..local + n]);
             written += n;
         }
@@ -218,5 +243,65 @@ impl Drop for VirtualGguf {
         // `Zeroizing` clears the header and cached plaintext buffers; the
         // ciphertext copy-out is not secret but costs nothing to clear.
         self.cipher.zeroize();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentdf::{GgufSegment, GgufSegmentKind};
+    use std::io::Cursor;
+
+    /// A structurally valid, member-less zip. Sufficient here because this
+    /// module's tests only ever touch segment 0 (the retained header), which
+    /// `read_at` serves from `header_plain` without consulting `members`.
+    fn empty_member_index() -> TdfMemberIndex {
+        let mut buf = Vec::new();
+        zip::ZipWriter::new(Cursor::new(&mut buf)).finish().unwrap();
+        TdfMemberIndex::open(Cursor::new(buf)).unwrap()
+    }
+
+    /// The index's segment map says the header covers 64 virtual bytes, but
+    /// the plaintext actually retained from decryption (`header_plain`) is
+    /// only 8 — an internal inconsistency `read_at`'s bounds check exists to
+    /// catch. It must fail closed, zeroize what it already copied, and clear
+    /// the (here empty) cache rather than panic or read past `header_plain`.
+    #[test]
+    fn segment_map_disagreeing_with_header_plain_length_fails_closed_and_clears_cache() {
+        let index = GgufIndex {
+            profile: crate::PROFILE.to_string(),
+            alignment: 32,
+            header_bytes: 64,
+            virtual_size: 64,
+            max_segment: crate::DEFAULT_MAX_SEGMENT,
+            tensors: Vec::new(),
+            segments: vec![GgufSegment {
+                id: 0,
+                kind: GgufSegmentKind::Header,
+                plain: 64,
+                entry: crate::HEADER_ENTRY.to_string(),
+            }],
+        };
+        let map = SegmentMap::new(&index);
+
+        let mut vg = VirtualGguf::new(
+            File::open("/dev/null").unwrap(),
+            empty_member_index(),
+            index,
+            map,
+            TdfEncryption::new().unwrap(),
+            Zeroizing::new(vec![0u8; 8]), // shorter than the map's 64-byte claim
+            Vec::new(),
+            4,
+        );
+
+        let mut buf = [0xAAu8; 16];
+        assert_eq!(vg.read_at(0, &mut buf), 0);
+        assert!(matches!(vg.error(), Some(GgufTdfError::BadIndex(_))));
+        assert_eq!(vg.cached_segments(), 0, "cache must be cleared on failure");
+        // The first 8 bytes were genuinely copied from header_plain before
+        // the second chunk's bounds check failed; they must be wiped too.
+        assert!(buf[..8].iter().all(|b| *b == 0));
+        assert_eq!(vg.read_at(0, &mut buf), 0, "failure is sticky");
     }
 }
