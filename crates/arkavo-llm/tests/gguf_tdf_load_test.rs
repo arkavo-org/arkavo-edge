@@ -54,7 +54,19 @@ fn a_protected_model_never_falls_back_to_a_sibling_plaintext() {
         ),
         "must fail closed",
     );
-    assert!(err.to_string().contains("GGUFTDF_KAS_DENIED"));
+    let msg = err.to_string();
+    assert!(msg.contains("GGUFTDF_KAS_DENIED"));
+    // The error must name the protected path itself, not just the family of
+    // error — this is the signal that the constructor rejected on sight
+    // rather than after having opened (and thus fallen back to) the sibling.
+    // `model.gguf.tdf` contains `model.gguf` as a filename prefix, so a
+    // substring check against `plain` can't tell "named the sibling" from
+    // "named the protected path" — the meaningful assertion is that the
+    // error names the full protected path, `.tdf` extension included.
+    assert!(
+        msg.contains(&protected.to_string_lossy().to_string()),
+        "error should name the .gguf.tdf path: {msg}"
+    );
 
     // Loading with a key still fails, because the archive is not a real one,
     // and it fails on the archive rather than silently reading the sibling.
@@ -88,6 +100,12 @@ fn registry_load_refuses_a_protected_path_without_a_key() {
         "registry must not open a .gguf.tdf with from_file",
     );
     assert!(err.to_string().contains("GGUFTDF_KAS_DENIED"), "got: {err}");
+    // The failed load must not have registered a half-open model: nothing
+    // under that name should show up as loaded afterwards.
+    assert!(
+        !registry.is_loaded("protected"),
+        "a denied load must not leave the model registered as loaded"
+    );
 }
 
 #[test]
