@@ -3211,7 +3211,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3980,7 +3980,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4287,7 +4287,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5468,7 +5468,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -5488,7 +5488,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -6113,7 +6113,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7388,7 +7388,7 @@ dependencies = [
  "pin-project-lite",
  "rustc-hash 2.1.2",
  "rustls",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -7431,7 +7431,7 @@ checksum = "b56d621ed2c1773b5356ab39cc68c819f8d0103f7493d8661c4a5f5f8ea55f40"
 dependencies = [
  "cfg_aliases",
  "libc",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -7478,7 +7478,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7761,8 +7761,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "opentdf"
-version = "0.14.2"
-source = "git+https://github.com/arkavo-org/opentdf-rs?rev=ead8fdcdd792a118bcde1c57767ca6aedde58a99#ead8fdcdd792a118bcde1c57767ca6aedde58a99"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "462d73609f400132213c088de4ff2cd956d10341cba780039f907cc0bba6d5ff"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",
@@ -7785,8 +7786,9 @@ dependencies = [
 
 [[package]]
 name = "opentdf-crypto"
-version = "0.14.2"
-source = "git+https://github.com/arkavo-org/opentdf-rs?rev=ead8fdcdd792a118bcde1c57767ca6aedde58a99#ead8fdcdd792a118bcde1c57767ca6aedde58a99"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4a37d0bbc03333a0c3a7d72152d34e2c1066227166a35488f3be430be13e89f"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -7816,8 +7818,9 @@ dependencies = [
 
 [[package]]
 name = "opentdf-kas"
-version = "0.14.2"
-source = "git+https://github.com/arkavo-org/opentdf-rs?rev=ead8fdcdd792a118bcde1c57767ca6aedde58a99#ead8fdcdd792a118bcde1c57767ca6aedde58a99"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d94034b601c37c5a9204ee2c3d781a1d3832e6ddb20204fba6a7af47e6149f2e"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -7832,8 +7835,9 @@ dependencies = [
 
 [[package]]
 name = "opentdf-protocol"
-version = "0.14.2"
-source = "git+https://github.com/arkavo-org/opentdf-rs?rev=ead8fdcdd792a118bcde1c57767ca6aedde58a99#ead8fdcdd792a118bcde1c57767ca6aedde58a99"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a5fc277209c3b4739b6f7e59fc17950298e7ffb3c31712bdf24afb8065113fe"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -8691,7 +8695,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.2",
  "rustls",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8729,9 +8733,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9507,7 +9511,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9587,7 +9591,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.8",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9803,7 +9807,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10783,7 +10787,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

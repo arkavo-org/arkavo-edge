@@ -19,7 +19,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
 tracing = { workspace = true }
 url = { workspace = true }
-opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", rev = "ead8fdcdd792a118bcde1c57767ca6aedde58a99", default-features = false, features = ["rustls-tls", "kas-client"] }
+opentdf = { version = "0.15.0", default-features = false, features = ["rustls-tls", "kas-client"] }
 ciborium = "0.2"
 
 [dev-dependencies]
