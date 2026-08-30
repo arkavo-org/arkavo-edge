@@ -28,6 +28,18 @@ pub fn default_output(source: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// Same posture as the identity client: rustls, no redirects, bounded wait.
+/// `validate_kas_url` runs on the URL we dial; following a redirect would
+/// silently move the wrap to a host it never checked.
+pub(crate) fn kas_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .use_rustls_tls()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("reqwest rustls client")
+}
+
 pub async fn run(args: ProtectArgs<'_>) -> Result<()> {
     if !args.path.exists() {
         bail!("model not found: {}", args.path.display());
@@ -55,7 +67,7 @@ pub async fn run(args: ProtectArgs<'_>) -> Result<()> {
     let endpoints = opentdf::kas_discovery::KasEndpoints::from_config(&config)
         .with_context(|| format!("cannot resolve KAS endpoints for {kas_url}"))?;
 
-    let http = reqwest::Client::new();
+    let http = kas_http_client();
     let kas_key = opentdf::kas_key::fetch_kas_public_key_connect(&endpoints.public_key_url, &http)
         .await
         .with_context(|| {
@@ -120,6 +132,35 @@ mod tests {
     #[test]
     fn default_kas_is_platform() {
         assert_eq!(DEFAULT_KAS_URL, "https://platform.arkavo.net");
+    }
+
+    /// The key fetch must not follow a redirect: a 3xx from the KAS host must
+    /// surface as an error, never as a key from wherever Location points.
+    #[tokio::test]
+    async fn kas_key_fetch_does_not_follow_redirects() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf).await;
+            let _ = s
+                .write_all(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:9/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+            let _ = s.shutdown().await;
+        });
+        let http = kas_http_client();
+        let resp = http
+            .get(format!("http://{addr}/kas.AccessService/PublicKey"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status().as_u16(),
+            302,
+            "redirect must be returned, not followed"
+        );
     }
 
     #[test]
