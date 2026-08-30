@@ -166,6 +166,26 @@ fn t1_packs_a_tiny_gguf_into_profile_members() {
     assert_ne!(wrapper.key(), [0u8; 32]);
 }
 
+#[test]
+fn protect_reads_the_archive_back_with_the_fresh_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = common::synthetic_gguf(&[("a", 0, [64, 1, 1, 1])], None);
+    let source = common::write_gguf(dir.path(), "model.gguf", &bytes);
+    let dest = dir.path().join("model.gguf.tdf");
+
+    let report = protect(
+        &source,
+        &dest,
+        &MockWrapper::new(),
+        &ProtectOptions::default(),
+    )
+    .unwrap();
+    assert!(
+        report.verified_header,
+        "writer must prove the archive unlocks before reporting success"
+    );
+}
+
 fn partial_path(dest: &std::path::Path) -> std::path::PathBuf {
     let mut name = dest.as_os_str().to_os_string();
     name.push(".partial");

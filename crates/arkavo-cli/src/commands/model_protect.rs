@@ -88,16 +88,18 @@ pub async fn run(args: ProtectArgs<'_>) -> Result<()> {
     let report = protect(args.path, &dest, &wrapper, &opts)
         .with_context(|| format!("cannot protect {}", args.path.display()))?;
 
-    // Structural read-back (no KAS round-trip): a truncated or malformed
-    // archive must be caught before the only plaintext copy can be removed.
-    arkavo_gguf_tdf::GgufTdfArchive::open(&dest).with_context(|| {
-        format!(
-            "wrote {} but it failed to reopen; the source was not deleted",
+    // `protect` already reopened the archive and unlocked it with the fresh
+    // payload key before returning; this guard is so the delete below never
+    // fires on a report the CLI did not itself check.
+    if !report.verified_header {
+        bail!(
+            "wrote {} but the read-back check did not run; the source was not deleted",
             dest.display()
-        )
-    })?;
+        );
+    }
 
     println!("  wrote      {}", dest.display());
+    println!("  verified   archive read back and header authenticated (KAS rewrap not exercised)");
     println!("  segments   {}", report.segments);
     println!("  header     {} bytes", report.header_bytes);
     println!("  virtual    {} bytes", report.virtual_size);
@@ -114,7 +116,10 @@ pub async fn run(args: ProtectArgs<'_>) -> Result<()> {
     if args.delete_source {
         std::fs::remove_file(args.path)
             .with_context(|| format!("cannot delete {}", args.path.display()))?;
-        println!("  removed    {}", args.path.display());
+        println!(
+            "  removed    {} (archive read back and header authenticated; KAS rewrap not exercised)",
+            args.path.display()
+        );
     } else {
         println!(
             "  kept       {} (pass --delete-source to remove it)",

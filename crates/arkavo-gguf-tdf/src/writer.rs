@@ -7,8 +7,9 @@
 use crate::error::GgufTdfError;
 use crate::gguf_header::parse_header;
 use crate::index::build_index;
-use crate::key::PayloadKeyWrapper;
+use crate::key::{PayloadKeyWrapper, PreResolvedKey};
 use crate::pack::plan_segments;
+use crate::reader::GgufTdfArchive;
 use crate::{DEFAULT_MAX_SEGMENT, MANIFEST_ENTRY, SEGMENT_OVERHEAD};
 use opentdf::manifest::{IntegrityInformationExt, KeyAccessExt};
 use opentdf::{Segment, TdfEncryption, TdfManifest, TdfMultiEntryBuilder};
@@ -57,6 +58,12 @@ pub struct ProtectReport {
     pub header_bytes: u64,
     /// Size of the written archive.
     pub archive_bytes: u64,
+    /// `true` once the archive has been reopened and unlocked with the fresh
+    /// payload key, so `--delete-source` has proof the archive it is about
+    /// to leave as the only copy actually unlocks. `protect` never returns
+    /// `Ok` with this `false`; the field exists so a caller cannot delete a
+    /// source on a report it did not check.
+    pub verified_header: bool,
 }
 
 /// Wraps `source` (a little-endian GGUF v3 file) into `dest` as a
@@ -101,11 +108,18 @@ pub fn protect(
         header.data_offset,
     );
     match written {
-        Ok(report) => {
+        Ok(mut report) => {
             if let Err(err) = std::fs::rename(&staging, dest) {
                 let _ = std::fs::remove_file(&staging);
                 return Err(err.into());
             }
+            // dest is now the only artifact; a read-back failure here must
+            // leave it in place for inspection rather than delete it, and
+            // must never touch the source. The caller (--delete-source)
+            // trusts `verified_header` alone, so it is only ever set on the
+            // success path below.
+            read_back(dest, &payload_key)?;
+            report.verified_header = true;
             Ok(report)
         }
         Err(err) => {
@@ -113,6 +127,21 @@ pub fn protect(
             Err(err)
         }
     }
+}
+
+/// Proves the archive just written unlocks with the key it was wrapped
+/// with: structure, header GMAC, and root signature. A single cached
+/// segment is enough since only the header member is read; no worker thread
+/// is spawned. A wrap that cannot be read back must never be reported as
+/// success — `--delete-source` relies on this before it removes the only
+/// plaintext copy.
+fn read_back(dest: &Path, payload_key: &[u8; 32]) -> Result<(), GgufTdfError> {
+    GgufTdfArchive::open(dest)?
+        .unlock_with_cache(&PreResolvedKey::new(*payload_key), 1)
+        .map_err(|e| {
+            GgufTdfError::Crypto(format!("read-back of {} failed: {e}", dest.display()))
+        })?;
+    Ok(())
 }
 
 fn staging_path(dest: &Path) -> PathBuf {
@@ -169,6 +198,9 @@ fn write_archive(
         virtual_size,
         header_bytes,
         archive_bytes,
+        // Set by `protect` once the rename has happened and the read-back
+        // has actually run; this function never sees the final path.
+        verified_header: false,
     })
 }
 
@@ -233,4 +265,92 @@ fn policy_document(attributes: &[String], dissem: &[String]) -> Result<String, G
 fn base64_standard(bytes: &[u8]) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::key::WrappedKey;
+    use opentdf::TdfMemberIndex;
+    use std::io::Write;
+
+    /// Records the payload key `protect` generated, standing in for a KAS.
+    struct MockWrapper {
+        captured: std::sync::Mutex<Option<[u8; 32]>>,
+    }
+
+    impl MockWrapper {
+        fn new() -> Self {
+            Self {
+                captured: std::sync::Mutex::new(None),
+            }
+        }
+        fn key(&self) -> [u8; 32] {
+            self.captured.lock().unwrap().expect("wrap was called")
+        }
+    }
+
+    impl PayloadKeyWrapper for MockWrapper {
+        fn wrap(&self, payload_key: &[u8; 32]) -> Result<WrappedKey, GgufTdfError> {
+            *self.captured.lock().unwrap() = Some(*payload_key);
+            Ok(WrappedKey {
+                kas_url: "https://kas.example.invalid".to_string(),
+                kid: Some("kas-key-1".to_string()),
+                wrapped_key: String::new(),
+            })
+        }
+    }
+
+    /// The smallest header `parse_header` accepts: magic, version 3, zero
+    /// tensors, zero KV, padded to the default 32-byte alignment.
+    fn minimal_gguf() -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"GGUF");
+        out.extend_from_slice(&3u32.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes()); // tensor_count
+        out.extend_from_slice(&0u64.to_le_bytes()); // kv_count
+        out.resize(32, 0);
+        out
+    }
+
+    /// Flips one ciphertext byte inside zip member `entry`, past its 12-byte
+    /// IV — the same technique `tests/roundtrip.rs`'s `corrupt_member` uses.
+    fn flip_a_ciphertext_byte(archive: &Path, entry: &str) {
+        let data_start = {
+            let mut file = File::open(archive).unwrap();
+            let members = TdfMemberIndex::open(&mut file).unwrap();
+            members.get(entry).unwrap().data_start
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(archive)
+            .unwrap();
+        file.seek(SeekFrom::Start(data_start + 20)).unwrap();
+        let mut byte = [0u8; 1];
+        file.read_exact(&mut byte).unwrap();
+        byte[0] ^= 0x01;
+        file.seek(SeekFrom::Start(data_start + 20)).unwrap();
+        file.write_all(&byte).unwrap();
+    }
+
+    #[test]
+    fn read_back_fails_closed_when_the_header_member_is_corrupted() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("model.gguf");
+        std::fs::write(&source, minimal_gguf()).unwrap();
+        let dest = dir.path().join("model.gguf.tdf");
+
+        let wrapper = MockWrapper::new();
+        protect(&source, &dest, &wrapper, &ProtectOptions::default()).unwrap();
+        let payload_key = wrapper.key();
+
+        flip_a_ciphertext_byte(&dest, crate::HEADER_ENTRY);
+
+        let err = read_back(&dest, &payload_key).unwrap_err();
+        assert!(
+            matches!(err, GgufTdfError::Crypto(_)),
+            "a corrupted header member must fail read-back as Crypto, got: {err:?}"
+        );
+    }
 }
