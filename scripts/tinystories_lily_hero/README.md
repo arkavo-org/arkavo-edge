@@ -26,3 +26,15 @@ python3 scripts/tinystories_lily_hero/eval_lily.py --gguf models/tinystories/sto
 ```
 
 Run in arkavo-edge with `arkavo chat --model tinystories-15m`.
+
+## Protect at rest (OpenTDF)
+
+0.90.0 wraps GGUF weights as a KAS-gated `.gguf.tdf`. Discovery prefers a sibling plaintext `.gguf`, so delete the source after wrap or the router will keep loading plaintext.
+
+```bash
+arkavo model protect ~/.cache/huggingface/hub/models--arkavo--tinystories-15m/snapshots/local/stories15M.gguf
+rm ~/.cache/huggingface/hub/models--arkavo--tinystories-15m/snapshots/local/stories15M.gguf
+arkavo chat --model tinystories-15m --prompt "Once upon a time, Lily"
+```
+
+The first load rewraps through `arkavo login` / platform KAS. Keep a plaintext backup until that load succeeds.
