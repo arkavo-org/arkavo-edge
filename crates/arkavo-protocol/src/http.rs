@@ -13,6 +13,17 @@ pub struct HttpTransport {
     endpoint: Arc<RwLock<Option<A2aEndpoint>>>,
 }
 
+fn format_reqwest_error(err: &reqwest::Error) -> String {
+    let mut msg = err.to_string();
+    let mut source = std::error::Error::source(err);
+    while let Some(cause) = source {
+        msg.push_str(": ");
+        msg.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    msg
+}
+
 impl HttpTransport {
     pub fn new(config: TransportConfig) -> Result<Self> {
         let timeout = Duration::from_millis(config.timeout_ms);
@@ -20,11 +31,13 @@ impl HttpTransport {
         let mut builder = ClientBuilder::new()
             .use_rustls_tls()
             .timeout(timeout)
-            .connect_timeout(timeout);
+            .connect_timeout(timeout)
+            .danger_accept_invalid_certs(false);
 
         if !config.tls_config.verify_cert {
-            warn!("TLS certificate verification is disabled — vulnerable to MITM attacks");
-            builder = builder.danger_accept_invalid_certs(true);
+            warn!(
+                "tls_config.verify_cert=false is ignored; TLS certificate verification is always enabled"
+            );
         }
 
         // Load client certificates for mTLS
@@ -202,7 +215,11 @@ impl A2aTransport for HttpTransport {
                         continue;
                     }
 
-                    return Err(A2aError::Http(format!("Request failed: {e}")).into());
+                    return Err(A2aError::Http(format!(
+                        "Request failed: {}",
+                        format_reqwest_error(&e)
+                    ))
+                    .into());
                 }
             }
         }

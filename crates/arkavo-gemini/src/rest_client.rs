@@ -7,6 +7,8 @@ use serde_json::Value;
 use std::time::Duration;
 
 const GEMINI_REST_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta";
+/// Google APIs accept the key as `x-goog-api-key` so it never appears in URLs.
+const GOOG_API_KEY_HEADER: &str = "x-goog-api-key";
 
 #[derive(Debug, Clone)]
 pub struct RestClient {
@@ -107,6 +109,7 @@ struct Candidate {
 impl RestClient {
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         let client = Client::builder()
+            .use_rustls_tls()
             .timeout(Duration::from_mins(2))
             .build()
             .unwrap_or_else(|_| Client::new());
@@ -116,6 +119,35 @@ impl RestClient {
             api_key: api_key.into(),
             model: model.into(),
         }
+    }
+
+    fn model_name(&self) -> &str {
+        self.model.strip_prefix("models/").unwrap_or(&self.model)
+    }
+
+    fn generate_content_url(&self) -> String {
+        format!(
+            "{GEMINI_REST_ENDPOINT}/models/{}:generateContent",
+            self.model_name()
+        )
+    }
+
+    fn stream_generate_content_url(&self) -> String {
+        format!(
+            "{GEMINI_REST_ENDPOINT}/models/{}:streamGenerateContent?alt=sse",
+            self.model_name()
+        )
+    }
+
+    fn list_models_url(page_size: Option<u32>) -> String {
+        match page_size {
+            Some(size) => format!("{GEMINI_REST_ENDPOINT}/models?pageSize={size}"),
+            None => format!("{GEMINI_REST_ENDPOINT}/models"),
+        }
+    }
+
+    fn apply_auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        builder.header(GOOG_API_KEY_HEADER, self.api_key.as_str())
     }
 
     pub async fn generate_content(
@@ -144,16 +176,9 @@ impl RestClient {
             generation_config,
         };
 
-        // Remove 'models/' prefix if present since we'll add it in the URL
-        let model_name = self.model.strip_prefix("models/").unwrap_or(&self.model);
-        let url = format!(
-            "{}/models/{}:generateContent?key={}",
-            GEMINI_REST_ENDPOINT, model_name, self.api_key
-        );
-
+        let url = self.generate_content_url();
         let response = self
-            .client
-            .post(&url)
+            .apply_auth(self.client.post(&url))
             .json(&request)
             .send()
             .await
@@ -302,17 +327,16 @@ impl RestClient {
     }
 
     async fn stream_request(&self, request: GenerateContentRequest) -> Result<GeminiSseStream> {
-        let model_name = self.model.strip_prefix("models/").unwrap_or(&self.model);
-        let url = format!(
-            "{}/models/{}:streamGenerateContent?alt=sse&key={}",
-            GEMINI_REST_ENDPOINT, model_name, self.api_key
-        );
+        let url = self.stream_generate_content_url();
 
         // Create a new client with no timeout for streaming (SSE keeps connection open)
-        let streaming_client = Client::builder().build().unwrap_or_else(|_| Client::new());
+        let streaming_client = Client::builder()
+            .use_rustls_tls()
+            .build()
+            .unwrap_or_else(|_| Client::new());
 
-        let response = streaming_client
-            .post(&url)
+        let response = self
+            .apply_auth(streaming_client.post(&url))
             .json(&request)
             .send()
             .await
@@ -341,18 +365,9 @@ impl RestClient {
     }
 
     pub async fn list_models(&self, page_size: Option<u32>) -> Result<ListModelsResponse> {
-        let url = if let Some(size) = page_size {
-            format!(
-                "{}/models?key={}&pageSize={size}",
-                GEMINI_REST_ENDPOINT, self.api_key
-            )
-        } else {
-            format!("{}/models?key={}", GEMINI_REST_ENDPOINT, self.api_key)
-        };
-
+        let url = Self::list_models_url(page_size);
         let response = self
-            .client
-            .get(&url)
+            .apply_auth(self.client.get(&url))
             .send()
             .await
             .map_err(|e| GeminiError::ApiError(format!("HTTP request failed: {e}")))?;
@@ -371,5 +386,27 @@ impl RestClient {
             .map_err(|e| GeminiError::ApiError(format!("Failed to parse response: {e}")))?;
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_url_excludes_secret(url: &str, secret: &str) {
+        assert!(url.starts_with("https://"), "{url}");
+        assert!(!url.contains(secret), "{url}");
+        assert!(!url.contains("key="), "{url}");
+    }
+
+    #[test]
+    fn rest_urls_never_include_api_key() {
+        let secret = "sk-test-secret-value";
+        let client = RestClient::new(secret, "models/gemini-3.5-flash");
+        assert_url_excludes_secret(&client.generate_content_url(), secret);
+        assert_url_excludes_secret(&client.stream_generate_content_url(), secret);
+        assert_url_excludes_secret(&RestClient::list_models_url(None), secret);
+        assert_url_excludes_secret(&RestClient::list_models_url(Some(10)), secret);
+        assert_eq!(GOOG_API_KEY_HEADER, "x-goog-api-key");
     }
 }

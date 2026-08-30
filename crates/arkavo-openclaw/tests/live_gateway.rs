@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Live integration tests against a running OpenClaw gateway.
 //!
 //! These tests require `OPENCLAW_GATEWAY_TOKEN` env and a gateway at `ws://127.0.0.1:18789`.
@@ -354,7 +356,7 @@ async fn chat_send_with_streaming_response() {
         _ => "agent:main:main".to_string(),
     };
 
-    eprintln!("using session_key: {session_key}");
+    eprintln!("using discovered session");
 
     // Send chat via the convenience method
     let result = transport
