@@ -146,7 +146,7 @@ impl RestClient {
         }
     }
 
-    fn with_api_key(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    fn apply_auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         builder.header(GOOG_API_KEY_HEADER, self.api_key.as_str())
     }
 
@@ -178,7 +178,7 @@ impl RestClient {
 
         let url = self.generate_content_url();
         let response = self
-            .with_api_key(self.client.post(&url))
+            .apply_auth(self.client.post(&url))
             .json(&request)
             .send()
             .await
@@ -336,7 +336,7 @@ impl RestClient {
             .unwrap_or_else(|_| Client::new());
 
         let response = self
-            .with_api_key(streaming_client.post(&url))
+            .apply_auth(streaming_client.post(&url))
             .json(&request)
             .send()
             .await
@@ -367,7 +367,7 @@ impl RestClient {
     pub async fn list_models(&self, page_size: Option<u32>) -> Result<ListModelsResponse> {
         let url = Self::list_models_url(page_size);
         let response = self
-            .with_api_key(self.client.get(&url))
+            .apply_auth(self.client.get(&url))
             .send()
             .await
             .map_err(|e| GeminiError::ApiError(format!("HTTP request failed: {e}")))?;
