@@ -202,7 +202,9 @@ impl VirtualGguf {
         copied.zeroize();
         self.cache.clear();
         // Dropping the prefetcher stops the worker and zeroizes the segments
-        // it had decrypted ahead of the loader.
+        // it had decrypted ahead of the loader. This runs inside llama.cpp's
+        // FFI read callback and joins the worker, so it blocks the loader for
+        // at most the one segment decrypt already in progress.
         self.prefetch = None;
         self.deferred_failures.clear();
         self.failed = Some(err);

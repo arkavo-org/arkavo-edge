@@ -83,8 +83,7 @@ impl Prefetcher {
                         break;
                     }
                 }
-            })
-            .expect("spawn prefetch thread");
+            })?;
 
         Ok(Self {
             requests: Some(req_tx),
@@ -102,9 +101,15 @@ impl Prefetcher {
     }
 
     /// Asks the worker for segment `id`, unless it is already in flight, is
-    /// already decrypted and waiting, or `depth` segments are outstanding.
+    /// already decrypted and waiting, or `depth` segments are already held.
+    ///
+    /// The cap counts `in_flight` *and* `ready` together. An id moves from one
+    /// to the other the moment its plaintext arrives, so counting only
+    /// `in_flight` would let `wait_for` stash results and `request` then refill
+    /// the window behind them, holding up to `2 * depth - 1` decrypted segments
+    /// — more than the plaintext bound this type documents.
     pub(crate) fn request(&mut self, id: usize) {
-        if self.in_flight.len() >= self.depth
+        if self.in_flight.len() + self.ready.len() >= self.depth
             || self.in_flight.contains(&id)
             || self.ready.iter().any(|(k, _)| *k == id)
         {
@@ -152,11 +157,17 @@ impl Prefetcher {
         None
     }
 
-    /// Outstanding requests. Only the unit tests need this: it is how the
-    /// `depth` cap — and so the plaintext bound — is asserted.
+    /// Outstanding requests. Only the unit tests need this: with `stashed`, it
+    /// is how the `depth` cap — and so the plaintext bound — is asserted.
     #[cfg(test)]
     pub(crate) fn in_flight(&self) -> usize {
         self.in_flight.len()
+    }
+
+    /// Results decrypted but not yet handed to the reader.
+    #[cfg(test)]
+    pub(crate) fn stashed(&self) -> usize {
+        self.ready.len()
     }
 }
 
@@ -330,6 +341,31 @@ mod tests {
             p.request(id);
         }
         assert_eq!(p.in_flight(), 2, "depth caps the plaintext held ahead");
+    }
+
+    /// The cap must count stashed results too: `wait_for` moves everything it
+    /// receives ahead of the id it wants into `ready`, and those buffers hold
+    /// plaintext just as much as an outstanding request will.
+    #[test]
+    fn stashed_results_count_against_the_depth_cap() {
+        let parts = fixture(7);
+        let mut p = spawn(&parts, 4);
+        for id in 1..=4 {
+            p.request(id);
+        }
+        // Waiting for 3 stashes 1 and 2, leaving only 4 in flight.
+        assert!(p.wait_for(3).unwrap().is_ok());
+        assert_eq!((p.in_flight(), p.stashed()), (1, 2));
+
+        for id in 5..=7 {
+            p.request(id);
+        }
+        assert_eq!(
+            p.in_flight() + p.stashed(),
+            4,
+            "only one more request fits: stashed plaintext counts against depth"
+        );
+        assert_eq!(p.in_flight(), 2, "5 was accepted, 6 and 7 were not");
     }
 
     #[test]
