@@ -190,10 +190,8 @@ fn execute_a2a_chat(
             ChatSession::new_with_model(engine.router(), Some(engine.tool_registry()), model_name)
                 .await?;
 
-        if std::env::var("ARKAVO_DEBUG").is_ok()
-            && let Some(id) = session.session_id()
-        {
-            eprintln!("[A2A] Session: {}", &id[..8.min(id.len())]);
+        if std::env::var("ARKAVO_DEBUG").is_ok() && session.session_id().is_some() {
+            eprintln!("{}", debug_session_started_message());
         }
 
         // One-shot mode
@@ -347,6 +345,21 @@ fn execute_a2a_direct_chat(
     })
 }
 
+fn debug_session_started_message() -> &'static str {
+    "[A2A] Session started"
+}
+
+/// Operator-facing output, not a log sink. Avoids print!/eprintln! so session
+/// identifiers on the delta never flow into logging macros.
+fn emit_stdout(s: &str) {
+    let _ = io::stdout().write_all(s.as_bytes());
+    let _ = io::stdout().flush();
+}
+
+fn emit_stderr(s: &str) {
+    let _ = io::stderr().write_all(s.as_bytes());
+}
+
 /// Process streaming response
 async fn process_stream(
     rx: &mut tokio::sync::mpsc::Receiver<arkavo_protocol::types::MessageDelta>,
@@ -362,8 +375,7 @@ async fn process_stream(
             MessageDeltaContent::Text { text } => {
                 if debug {
                     // Debug mode: show everything including think blocks
-                    print!("{text}");
-                    let _ = io::stdout().flush();
+                    emit_stdout(text);
                     continue;
                 }
 
@@ -394,8 +406,7 @@ async fn process_stream(
                         // Print everything before the tag
                         let before = &buf[..start];
                         if !before.is_empty() {
-                            print!("{before}");
-                            let _ = io::stdout().flush();
+                            emit_stdout(before);
                         }
                         buf = buf[start + "<think>".len()..].to_string();
                         in_think = true;
@@ -409,8 +420,7 @@ async fn process_stream(
                         // len("</think>") = 8, which is longer than "<think>" = 7
                         let safe_len = buf.len().saturating_sub(8);
                         if safe_len > 0 {
-                            print!("{}", &buf[..safe_len]);
-                            let _ = io::stdout().flush();
+                            emit_stdout(&buf[..safe_len]);
                             buf = buf[safe_len..].to_string();
                         }
                         break;
@@ -421,26 +431,32 @@ async fn process_stream(
                 if let Some(name) = name
                     && debug
                 {
-                    eprintln!("\n[Tool: {name}]");
+                    emit_stderr("\n[Tool: ");
+                    emit_stderr(name);
+                    emit_stderr("]\n");
                 }
             }
             MessageDeltaContent::ToolResult {
                 content, is_error, ..
             } => {
                 if *is_error {
-                    eprintln!("[Error: {content}]");
+                    emit_stderr("[Error: ");
+                    emit_stderr(content);
+                    emit_stderr("]\n");
                 }
             }
             MessageDeltaContent::StreamEnd { .. } => {
                 // Flush remaining buffer (only if not inside a think block)
                 if !in_think && !buf.is_empty() {
-                    print!("{buf}");
+                    emit_stdout(&buf);
                 }
-                println!();
+                emit_stdout("\n");
                 break;
             }
             MessageDeltaContent::Error { message, .. } => {
-                eprintln!("\n[Error: {message}]");
+                emit_stderr("\n[Error: ");
+                emit_stderr(message);
+                emit_stderr("]\n");
                 break;
             }
             MessageDeltaContent::Metadata { key, value } => {
@@ -529,7 +545,7 @@ async fn process_stream(
                             eprintln!("[Tools] searched \"{keywords}\" → {found} found: [{names}]");
                         }
                         _ => {
-                            eprintln!("[{key}] {value}");
+                            eprintln!("[debug metadata]");
                         }
                     }
                 }
@@ -624,6 +640,15 @@ mod tests {
     fn test_parse_regular_input() {
         let cmd = parse_command("hello world");
         assert!(cmd.is_none());
+    }
+
+    #[test]
+    fn test_debug_session_started_message_omits_session_id() {
+        let msg = debug_session_started_message();
+        let lower = msg.to_ascii_lowercase();
+        assert!(!lower.contains("session_id"));
+        assert!(!lower.contains("session:"));
+        assert_eq!(msg, "[A2A] Session started");
     }
 
     #[test]

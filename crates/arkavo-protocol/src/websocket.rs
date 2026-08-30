@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use rustls::pki_types::pem::PemObject;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore};
 use std::fs;
 use std::sync::Arc;
@@ -75,7 +75,7 @@ impl WebSocketTransport {
         }
 
         // Build the client config based on whether mTLS is needed
-        let mut config = if let (Some(cert_path), Some(key_path)) = (
+        let config = if let (Some(cert_path), Some(key_path)) = (
             &self.config.tls_config.client_cert_path,
             &self.config.tls_config.client_key_path,
         ) {
@@ -106,12 +106,10 @@ impl WebSocketTransport {
                 .with_no_client_auth()
         };
 
-        // Configure certificate verification
         if !self.config.tls_config.verify_cert {
-            warn!("Certificate verification disabled - accepting any certificate");
-            config
-                .dangerous()
-                .set_certificate_verifier(Arc::new(AcceptAnyServerCert));
+            warn!(
+                "tls_config.verify_cert=false is ignored; TLS certificate verification is always enabled"
+            );
         }
 
         Ok(Connector::Rustls(Arc::new(config)))
@@ -308,55 +306,6 @@ impl A2aTransport for WebSocketTransport {
     }
 }
 
-// Custom certificate verifier that accepts any certificate (for development only)
-#[derive(Debug)]
-struct AcceptAnyServerCert;
-
-impl rustls::client::danger::ServerCertVerifier for AcceptAnyServerCert {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            rustls::SignatureScheme::RSA_PKCS1_SHA384,
-            rustls::SignatureScheme::RSA_PKCS1_SHA512,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
-            rustls::SignatureScheme::RSA_PSS_SHA256,
-            rustls::SignatureScheme::RSA_PSS_SHA384,
-            rustls::SignatureScheme::RSA_PSS_SHA512,
-            rustls::SignatureScheme::ED25519,
-        ]
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 #[allow(clippy::field_reassign_with_default)]
@@ -369,6 +318,20 @@ mod tests {
     #[tokio::test]
     async fn test_websocket_transport_creation() {
         let config = TransportConfig::default();
+        let transport = WebSocketTransport::new(config);
+        assert!(!transport.is_connected());
+    }
+
+    #[test]
+    fn test_cert_verification_cannot_be_disabled() {
+        let config = TransportConfig {
+            tls_config: crate::transport::TlsConfig {
+                verify_cert: false,
+                require_tls: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let transport = WebSocketTransport::new(config);
         assert!(!transport.is_connected());
     }

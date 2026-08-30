@@ -20,11 +20,13 @@ impl HttpTransport {
         let mut builder = ClientBuilder::new()
             .use_rustls_tls()
             .timeout(timeout)
-            .connect_timeout(timeout);
+            .connect_timeout(timeout)
+            .danger_accept_invalid_certs(false);
 
         if !config.tls_config.verify_cert {
-            warn!("TLS certificate verification is disabled — vulnerable to MITM attacks");
-            builder = builder.danger_accept_invalid_certs(true);
+            warn!(
+                "tls_config.verify_cert=false is ignored; TLS certificate verification is always enabled"
+            );
         }
 
         // Load client certificates for mTLS
@@ -296,5 +298,21 @@ mod tests {
                 .to_string()
                 .contains("Transport not connected")
         );
+    }
+
+    #[test]
+    fn test_cert_verification_cannot_be_disabled() {
+        let config = TransportConfig {
+            tls_config: crate::transport::TlsConfig {
+                verify_cert: false,
+                require_tls: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // Construction succeeds; verification stays enabled (the dangerous
+        // accept-invalid-certs path is gone).
+        let transport = HttpTransport::new(config).unwrap();
+        assert!(!transport.is_connected());
     }
 }

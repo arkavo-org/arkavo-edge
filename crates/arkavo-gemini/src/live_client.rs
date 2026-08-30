@@ -13,6 +13,8 @@ use tokio::net::TcpStream;
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error, info, warn};
 use url::Url;
@@ -183,12 +185,22 @@ impl LiveSessionClient {
         Err(GeminiError::ConnectionTimeout(backoff))
     }
 
+    fn connect_request(&self) -> Result<tokio_tungstenite::tungstenite::http::Request<()>> {
+        Url::parse(&self.endpoint_url)?;
+        let mut request = self.endpoint_url.as_str().into_client_request()?;
+        let api_key_header = HeaderValue::from_str(&self.api_key)
+            .map_err(|e| GeminiError::Config(format!("invalid API key for header: {e}")))?;
+        request
+            .headers_mut()
+            .insert("x-goog-api-key", api_key_header);
+        Ok(request)
+    }
+
     async fn try_connect(&self) -> Result<()> {
-        let url_with_key = format!("{}?key={}", self.endpoint_url, self.api_key);
-        let _url = Url::parse(&url_with_key)?;
+        let request = self.connect_request()?;
 
         debug!("Connecting to Gemini WebSocket endpoint");
-        let (ws_stream, _) = connect_async(&url_with_key).await?;
+        let (ws_stream, _) = connect_async(request).await?;
         let (writer, reader) = ws_stream.split();
 
         {
@@ -477,5 +489,21 @@ impl LiveSessionClient {
 
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_connect_request_keeps_api_key_out_of_url() {
+        let secret = "sk-test-secret-value";
+        let client = LiveSessionClient::new(secret, "gemini-2.5-flash-native-audio-latest");
+        let request = client.connect_request().unwrap();
+        let uri = request.uri().to_string();
+        assert!(!uri.contains(secret), "{uri}");
+        assert!(!uri.contains("key="), "{uri}");
+        assert_eq!(request.headers().get("x-goog-api-key").unwrap(), secret);
     }
 }
