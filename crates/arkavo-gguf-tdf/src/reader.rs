@@ -9,6 +9,7 @@ use crate::error::GgufTdfError;
 use crate::gguf_header::parse_header;
 use crate::index::{SegmentMap, validate_index};
 use crate::key::PayloadKeyUnwrapper;
+use crate::prefetch::Prefetcher;
 use crate::read_at::VirtualGguf;
 use crate::{MANIFEST_ENTRY, MANIFEST_ENTRY_FALLBACK, PROFILE};
 use base64::Engine as _;
@@ -17,13 +18,17 @@ use opentdf::{GgufIndex, TdfEncryption, TdfManifest, TdfMemberIndex};
 use sha2::Sha256;
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 /// An opened `.gguf.tdf` whose structure has been validated but whose payload
 /// key has not been requested yet.
 pub struct GgufTdfArchive {
+    /// Kept so the decrypt-ahead worker can open its own handle; `try_clone`
+    /// would only `dup` this one, and a duplicated descriptor shares the seek
+    /// cursor, so the worker and the reader would race on every read.
+    path: PathBuf,
     file: File,
     members: TdfMemberIndex,
     manifest: TdfManifest,
@@ -57,6 +62,7 @@ impl GgufTdfArchive {
         )?;
 
         Ok(Self {
+            path: path.to_path_buf(),
             file,
             members,
             manifest,
@@ -97,16 +103,36 @@ impl GgufTdfArchive {
     /// authenticated header, and checks the root signature, all before any
     /// caller can read a weight byte.
     pub fn unlock(self, unwrapper: &dyn PayloadKeyUnwrapper) -> Result<VirtualGguf, GgufTdfError> {
-        self.unlock_with_cache(unwrapper, crate::DEFAULT_CACHED_SEGMENTS)
+        self.unlock_with_options(
+            unwrapper,
+            crate::DEFAULT_CACHED_SEGMENTS,
+            crate::DEFAULT_PREFETCH_DEPTH,
+        )
     }
 
     /// `unlock` with an explicit number of decrypted weight segments to keep
-    /// (spec §13.3). Extra plaintext is `headerBytes + cached_segments *
-    /// maxSegment`. `cached_segments == 0` is treated as 1.
+    /// (spec §13.3) and no decrypt-ahead worker, so extra plaintext is exactly
+    /// `headerBytes + cached_segments * maxSegment`. `cached_segments == 0` is
+    /// treated as 1.
     pub fn unlock_with_cache(
+        self,
+        unwrapper: &dyn PayloadKeyUnwrapper,
+        cached_segments: usize,
+    ) -> Result<VirtualGguf, GgufTdfError> {
+        self.unlock_with_options(unwrapper, cached_segments, 0)
+    }
+
+    /// `unlock` with both reader knobs (spec §13.3).
+    ///
+    /// `prefetch_depth` segments are decrypted ahead of the loader on a
+    /// worker thread, so AES overlaps the loader's copy; `0` spawns no
+    /// thread. Extra plaintext is `headerBytes + (cached_segments +
+    /// prefetch_depth) * maxSegment`.
+    pub fn unlock_with_options(
         mut self,
         unwrapper: &dyn PayloadKeyUnwrapper,
         cached_segments: usize,
+        prefetch_depth: usize,
     ) -> Result<VirtualGguf, GgufTdfError> {
         let payload_key = Zeroizing::new(unwrapper.unwrap_key(&self.manifest)?);
 
@@ -119,7 +145,7 @@ impl GgufTdfArchive {
         verify_root_signature(&self.manifest, &payload_key)?;
 
         let index = self.index().clone();
-        let hashes = self
+        let hashes: Vec<String> = self
             .manifest
             .encryption_information
             .integrity_information
@@ -127,6 +153,27 @@ impl GgufTdfArchive {
             .iter()
             .map(|s| s.hash.clone())
             .collect();
+
+        // The worker reads and decrypts independently of the reader, so it
+        // gets its own open file and its own cipher state; everything it
+        // needs is already authenticated above. Should this open see a
+        // different file than `open` did, every byte it produces is still
+        // checked against the manifest's GMAC row, so the swap can only fail
+        // closed for the segment concerned.
+        let prefetch = if prefetch_depth > 0 {
+            Some(Prefetcher::spawn(
+                &self.path,
+                TdfEncryption::with_payload_key(payload_key.as_ref()).map_err(|e| {
+                    GgufTdfError::KasDenied(format!("KAS returned an unusable key: {e}"))
+                })?,
+                self.members.clone(),
+                index.segments.clone(),
+                hashes.clone(),
+                prefetch_depth,
+            )?)
+        } else {
+            None
+        };
 
         Ok(VirtualGguf::new(
             self.file,
@@ -137,6 +184,7 @@ impl GgufTdfArchive {
             header_plain,
             hashes,
             cached_segments,
+            prefetch,
         ))
     }
 }

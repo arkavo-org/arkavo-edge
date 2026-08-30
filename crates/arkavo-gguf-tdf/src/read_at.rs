@@ -1,12 +1,20 @@
 //! Virtual GGUF `read_at` (spec §13.3).
 //!
-//! Extra anonymous plaintext is the retained header plus up to
-//! `cached_segments` decrypted weight segments: `headerBytes + k·maxSegment`.
-//! A tag failure is sticky, zeroizes the bytes already copied into the
-//! caller's buffer, clears the whole segment cache, and never falls back.
+//! Extra anonymous plaintext is the retained header, up to `cached_segments`
+//! decrypted weight segments, and up to `prefetch_depth` more held by the
+//! decrypt-ahead worker: `headerBytes + (cached_segments + prefetch_depth) ·
+//! maxSegment`. A tag failure is sticky, zeroizes the bytes already copied
+//! into the caller's buffer, drops every plaintext the reader holds — cache
+//! and worker alike — and never falls back.
+
+// `pub(crate)` on `decrypt_and_verify` is the real, intended visibility (this
+// module is private, so nothing leaks past the crate either way);
+// `redundant_pub_crate` wants `pub`, which `unreachable_pub` then rejects.
+#![allow(clippy::redundant_pub_crate)]
 
 use crate::error::GgufTdfError;
 use crate::index::SegmentMap;
+use crate::prefetch::Prefetcher;
 use crate::segment_cache::SegmentCache;
 use base64::Engine as _;
 use opentdf::{GgufIndex, TdfEncryption, TdfMemberIndex};
@@ -34,13 +42,18 @@ pub struct VirtualGguf {
     hashes: Vec<String>,
     /// Weight segments decrypted so far, for `segments_decrypted`.
     decrypts: u64,
+    /// Decrypt-ahead worker, when `prefetch_depth` was non-zero at unlock.
+    prefetch: Option<Prefetcher>,
+    /// Prefetch failures, held until the loader asks for that segment: a
+    /// segment the loader never reads must not fail the load (spec §13.3).
+    deferred_failures: Vec<(usize, GgufTdfError)>,
     failed: Option<GgufTdfError>,
 }
 
 impl VirtualGguf {
     // One argument per field the caller has already authenticated or
     // computed at unlock; splitting them into a builder would just move the
-    // same eight values one level up without adding a real invariant.
+    // same values one level up without adding a real invariant.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         file: File,
@@ -51,6 +64,7 @@ impl VirtualGguf {
         header_plain: Zeroizing<Vec<u8>>,
         hashes: Vec<String>,
         cached_segments: usize,
+        prefetch: Option<Prefetcher>,
     ) -> Self {
         Self {
             file,
@@ -63,6 +77,8 @@ impl VirtualGguf {
             cipher: Vec::new(),
             hashes,
             decrypts: 0,
+            prefetch,
+            deferred_failures: Vec::new(),
             failed: None,
         }
     }
@@ -120,10 +136,7 @@ impl VirtualGguf {
                 break;
             };
             if let Err(err) = self.ensure_segment(id) {
-                dst[..written].zeroize();
-                self.cache.clear();
-                self.failed = Some(err);
-                return 0;
+                return self.fail(&mut dst[..written], err);
             }
 
             let start = self.map.start_of(id);
@@ -143,12 +156,12 @@ impl VirtualGguf {
                     .unwrap_or(0)
             };
             if local >= plain_len {
-                dst[..written].zeroize();
-                self.cache.clear();
-                self.failed = Some(GgufTdfError::BadIndex(
-                    "segment map disagrees with the decrypted segment length".to_string(),
-                ));
-                return 0;
+                return self.fail(
+                    &mut dst[..written],
+                    GgufTdfError::BadIndex(
+                        "segment map disagrees with the decrypted segment length".to_string(),
+                    ),
+                );
             }
 
             let plaintext = if id == 0 {
@@ -162,12 +175,13 @@ impl VirtualGguf {
                         // llama.cpp's FFI read callback, where unwinding
                         // across the boundary is undefined behaviour, so fail
                         // closed instead of panicking.
-                        dst[..written].zeroize();
-                        self.cache.clear();
-                        self.failed = Some(GgufTdfError::BadIndex(format!(
-                            "segment {id} vanished from the cache immediately after being cached"
-                        )));
-                        return 0;
+                        return self.fail(
+                            &mut dst[..written],
+                            GgufTdfError::BadIndex(format!(
+                                "segment {id} vanished from the cache immediately \
+                                 after being cached"
+                            )),
+                        );
                     }
                 }
             };
@@ -180,13 +194,46 @@ impl VirtualGguf {
         written
     }
 
+    /// Fails closed: wipes what this call already copied, drops every
+    /// plaintext the reader holds — the cache and the worker's decrypt-ahead
+    /// buffers alike — and makes the failure sticky. Always returns 0, the
+    /// count `read_at` reports for both EOF and failure.
+    fn fail(&mut self, copied: &mut [u8], err: GgufTdfError) -> usize {
+        copied.zeroize();
+        self.cache.clear();
+        // Dropping the prefetcher stops the worker and zeroizes the segments
+        // it had decrypted ahead of the loader.
+        self.prefetch = None;
+        self.deferred_failures.clear();
+        self.failed = Some(err);
+        0
+    }
+
     /// Makes segment `id`'s plaintext available, decrypting if needed.
     ///
     /// Segment 0 is already retained and authenticated. Any other segment is
-    /// served from the LRU cache when present, or decrypted and inserted,
-    /// evicting the least-recently-used entry when the cache is full.
+    /// served from the LRU cache when present, from the decrypt-ahead worker
+    /// when it got there first, or decrypted inline; each path inserts into
+    /// the cache, evicting the least-recently-used entry when it is full.
     fn ensure_segment(&mut self, id: usize) -> Result<(), GgufTdfError> {
-        if id == 0 || self.cache.get(id).is_some() {
+        if id == 0 {
+            return Ok(());
+        }
+        // Draining first means a segment the worker already finished is a
+        // cache hit here rather than a second decrypt.
+        self.drain_prefetched();
+        if self.cache.get(id).is_some() {
+            self.schedule_ahead(id);
+            return Ok(());
+        }
+        if let Some(pos) = self.deferred_failures.iter().position(|(k, _)| *k == id) {
+            return Err(self.deferred_failures.remove(pos).1);
+        }
+        if let Some(result) = self.prefetch.as_mut().and_then(|p| p.wait_for(id)) {
+            let plain = result?;
+            self.decrypts += 1;
+            self.cache.insert(id, plain);
+            self.schedule_ahead(id);
             return Ok(());
         }
 
@@ -213,29 +260,81 @@ impl VirtualGguf {
         // The slot comes back zeroized; a failed decrypt below drops it
         // without ever inserting, so no partial plaintext stays reachable.
         let mut plain = self.cache.take_slot(segment.plain as usize);
-        let tag = self
-            .encryption
-            .decrypt_segment_into(&self.cipher, &mut plain)
-            .map_err(|_| GgufTdfError::TagMismatch)?;
-        self.decrypts += 1;
-
         let row = self
             .index_row(id)
             .ok_or_else(|| GgufTdfError::BadIndex(format!("no integrity row {id}")))?;
-        let expected = base64::engine::general_purpose::STANDARD
-            .decode(row)
-            .map_err(|_| GgufTdfError::TagMismatch)?;
-        if expected.ct_eq(&tag).unwrap_u8() != 1 {
-            return Err(GgufTdfError::TagMismatch);
-        }
+        decrypt_and_verify(&self.encryption, &self.cipher, &mut plain, row)?;
+        self.decrypts += 1;
 
         self.cache.insert(id, plain);
+        self.schedule_ahead(id);
         Ok(())
+    }
+
+    /// Moves everything the worker has finished into the cache. A failure is
+    /// held rather than raised: it becomes this reader's sticky failure only
+    /// if the loader asks for that segment (spec §13.3).
+    fn drain_prefetched(&mut self) {
+        let collected = match self.prefetch.as_mut() {
+            Some(p) => p.collect(),
+            None => return,
+        };
+        for (id, result) in collected {
+            match result {
+                Ok(plain) => {
+                    self.decrypts += 1;
+                    self.cache.insert(id, plain);
+                }
+                Err(err) => self.deferred_failures.push((id, err)),
+            }
+        }
+    }
+
+    /// Asks the worker for the segments after `id`, so their AES overlaps the
+    /// loader's copy of the one it just got.
+    fn schedule_ahead(&mut self, id: usize) {
+        let Some(depth) = self.prefetch.as_ref().map(Prefetcher::depth) else {
+            return;
+        };
+        let last = self.index.segments.len().saturating_sub(1);
+        for next in (id + 1)..=(id + depth).min(last) {
+            // A cached segment needs no work, and a segment already charged
+            // with a deferred failure must not be re-requested: a retry that
+            // succeeded would leave the stale error to fire later.
+            if self.cache.contains(next) || self.deferred_failures.iter().any(|(k, _)| *k == next) {
+                continue;
+            }
+            if let Some(p) = self.prefetch.as_mut() {
+                p.request(next);
+            }
+        }
     }
 
     fn index_row(&self, id: usize) -> Option<&str> {
         self.hashes.get(id).map(String::as_str)
     }
+}
+
+/// Decrypts one member into `plain` and checks its GMAC against the manifest
+/// row. Used by the inline path and by the prefetch worker; both must fail
+/// identically, so a segment's plaintext is served only after both the GCM tag
+/// and the manifest row agree (spec §13.3).
+pub(crate) fn decrypt_and_verify(
+    encryption: &TdfEncryption,
+    cipher: &[u8],
+    plain: &mut [u8],
+    expected_row: &str,
+) -> Result<(), GgufTdfError> {
+    let tag = encryption
+        .decrypt_segment_into(cipher, plain)
+        .map_err(|_| GgufTdfError::TagMismatch)?;
+    let expected = base64::engine::general_purpose::STANDARD
+        .decode(expected_row)
+        .map_err(|_| GgufTdfError::TagMismatch)?;
+    if expected.ct_eq(&tag).unwrap_u8() != 1 {
+        return Err(GgufTdfError::TagMismatch);
+    }
+    Ok(())
 }
 
 impl Drop for VirtualGguf {
@@ -293,6 +392,7 @@ mod tests {
             Zeroizing::new(vec![0u8; 8]), // shorter than the map's 64-byte claim
             Vec::new(),
             4,
+            None,
         );
 
         let mut buf = [0xAAu8; 16];

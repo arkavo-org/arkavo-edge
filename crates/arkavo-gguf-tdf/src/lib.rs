@@ -13,6 +13,7 @@ mod gguf_header;
 mod index;
 mod key;
 mod pack;
+mod prefetch;
 mod read_at;
 mod reader;
 mod segment_cache;
@@ -42,6 +43,14 @@ pub const SEGMENT_OVERHEAD: u64 = 28;
 /// Decrypted weight segments a reader keeps by default (spec §13.3). Extra
 /// plaintext at load is `headerBytes + DEFAULT_CACHED_SEGMENTS * maxSegment`.
 pub const DEFAULT_CACHED_SEGMENTS: usize = 8;
+
+/// Segments the decrypt-ahead worker keeps in flight by default (spec §13.3).
+///
+/// The worker holds up to this many decrypted segments beyond the reader
+/// cache, so the plaintext bound becomes `headerBytes +
+/// (DEFAULT_CACHED_SEGMENTS + DEFAULT_PREFETCH_DEPTH) * maxSegment`. Zero
+/// disables the worker.
+pub const DEFAULT_PREFETCH_DEPTH: usize = 4;
 
 /// Zip member holding encrypted segment 0, the GGUF header.
 pub const HEADER_ENTRY: &str = "header";

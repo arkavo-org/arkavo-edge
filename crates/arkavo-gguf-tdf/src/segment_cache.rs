@@ -48,6 +48,12 @@ impl SegmentCache {
         slot
     }
 
+    /// Whether `id` is cached, without promoting it: used to decide what to
+    /// prefetch, which must not disturb the LRU order.
+    pub(crate) fn contains(&self, id: usize) -> bool {
+        self.entries.iter().any(|(k, _)| *k == id)
+    }
+
     pub(crate) fn insert(&mut self, id: usize, plain: Zeroizing<Vec<u8>>) {
         self.entries.retain(|(k, _)| *k != id);
         if self.entries.len() >= self.capacity {
@@ -115,6 +121,18 @@ mod tests {
         let slot = c.take_slot(6);
         assert_eq!(slot.len(), 6);
         assert_eq!(c.len(), 1);
+    }
+
+    #[test]
+    fn contains_reports_membership_without_promoting() {
+        let mut c = SegmentCache::new(2);
+        c.insert(1, buf(1, 4));
+        c.insert(2, buf(2, 4));
+        assert!(c.contains(1));
+        assert!(!c.contains(3));
+        // 1 was not promoted, so it is still the eviction victim.
+        c.insert(3, buf(3, 4));
+        assert!(!c.contains(1));
     }
 
     #[test]

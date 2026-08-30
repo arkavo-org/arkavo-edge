@@ -128,6 +128,32 @@ fn unlock(f: &Fixture) -> VirtualGguf {
         .unwrap()
 }
 
+/// Copies `f.archive` to `name` in the same directory and flips one
+/// ciphertext bit inside `entry`, past its 12-byte IV.
+fn corrupt_member(f: &Fixture, entry: &str, name: &str) -> PathBuf {
+    use std::io::Write;
+
+    let corrupted = f.archive.with_file_name(name);
+    std::fs::copy(&f.archive, &corrupted).unwrap();
+    let data_start = {
+        let mut file = File::open(&corrupted).unwrap();
+        let members = TdfMemberIndex::open(&mut file).unwrap();
+        members.get(entry).unwrap().data_start
+    };
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&corrupted)
+        .unwrap();
+    file.seek(SeekFrom::Start(data_start + 20)).unwrap();
+    let mut byte = [0u8; 1];
+    file.read_exact(&mut byte).unwrap();
+    byte[0] ^= 0x01;
+    file.seek(SeekFrom::Start(data_start + 20)).unwrap();
+    file.write_all(&byte).unwrap();
+    corrupted
+}
+
 /// Rewrites an archive with its manifest JSON transformed.
 fn rewrite_manifest(archive: &Path, dest: &Path, edit: impl FnOnce(&mut serde_json::Value)) {
     let mut file = File::open(archive).unwrap();
@@ -722,4 +748,138 @@ fn tag_failure_clears_every_cached_segment() {
     assert!(matches!(vg.error(), Some(GgufTdfError::TagMismatch)));
     assert_eq!(vg.cached_segments(), 0, "cache must be cleared on failure");
     assert_eq!(vg.read_at(base, &mut buf), 0, "failure is sticky");
+}
+
+/// A sequential pass with the decrypt-ahead worker serves the same bytes and
+/// still decrypts each segment once: prefetched plaintext lands in the same
+/// LRU the inline path fills.
+#[test]
+fn prefetching_reader_serves_identical_bytes_and_decrypts_each_segment_once() {
+    let f = build(64);
+    let mut vg = GgufTdfArchive::open(&f.archive)
+        .unwrap()
+        .unlock_with_options(&f.kas, 8, 4)
+        .unwrap();
+
+    let total = f.source_bytes.len();
+    let mut out = vec![0u8; total];
+    let mut off = 0usize;
+    while off < total {
+        let end = (off + 100).min(total);
+        let n = vg.read_at(off as u64, &mut out[off..end]);
+        assert!(n > 0, "read stalled at {off}");
+        off += n;
+    }
+
+    assert_eq!(out, f.source_bytes);
+    let weight_segments = (total as u64 - vg.header_bytes()).div_ceil(64);
+    assert!(
+        vg.segments_decrypted() <= weight_segments,
+        "sequential pass must not re-decrypt: {} > {weight_segments}",
+        vg.segments_decrypted()
+    );
+}
+
+/// A corrupt segment the worker decrypted ahead of the loader still fails
+/// closed, and only when the loader actually asks for it.
+#[test]
+fn prefetched_corrupt_segment_still_fails_closed_when_read() {
+    let f = build(64);
+    let corrupted = corrupt_member(&f, "s/3", "prefetch-corrupt.tdf");
+
+    let mut vg = GgufTdfArchive::open(&corrupted)
+        .unwrap()
+        .unlock_with_options(&f.kas, 8, 4)
+        .unwrap();
+    let base = vg.header_bytes();
+    let mut buf = [0u8; 16];
+
+    assert_eq!(vg.read_at(base, &mut buf), 16, "s/1 is intact");
+    assert_eq!(vg.read_at(base + 128, &mut buf), 0, "s/3 must fail closed");
+    assert!(matches!(vg.error(), Some(GgufTdfError::TagMismatch)));
+    assert_eq!(vg.cached_segments(), 0, "cache must be cleared on failure");
+    assert_eq!(vg.read_at(base, &mut buf), 0, "failure is sticky");
+}
+
+/// Spec §13.3: a segment the loader never reads must not fail the load, even
+/// though the worker decrypted it ahead and failed — and the failure is still
+/// raised, unchanged, the moment the loader does ask for that segment.
+#[test]
+fn a_prefetch_failure_is_deferred_until_the_segment_is_read() {
+    let f = build(64);
+    let corrupted = corrupt_member(&f, "s/2", "deferred-corrupt.tdf");
+
+    let mut vg = GgufTdfArchive::open(&corrupted)
+        .unwrap()
+        .unlock_with_options(&f.kas, 8, 4)
+        .unwrap();
+    let base = vg.header_bytes();
+    let start = base as usize;
+    let mut buf = [0u8; 16];
+
+    // Reading s/1 schedules s/2..s/5. The worker answers in request order, so
+    // by the time s/3 has been served s/2's failure is certainly in hand.
+    assert_eq!(vg.read_at(base, &mut buf), 16);
+    assert_eq!(&buf, &f.source_bytes[start..start + 16]);
+    assert_eq!(vg.read_at(base + 128, &mut buf), 16, "s/3 is intact");
+    assert_eq!(&buf, &f.source_bytes[start + 128..start + 144]);
+    assert!(
+        vg.error().is_none(),
+        "a failure for a segment the loader never read must not fail the load"
+    );
+
+    // Asking for it raises exactly the failure the inline path would have.
+    assert_eq!(vg.read_at(base + 64, &mut buf), 0);
+    assert!(matches!(vg.error(), Some(GgufTdfError::TagMismatch)));
+    assert_eq!(vg.cached_segments(), 0, "cache must be cleared on failure");
+    assert_eq!(vg.read_at(base, &mut buf), 0, "failure is sticky");
+}
+
+/// `prefetch_depth == 0` spawns no worker and behaves exactly as the inline
+/// reader from draft-00.
+#[test]
+fn zero_prefetch_depth_matches_the_inline_reader() {
+    let f = build(64);
+    let mut vg = GgufTdfArchive::open(&f.archive)
+        .unwrap()
+        .unlock_with_options(&f.kas, 1, 0)
+        .unwrap();
+    let base = vg.header_bytes();
+    let mut buf = [0u8; 16];
+    for seg in [0u64, 1, 0] {
+        assert_eq!(vg.read_at(base + seg * 64, &mut buf), 16);
+    }
+    assert_eq!(vg.segments_decrypted(), 3, "a one-entry cache re-decrypts");
+}
+
+/// Regression: the worker must not share a seek cursor with the reader.
+///
+/// Giving it a `try_clone` of the reader's handle duplicates the descriptor,
+/// which shares one file offset, so the two threads' `seek`/`read` pairs
+/// interleave and each reads the other's bytes. It shows up only when the
+/// reader reads the archive itself while the worker is busy, which is what a
+/// jump past the prefetch window does; a single pass is not enough to catch
+/// it, so this repeats.
+#[test]
+fn a_read_outside_the_prefetch_window_does_not_race_the_worker() {
+    let f = build(4096);
+    let total = f.source_bytes.len() as u64;
+    for pass in 0..40 {
+        let mut vg = unlock(&f);
+        let base = vg.header_bytes();
+        let mut head = [0u8; 32];
+        assert_eq!(vg.read_at(base, &mut head), 32);
+        // The worker is now decrypting the next segments. This one is far
+        // outside its window, so the reader decrypts it inline, on its own
+        // file handle, while the worker is reading on its own.
+        let mut tail = [0u8; 16];
+        assert_eq!(
+            vg.read_at(total - 16, &mut tail),
+            16,
+            "pass {pass}: {:?}",
+            vg.error().map(GgufTdfError::code)
+        );
+        assert_eq!(&tail, &f.source_bytes[(total - 16) as usize..]);
+        assert_eq!(&head, &f.source_bytes[base as usize..base as usize + 32]);
+    }
 }
