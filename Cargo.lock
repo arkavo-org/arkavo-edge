@@ -1125,13 +1125,11 @@ name = "arkavo-gguf-tdf"
 version = "0.90.0"
 dependencies = [
  "base64 0.22.1",
- "hmac",
  "opentdf",
  "rand 0.8.6",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "subtle",
  "tempfile",
  "thiserror 2.0.18",

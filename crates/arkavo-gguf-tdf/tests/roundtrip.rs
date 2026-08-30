@@ -926,3 +926,24 @@ fn manifest_member_over_the_cap_is_refused_before_allocating() {
         "GGUFTDF_BAD_INDEX"
     );
 }
+
+/// Task 14 lock-in: `verify_root_signature` enforces the 16-byte-per-row
+/// shape itself (spec §10.4); the library's `verify_root_signature` does
+/// not, so this check must survive the swap to it.
+///
+/// Row 1, not row 0: row 0 is also the header's own GMAC, checked earlier
+/// by `decrypt_header`, so shortening it would be caught there first
+/// (`TagMismatch`) rather than exercising `verify_root_signature`.
+#[test]
+fn root_signature_row_that_is_not_16_bytes_is_root_mismatch() {
+    let f = build(4096);
+    let dest = f.archive.with_file_name("short-row.gguf.tdf");
+    rewrite_manifest(&f.archive, &dest, |v| {
+        let fifteen = base64::engine::general_purpose::STANDARD.encode([0u8; 15]);
+        v["encryptionInformation"]["integrityInformation"]["segments"][1]["hash"] =
+            serde_json::json!(fifteen);
+    });
+
+    let err = expect_err(GgufTdfArchive::open(&dest).unwrap().unlock(&f.kas));
+    assert_eq!(err.code(), "GGUFTDF_ROOT_MISMATCH");
+}

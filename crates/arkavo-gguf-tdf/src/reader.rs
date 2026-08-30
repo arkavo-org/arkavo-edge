@@ -16,9 +16,8 @@ use crate::{
     SEGMENT_OVERHEAD,
 };
 use base64::Engine as _;
-use hmac::{Hmac, Mac};
+use opentdf::manifest::IntegrityInformationExt;
 use opentdf::{GgufIndex, TdfEncryption, TdfManifest, TdfMemberIndex};
-use sha2::Sha256;
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -346,7 +345,9 @@ fn bind_index_to_header(index: &GgufIndex, header_plain: &[u8]) -> Result<(), Gg
     Ok(())
 }
 
-/// Spec §10.4: HMAC over the concatenated raw 16-byte segment tags.
+/// Spec §10.4: HMAC over the concatenated raw 16-byte segment tags, verified
+/// through `opentdf`'s own constant-time implementation rather than a local
+/// HMAC (opentdf-rs#100 item 2 would also retire the row decoding below).
 ///
 /// GMAC authenticates each member in isolation and does not bind order, so an
 /// equal-size swap of two members with their `hash` rows is caught only here.
@@ -356,27 +357,21 @@ fn verify_root_signature(
     payload_key: &[u8; 32],
 ) -> Result<(), GgufTdfError> {
     let integrity = &manifest.encryption_information.integrity_information;
-
-    let mut mac = <Hmac<Sha256>>::new_from_slice(payload_key)
-        .map_err(|_| GgufTdfError::BadIndex("invalid payload key length".to_string()))?;
+    let mut tags = Vec::with_capacity(integrity.segments.len());
     for row in &integrity.segments {
         let tag = base64::engine::general_purpose::STANDARD
             .decode(&row.hash)
             .map_err(|_| GgufTdfError::RootMismatch)?;
+        // The library concatenates whatever it is given; the profile requires
+        // exactly one 16-byte GMAC per row (§10.4), so enforce that here.
         if tag.len() != 16 {
             return Err(GgufTdfError::RootMismatch);
         }
-        mac.update(&tag);
+        tags.push(tag);
     }
-    let computed = mac.finalize().into_bytes();
-
-    let expected = base64::engine::general_purpose::STANDARD
-        .decode(&integrity.root_signature.sig)
-        .map_err(|_| GgufTdfError::RootMismatch)?;
-    if expected.ct_eq(computed.as_slice()).unwrap_u8() != 1 {
-        return Err(GgufTdfError::RootMismatch);
-    }
-    Ok(())
+    integrity
+        .verify_root_signature(&tags, payload_key)
+        .map_err(|_| GgufTdfError::RootMismatch)
 }
 
 #[cfg(test)]
