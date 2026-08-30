@@ -50,7 +50,8 @@ enum ModelSubcommand {
         #[arg(long = "attribute")]
         attributes: Vec<String>,
 
-        /// Delete the plaintext source after a successful wrap
+        /// Delete the plaintext source after a successful wrap.
+        /// Reopen is structural only (zip/index); it does not prove KAS can rewrap.
         #[arg(long)]
         delete_source: bool,
     },
