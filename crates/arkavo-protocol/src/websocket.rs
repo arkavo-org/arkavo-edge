@@ -322,20 +322,6 @@ mod tests {
         assert!(!transport.is_connected());
     }
 
-    #[test]
-    fn test_cert_verification_cannot_be_disabled() {
-        let config = TransportConfig {
-            tls_config: crate::transport::TlsConfig {
-                verify_cert: false,
-                require_tls: false,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let transport = WebSocketTransport::new(config);
-        assert!(!transport.is_connected());
-    }
-
     #[tokio::test]
     async fn test_invalid_endpoint() {
         let config = TransportConfig::default();

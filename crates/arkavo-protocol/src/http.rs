@@ -13,6 +13,17 @@ pub struct HttpTransport {
     endpoint: Arc<RwLock<Option<A2aEndpoint>>>,
 }
 
+fn format_reqwest_error(err: &reqwest::Error) -> String {
+    let mut msg = err.to_string();
+    let mut source = std::error::Error::source(err);
+    while let Some(cause) = source {
+        msg.push_str(": ");
+        msg.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    msg
+}
+
 impl HttpTransport {
     pub fn new(config: TransportConfig) -> Result<Self> {
         let timeout = Duration::from_millis(config.timeout_ms);
@@ -204,7 +215,11 @@ impl A2aTransport for HttpTransport {
                         continue;
                     }
 
-                    return Err(A2aError::Http(format!("Request failed: {e}")).into());
+                    return Err(A2aError::Http(format!(
+                        "Request failed: {}",
+                        format_reqwest_error(&e)
+                    ))
+                    .into());
                 }
             }
         }
@@ -298,21 +313,5 @@ mod tests {
                 .to_string()
                 .contains("Transport not connected")
         );
-    }
-
-    #[test]
-    fn test_cert_verification_cannot_be_disabled() {
-        let config = TransportConfig {
-            tls_config: crate::transport::TlsConfig {
-                verify_cert: false,
-                require_tls: false,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        // Construction succeeds; verification stays enabled (the dangerous
-        // accept-invalid-certs path is gone).
-        let transport = HttpTransport::new(config).unwrap();
-        assert!(!transport.is_connected());
     }
 }

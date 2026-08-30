@@ -143,6 +143,9 @@ arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 # For benchmarks
 criterion = { workspace = true }
+# Self-signed TLS listener for cert-verification regression tests
+tokio-rustls = "0.26"
+rustls = { workspace = true, features = ["std", "tls12"] }
 
 [[bench]]
 name = "a2a_latency"
