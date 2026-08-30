@@ -615,4 +615,33 @@ mod protected_model_tests {
         let found = find_any_plain_gguf_in(cache.path()).unwrap();
         assert_eq!(found.file_name().unwrap(), "other.gguf");
     }
+
+    /// Precedence is tree-wide, not per directory: a protected artifact seen
+    /// first must not shadow a plaintext GGUF found later in a sibling dir.
+    #[test]
+    fn plaintext_in_a_later_directory_beats_protected_seen_earlier() {
+        let root = tempfile::tempdir().unwrap();
+        let a = root.path().join("a-protected");
+        let b = root.path().join("b-plain");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(a.join("model.gguf.tdf"), b"PK\x03\x04").unwrap();
+        std::fs::write(b.join("model.gguf"), b"GGUF").unwrap();
+
+        let found = find_gguf_in_dir(root.path()).expect("plaintext must be found");
+        assert_eq!(found, b.join("model.gguf"));
+    }
+
+    /// And the fallback still works when the protected file is the only one,
+    /// nested deeper than the directory scanned.
+    #[test]
+    fn protected_in_a_nested_directory_is_found_when_nothing_plain_exists() {
+        let root = tempfile::tempdir().unwrap();
+        let deep = root.path().join("a/snapshots/x");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("model.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        let found = find_gguf_in_dir(root.path()).expect("protected must be found");
+        assert_eq!(found, deep.join("model.gguf.tdf"));
+    }
 }
