@@ -51,7 +51,12 @@ enum ModelSubcommand {
         attributes: Vec<String>,
 
         /// Delete the plaintext source after a successful wrap.
-        /// Reopen is structural only (zip/index); it does not prove KAS can rewrap.
+        ///
+        /// The written archive is reopened, unlocked with the freshly
+        /// generated payload key, and its header authenticated first; the
+        /// KAS rewrap itself is not exercised, so a wrong KAS public key is
+        /// only caught at first load. Keep a backup until a load through
+        /// `arkavo login` has succeeded.
         #[arg(long)]
         delete_source: bool,
     },
@@ -264,4 +269,32 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{CommandFactory, Parser};
+
+    /// `ModelCommand` derives `Args`, not `Parser`, so it has no `Command` of
+    /// its own to render help from; this wrapper mirrors the one `lib.rs`
+    /// builds at dispatch time.
+    #[derive(Parser)]
+    struct Cli {
+        #[command(flatten)]
+        command: ModelCommand,
+    }
+
+    #[test]
+    fn delete_source_help_states_the_kas_rewrap_is_not_exercised() {
+        let mut top = Cli::command();
+        let protect = top
+            .find_subcommand_mut("protect")
+            .expect("protect subcommand exists");
+        let help = protect.render_long_help().to_string();
+        assert!(
+            help.contains("KAS rewrap itself is not exercised"),
+            "help must state the trust boundary, got:\n{help}"
+        );
+    }
 }
