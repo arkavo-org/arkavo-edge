@@ -1351,3 +1351,9 @@ In addition to the original Step 2: fix the Security-notes nit — "tampered or 
 - [ ] **Step 4:** commit `Verify the root signature through opentdf instead of a local HMAC` (mention opentdf-rs#100 item 2 as the API that would also retire the row decoding).
 
 Related upstream work (not in this plan): opentdf-rs#99 (in-place segment decrypt — fix in progress on branch `fix/decrypt-segment-in-place`; when merged, bump the `opentdf` rev in `crates/arkavo-cli/Cargo.toml` and the workspace), opentdf-rs#100 (verify-side APIs).
+
+### Task 15: Depend on crates.io `opentdf` 0.15.0 (after opentdf-rs#102 merges)
+
+- [ ] Replace `opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", rev = "ead8fdc…" }` in `crates/arkavo-cli/Cargo.toml` (and any workspace pin) with `opentdf = { version = "0.15.0", default-features = false, features = [...] }` keeping the same features; `cargo update -p opentdf`; commit `Cargo.lock`.
+- [ ] `cargo test -p arkavo-gguf-tdf && cargo test -p arkavo-llm --features llama-cpp --test gguf_tdf_load_test && cargo clippy -p arkavo-gguf-tdf --all-targets -- -D warnings`.
+- [ ] Commit `Use opentdf 0.15.0 from crates.io`.
