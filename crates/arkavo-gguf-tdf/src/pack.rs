@@ -57,6 +57,17 @@ impl TensorRanges {
 
 /// Builds the segment plan for a source GGUF (spec §11.3).
 ///
+/// Segment boundaries follow the tensor layout, so a loader that reads one
+/// tensor at a time touches one member per tensor:
+///
+/// - small tensors (and the alignment padding between them) accumulate in an
+///   open pack, which is closed **at a tensor start** as soon as the next
+///   tensor would not fit under `max_segment`;
+/// - a tensor larger than `max_segment` is split into `max_segment` windows
+///   starting at **its own offset**, never from an earlier pack start, and its
+///   remainder opens the next pack;
+/// - a tensor no larger than `max_segment` is never split.
+///
 /// The while-conditions are `>=`, not `>`: a remainder of exactly
 /// `max_segment` must still emit its own member.
 pub fn plan_segments(
@@ -87,30 +98,36 @@ pub fn plan_segments(
         if t_off < cursor {
             return Err(GgufTdfError::Overlap);
         }
-        let mut remaining_off = t_off;
 
-        // Close an open pack that already holds a full cap of earlier
-        // tensors and padding, before taking any bytes from this tensor.
-        while remaining_off - pack_start >= max_segment {
+        // A gap of prior tensors and padding that already exceeds the cap is
+        // flushed in full windows (padding-only windows are packs).
+        while t_off - pack_start >= max_segment {
             let end = pack_start + max_segment;
             push(&mut plan, &mut next_id, &ranges, pack_start, end);
             pack_start = end;
         }
 
-        // Split this tensor while a full window still fits.
-        while t_end - pack_start >= max_segment && t_end > remaining_off {
+        // Close the open pack at this tensor's start when the tensor would
+        // not fit in it. The cut lands on a tensor boundary, never inside one.
+        if pack_start < t_off && t_end - pack_start > max_segment {
+            push(&mut plan, &mut next_id, &ranges, pack_start, t_off);
+            pack_start = t_off;
+        }
+
+        // Split a tensor larger than the cap from its own offset. For a tensor
+        // that fits, this fires only when the pack ends exactly at `t_end`.
+        while t_end - pack_start >= max_segment {
             let end = pack_start + max_segment;
             push(&mut plan, &mut next_id, &ranges, pack_start, end);
             pack_start = end;
-            remaining_off = pack_start;
         }
 
         cursor = t_end;
     }
 
-    // Everything left, including trailing padding. Split it too: the profile
-    // caps every non-header segment at max_segment (§9.4 invariant 10), and a
-    // file may end with more than one window of padding.
+    // Everything left: the open pack's tail plus trailing padding. The open
+    // pack holds fewer than `max_segment` tensor bytes, so the first window
+    // ends the last tensor and later windows hold only padding.
     while virtual_size - pack_start >= max_segment {
         let end = pack_start + max_segment;
         push(&mut plan, &mut next_id, &ranges, pack_start, end);

@@ -209,3 +209,148 @@ fn rejects_a_header_that_is_zero_or_misaligned_or_past_the_file() {
         "GGUFTDF_BAD_HEADER"
     );
 }
+
+// --- Tensor-aligned boundaries (spec §11.3, draft-01) -------------------
+
+/// Every tensor no larger than the cap must be covered by exactly one segment.
+fn assert_small_tensors_unsplit(
+    plan: &[arkavo_gguf_tdf::PlannedSegment],
+    h: &GgufHeader,
+    max_segment: u64,
+) {
+    for t in &h.tensors {
+        if t.size > max_segment {
+            continue;
+        }
+        let off = h.data_offset + t.gguf_offset;
+        let end = off + t.size;
+        let covering: Vec<_> = plan
+            .iter()
+            .filter(|s| s.start < end && off < s.end)
+            .collect();
+        assert_eq!(
+            covering.len(),
+            1,
+            "tensor {} [{off}, {end}) is split across {:?}",
+            t.name,
+            covering
+                .iter()
+                .map(|s| (s.id, s.start, s.end))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn small_tensor_that_would_straddle_a_window_is_not_split() {
+    // 96 B + 96 B with a 128 B cap. Fixed windows would cut the second tensor
+    // at 192; tensor-aligned packing closes the pack at its start instead.
+    let h = header(32, 64, vec![tensor("a", 0, 96), tensor("b", 96, 96)]);
+    let plan = plan_segments(&h, 256, 128).unwrap();
+
+    let got: Vec<_> = plan
+        .iter()
+        .map(|s| (s.id, s.kind, s.start, s.end))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (0, GgufSegmentKind::Header, 0, 64),
+            (1, GgufSegmentKind::Tensor, 64, 160),
+            (2, GgufSegmentKind::Tensor, 160, 256),
+        ]
+    );
+    assert_small_tensors_unsplit(&plan, &h, 128);
+}
+
+#[test]
+fn large_tensor_after_an_open_pack_is_split_from_its_own_offset() {
+    // 64 B tensor, then a 256 B tensor, 128 B cap. The pack closes at 128 and
+    // the big tensor's windows start on its offset, not on the pack start.
+    let h = header(32, 64, vec![tensor("a", 0, 64), tensor("b", 64, 256)]);
+    let plan = plan_segments(&h, 384, 128).unwrap();
+
+    let got: Vec<_> = plan.iter().map(|s| (s.kind, s.start, s.end)).collect();
+    assert_eq!(
+        got,
+        vec![
+            (GgufSegmentKind::Header, 0, 64),
+            (GgufSegmentKind::Tensor, 64, 128),
+            (GgufSegmentKind::Tensor, 128, 256),
+            (GgufSegmentKind::Tensor, 256, 384),
+        ]
+    );
+    assert_small_tensors_unsplit(&plan, &h, 128);
+}
+
+#[test]
+fn remainder_of_a_split_tensor_packs_with_the_following_small_tensors() {
+    // 160 B tensor then 32 B: one full window from the tensor offset, then
+    // the 32 B remainder shares a pack with the next tensor.
+    let h = header(32, 64, vec![tensor("a", 0, 160), tensor("b", 160, 32)]);
+    let plan = plan_segments(&h, 256, 128).unwrap();
+
+    let got: Vec<_> = plan.iter().map(|s| (s.kind, s.start, s.end)).collect();
+    assert_eq!(
+        got,
+        vec![
+            (GgufSegmentKind::Header, 0, 64),
+            (GgufSegmentKind::Tensor, 64, 192),
+            (GgufSegmentKind::Pack, 192, 256),
+        ]
+    );
+    assert_small_tensors_unsplit(&plan, &h, 128);
+}
+
+#[test]
+fn tensor_exactly_at_the_cap_closes_the_open_pack_and_gets_its_own_member() {
+    let h = header(32, 64, vec![tensor("a", 0, 32), tensor("b", 32, 128)]);
+    let plan = plan_segments(&h, 224, 128).unwrap();
+
+    let got: Vec<_> = plan.iter().map(|s| (s.kind, s.start, s.end)).collect();
+    assert_eq!(
+        got,
+        vec![
+            (GgufSegmentKind::Header, 0, 64),
+            (GgufSegmentKind::Tensor, 64, 96),
+            (GgufSegmentKind::Tensor, 96, 224),
+        ]
+    );
+    assert_small_tensors_unsplit(&plan, &h, 128);
+}
+
+#[test]
+fn a_layer_of_mixed_tensors_never_splits_a_small_one() {
+    // A transformer-ish layer: a few big projections and many small norms,
+    // with a cap that is not a multiple of any of them.
+    const KIB: u64 = 1024;
+    let mut tensors = Vec::new();
+    let mut off = 0;
+    for layer in 0..4 {
+        for (name, size) in [
+            ("attn_q", 300 * KIB),
+            ("attn_norm", 3 * KIB),
+            ("attn_k", 700 * KIB),
+            ("ffn_norm", 5 * KIB),
+            ("ffn_up", 1500 * KIB),
+        ] {
+            tensors.push(tensor(&format!("blk.{layer}.{name}"), off, size));
+            off += size;
+            off = off.div_ceil(32) * 32;
+        }
+    }
+    let virtual_size = 4096 + off;
+    let h = header(32, 4096, tensors);
+    let max = 512 * KIB;
+    let plan = plan_segments(&h, virtual_size, max).unwrap();
+
+    assert_small_tensors_unsplit(&plan, &h, max);
+    let mut cursor = 0;
+    for s in &plan {
+        assert_eq!(s.start, cursor);
+        cursor = s.end;
+        assert!(s.id == 0 || s.plain() <= max);
+        assert_eq!(s.start % 32, 0, "boundaries stay aligned");
+    }
+    assert_eq!(cursor, virtual_size);
+}
