@@ -1144,3 +1144,167 @@ removal line so the trust boundary is visible where the choice is made."
 ## Execution order
 
 Tasks 1, 4, 5, 6 are independent of each other and of 2–3 (different crates/files) and can run in parallel. Task 2 must precede Task 3. Task 5 depends on Task 4 Step 3 (sorted walk). Task 7 runs last. All tasks commit to `feature/gguf-tdf`; parallel workers must each `git pull --rebase` before committing and must not touch files outside their task's list.
+
+---
+
+## Review follow-ups (PR #664 review on `9078539`, added 2026-08-30)
+
+### Task 8: `model protect` fetches the KAS key with a hardened client
+
+**Why:** `model_protect::run` uses `reqwest::Client::new()` (default TLS, follows redirects). The identity client uses rustls and `redirect::Policy::none()`; `validate_kas_url` only checks the initial URL, so a 3xx from `platform.arkavo.net/kas.AccessService/PublicKey` could hand the wrap to another host. Match the identity client.
+
+**Files:**
+- Modify: `crates/arkavo-cli/src/commands/model_protect.rs:56-66`
+- Test: `crates/arkavo-cli/src/commands/model_protect.rs` (`#[cfg(test)]`)
+
+**Interfaces:**
+- Produces: `pub(crate) fn kas_http_client() -> reqwest::Client` in `model_protect.rs` (rustls, no redirects, 30 s timeout). Task 9 reuses it unchanged.
+
+- [ ] **Step 1: Write the failing test**
+
+```rust
+    /// The key fetch must not follow a redirect: a 3xx from the KAS host must
+    /// surface as an error, never as a key from wherever Location points.
+    #[tokio::test]
+    async fn kas_key_fetch_does_not_follow_redirects() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf).await;
+            let _ = s
+                .write_all(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:9/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+            let _ = s.shutdown().await;
+        });
+        let http = kas_http_client();
+        let resp = http.get(format!("http://{addr}/kas.AccessService/PublicKey")).send().await.unwrap();
+        assert_eq!(resp.status().as_u16(), 302, "redirect must be returned, not followed");
+    }
+```
+
+Run: `cargo test -p arkavo-cli --lib commands::model_protect` — Expected: compile error, `kas_http_client` missing. (If `tokio` is not a dev-dependency of `arkavo-cli`, check `Cargo.toml`; it is a normal dependency of the crate, which is enough.)
+
+- [ ] **Step 2: Implement**
+
+```rust
+/// Same posture as the identity client: rustls, no redirects, bounded wait.
+/// `validate_kas_url` runs on the URL we dial; following a redirect would
+/// silently move the wrap to a host it never checked.
+pub(crate) fn kas_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .use_rustls_tls()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("reqwest rustls client")
+}
+```
+
+and replace `let http = reqwest::Client::new();` with `let http = kas_http_client();`. If `arkavo-cli`'s reqwest features do not include `rustls-tls`, add the feature to the existing `reqwest` line in `crates/arkavo-cli/Cargo.toml` (no new crate). `expect` here matches `arkavo-identity/src/session.rs`; a failure to build the client is a programming error, not a runtime condition.
+
+- [ ] **Step 3: Tests + clippy** — `cargo test -p arkavo-cli --lib commands::model_protect && cargo clippy -p arkavo-cli --lib -- -D warnings`
+- [ ] **Step 4: Commit** — `git commit -m "Fetch the KAS key without following redirects"` (body: one sentence on the identity-client parity).
+
+---
+
+### Task 9: `--delete-source` decrypts before it deletes
+
+**Why:** the post-write check is `GgufTdfArchive::open` only. A structurally valid archive whose payload key was wrapped to the wrong KAS key, or whose header member is corrupt, still passes, and the only plaintext is removed. The writer holds the fresh payload key in memory, so it can prove the archive unlocks and the header authenticates before the source goes.
+
+**Files:**
+- Modify: `crates/arkavo-gguf-tdf/src/writer.rs` (`protect` gains a read-back step; `ProtectReport` gains `verified_header: bool`)
+- Modify: `crates/arkavo-cli/src/commands/model_protect.rs` (use the report; drop the separate `GgufTdfArchive::open` if the writer now covers it)
+- Modify: `crates/arkavo-cli/src/commands/model.rs` (`delete_source` help — see Task 6; this task supersedes Task 6's wording)
+- Test: `crates/arkavo-gguf-tdf/tests/writer.rs`, `crates/arkavo-cli/src/commands/model.rs`
+
+**Interfaces:**
+- Produces: `ProtectReport { …, verified_header: bool }` — `true` when, after the rename, `GgufTdfArchive::open(dest)?.unlock(&PreResolvedKey::new(*payload_key))` succeeded (unlock already decrypts + authenticates the header and verifies the root signature). `protect` returns `Err(GgufTdfError::Crypto(..))` when the read-back fails, leaving `dest` in place for inspection and never touching the source.
+- Task 6's help text becomes: "Delete the plaintext source after a successful wrap. The written archive is reopened, unlocked with the freshly generated payload key, and its header authenticated first; the KAS rewrap itself is not exercised, so a wrong KAS public key is only caught at first load. Keep a backup until a load through `arkavo login` has succeeded."
+
+- [ ] **Step 1: Failing writer test** in `tests/writer.rs` (uses the file's existing fixture helpers; look at how it builds a source and a wrapper):
+
+```rust
+#[test]
+fn protect_reads_the_archive_back_with_the_fresh_key() {
+    let (dir, source) = fixture_source();          // existing helper name may differ — reuse the file's
+    let dest = dir.path().join("model.gguf.tdf");
+    let report = protect(&source, &dest, &MockWrapper::default(), &ProtectOptions::default()).unwrap();
+    assert!(report.verified_header, "writer must prove the archive unlocks before reporting success");
+}
+```
+
+- [ ] **Step 2: Implement** in `writer.rs`, after the `.partial` → `dest` rename:
+
+```rust
+    // Prove the archive we just wrote unlocks with the key we wrapped:
+    // structure, header GMAC, root signature. A wrap that cannot be read
+    // back must never be reported as success — --delete-source trusts this.
+    GgufTdfArchive::open(dest)?
+        .unlock(&PreResolvedKey::new(*payload_key))
+        .map_err(|e| GgufTdfError::Crypto(format!("read-back of {} failed: {e}", dest.display())))?;
+```
+
+and set `verified_header: true` in the report. (`payload_key` is the `Zeroizing<[u8; 32]>` already in scope; `PreResolvedKey::new` takes `[u8; 32]`.)
+
+- [ ] **Step 3: CLI** — in `model_protect.rs` replace the structural reopen block with a guard on `report.verified_header` (`bail!` if false — it cannot be false after Step 2, but the CLI must not delete on a report it did not check). Update the `removed` line: `"  removed    {} (archive read back and header authenticated; KAS rewrap not exercised)"`. Update the `delete_source` help per Interfaces and Task 6's test string accordingly (`contains("KAS rewrap itself is not exercised")`).
+- [ ] **Step 4: Tests + clippy** — `cargo test -p arkavo-gguf-tdf && cargo test -p arkavo-cli --lib commands::model && cargo clippy -p arkavo-gguf-tdf -p arkavo-cli --all-targets -- -D warnings`
+- [ ] **Step 5: Commit** — `git commit -m "Read the archive back with the fresh key before --delete-source removes the source"`.
+
+---
+
+### Task 10: Refuse absurd `headerBytes` / `maxSegment` before allocating
+
+**Why:** `validate_index` checks alignment and multiples only; `decrypt_header` does `vec![0u8; plain_len]` and `read_manifest` does `vec![0u8; location.size]` from untrusted sizes. A hostile archive is a local allocation bomb.
+
+**Files:**
+- Modify: `crates/arkavo-gguf-tdf/src/lib.rs` (constants), `src/index.rs` (`validate_index`), `src/reader.rs` (`read_manifest`, `decrypt_header`)
+- Test: `crates/arkavo-gguf-tdf/tests/index.rs`, `tests/roundtrip.rs`
+
+**Interfaces:**
+- Produces: `pub const MAX_HEADER_BYTES: u64 = 1 << 30;` (1 GiB — a tokenizer-heavy header is tens of MiB), `pub const MAX_MAX_SEGMENT: u64 = 256 << 20;`, `pub const MAX_MANIFEST_BYTES: u64 = 64 << 20;` in `lib.rs`. `validate_index` fails `BadHeader` when `header_bytes > MAX_HEADER_BYTES` and `BadMaxSegment` when `max_segment > MAX_MAX_SEGMENT`; `read_manifest` fails `BadIndex("manifest member is N bytes, over the M byte cap")` before allocating; `decrypt_header` fails `BadIndex` when the row's `segment_size` exceeds `MAX_HEADER_BYTES` or the member size exceeds `MAX_HEADER_BYTES + SEGMENT_OVERHEAD`. Writer: `plan_segments` fails `BadMaxSegment` for `max_segment > MAX_MAX_SEGMENT` (so writers cannot produce what readers refuse).
+
+- [ ] **Step 1: Failing tests** — in `tests/index.rs`, take the `appendix_a_index()` fixture, set `index.header_bytes = MAX_HEADER_BYTES + 32` (and the header segment's `plain` to match) and assert `validate_index(..)` is `Err(BadHeader)`; set `index.max_segment = MAX_MAX_SEGMENT + 32` (aligned) and assert `Err(BadMaxSegment)`. In `tests/roundtrip.rs`, use `rewrite_manifest` (existing helper) to set `integrityInformation.segments[0].segmentSize` to `2 * MAX_HEADER_BYTES` and assert `GgufTdfArchive::open(..).unwrap().unlock(&kas)` fails with `BadIndex` **without** the test process allocating (the assertion is the error variant; if the cap is missing the test will OOM or take seconds — that is the failure mode being fixed). In `tests/packing.rs`, `plan_segments(&h, .., MAX_MAX_SEGMENT + 32)` → `GGUFTDF_BAD_MAX_SEGMENT`.
+- [ ] **Step 2: Implement** the checks at the four sites; comments say why the numbers are what they are (1 GiB header: largest known tokenizer KV blocks are < 100 MiB; 256 MiB segment: 64× the default, beyond which the scratch bound stops being small).
+- [ ] **Step 3: Tests + clippy** — `cargo test -p arkavo-gguf-tdf && cargo clippy -p arkavo-gguf-tdf --all-targets -- -D warnings`
+- [ ] **Step 4: Commit** — `git commit -m "Cap untrusted header, segment, and manifest sizes before allocating"`. Note the caps in the spec errata later (§9.4 / §17.7) — controller task.
+
+---
+
+### Task 11: Fail-closed unit tests the review asked for
+
+**Why:** reviewer-named gaps: `arkavo model list` with both artifacts present; `ModelRegistry::load` and `LlamaCppProvider::new_with_config` fail-closed on a protected path (check `crates/arkavo-llm/tests/gguf_tdf_load_test.rs` — `registry_load_refuses_a_protected_path_without_a_key` and `the_sync_constructor_refuses_a_protected_model` already exist; add only what is missing).
+
+**Files:**
+- Test: `crates/arkavo-cli/src/commands/model_list.rs` (`list_local_gguf_models` against a tempdir HF hub with `model.gguf` and `model.gguf.tdf` side by side — both listed, plaintext first), `crates/arkavo-llm/tests/gguf_tdf_load_test.rs` (add: `ModelRegistry::load` on a protected path returns `GGUFTDF_KAS_DENIED` **and** leaves `is_loaded(name)` false; `LlamaCppProvider::new_with_config` on a protected path never opens the sibling plaintext — create both files, assert the error, assert the plaintext file's mtime/atime untouched is not reliable, so instead assert `is_loaded` false and the error names the `.gguf.tdf` path).
+
+- [ ] **Step 1:** read `list_local_gguf_models` to see how it locates the hub (`HF_HOME`?); if it reads the env var, the test must set `HF_HOME` to a tempdir — env mutation is process-global, so mark the test `#[serial]` only if the crate already uses `serial_test`; otherwise refactor a `fn list_gguf_models_in(hub: &Path)` (sync, pure) and test that.
+- [ ] **Step 2:** write the tests; run `cargo test -p arkavo-cli --lib commands::model_list` and `cargo test -p arkavo-llm --features llama-cpp --test gguf_tdf_load_test`.
+- [ ] **Step 3: Commit** — `git commit -m "Test dual-artifact listing and registry fail-closed paths"`.
+
+---
+
+### Task 12: Deterministic "latest session" pick (CI flake in `arkavo-session`)
+
+**Why:** `conversation::tests::test_restore_last_session_with_compatibility` failed on two consecutive CI runs (`a243159e`, `9078539`) and passes locally: `restore_last_session_with_compatibility` (`crates/arkavo-session/src/conversation.rs:200-230`) takes `sessions.first()` from `memory_storage.search("conversation_session", 10, ..)` and assumes that is the newest; when two sessions are created within the same clock tick the search order is not the creation order, and the older compatible session is picked. This blocks Release Readiness for every push of this PR.
+
+**Files:**
+- Modify: `crates/arkavo-session/src/conversation.rs:214-222`
+- Test: same file, `#[cfg(test)]` module
+
+- [ ] **Step 1: Failing test** — construct two `ConversationSession`s with identical `created_at`/`updated_at` (build them by hand, then store via the same path `start_session_with_metadata` uses — read that function to see the storage call), stored in the *compatible-first* order, and assert `restore_last_session_with_compatibility` returns `None` (the incompatible one is newest by insertion). Run it 20× with `--test-threads=1` in a shell loop to confirm it fails at least once before the fix (report the count).
+- [ ] **Step 2: Implement** — deserialize every search hit, choose the newest by `(updated_at, created_at)`, and on a full tie prefer the hit with the highest storage sequence if the `Memory` type exposes one (look at `memory.id` / `memory.created_at` in the `search` result), else the last hit. Replace `sessions.first()` with that selection; keep the compatibility checks unchanged.
+- [ ] **Step 3:** `cargo test -p arkavo-session --lib conversation` (all pass) and the 20× loop (0 failures). Clippy clean.
+- [ ] **Step 4: Commit** — `git commit -m "Pick the newest session deterministically when restoring"` with a body naming the CI runs.
+
+---
+
+### Task 7 (amended): fold everything into PR #664
+
+In addition to the original Step 2: fix the Security-notes nit — "tampered or reordered → TagMismatch" becomes "a flipped ciphertext bit → `TagMismatch` (T6); an equal-size member+hash swap → `RootMismatch` at unlock (T17), which is the order bind"; add the size caps (Task 10) and the read-back-before-delete (Task 9) to Security notes; note Windows cannot load protected models and that protected `mmproj` is refused under Caveats. Reply to the review comment listing what landed per item and what was deferred.
+
+## Execution order (amended)
+
+1 ✓, 4+5 ✓, 2 → 3 → 10 → 9 (gguf-tdf crate, sequential), then 8, 11, 12 (independent crates, sequential dispatches), then 7.
