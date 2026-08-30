@@ -26,4 +26,4 @@ pub use claims::{
 pub use error::PermitError;
 pub use hash::HashAlgorithm;
 pub use keys::{PermitSigner, PermitVerifier};
-pub use permit::{Permit, decode, mint, verify};
+pub use permit::{MAX_PERMIT_BYTES, Permit, decode, mint, verify};

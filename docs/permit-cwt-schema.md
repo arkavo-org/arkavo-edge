@@ -13,6 +13,11 @@ CWT = #6.61( COSE_Sign1 )        ; CBOR tag 61 wrapping tag 18
 COSE_Sign1 payload = claims set  ; CBOR map, labels below
 ```
 
+Untrusted `decode`/`verify` input is rejected if it exceeds 16 KiB
+(`MAX_PERMIT_BYTES`) before COSE/CBOR parse. Permit-bound hashes
+(`policy_bundle_hash`, `argument_hash`, `sequence_state_hash`,
+`parent_permit`) must be exactly 32 bytes (SHA-256 / BLAKE3 default output).
+
 The COSE_Sign1 protected header carries:
 
 - `alg` (1): `EdDSA` (-8) or `ES256` (-7). No other algorithms are accepted.

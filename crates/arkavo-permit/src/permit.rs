@@ -16,6 +16,10 @@ use coset::{
 /// CBOR tag 61 (CWT) prefix bytes: 0xd8 0x3d.
 const CWT_TAG_PREFIX: [u8; 2] = [0xd8, 0x3d];
 
+/// Permits are small CWTs. Untrusted `decode`/`verify` input larger than this
+/// is rejected before COSE/CBOR parse.
+pub const MAX_PERMIT_BYTES: usize = 16 * 1024;
+
 /// A decoded permit: the validated claims plus the confirmation key they
 /// were bound to. Instances returned by [`verify`] are additionally
 /// signature- and time-checked.
@@ -54,6 +58,8 @@ pub fn mint(claims: &PermitClaims, signer: &PermitSigner) -> Result<Vec<u8>, Per
 /// The claims are structurally validated (fail-closed on malformed input),
 /// but callers must not make authorization decisions from the result; use
 /// [`verify`] for that.
+///
+/// Input larger than [`MAX_PERMIT_BYTES`] is rejected before parse.
 pub fn decode(cwt: &[u8]) -> Result<Permit, PermitError> {
     let sign1 = parse_sign1(cwt)?;
     extract(&sign1)
@@ -62,6 +68,8 @@ pub fn decode(cwt: &[u8]) -> Result<Permit, PermitError> {
 /// Decode and fully verify a permit: structure, signature against the `cnf`
 /// key, algorithm/key agreement, and the nbf/exp/iat window at `now`
 /// (seconds since UNIX epoch).
+///
+/// Input larger than [`MAX_PERMIT_BYTES`] is rejected before parse.
 pub fn verify(cwt: &[u8], now: i64) -> Result<Permit, PermitError> {
     let sign1 = parse_sign1(cwt)?;
     let algorithm = header_algorithm(&sign1)?;
@@ -92,6 +100,9 @@ pub fn verify(cwt: &[u8], now: i64) -> Result<Permit, PermitError> {
 }
 
 fn parse_sign1(cwt: &[u8]) -> Result<CoseSign1, PermitError> {
+    if cwt.len() > MAX_PERMIT_BYTES {
+        return Err(PermitError::Cose("permit exceeds maximum size".to_string()));
+    }
     let tagged = cwt
         .strip_prefix(&CWT_TAG_PREFIX)
         .ok_or(PermitError::Cose("missing CBOR tag 61 (CWT)".to_string()))?;
@@ -363,6 +374,19 @@ mod tests {
             permit.claims.parent_permit.as_deref(),
             Some(HashAlgorithm::Sha256.digest(&parent).as_slice())
         );
+    }
+
+    #[test]
+    fn oversized_permit_rejected_before_parse() {
+        let oversized = vec![0u8; MAX_PERMIT_BYTES + 1];
+        assert!(matches!(
+            decode(&oversized),
+            Err(PermitError::Cose(msg)) if msg.contains("maximum size")
+        ));
+        assert!(matches!(
+            verify(&oversized, NOW),
+            Err(PermitError::Cose(msg)) if msg.contains("maximum size")
+        ));
     }
 
     #[test]

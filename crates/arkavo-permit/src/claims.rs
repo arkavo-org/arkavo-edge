@@ -128,12 +128,15 @@ impl PermitClaims {
                 return Err(PermitError::MalformedClaim(name));
             }
         }
+        // SHA-256 and BLAKE3 default outputs are 32 bytes. Reject any other
+        // length at validate time so a 1-byte hash cannot pass as well-formed.
+        const DIGEST_LEN: usize = 32;
         for (value, name) in [
             (&self.policy_bundle_hash, "policy_bundle_hash"),
             (&self.argument_hash, "argument_hash"),
             (&self.sequence_state_hash, "sequence_state_hash"),
         ] {
-            if value.is_empty() {
+            if value.len() != DIGEST_LEN {
                 return Err(PermitError::MalformedClaim(name));
             }
         }
@@ -143,7 +146,7 @@ impl PermitClaims {
             }
         }
         if let Some(parent) = &self.parent_permit
-            && parent.is_empty()
+            && parent.len() != DIGEST_LEN
         {
             return Err(PermitError::MalformedClaim("parent_permit"));
         }
@@ -446,6 +449,37 @@ mod tests {
         let mut claims = sample_claims();
         claims.tool_name = String::new();
         assert!(claims.validate().is_err());
+    }
+
+    #[test]
+    fn digest_claims_must_be_32_bytes() {
+        let mut claims = sample_claims();
+        claims.policy_bundle_hash = vec![1];
+        assert!(matches!(
+            claims.validate(),
+            Err(PermitError::MalformedClaim("policy_bundle_hash"))
+        ));
+
+        claims = sample_claims();
+        claims.argument_hash = vec![1; 31];
+        assert!(matches!(
+            claims.validate(),
+            Err(PermitError::MalformedClaim("argument_hash"))
+        ));
+
+        claims = sample_claims();
+        claims.sequence_state_hash = vec![1; 33];
+        assert!(matches!(
+            claims.validate(),
+            Err(PermitError::MalformedClaim("sequence_state_hash"))
+        ));
+
+        claims = sample_claims();
+        claims.parent_permit = Some(vec![1]);
+        assert!(matches!(
+            claims.validate(),
+            Err(PermitError::MalformedClaim("parent_permit"))
+        ));
     }
 
     #[test]
