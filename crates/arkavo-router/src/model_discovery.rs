@@ -230,8 +230,9 @@ fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
 fn find_artifact_in_dir(dir: &std::path::Path, protected: &mut Option<PathBuf>) -> Option<PathBuf> {
     tracing::debug!("find_artifact_in_dir: scanning {:?}", dir);
     if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
+        let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for path in paths {
             if path.is_file() {
                 if is_plaintext_gguf(&path) {
                     return Some(path);
@@ -350,13 +351,19 @@ pub fn find_mmproj_for_model(model_path: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
-/// Scan entire HuggingFace cache for any .gguf file
+/// Scan the HuggingFace cache for any **plaintext** `.gguf`.
 ///
-/// This is the ultimate fallback when no specific model is found.
-/// Prefers TØRG-compatible models (Qwen3, Ministral) over others.
+/// This is the fallback the routing classifier and response judge use. They
+/// construct `LlamaCppProvider` synchronously and cannot rewrap a protected
+/// model, so a `.gguf.tdf` is never a candidate here — a cache holding only
+/// protected models yields `None` and the caller falls back to rule-based
+/// classification instead of failing router init.
 pub async fn find_any_gguf() -> Option<PathBuf> {
     let cache = get_hf_cache_dir()?;
+    find_any_plain_gguf_in(&cache)
+}
 
+fn find_any_plain_gguf_in(cache: &Path) -> Option<PathBuf> {
     // Priority order: prefer smallest models first — classifier/judge need speed, not quality.
     // Loading large models here wastes memory (bypasses per-agent memory budget).
     use crate::decision::ModelChoice;
@@ -370,30 +377,34 @@ pub async fn find_any_gguf() -> Option<PathBuf> {
     .filter_map(ModelChoice::cache_dir_name)
     .collect();
 
-    // Check preferred repos first
     for repo_name in &preferred_repos {
         let repo_path = cache.join(repo_name.as_str());
         if repo_path.exists()
-            && let Some(gguf) = find_gguf_in_dir(&repo_path)
+            && let Some(gguf) = find_plain_gguf_in_dir(&repo_path)
         {
             return Some(gguf);
         }
     }
 
-    // Fallback: scan all model repositories
-    if let Ok(entries) = std::fs::read_dir(&cache) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir()
-                && path.file_name()?.to_str()?.starts_with("models--")
-                && let Some(gguf) = find_gguf_in_dir(&path)
-            {
-                return Some(gguf);
-            }
-        }
-    }
+    let mut repos: Vec<PathBuf> = std::fs::read_dir(cache)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_dir()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("models--"))
+        })
+        .collect();
+    repos.sort();
+    repos.iter().find_map(|p| find_plain_gguf_in_dir(p))
+}
 
-    None
+/// Recursively find a plaintext `.gguf`, ignoring `.gguf.tdf`.
+fn find_plain_gguf_in_dir(dir: &Path) -> Option<PathBuf> {
+    let mut ignored = None;
+    find_artifact_in_dir(dir, &mut ignored)
 }
 
 #[cfg(test)]
@@ -555,5 +566,53 @@ mod protected_model_tests {
 
         let found = find_file_in_dir(dir.path(), "model.gguf").expect("tdf sibling");
         assert_eq!(found.file_name().unwrap(), "model.gguf.tdf");
+    }
+
+    /// The classifier/judge load synchronously and cannot rewrap: a cache
+    /// holding only protected models must yield nothing, not a `.gguf.tdf`.
+    #[test]
+    fn find_any_gguf_ignores_protected_models() {
+        let cache = tempfile::tempdir().unwrap();
+        let repo = cache
+            .path()
+            .join("models--unsloth--Qwen3.5-0.8B-GGUF/snapshots/x");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("Qwen3.5-0.8B-Q4_K_M.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        assert_eq!(find_any_plain_gguf_in(cache.path()), None);
+    }
+
+    #[test]
+    fn find_any_gguf_prefers_a_plaintext_qwen_over_other_plaintext_models() {
+        let cache = tempfile::tempdir().unwrap();
+        let other = cache.path().join("models--org--other/snapshots/x");
+        let qwen = cache
+            .path()
+            .join("models--unsloth--Qwen3.5-0.8B-GGUF/snapshots/x");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::create_dir_all(&qwen).unwrap();
+        std::fs::write(other.join("other.gguf"), b"GGUF").unwrap();
+        std::fs::write(qwen.join("Qwen3.5-0.8B-Q4_K_M.gguf"), b"GGUF").unwrap();
+        // A protected sibling next to the preferred plaintext changes nothing.
+        std::fs::write(qwen.join("Qwen3.5-0.8B-Q4_K_M.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        let found = find_any_plain_gguf_in(cache.path()).unwrap();
+        assert_eq!(found.file_name().unwrap(), "Qwen3.5-0.8B-Q4_K_M.gguf");
+    }
+
+    #[test]
+    fn find_any_gguf_falls_back_to_any_plaintext_repo_when_preferred_ones_are_protected() {
+        let cache = tempfile::tempdir().unwrap();
+        let other = cache.path().join("models--org--other/snapshots/x");
+        let qwen = cache
+            .path()
+            .join("models--unsloth--Qwen3.5-0.8B-GGUF/snapshots/x");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::create_dir_all(&qwen).unwrap();
+        std::fs::write(other.join("other.gguf"), b"GGUF").unwrap();
+        std::fs::write(qwen.join("Qwen3.5-0.8B-Q4_K_M.gguf.tdf"), b"PK\x03\x04").unwrap();
+
+        let found = find_any_plain_gguf_in(cache.path()).unwrap();
+        assert_eq!(found.file_name().unwrap(), "other.gguf");
     }
 }
