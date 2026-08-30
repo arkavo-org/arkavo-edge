@@ -21,6 +21,8 @@ quiet = false
 # aes 0.8 only uses the ARMv8 AES instructions when this cfg is set; without
 # it every aarch64 build (release included) runs bitsliced software AES-GCM at
 # ~200 MB/s, which makes a multi-GB .gguf.tdf load take tens of seconds.
-# x86_64 selects AES-NI at runtime and needs nothing here.
+# x86_64 selects AES-NI at runtime and needs nothing here. CI jobs that set
+# RUSTFLAGS in the environment must repeat the cfg there (env RUSTFLAGS
+# replaces this table).
 [target.'cfg(target_arch = "aarch64")']
 rustflags = ["--cfg", "aes_armv8"]
