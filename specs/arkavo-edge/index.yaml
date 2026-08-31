@@ -937,10 +937,22 @@ components:
       - Partial outputs survive budget exhaustion and call failures
       - Sampling caps are recorded in the ledger, never silent
 
+  - name: identity-session
+    file: identity-session.spec.yaml
+    module: arkavo_identity
+    description: OIDC login/logout session brokered by Arkavo Creator (PKCE, loopback callback, token store)
+    criticality: critical
+    scenario_count: 21
+    invariants:
+      - Public client arkavo-edge; no client_secret ever sent
+      - Loopback callback on numeric 127.0.0.1 ports 52171-52178, path /cb, state-matched
+      - Token file written atomically at unix mode 0o600
+      - Refresh-before-expiry with 60-second skew; dead refresh deletes the token file
+
 stats:
-  total_specs: 80
-  total_scenarios: 751
-  critical_scenarios: 204
+  total_specs: 81
+  total_scenarios: 772
+  critical_scenarios: 211
   coverage_areas:
     - authentication
     - authorization
