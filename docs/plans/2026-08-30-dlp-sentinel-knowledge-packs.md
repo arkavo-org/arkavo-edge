@@ -84,7 +84,7 @@ One distillation pipeline produces a **sealed knowledge pack**: policy-scoped kn
 
 **Accept:** SENT tripwires flipped; holdback latency p50/p95/p99 published in bench; e2e test proves a seeded canary in a completion is caught pre-release under mock provider.
 
-**Delivered (2026-08-30, 0.92.0).** SENT-001, 002, 003, 006, 007, 008, 009, 014, 015 and 016 flipped. Measured: cascade per-call overhead 1.39µs against the 50µs invariant; holdback window latency p50 6.21µs, p95 6.42µs, p99 6.96µs. The canary test drives a mock-provider completion through the release gate and asserts the consumer never sees it.
+**Delivered (2026-08-30, 0.91.0).** SENT-001, 002, 003, 006, 007, 008, 009, 014, 015 and 016 flipped. Measured: cascade per-call overhead 1.39µs against the 50µs invariant; holdback window latency p50 6.21µs, p95 6.42µs, p99 6.96µs. The canary test drives a mock-provider completion through the release gate and asserts the consumer never sees it.
 
 Still `wip`, with the reason each is not green:
 
@@ -111,7 +111,7 @@ Two deviations from the plan text, both deliberate:
 
 **Accept:** KP tripwires flipped; pack build and verify round-trip in e2e; adapter selection integration test with two clearance levels; tampered manifest rejected.
 
-**Delivered (2026-08-31, 0.93.0).** KP-001 through KP-005 and KP-008 flipped, plus SENT-004, which this phase unblocked: thresholds now come from a verified manifest rather than from anything an operator can edit. `arkavo pack seal`, `verify` and `anchor` complete the command family, and `SentinelRuntime::from_pack` is the runtime call site Phase 4 left open — the gate and the critic check are now built from a signed pack instead of being constructible and unconstructed.
+**Delivered (2026-08-31, 0.91.0).** KP-001 through KP-005 and KP-008 flipped, plus SENT-004, which this phase unblocked: thresholds now come from a verified manifest rather than from anything an operator can edit. `arkavo pack seal`, `verify` and `anchor` complete the command family, and `SentinelRuntime::from_pack` is the runtime call site Phase 4 left open — the gate and the critic check are now built from a signed pack instead of being constructible and unconstructed.
 
 Decisions taken under delegation, with the reasoning:
 
@@ -165,7 +165,7 @@ Resolved:
 
 Open:
 
-- **Release mapping proposal:** 0.91 → P0–P2 · 0.92 → P3–P4 · 0.93 → P5 · 0.94 → P6–P7.
+- **Release mapping:** 0.91.0 ships phases 0–5 (taint, keyed index, sentinel cascade, sealed packs) behind `taint` / `sentinel` / `knowledge-pack`. Phases 6–7 remain later releases. The earlier 0.91/0.92/0.93 split per phase was not used.
 
 ## Milestone map
 

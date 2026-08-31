@@ -1,6 +1,6 @@
 # DLP Sentinel and Sealed Knowledge Packs — Capability Brief
 
-**Version:** 0.93.0 · **Phases delivered:** 0–5 · **As of:** 2026-08-31
+**Version:** 0.91.0 · **Phases delivered:** 0–5 · **As of:** 2026-08-31
 **Features:** `taint`, `sentinel`, `knowledge-pack`
 
 One source of truth for three jobs: the golden sets Phase 7 will test against,
