@@ -115,6 +115,27 @@ impl ReferenceIndex {
         &self.suppression
     }
 
+    /// Highest classification any entry carries.
+    ///
+    /// What the index has to be wrapped at. The digests are not reversible, but
+    /// the family names and the suppression list are metadata about the corpus,
+    /// and an index of restricted material is itself restricted.
+    pub fn max_sensitivity(&self) -> SensitivityLevel {
+        self.entries
+            .values()
+            .map(|e| e.sensitivity)
+            .max()
+            .unwrap_or(SensitivityLevel::Public)
+    }
+
+    /// Categories present, for deriving the wrap policy.
+    pub fn categories(&self) -> Vec<DataCategory> {
+        let mut categories: Vec<DataCategory> = self.entries.values().map(|e| e.category).collect();
+        categories.sort_unstable();
+        categories.dedup();
+        categories
+    }
+
     /// Look up one keyed digest. This is the hot-path operation (KP-011): a
     /// hash-map probe, so a miss costs the same as a hit.
     pub fn lookup(&self, hash: ShingleHash) -> Option<&EntryMeta> {
@@ -476,6 +497,44 @@ mod tests {
 
         assert_eq!(index.suppression().version, INDEX_FORMAT_VERSION);
         assert!(!index.suppression().is_empty());
+    }
+
+    #[spec("KP-009")]
+    #[test]
+    fn the_index_reports_the_classification_it_must_be_wrapped_at() {
+        let key = key();
+        let mut builder = ReferenceIndex::builder(&key, "1.0.0");
+        builder.add_document(
+            &key,
+            CLASSIFIED,
+            DataCategory::Internal,
+            SensitivityLevel::Internal,
+            "a",
+        );
+        builder.add_document(
+            &key,
+            "patient roster for the northern clinic listing every admission this month",
+            DataCategory::Healthcare,
+            SensitivityLevel::Restricted,
+            "b",
+        );
+        let index = builder.build();
+
+        assert_eq!(index.max_sensitivity(), SensitivityLevel::Restricted);
+        assert!(index.categories().contains(&DataCategory::Healthcare));
+    }
+
+    #[spec("KP-009")]
+    #[test]
+    fn an_empty_index_is_public() {
+        let key = key();
+
+        assert_eq!(
+            ReferenceIndex::builder(&key, "1.0.0")
+                .build()
+                .max_sensitivity(),
+            SensitivityLevel::Public
+        );
     }
 
     #[spec("KP-009")]

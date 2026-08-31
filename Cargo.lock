@@ -808,6 +808,7 @@ dependencies = [
  "arkavo-dataflow",
  "arkavo-device-identity",
  "arkavo-events",
+ "arkavo-fingerprint",
  "arkavo-gguf-tdf",
  "arkavo-git",
  "arkavo-gossip",

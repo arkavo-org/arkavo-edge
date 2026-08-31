@@ -85,6 +85,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         // Hidden commands (still accessible, just not in main help)
+        "pack" => commands::pack::execute(&args[1..]).map_err(Into::into),
         "terminal" => commands::terminal::execute(&args[1..]),
         #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         "test" => commands::test::execute(&args[1..]),
@@ -190,6 +191,7 @@ fn print_usage() {
     println!("    chat           Conversational chat");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
+    println!("    pack           Build sealed knowledge-pack components");
     println!("{}", commands::login::login_help());
     println!();
     println!("Run 'arkavo <command> --help' for detailed options");

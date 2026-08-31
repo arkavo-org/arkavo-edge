@@ -54,6 +54,7 @@ arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
+arkavo-fingerprint = { path = "../arkavo-fingerprint" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-session = { path = "../arkavo-session" }
