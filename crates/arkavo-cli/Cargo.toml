@@ -43,8 +43,10 @@ cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 # binary and blow the 65MB cap.
 # The `arkavo pack` command family: build a keyed index, seal a pack, verify
 # one. Named for the plan's ground rule rather than for the crate it started
-# with, now that it covers the pack format too.
-knowledge-pack = ["dep:arkavo-fingerprint", "dep:arkavo-knowledge-pack"]
+# with, now that it covers the pack format too. Also enables wrap-time pack
+# metadata on arkavo-gguf-tdf: `model protect` is always compiled, and that
+# path is live in protect/open so LTO cannot strip it from the default binary.
+knowledge-pack = ["dep:arkavo-fingerprint", "dep:arkavo-knowledge-pack", "arkavo-gguf-tdf/knowledge-pack"]
 # The DLP sentinel: the classification cascade wired into the critic
 # pipeline and the streaming release path. Off until the work reaches GA.
 sentinel = ["dep:arkavo-sentinel", "knowledge-pack", "arkavo-critic/sentinel"]

@@ -10,7 +10,7 @@ keywords = ["tdf", "manifest", "signing", "dlp"]
 categories = ["cryptography"]
 
 [dependencies]
-arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf" }
+arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf", features = ["knowledge-pack"] }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-sentinel = { path = "../arkavo-sentinel", default-features = false }
 arkavo-fingerprint = { path = "../arkavo-fingerprint" }

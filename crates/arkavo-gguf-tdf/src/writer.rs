@@ -39,6 +39,7 @@ pub struct ProtectOptions {
     /// Recorded here so it is a wrap-time decision rather than something read
     /// back off a file name later (KP-001, KP-008). Absent for a plain
     /// protected model that is not part of a pack.
+    #[cfg(feature = "knowledge-pack")]
     pub component: Option<crate::component::ComponentMetadata>,
 }
 
@@ -49,6 +50,7 @@ impl Default for ProtectOptions {
             attributes: Vec::new(),
             dissem: Vec::new(),
             mime_type: "application/x-gguf".to_string(),
+            #[cfg(feature = "knowledge-pack")]
             component: None,
         }
     }
@@ -202,6 +204,7 @@ fn write_archive(
     // even entitled to ask for a key, which is necessarily before it could
     // decrypt anything; the pack signature over its digest is what makes the
     // claim trustworthy.
+    #[cfg(feature = "knowledge-pack")]
     if let Some(component) = &opts.component {
         let encoded = serde_json::to_vec(component)
             .map_err(|e| GgufTdfError::BadIndex(format!("component metadata: {e}")))?;
