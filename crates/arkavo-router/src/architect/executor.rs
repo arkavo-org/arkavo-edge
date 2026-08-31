@@ -296,6 +296,7 @@ impl ArchitectExecutor {
             ModelChoice::LocalGemma12B => ModelChoice::GeminiPro,
             // Other escalation paths
             ModelChoice::LocalDeepSeekCoder => ModelChoice::DeepSeekV32,
+            ModelChoice::LocalTinyStories15M => ModelChoice::LocalTinyStories15M,
             ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
             ModelChoice::DeepSeekV32Speciale => ModelChoice::ClaudeOpus,
             ModelChoice::GeminiFlash => ModelChoice::Gemini35Flash,

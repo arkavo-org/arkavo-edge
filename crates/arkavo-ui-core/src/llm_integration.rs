@@ -165,7 +165,8 @@ impl LlmIntegration {
             | ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B
-            | ModelChoice::LocalDeepSeekCoder => {
+            | ModelChoice::LocalDeepSeekCoder
+            | ModelChoice::LocalTinyStories15M => {
                 tracing::info!("Checking for Ollama...");
                 if let Ok(client) = LlmClient::from_env()
                     && client.complete(vec![Message::user("ping")]).await.is_ok()

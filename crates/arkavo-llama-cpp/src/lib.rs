@@ -52,7 +52,7 @@ mod callback;
 pub use arkavo_llama_cpp_sys as ffi;
 
 #[cfg(not(target_env = "musl"))]
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 #[cfg(not(target_env = "musl"))]
 use std::os::raw::{c_char, c_void};
 #[cfg(not(target_env = "musl"))]
@@ -76,12 +76,17 @@ pub enum ModelFormat {
     Qwen3,
     /// GLM-4 format (ChatML variant): [gMASK]<sop><|user|>\n...<|assistant|>\n
     GLM4,
+    /// Raw next-token completion. No chat markup. Used for base models
+    /// such as TinyStories that were never instruction-tuned.
+    Completion,
 }
 
 /// Detect model format from model name or path
 pub fn detect_model_format(model_name: &str) -> ModelFormat {
     let name_lower = model_name.to_lowercase();
-    if name_lower.contains("glm-4") || name_lower.contains("glm4") {
+    if name_lower.contains("tinystories") || name_lower.contains("stories15m") {
+        ModelFormat::Completion
+    } else if name_lower.contains("glm-4") || name_lower.contains("glm4") {
         ModelFormat::GLM4
     } else if name_lower.contains("qwen") {
         ModelFormat::Qwen3
@@ -570,22 +575,13 @@ impl LlamaContext {
         // Scale context based on trained size to prevent memory exhaustion
         // KV cache memory usage: ~460KB per token for typical small models
         // On 16GB systems, safe limit is ~16K tokens (~7.5GB KV cache + model + system)
-        let safe_ctx = if !(512..=1048576).contains(&trained_ctx) {
+        let safe_ctx = scale_context(trained_ctx);
+        if trained_ctx == 0 || trained_ctx > 1_048_576 {
             eprintln!(
-                "⚠ Model '{}' reported unusual trained context size: {}, using 8192",
-                model_name, trained_ctx
+                "⚠ Model '{}' reported unusual trained context size: {}, using {}",
+                model_name, trained_ctx, safe_ctx
             );
-            8192
-        } else if trained_ctx <= 8192 {
-            // Small models: use full trained context
-            trained_ctx
-        } else if trained_ctx <= 32768 {
-            // Medium models: use 50% to save memory
-            trained_ctx / 2
-        } else {
-            // Large models: use 25%, capped at 16K to prevent OOM
-            (trained_ctx / 4).min(16384)
-        };
+        }
 
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!(
@@ -870,6 +866,29 @@ pub fn apply_chat_template(
     apply_chat_template_with_format(messages, add_assistant, ModelFormat::Gemma3)
 }
 
+/// Concatenate user/assistant contents with no chat markup.
+///
+/// System and tool turns are dropped so an agent system prompt does not
+/// leak into a base model's completion prefix.
+#[cfg(not(target_env = "musl"))]
+fn apply_completion_prompt(messages: &[ffi::llama_chat_message]) -> Result<Vec<u8>, String> {
+    let mut out = String::new();
+    for msg in messages {
+        if msg.role.is_null() || msg.content.is_null() {
+            continue;
+        }
+        // SAFETY: role/content are NUL-terminated C strings owned by the caller
+        // for the duration of this call (same contract as llama_chat_apply_template).
+        let role = unsafe { CStr::from_ptr(msg.role) }.to_string_lossy();
+        if role == "system" || role == "tool" {
+            continue;
+        }
+        let content = unsafe { CStr::from_ptr(msg.content) }.to_string_lossy();
+        out.push_str(&content);
+    }
+    Ok(out.into_bytes())
+}
+
 #[cfg(not(target_env = "musl"))]
 pub fn apply_chat_template_with_format(
     messages: &[ffi::llama_chat_message],
@@ -877,6 +896,7 @@ pub fn apply_chat_template_with_format(
     format: ModelFormat,
 ) -> Result<Vec<u8>, String> {
     let template = match format {
+        ModelFormat::Completion => return apply_completion_prompt(messages),
         ModelFormat::Gemma3 | ModelFormat::Gemma4 => GEMMA3_TEMPLATE,
         ModelFormat::MistralV3 => MISTRAL_V3_TEMPLATE,
         ModelFormat::Qwen3 => QWEN3_TEMPLATE,
@@ -2243,6 +2263,20 @@ pub fn test_minimal_init() -> Result<(), String> {
     Ok(())
 }
 
+/// Choose n_ctx from the model's trained context length.
+///
+/// Trusts 1..=1_048_576, including TinyStories-scale windows (128–256).
+/// Zero or huge values are treated as broken metadata and fall back to 8192.
+#[cfg(not(target_env = "musl"))]
+fn scale_context(trained_ctx: u32) -> u32 {
+    match trained_ctx {
+        0 | 1_048_577.. => 8192,
+        1..=8192 => trained_ctx,
+        8193..=32768 => trained_ctx / 2,
+        _ => (trained_ctx / 4).min(16384),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2329,6 +2363,65 @@ mod tests {
         assert_eq!(detect_model_format("phi-3-mini"), ModelFormat::Qwen3);
         assert_eq!(detect_model_format("deepseek-coder"), ModelFormat::Qwen3);
         assert_eq!(detect_model_format("unknown-model"), ModelFormat::Qwen3);
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[spec("LLAMA-006")]
+    #[test]
+    fn scale_context_keeps_tinystories_windows() {
+        assert_eq!(scale_context(128), 128);
+        assert_eq!(scale_context(256), 256);
+        assert_eq!(scale_context(2048), 2048);
+        assert_eq!(scale_context(0), 8192);
+        assert_eq!(scale_context(16_384), 8192);
+        assert_eq!(scale_context(131_072), 16_384);
+        assert_eq!(scale_context(2_000_000), 8192);
+    }
+
+    #[spec("LLAMA-006")]
+    #[test]
+    fn test_detect_model_format_tinystories_is_completion() {
+        assert_eq!(
+            detect_model_format("tinystories-15m"),
+            ModelFormat::Completion
+        );
+        assert_eq!(
+            detect_model_format("stories15M.gguf"),
+            ModelFormat::Completion
+        );
+        assert_eq!(
+            detect_model_format("arkavo/tinystories-15m"),
+            ModelFormat::Completion
+        );
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[spec("LLAMA-006")]
+    #[test]
+    fn test_completion_prompt_skips_system_and_tool() {
+        let role_sys = CString::new("system").unwrap();
+        let content_sys = CString::new("You are a helpful assistant.").unwrap();
+        let role_user = CString::new("user").unwrap();
+        let content_user = CString::new("Once upon a time").unwrap();
+        let role_tool = CString::new("tool").unwrap();
+        let content_tool = CString::new("ignored tool output").unwrap();
+        let messages = [
+            ffi::llama_chat_message {
+                role: role_sys.as_ptr(),
+                content: content_sys.as_ptr(),
+            },
+            ffi::llama_chat_message {
+                role: role_tool.as_ptr(),
+                content: content_tool.as_ptr(),
+            },
+            ffi::llama_chat_message {
+                role: role_user.as_ptr(),
+                content: content_user.as_ptr(),
+            },
+        ];
+        let bytes =
+            apply_chat_template_with_format(&messages, true, ModelFormat::Completion).unwrap();
+        assert_eq!(bytes, b"Once upon a time");
     }
 
     #[spec("LLAMA-006")]

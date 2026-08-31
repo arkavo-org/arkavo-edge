@@ -1024,7 +1024,8 @@ async fn create_client_from_routing(
         | ModelChoice::LocalGemma270M
         | ModelChoice::LocalGemma4B
         | ModelChoice::LocalGemma12B
-        | ModelChoice::LocalDeepSeekCoder => {
+        | ModelChoice::LocalDeepSeekCoder
+        | ModelChoice::LocalTinyStories15M => {
             // Try Ollama first (from_env defaults to ollama)
             println!("Checking for Ollama...");
             if let Ok(client) = LlmClient::from_env() {

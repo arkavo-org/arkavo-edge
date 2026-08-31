@@ -102,6 +102,9 @@ impl ModelSelector {
             ModelChoice::LocalDeepSeekCoder => {
                 "Code-specialized (4s), zero cost, optimized for patches"
             }
+            ModelChoice::LocalTinyStories15M => {
+                "TinyStories 15M story completion, not for agent tasks"
+            }
             ModelChoice::DeepSeekV32 => "Fast (5s), cost-effective ($0.001), excellent for code",
             ModelChoice::DeepSeekV32Speciale => "Planning-optimized (5s), reasoning-only, no tools",
             ModelChoice::KimiK2 => "Fast (5s), 256K context, thinking mode support",
