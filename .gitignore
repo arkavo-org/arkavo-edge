@@ -61,6 +61,11 @@ DerivedData/
 # Downloaded model files for arkavo-memory
 crates/arkavo-memory/models/
 
+# Local GGUF / HF weights and distill runs. Never commit a sentinel checkpoint.
+/models/
+**/__pycache__/
+*.pyc
+
 # Autoresearch sweep/burst result files
 *_sweep_results.*
 *_burst_results.*
