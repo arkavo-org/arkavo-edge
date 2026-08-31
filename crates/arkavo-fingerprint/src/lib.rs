@@ -11,7 +11,9 @@
 
 pub mod index;
 pub mod key;
+pub mod near_tier;
 pub mod shingle;
+pub mod simhash;
 pub mod tier;
 
 pub use index::{
@@ -19,5 +21,10 @@ pub use index::{
     ReferenceIndexBuilder, SuppressionIndex, match_span,
 };
 pub use key::{IndexKey, KeyError, MIN_SECRET_BYTES, ShingleHash};
+pub use near_tier::{NEAR_TIER_BUDGET, NEAR_TIER_NAME, NearDuplicateTier};
 pub use shingle::{SHINGLE_WORDS, normalize, shingle_text, shingles, windows};
+pub use simhash::{
+    MAX_DOCUMENTS, MAX_HAMMING, MIN_SHINGLES, NearDuplicateIndex, NearDuplicateIndexBuilder,
+    NearMatch, SimHash, simhash,
+};
 pub use tier::{ReferenceTier, TIER_BUDGET, TIER_NAME, evidence_for};

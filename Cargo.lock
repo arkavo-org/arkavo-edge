@@ -1918,6 +1918,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-sentinel"
+version = "0.91.0"
+dependencies = [
+ "arkavo-fingerprint",
+ "arkavo-gguf-tdf",
+ "arkavo-protocol",
+ "arkavo-test-macros",
+ "criterion",
+ "governor",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arkavo-server"
 version = "0.91.0"
 dependencies = [

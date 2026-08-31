@@ -93,8 +93,17 @@ impl ReferenceTier {
         }
     }
 
-    /// Examine a span and report what this tier saw.
+    /// Examine a span against this tier's own budget.
     pub fn examine(&self, text: &str) -> TierReport {
+        self.examine_until(text, Instant::now() + self.budget)
+    }
+
+    /// Examine a span, stopping at a deadline the cascade owns.
+    ///
+    /// The cascade passes one deadline through every tier so the *sum* of the
+    /// tiers stays inside the per-call budget, rather than each tier
+    /// independently spending its own share of it.
+    pub fn examine_until(&self, text: &str, deadline: Instant) -> TierReport {
         let (Some(index), Some(key)) = (&self.index, &self.key) else {
             return TierReport::unavailable(TIER_NAME, self.version(), &self.unavailable_reason);
         };
@@ -111,8 +120,7 @@ impl ReferenceTier {
             );
         }
 
-        let started = Instant::now();
-        let summary = self.match_within_budget(index, key, text, started);
+        let summary = self.match_within_budget(index, key, text, deadline);
         match summary {
             Ok(summary) => TierReport::matched(TIER_NAME, self.version(), findings(&summary)),
             // Not a match and not a clean miss: the span was only partly seen,
@@ -120,10 +128,7 @@ impl ReferenceTier {
             Err(examined) => TierReport::unavailable(
                 TIER_NAME,
                 self.version(),
-                format!(
-                    "budget of {}µs exhausted after {examined} shingles; scoring deferred",
-                    self.budget.as_micros()
-                ),
+                format!("budget exhausted after {examined} shingles; scoring deferred"),
             ),
         }
     }
@@ -147,7 +152,7 @@ impl ReferenceTier {
         index: &ReferenceIndex,
         key: &IndexKey,
         text: &str,
-        started: Instant,
+        deadline: Instant,
     ) -> Result<MatchSummary, usize> {
         // Normalized once; windows are joined one at a time so the budget can
         // stop the work rather than arriving after it.
@@ -155,7 +160,7 @@ impl ReferenceTier {
         let words: Vec<&str> = normalized.split(' ').filter(|w| !w.is_empty()).collect();
         let mut summary = MatchSummary::default();
         for (n, shingle) in crate::shingle::windows(&words).enumerate() {
-            if n % BUDGET_CHECK_STRIDE == 0 && n > 0 && started.elapsed() > self.budget {
+            if n % BUDGET_CHECK_STRIDE == 0 && n > 0 && Instant::now() > deadline {
                 return Err(n);
             }
             summary.shingles_examined += 1;
