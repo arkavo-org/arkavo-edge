@@ -1,5 +1,6 @@
-//! SENT-001, SENT-002, SENT-003, SENT-013: tripwires against the DLP surface
-//! the sentinel will replace.
+#![cfg(feature = "taint")]
+//! SENT-001, SENT-002, SENT-003, SENT-013: the split between labelling and
+//! authorizing.
 //!
 //! `DlpPolicy` today fuses detection and authorization: it looks at one datum
 //! and answers Allow or Block. The sentinel splits those apart — it produces
