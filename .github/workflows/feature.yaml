@@ -274,6 +274,8 @@ jobs:
             cargo test --locked -p arkavo-protocol --features taint --test sentinel_test --test taint_propagation_test --test egress_taint_test
             cargo test --locked -p arkavo-server --features taint --lib egress_guard
             cargo test --locked -p arkavo-critic --features sentinel --lib checks::sentinel
+            # Pack-index unit tests live in arkavo-cli and only compile when
+            # the fingerprint crate is linked.
             cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel commands::pack
             # Phase 4's acceptance test: a seeded canary in a completion never
             # reaches the consumer.
