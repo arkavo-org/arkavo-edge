@@ -254,11 +254,14 @@ because a looser word would have hidden a real distinction.
 
 ## Two things a reader will trip over
 
-- **The SEQ spec flags are stale.** 16 of 17 sequence-integrity scenarios still
-  carry `wip: true`, though their tripwires are green and the egress gate
-  demonstrably enforces. The flags were not swept when Phases 1 and 2 landed.
-  Read the tests, not the flags, until that sweep happens — and do not quote
-  "1 of 17" at anyone.
+- **Sequence-integrity coverage is 6 of 17, not 1 of 17.** SEQ-001..004, 014
+  and 015 are green: labels, propagation, the egress gate, the session graph,
+  and audit evidence. The other eleven stay `wip` because the tripwires are
+  still red — baselines (005), session-graph divergence (006), the
+  cross-session ledger (007–009), sequence-aware TØR-G (010–011), async
+  coverage (012), Titan sequence drift (013), per-role config (016), and
+  tracking-error handling (017). Do not quote "1 of 17" at anyone, and do
+  not quote "16 of 17 tripwires are green" either.
 - **The pack-wide ceiling is deliberately blunt.** A session that selected only
   an Internal adapter still inherits the whole pack's Restricted ceiling, so it
   gets no partial streaming. Conservative on purpose; a selection-scoped ceiling

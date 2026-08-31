@@ -2,7 +2,7 @@
 
 feature: Agent Behavioral Sequence Integrity
 module: arkavo_sequence_integrity
-version: 0.67.1
+version: 0.93.0
 
 invariants:
   - Every tool call is taint-tracked from data source to data sink
@@ -21,7 +21,6 @@ scenarios:
   - id: SEQ-001
     name: Tag data with provenance at ingestion
     criticality: critical
-    wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/549
     given:
       - Agent reads data from any source (email, file, API, database)
@@ -38,7 +37,7 @@ scenarios:
       - crates/arkavo-protocol/src/taint_inference.rs:1-135
       - crates/arkavo-protocol/src/taint_tracker.rs:1-209
       - crates/arkavo-events/src/payload.rs:77-125
-    changed: "2026-08-30"
+    changed: "2026-08-31"
     edge_cases:
       - condition: Data source classification ambiguous
         expected: Conservative classification (assume sensitive)
@@ -50,7 +49,6 @@ scenarios:
   - id: SEQ-002
     name: Propagate taint through data transformations
     criticality: critical
-    wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/549
     given:
       - Tainted data in agent context
@@ -64,7 +62,7 @@ scenarios:
     refs:
       - crates/arkavo-protocol/src/taint.rs:245-347
       - crates/arkavo-protocol/src/taint_tracker.rs:150-209
-    changed: "2026-08-30"
+    changed: "2026-08-31"
     edge_cases:
       - condition: Agent extracts single field from tainted record
         expected: Extracted field inherits parent taint
@@ -76,7 +74,6 @@ scenarios:
   - id: SEQ-003
     name: Block tainted data exfiltration at egress
     criticality: critical
-    wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/548
     given:
       - Agent attempts outbound action (HTTP POST, email send, file write to external)
@@ -98,7 +95,7 @@ scenarios:
       - crates/arkavo-protocol/src/http.rs:110-190
       - crates/arkavo-validation/src/url.rs:83-142
       - schemas/taxonomy-map.v1.json
-    changed: "2026-08-30"
+    changed: "2026-08-31"
     edge_cases:
       - condition: Destination is sanctioned internal endpoint
         expected: Taint policy allows, action proceeds
@@ -119,7 +116,6 @@ scenarios:
   - id: SEQ-004
     name: Build directed action graph per session
     criticality: critical
-    wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/556
     given:
       - Agent session active
@@ -134,7 +130,7 @@ scenarios:
       - crates/arkavo-protocol/src/sequence_graph.rs:1-129
       - crates/arkavo-protocol/src/taint_ledger.rs:1-60
       - crates/arkavo-events/src/payload.rs:77-125
-    changed: "2026-08-30"
+    changed: "2026-08-31"
 
   - id: SEQ-005
     name: Learn behavioral baselines per agent skill
@@ -372,7 +368,6 @@ scenarios:
   - id: SEQ-015
     name: Sequence evidence in audit events
     criticality: high
-    wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/550
     given:
       - EventWriter from arkavo-events active
@@ -393,7 +388,7 @@ scenarios:
       - crates/arkavo-arp/src/observability.rs:151-215
       - crates/arkavo-observability/src/decision_trace.rs:107-150
       - crates/arkavo-server/src/server/egress_guard.rs:150-235
-    changed: "2026-08-30"
+    changed: "2026-08-31"
 
   # ============================================================================
   # Configuration and Lifecycle

@@ -2,9 +2,10 @@
 
 //! SEQ-001, SEQ-002: taint labelling and monotonic propagation.
 //!
-//! These cover the substrate. The scenarios stay `wip` until the tracker is
-//! wired at the tool-dispatch and A2A seams, which is Phase 2 work; what is
-//! asserted here is that the labels themselves behave.
+//! These cover the substrate: labels, inference, and monotonic union.
+//! The tracker is wired at both conductor loops (`EgressGuard`); SEQ-001
+//! and SEQ-002 are green for the paths that exist. Cross-session
+//! decomposition (SEQ-007..009) is a later seam.
 
 use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
 use arkavo_protocol::taint::{SourceKind, TaintLabel, TaintSet, TaintSource, Transformation};
