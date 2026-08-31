@@ -81,8 +81,6 @@ crates/arkavo-llm/assets/gemma_tokenizer.model
 !.env.example
 !.env.*.example
 /STATUS.md
-vendor/idb/
-vendor/idb-prebuilt/
 vendor/cef/
 vendor/cef_binary*/
 vendor/*.tar.bz2

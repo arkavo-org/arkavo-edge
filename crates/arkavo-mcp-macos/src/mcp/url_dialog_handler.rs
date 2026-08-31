@@ -92,46 +92,26 @@ impl UrlDialogHandler {
             x, y, device.name
         );
 
-        // Use idb to tap the button
-        let output = Command::new("idb")
+        let simctl_output = Command::new("xcrun")
             .args([
-                "ui",
+                "simctl",
+                "io",
+                device_id,
                 "tap",
                 &x.to_string(),
                 &y.to_string(),
-                "--udid",
-                device_id,
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb tap: {e}")))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute simctl tap: {e}")))?;
 
-        if !output.status.success() {
-            let _stderr = String::from_utf8_lossy(&output.stderr);
-
-            // If idb fails, try using simctl
-            eprintln!("[UrlDialogHandler] idb failed, trying simctl approach...");
-
-            let simctl_output = Command::new("xcrun")
-                .args([
-                    "simctl",
-                    "io",
-                    device_id,
-                    "tap",
-                    &x.to_string(),
-                    &y.to_string(),
-                ])
-                .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to execute simctl tap: {e}")))?;
-
-            if !simctl_output.status.success() {
-                return Ok(json!({
-                    "success": false,
-                    "error": "Failed to tap Open button",
-                    "details": String::from_utf8_lossy(&simctl_output.stderr).to_string(),
-                    "coordinates": {"x": x, "y": y},
-                    "device": device.name
-                }));
-            }
+        if !simctl_output.status.success() {
+            return Ok(json!({
+                "success": false,
+                "error": "Failed to tap Open button",
+                "details": String::from_utf8_lossy(&simctl_output.stderr).to_string(),
+                "coordinates": {"x": x, "y": y},
+                "device": device.name
+            }));
         }
 
         Ok(json!({
@@ -170,14 +150,14 @@ impl Tool for UrlDialogHandler {
                     _ => (78.0, 490.0),
                 };
 
-                let output = Command::new("idb")
+                let output = Command::new("xcrun")
                     .args([
-                        "ui",
+                        "simctl",
+                        "io",
+                        &device_id,
                         "tap",
                         &x.to_string(),
                         &y.to_string(),
-                        "--udid",
-                        &device_id,
                     ])
                     .output()
                     .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {e}")))?;

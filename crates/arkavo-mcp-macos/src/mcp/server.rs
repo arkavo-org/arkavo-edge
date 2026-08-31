@@ -85,12 +85,9 @@ impl McpTestServer {
     pub fn new() -> Result<Self> {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
-        // Defer IDB initialization until iOS tools are actually used
         #[cfg(target_os = "macos")]
         {
-            eprintln!(
-                "[McpTestServer] iOS testing tools available - initialization deferred until first use"
-            );
+            eprintln!("[McpTestServer] iOS testing tools available");
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -209,11 +206,6 @@ impl McpTestServer {
         #[cfg(target_os = "macos")]
         if xcode_available {
             tools.insert(
-                "idb_management".to_string(),
-                Arc::new(super::idb_management_tool::IdbManagementTool::new()),
-            );
-
-            tools.insert(
                 "app_diagnostic".to_string(),
                 Arc::new(AppDiagnosticTool::new()),
             );
@@ -248,7 +240,7 @@ impl McpTestServer {
                 Arc::new(SystemDialogKit::new(device_manager.clone())),
             );
 
-            // Add simulator management tools (IDB functionality in Rust)
+            // Add simulator management tools
             tools.insert(
                 "simulator_control".to_string(),
                 Arc::new(SimulatorControl::new()),
@@ -565,7 +557,6 @@ impl McpTestServer {
             return Err(TestError::Mcp("Tool not allowed".to_string()));
         }
 
-        // Use longer timeout for IDB-based operations which can be slow on first run
         let timeout_duration = match request.tool_name.as_str() {
             "ui_interaction"
             | "screen_capture"
@@ -573,9 +564,7 @@ impl McpTestServer {
             | "simulator_control"
             | "simulator_advanced"
             | "calibration_manager"
-            | "setup_calibration" => {
-                Duration::from_secs(120) // 2 minutes for IDB operations
-            }
+            | "setup_calibration" => Duration::from_secs(120),
             _ => Duration::from_secs(30), // Default 30 seconds
         };
 
@@ -644,7 +633,6 @@ impl McpTestServer {
                 | "biometric_test_scenario"
                 | "smart_biometric_handler"
                 | "enrollment_flow"
-                | "idb_management"
                 | "store_memory"
                 | "search_memory"
                 | "get_memory"
