@@ -175,7 +175,7 @@ jobs:
           - routing     # arkavo-router, arkavo-dataflow (42K LOC)
           - ui          # arkavo-terminal, arkavo-ui-generator, arkavo-agui
           - cli         # arkavo-cli (large dep tree, needs its own disk budget)
-          - dlp         # the taint and fingerprint features: off by default, so nothing else builds them
+          - dlp         # the taint and sentinel features: off by default, so nothing else builds them
           - benches     # bench compile-checks only: release profile doubles disk, so isolate it
     steps:
       - uses: actions/checkout@v4
@@ -267,12 +267,17 @@ jobs:
             # Use --no-default-features to skip llama-cpp (saves disk space)
             cargo check --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui,cef-ui
           elif [ "${{ matrix.group }}" = "dlp" ]; then
-            # `taint` and `fingerprint` are off by default, so no other group
+            # `taint` and `sentinel` are off by default, so no other group
             # compiles them and nothing else would notice them breaking.
             cargo test --locked -p arkavo-fingerprint
+            cargo test --locked -p arkavo-sentinel
             cargo test --locked -p arkavo-protocol --features taint --test sentinel_test --test taint_propagation_test --test egress_taint_test
             cargo test --locked -p arkavo-server --features taint --lib egress_guard
-            cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,fingerprint commands::pack
+            cargo test --locked -p arkavo-critic --features sentinel --lib checks::sentinel
+            cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel commands::pack
+            # Phase 4's acceptance test: a seeded canary in a completion never
+            # reaches the consumer.
+            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary
           fi
 
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
@@ -307,8 +312,10 @@ jobs:
             cargo clippy --locked -p arkavo-cli --lib --bins --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui,cef-ui -- -D warnings
           elif [ "${{ matrix.group }}" = "dlp" ]; then
             cargo clippy --locked -p arkavo-fingerprint --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-sentinel --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-protocol --lib --bins --features taint -- -D warnings
-            cargo clippy --locked -p arkavo-cli --lib --bins --no-default-features --features memory,mdns,mcp-tools,llm-remote,fingerprint -- -D warnings
+            cargo clippy --locked -p arkavo-critic --lib --bins --features sentinel -- -D warnings
+            cargo clippy --locked -p arkavo-cli --lib --bins --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel -- -D warnings
           fi
 
   # Advisory early warning for the next-generation trait solver, which nightly

@@ -110,6 +110,19 @@ where
                     }
                     if chunk.done {
                         this.finished = true;
+                        // The final chunk can carry text: a provider that sends
+                        // its last tokens and the done marker in one message
+                        // would otherwise have that text bypass the gate
+                        // entirely, which is the one span most likely to hold
+                        // the end of a completion.
+                        if !chunk.content.is_empty()
+                            && this.gate.admit(&chunk.content) == GateOutcome::Blocked
+                        {
+                            this.blocked = true;
+                            return Poll::Ready(Some(Err(Error::Provider(
+                                GATE_BLOCKED.to_string(),
+                            ))));
+                        }
                         return Poll::Ready(Some(finish(
                             &this.gate,
                             &mut this.blocked,
@@ -289,6 +302,69 @@ mod tests {
         assert!(errored, "the consumer must be told the stream ended");
         assert!(!seen.contains("CANARY"));
         assert!(!seen.contains("the rest"));
+    }
+
+    /// The final chunk can carry text. Admitting it is what stops the last
+    /// tokens of a completion from bypassing the gate.
+    #[tokio::test]
+    async fn text_arriving_on_the_done_chunk_is_still_inspected() {
+        let inner = futures::stream::iter(vec![
+            Ok(StreamResponse {
+                content: "a clean opening ".to_string(),
+                reasoning_content: None,
+                done: false,
+                inference_timing: None,
+            }),
+            Ok(StreamResponse {
+                content: "and then CANARY at the very end".to_string(),
+                reasoning_content: None,
+                done: true,
+                inference_timing: None,
+            }),
+        ]);
+        let mut stream = gated(Box::pin(inner), Canary::new("CANARY", 4096));
+
+        let mut seen = String::new();
+        let mut refused = false;
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(chunk) => seen.push_str(&chunk.content),
+                Err(_) => {
+                    refused = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(refused, "the done chunk's text must not bypass the gate");
+        assert!(!seen.contains("CANARY"), "{seen}");
+    }
+
+    /// And clean text on the done chunk is still delivered.
+    #[tokio::test]
+    async fn clean_text_on_the_done_chunk_still_reaches_the_consumer() {
+        let inner = futures::stream::iter(vec![
+            Ok(StreamResponse {
+                content: "an opening ".to_string(),
+                reasoning_content: None,
+                done: false,
+                inference_timing: None,
+            }),
+            Ok(StreamResponse {
+                content: "and a closing".to_string(),
+                reasoning_content: None,
+                done: true,
+                inference_timing: None,
+            }),
+        ]);
+        let mut stream = gated(Box::pin(inner), Canary::new("CANARY", 4096));
+
+        let mut seen = String::new();
+        while let Some(item) = stream.next().await {
+            seen.push_str(&item.expect("clean text is not refused").content);
+        }
+
+        assert_eq!(seen, "an opening and a closing");
     }
 
     /// SENT-007 edge case: the completion ends mid-window and the tail is still

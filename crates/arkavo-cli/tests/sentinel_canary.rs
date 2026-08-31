@@ -68,9 +68,13 @@ fn stream_of(text: &str) -> Vec<arkavo_llm::Result<StreamResponse>> {
 }
 
 async fn completion_containing(text: &str) -> String {
-    // SAFETY-adjacent: the mock provider is the sanctioned test provider for
-    // the DLP suites, selected by this variable.
-    unsafe { std::env::set_var("ARKAVO_MOCK_PROVIDER", "1") };
+    // Set once: these tests run in parallel and `set_var` is not thread-safe
+    // against a concurrent read.
+    static MOCK: std::sync::Once = std::sync::Once::new();
+    MOCK.call_once(|| {
+        // SAFETY: inside `Once`, before any test reads the variable.
+        unsafe { std::env::set_var("ARKAVO_MOCK_PROVIDER", "1") };
+    });
     assert!(MockProvider::is_enabled());
 
     let mut config = MockProviderConfig::default();
