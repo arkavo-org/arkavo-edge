@@ -1,0 +1,118 @@
+{
+  "$schema": "./taxonomy-map.v1.schema.json",
+  "version": "1.0.0",
+  "namespace": "https://attr.arkavo.com/",
+  "attributeDefinitions": [
+    {
+      "name": "clearance",
+      "fqn": "https://attr.arkavo.com/clearance",
+      "rule": "hierarchy",
+      "order": ["public", "internal", "confidential", "restricted"],
+      "description": "Hierarchical clearance already used by swarmkit role policies. Holding a level grants every lower level."
+    },
+    {
+      "name": "department",
+      "fqn": "https://attr.arkavo.com/department",
+      "rule": "allOf",
+      "values": [],
+      "description": "Compartment orthogonal to clearance, populated per tenant. Conjunctive with clearance: a restricted clearance does not confer department access."
+    },
+    {
+      "name": "project",
+      "fqn": "https://attr.arkavo.com/project",
+      "rule": "allOf",
+      "values": [],
+      "description": "Second orthogonal compartment, populated per tenant. Kept separate from department so a project grant does not widen a department grant."
+    }
+  ],
+  "labels": [
+    {
+      "label": "public",
+      "category": "Public",
+      "sensitivity": "Public",
+      "requires": [],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "public" }
+      ],
+      "unentitled": "redact",
+      "description": "Content cleared for release. Wrapping is still available when a transport needs integrity, but is not required."
+    },
+    {
+      "label": "internal",
+      "category": "Internal",
+      "sensitivity": "Internal",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "internal" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "internal" }
+      ],
+      "unentitled": "block",
+      "description": "Organization-internal content, including internal addresses and hostnames."
+    },
+    {
+      "label": "pii",
+      "category": "Pii",
+      "sensitivity": "Internal",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "internal" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "internal" }
+      ],
+      "unentitled": "block",
+      "description": "Personal data. The floor matches DatumType::default_sensitivity so loading this map does not silently reclassify existing detections; a detector that reports a higher sensitivity for a specific datum, such as a national identity number at Restricted, wins by monotonic union. Release to an external destination requires explicit entitlement, per SEQ-003."
+    },
+    {
+      "label": "financial",
+      "category": "Financial",
+      "sensitivity": "Confidential",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "confidential" },
+        { "fqn": "https://attr.arkavo.com/department", "value": "finance" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "confidential" },
+        { "fqn": "https://attr.arkavo.com/department", "value": "finance" }
+      ],
+      "unentitled": "block",
+      "description": "Payment instruments and financial records. Conjunctive: clearance alone does not entitle."
+    },
+    {
+      "label": "healthcare",
+      "category": "Healthcare",
+      "sensitivity": "Restricted",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "restricted" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "restricted" }
+      ],
+      "unentitled": "block",
+      "description": "Health information. Held at restricted because re-identification survives most redaction."
+    },
+    {
+      "label": "credentials",
+      "category": "Credentials",
+      "sensitivity": "Restricted",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "restricted" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/clearance", "value": "restricted" }
+      ],
+      "unentitled": "block",
+      "neverRelease": true,
+      "description": "API keys, passwords, tokens. Blocked unconditionally: a credential that reaches an egress path is already compromised, so entitlement and wrapping do not rescue it."
+    }
+  ],
+  "obligations": [
+    {
+      "name": "legal-hold",
+      "fqn": "https://attr.arkavo.com/obligation/legal-hold",
+      "assertionType": "handling",
+      "grantsDecryption": false,
+      "description": "Content is under legal hold: it may not be deleted, redacted, or expired by retention. Modeled as a handling assertion because a hold is a duty on whoever already has the content, not a reason to give it to anyone."
+    }
+  ]
+}

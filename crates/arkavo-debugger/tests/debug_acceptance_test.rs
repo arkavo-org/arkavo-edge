@@ -107,6 +107,7 @@ async fn test_replay_determinism() {
                 schema_version: stored.schema_version,
                 parent_event_id: None,
                 correlation_id: None,
+                taint_chain: None,
             },
             payload,
         };

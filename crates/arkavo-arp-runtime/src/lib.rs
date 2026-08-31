@@ -114,6 +114,12 @@ impl ArpRuntime {
                 cryptographic_signing: None,
             });
         let decision_trace = Arc::new(DecisionTrace::new(trace_cfg));
+        // Published for layers below the runtime — the conductor's egress gate
+        // among them — that cannot have it threaded through them. Behind the
+        // feature: a process-wide side channel is a behavior change, and the
+        // phase plan says none land outside `taint`.
+        #[cfg(feature = "taint")]
+        arkavo_observability::decision_trace::install(decision_trace.clone());
         let proposals = Arc::new(Mutex::new(ProposalQueue::new(
             doc.clone(),
             decision_trace.clone(),

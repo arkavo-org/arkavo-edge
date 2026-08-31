@@ -34,6 +34,9 @@ kas = ["arkavo-cli/kas"]
 cef-ui = ["arkavo-cli/cef-ui"]
 web-ui = ["arkavo-cli/web-ui"]
 claude-agent = ["arkavo-cli/claude-agent"]
+# Taint-aware egress enforcement (SEQ-003, SEQ-014, SEQ-015). Off until the
+# sequence-integrity work reaches GA; the security suite builds a binary with it.
+taint = ["arkavo-cli/taint"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }

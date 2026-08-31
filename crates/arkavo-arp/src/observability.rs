@@ -165,6 +165,53 @@ pub struct DecisionTraceEntry {
     pub feedback: Option<TraceFeedback>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cryptographic_proofs: Option<TraceCryptoProofs>,
+    /// SEQ-015: evidence for a data-sovereignty decision — what the payload
+    /// carried, where it was going, and how the sequence got there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence_evidence: Option<TraceSequenceEvidence>,
+}
+
+/// Sequence-integrity evidence attached to a trace entry (SEQ-015).
+///
+/// Plain strings throughout. This crate sits below the one that owns the taint
+/// types, and an audit record has to stay readable by a tool that holds none of
+/// the producer's types; spelled-out names also mean renaming a Rust variant
+/// cannot rewrite what a past entry meant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceSequenceEvidence {
+    /// Highest sensitivity the payload carried.
+    pub sensitivity: String,
+    /// Every data category present, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
+    /// Source identifiers that contributed, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<String>,
+    /// Provenance chain from source to this point, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provenance: Vec<String>,
+    /// Provenance steps the producer dropped. Non-zero means the chain is
+    /// incomplete, which changes how much weight the entry can bear.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub truncated_hops: u32,
+    /// Destination as the gate resolved it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+    /// Disposition the gate reached: allow, wrap, hold, block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disposition: Option<String>,
+    /// Version of the taxonomy map that produced the attribute requirements.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub taxonomy_version: Option<String>,
+    /// Session action graph up to this point, one entry per node.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub action_graph: Vec<String>,
+}
+
+// serde's `skip_serializing_if` takes `fn(&T) -> bool`.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }
 
 /// Layer that produced the trace entry.

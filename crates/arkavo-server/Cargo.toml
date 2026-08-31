@@ -137,6 +137,9 @@ swarm-apply = ["kas", "iroh", "dep:arkavo-orchestrator", "arkavo-orchestrator/ka
 # chars/4 MockEstimator.
 llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-router/llama-cpp", "dep:arkavo-llama-cpp"]
 claude-agent = ["dep:arkavo-mcp-claude"]
+# Taint-aware egress enforcement in the conductor's tool loop (SEQ-003, SEQ-014,
+# SEQ-015). Off until the sequence-integrity work reaches GA.
+taint = ["arkavo-protocol/taint", "arkavo-arp-runtime/taint"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

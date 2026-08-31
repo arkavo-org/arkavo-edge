@@ -192,6 +192,7 @@ mod tests {
                 schema_version: "1.0.0".to_string(),
                 parent_event_id: None,
                 correlation_id: None,
+                taint_chain: None,
             },
             payload: match event_type {
                 "error" => EventPayload::Error {

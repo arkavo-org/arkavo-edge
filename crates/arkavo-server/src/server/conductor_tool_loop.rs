@@ -61,6 +61,7 @@ pub(super) async fn run_tool_loop(
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
     granted_tools: Option<&std::collections::HashSet<String>>,
+    #[cfg(feature = "taint")] egress: Option<&super::egress_guard::EgressGuard>,
 ) -> Result<ToolLoopResult, String> {
     const MAX_TOOL_ITERATIONS: u8 = 4;
     let mut final_result = String::new();
@@ -485,6 +486,8 @@ pub(super) async fn run_tool_loop(
             &declared_scope,
             &mut tool_observations,
             granted_tools,
+            #[cfg(feature = "taint")]
+            egress,
         )
         .await;
 
@@ -663,6 +666,7 @@ async fn execute_tool_calls(
     declared_scope: &[String],
     observations: &mut Vec<ToolCallObservation>,
     granted_tools: Option<&std::collections::HashSet<String>>,
+    #[cfg(feature = "taint")] egress: Option<&super::egress_guard::EgressGuard>,
 ) -> Vec<String> {
     let mut tool_result_parts = Vec::new();
 
@@ -698,6 +702,19 @@ async fn execute_tool_calls(
         }
 
         let args = tool_call.arguments.clone();
+
+        // SEQ-003: refuse before the call runs. A tool that would send tainted
+        // data somewhere it may not go must not reach the network at all, and
+        // the agent learns only that policy refused it.
+        #[cfg(feature = "taint")]
+        if let Some(guard) = egress
+            && let Err(message) = guard.check_call(&tool_call.tool_name, &args)
+        {
+            tool_result_parts.push(format!("Tool {} (Denied): {message}", tool_call.tool_name));
+            *total_step_idx += 1;
+            continue;
+        }
+
         debug!(
             "Tool call: {} with args: {}",
             tool_call.tool_name,
@@ -728,6 +745,11 @@ async fn execute_tool_calls(
                     declared: declared_scope.iter().any(|t| t == &tool_call.tool_name),
                 });
                 let result_str = serde_json::to_string(&result).unwrap_or_default();
+
+                #[cfg(feature = "taint")]
+                if let Some(guard) = egress {
+                    guard.observe_result(&tool_call.tool_name, &args, &result_str);
+                }
 
                 let reward = super::conductor::extract_reward_from_result(&result_str);
                 let semantic_failure = detect_semantic_failure(&result_str);

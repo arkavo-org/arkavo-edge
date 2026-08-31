@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "arkavo-taxonomy-map-v1",
+  "title": "Arkavo Taxonomy Map v1",
+  "description": "Versioned mapping from taxonomy labels to OpenTDF attributes. The map is data, not policy: it says which attributes a label implies and what happens to a payload whose requester does not hold them. Authorization itself stays with the KAS and the policy decision point.",
+  "type": "object",
+  "required": ["version", "namespace", "attributeDefinitions", "labels"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Map version, recorded in sentinel evidence and bound by the pack manifest signature"
+    },
+    "namespace": {
+      "type": "string",
+      "format": "uri",
+      "description": "Attribute namespace every definition FQN extends"
+    },
+    "attributeDefinitions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "OpenTDF attribute definitions. Definitions are conjunctive with one another: a requester must satisfy every definition a label names.",
+      "items": {
+        "type": "object",
+        "required": ["name", "fqn", "rule"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "fqn": { "type": "string", "format": "uri" },
+          "rule": {
+            "type": "string",
+            "enum": ["hierarchy", "allOf", "anyOf"],
+            "description": "hierarchy: ordered levels, holding a level grants every lower level. allOf: requester must hold every named value. anyOf: requester must hold at least one."
+          },
+          "order": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Lowest to highest. Required for and only valid on hierarchy definitions."
+          },
+          "values": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Known values. An empty array means the definition is populated per tenant."
+          },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "labels": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Taxonomy labels a classifier or reference tier may emit",
+      "items": {
+        "type": "object",
+        "required": ["label", "category", "sensitivity", "requires", "wrapAttributes", "unentitled"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "category": {
+            "type": "string",
+            "enum": ["Pii", "Credentials", "Financial", "Healthcare", "Internal", "Public"],
+            "description": "DataCategory this label maps onto"
+          },
+          "sensitivity": {
+            "type": "string",
+            "enum": ["Public", "Internal", "Confidential", "Restricted"],
+            "description": "SensitivityLevel floor this label implies. Merging labels takes the maximum."
+          },
+          "requires": {
+            "type": "array",
+            "description": "Attributes the requester must hold. Conjunctive across definitions.",
+            "items": { "$ref": "#/definitions/attributeValue" }
+          },
+          "wrapAttributes": {
+            "type": "array",
+            "description": "Attributes placed in dataAttributes when a payload carrying this label is wrapped for transport",
+            "items": { "$ref": "#/definitions/attributeValue" }
+          },
+          "unentitled": {
+            "type": "string",
+            "enum": ["block", "hold", "redact"],
+            "description": "Disposition when the requester does not hold the required attributes. Wrapping never rescues an unauthorized disclosure, so allow is not a legal value here."
+          },
+          "neverRelease": {
+            "type": "boolean",
+            "default": false,
+            "description": "Blocked unconditionally regardless of entitlement, wrapping, or destination"
+          },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "obligations": {
+      "type": "array",
+      "description": "Handling obligations carried as assertions. An obligation constrains what a holder may do with released content; it never grants decryption.",
+      "items": {
+        "type": "object",
+        "required": ["name", "fqn", "assertionType", "grantsDecryption"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "fqn": { "type": "string", "format": "uri" },
+          "assertionType": { "type": "string", "enum": ["handling"] },
+          "grantsDecryption": {
+            "type": "boolean",
+            "enum": [false],
+            "description": "Always false. An obligation that granted decryption would be an entitlement."
+          },
+          "description": { "type": "string" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "attributeValue": {
+      "type": "object",
+      "required": ["fqn", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "fqn": { "type": "string", "format": "uri" },
+        "value": { "type": "string" }
+      }
+    }
+  }
+}

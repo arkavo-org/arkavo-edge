@@ -61,6 +61,7 @@ pub(super) async fn run_tool_loop_parallel(
     tool_memory: Option<&Arc<RwLock<ToolMemory>>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
     granted_tools: Option<&std::collections::HashSet<String>>,
+    #[cfg(feature = "taint")] egress: Option<Arc<super::egress_guard::EgressGuard>>,
 ) -> Result<ToolLoopResult, String> {
     let loop_start = std::time::Instant::now();
 
@@ -86,6 +87,8 @@ pub(super) async fn run_tool_loop_parallel(
     let exec_bus = learning_bus.cloned();
     let exec_mem = tool_memory.cloned();
     let exec_declared = declared_scope.clone();
+    #[cfg(feature = "taint")]
+    let exec_egress = egress.clone();
     let executor = tokio::spawn(async move {
         executor_track(
             &exec_router,
@@ -98,6 +101,8 @@ pub(super) async fn run_tool_loop_parallel(
             &exec_declared,
             obs_tx,
             exec_granted.as_ref(),
+            #[cfg(feature = "taint")]
+            exec_egress,
         )
         .await;
     });
@@ -474,6 +479,7 @@ async fn executor_track(
     declared_scope: &[String],
     obs_tx: mpsc::Sender<ToolCallObservation>,
     granted_tools: Option<&std::collections::HashSet<String>>,
+    #[cfg(feature = "taint")] egress: Option<Arc<super::egress_guard::EgressGuard>>,
 ) {
     let mut step_idx: usize = 0;
 
@@ -514,6 +520,8 @@ async fn executor_track(
                     .clone()
                     .unwrap_or_else(|| format!("call_{idx}"));
                 let mem = tool_memory.cloned();
+                #[cfg(feature = "taint")]
+                let guard = egress.clone();
                 async move {
                     // Skip setup tools that already succeeded (e.g., registerAgent)
                     if let Some(ref m) = mem
@@ -526,6 +534,25 @@ async fn executor_track(
                             args,
                             Ok::<String, String>("Already completed \u{2014} skipped".to_string()),
                             true,
+                            None,
+                            0u64,
+                        );
+                    }
+                    // SEQ-003: refuse before dispatch. Calls in one batch run
+                    // concurrently, so a call is judged against what the session
+                    // held when the batch was planned — a same-batch peer's
+                    // result cannot have reached these params yet.
+                    #[cfg(feature = "taint")]
+                    if let Some(ref g) = guard
+                        && let Err(message) = g.check_call(&name, &args)
+                    {
+                        return (
+                            idx,
+                            name,
+                            call_id,
+                            args,
+                            Err::<String, String>(message),
+                            false,
                             None,
                             0u64,
                         );
@@ -568,6 +595,17 @@ async fn executor_track(
                     declared: declared_scope.iter().any(|t| t == &tool_name),
                 })
                 .await;
+            // SEQ-004: fold results into the session's taint sequentially, so
+            // the accumulator sees a deterministic order and no batch contends
+            // on its lock. Errors count too: one that echoes its argument
+            // carries whatever was in it.
+            #[cfg(feature = "taint")]
+            if let Some(ref g) = egress {
+                match &result {
+                    Ok(body) => g.observe_result(&tool_name, &args, body),
+                    Err(message) => g.observe_error(&tool_name, message),
+                }
+            }
             match result {
                 Ok(result_str) => {
                     if let Some(r) = reward

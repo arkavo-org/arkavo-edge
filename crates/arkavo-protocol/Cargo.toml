@@ -39,6 +39,7 @@ tower = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
+regex = { workspace = true, optional = true }
 serde_json = { workspace = true }
 
 # JWT authentication
@@ -123,8 +124,12 @@ stub_handlers = []
 mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf"]  # KAS A2A capability for TDF key operations
+# Taint labels and the classification-inference seam (SEQ-001, SEQ-002).
+# Off until the sequence-integrity work reaches GA.
+taint = ["dep:regex"]
 
 [dev-dependencies]
+
 # For integration tests
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 # For examples
@@ -150,6 +155,11 @@ rustls = { workspace = true, features = ["std", "tls12"] }
 [[bench]]
 name = "a2a_latency"
 harness = false
+
+[[bench]]
+name = "taint_tracker"
+harness = false
+required-features = ["taint"]
 
 [[bin]]
 name = "export-schema"

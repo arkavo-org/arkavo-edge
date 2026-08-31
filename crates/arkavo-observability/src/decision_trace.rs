@@ -4,11 +4,11 @@
 //! trace entries. Entries are stored in insertion order and can be exported
 //! as JSON lines for SIEM/GRC integration.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use arkavo_arp::observability::{
     DecisionTraceConfig, DecisionTraceEntry, TraceDecision, TraceEventType, TraceLayer,
-    TraceOutcome,
+    TraceOutcome, TraceSequenceEvidence,
 };
 use chrono::Utc;
 use serde_json;
@@ -23,6 +23,21 @@ pub struct DecisionTrace {
     config: DecisionTraceConfig,
     #[cfg(feature = "signing")]
     signing_key: Option<arkavo_crypto::AgentKeypair>,
+}
+
+static GLOBAL: OnceLock<Arc<DecisionTrace>> = OnceLock::new();
+
+/// Install the process-wide DecisionTrace.
+///
+/// Returns false if one was already installed; the first wins, so a late
+/// installer cannot silently redirect an audit stream that is already running.
+pub fn install(trace: Arc<DecisionTrace>) -> bool {
+    GLOBAL.set(trace).is_ok()
+}
+
+/// The process-wide DecisionTrace, if one was installed.
+pub fn current() -> Option<Arc<DecisionTrace>> {
+    GLOBAL.get().cloned()
 }
 
 /// An entry stored in the trace with optional signature.
@@ -86,6 +101,7 @@ impl DecisionTrace {
             escalation: None,
             feedback: None,
             cryptographic_proofs: None,
+            sequence_evidence: None,
         };
 
         let signature = self.maybe_sign(&entry);
@@ -101,6 +117,45 @@ impl DecisionTrace {
         self.entries.lock().unwrap().push(stored);
 
         Some(trace_id)
+    }
+
+    /// Record a data-sovereignty decision with sequence-integrity evidence
+    /// (SEQ-015).
+    ///
+    /// The evidence is the forensic side of an egress decision and stays here:
+    /// what a refused caller is told is deliberately narrower, or the denial
+    /// message becomes an oracle for the classifier (SENT-014).
+    pub fn record_sequence_evidence(
+        &self,
+        event_type: TraceEventType,
+        task_id: Uuid,
+        agent_id: &str,
+        decision: TraceDecision,
+        outcome: TraceOutcome,
+        evidence: TraceSequenceEvidence,
+    ) -> Option<String> {
+        if !self.is_enabled() {
+            return None;
+        }
+
+        let trace_id = Uuid::new_v4().to_string();
+        let entry = DecisionTraceEntry {
+            trace_id: trace_id.clone(),
+            timestamp: Utc::now().to_rfc3339(),
+            task_id: task_id.to_string(),
+            agent_id: agent_id.to_string(),
+            layer: TraceLayer::DataSovereignty,
+            event_type,
+            decision,
+            outcome,
+            budget: None,
+            escalation: None,
+            feedback: None,
+            cryptographic_proofs: None,
+            sequence_evidence: Some(evidence),
+        };
+
+        self.record_entry(entry)
     }
 
     /// Record a full pre-built entry (for cases where caller sets all fields).
@@ -349,6 +404,7 @@ mod tests {
             escalation: None,
             feedback: None,
             cryptographic_proofs: None,
+            sequence_evidence: None,
         };
 
         let id = trace.record_entry(entry);

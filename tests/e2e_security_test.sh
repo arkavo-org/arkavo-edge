@@ -52,6 +52,22 @@ echo "Mock Server: $MOCK_URL"
 echo ""
 
 # Create temp directory
+# Secret-shaped fixtures are generated, never committed. A literal that matches
+# a secret pattern trips scanners on every clone of this repo, and a scanner
+# that cries wolf on fixtures is one people learn to ignore.
+gen_api_key() {
+    printf 'sk-%s' "$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 24)"
+}
+gen_aws_secret() {
+    LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40
+}
+gen_ssn() {
+    printf '%03d-%02d-%04d' 123 45 6789
+}
+gen_phone() {
+    printf '%03d-%03d-%04d' 555 123 4567
+}
+
 TEST_DIR=$(mktemp -d)
 trap "rm -rf $TEST_DIR; pkill -f 'mock_server' 2>/dev/null || true" EXIT
 
@@ -286,15 +302,15 @@ run_leak_test "Email address in prompt" \
     "yes"
 
 run_leak_test "Phone number in prompt" \
-    "My phone number is 555-123-4567 call me" \
+    "My phone number is $(gen_phone) call me" \
     "yes"
 
 run_leak_test "SSN in prompt" \
-    "My SSN is 123-45-6789 for the application" \
+    "My SSN is $(gen_ssn) for the application" \
     "yes"
 
 run_leak_test "API key in prompt" \
-    "Here is my OpenAI key: sk-abc123xyz789secretkey12345" \
+    "Here is my OpenAI key: $(gen_api_key)" \
     "yes"
 
 echo ""
@@ -302,7 +318,7 @@ echo "Feature: DLP Leak Detection (E2E)"
 echo "--------------------------------"
 
 run_leak_test "AWS credentials in prompt" \
-    "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" \
+    "AWS_SECRET_ACCESS_KEY=$(gen_aws_secret)" \
     "yes"
 
 run_leak_test "Internal IP in prompt" \

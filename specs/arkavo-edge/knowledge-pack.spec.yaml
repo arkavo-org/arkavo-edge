@@ -1,0 +1,360 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Sealed Knowledge Packs
+module: arkavo_knowledge_pack
+version: 0.90.0
+
+invariants:
+  - Every pack component is TDF-wrapped separately so partial distribution is possible
+  - ABAC is evaluated before any component key is released
+  - The manifest is signed and binds every component digest, the taxonomy-map version, and the calibration thresholds
+  - A model carries the highest classification present in its training corpus
+  - Inferred or derived classification may add restrictions, never remove known ones
+  - No plaintext corpus, derivation, checkpoint, or intermediate artifact survives a pack build
+  - Volatile facts live in TDF-RAG capsules; adapters carry stable domain behavior only
+
+scenarios:
+  # ============================================================================
+  # Pack format, signing, distribution
+  # ============================================================================
+  - id: KP-001
+    name: Wrap each pack component as its own TDF
+    criticality: critical
+    wip: true
+    given:
+      - Distillation has produced knowledge adapters, a sentinel classifier, and a reference index
+      - A target compartment set is known for each adapter
+    when: The pack is assembled
+    then:
+      - Each adapter is wrapped as its own TDF keyed to its compartment attributes
+      - The sentinel classifier is wrapped separately from every adapter
+      - The reference index is wrapped separately from the sentinel and the adapters
+      - No component shares a payload key with another component
+      - Component role and compartment are recorded in wrap options, not inferred from a file name
+    refs:
+      - crates/arkavo-gguf-tdf/src/writer.rs:28-48
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:128-160
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: A pack contains zero adapters
+        expected: Sentinel and index still form a valid pack
+      - condition: Two adapters target the same compartment
+        expected: Assembly rejected; a compartment resolves to exactly one adapter
+
+  - id: KP-002
+    name: Bind pack contents with a signed manifest
+    criticality: critical
+    wip: true
+    given:
+      - All pack components have been wrapped
+      - An organization signing anchor is available
+    when: The pack manifest is written
+    then:
+      - Manifest records the corpus snapshot digest
+      - Manifest records the taxonomy-map version used to derive attributes
+      - Manifest records the tokenizer identity and the digest of every component
+      - Manifest records calibrated per-label thresholds for the sentinel
+      - Manifest records parent pack lineage and the eval-evidence digest
+      - A detached signature over the canonical manifest is written alongside it
+    refs:
+      - crates/arkavo-gguf-tdf/src/lib.rs:85-95
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:421-460
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: A component digest is absent from the manifest
+        expected: Assembly rejected before signing
+      - condition: The pack has no parent
+        expected: Lineage records a root pack explicitly rather than omitting the field
+
+  - id: KP-003
+    name: Verify the manifest before releasing any component key
+    criticality: critical
+    wip: true
+    given:
+      - A pack is presented to a runtime
+      - The organization signing anchor is resolvable
+    when: The runtime opens the pack
+    then:
+      - Manifest signature is verified against the anchor
+      - Embedded policy attributes are checked before a key request is issued
+      - Key release is refused when signature verification fails
+      - Key material is zeroized after use
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:371-418
+      - crates/arkavo-gguf-tdf/src/key.rs:1-40
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: The signing anchor cannot be resolved
+        expected: Pack refused; no offline trust-on-first-use fallback
+      - condition: The KAS is unreachable
+        expected: Fail fast before decrypt is attempted
+
+  - id: KP-004
+    name: Reject a tampered pack component
+    criticality: critical
+    wip: true
+    given:
+      - A signed pack whose manifest lists a digest for every component
+      - One component has been modified after signing
+    when: The runtime loads the modified component
+    then:
+      - Component digest mismatch is detected before the component is used
+      - Load fails with the component identity and the expected digest in audit evidence
+      - Failure is sticky for the pack, not retried per component
+      - No partially loaded adapter remains resident
+    refs:
+      - crates/arkavo-gguf-tdf/src/reader.rs:1-40
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: The manifest itself is modified
+        expected: Signature verification fails first, before any digest check
+
+  - id: KP-005
+    name: Distribute sentinel and index without the knowledge model
+    criticality: high
+    wip: true
+    given:
+      - An egress-only node enforces classification but performs no generation
+      - A pack containing adapters, a sentinel, and an index exists
+    when: The pack is distributed to the egress node
+    then:
+      - Sentinel and index components are delivered and openable
+      - Adapter components are not delivered, or are delivered and remain unopenable
+      - Manifest verification succeeds on the partial set
+      - The node reports which components it holds for audit
+    refs:
+      - crates/arkavo-swarmkit-runtime/src/tdf.rs:308-360
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: A component listed in the manifest is absent locally
+        expected: Absence is recorded, not treated as tampering
+
+  - id: KP-006
+    name: Carry the high-water mark of the training corpus
+    criticality: critical
+    wip: true
+    given:
+      - An adapter is trained on a corpus spanning more than one classification
+    when: The adapter's classification is computed at pack time
+    then:
+      - Adapter classification equals the maximum classification in its corpus
+      - Merging two adapters produces the maximum of their classifications
+      - The computed ceiling is recorded in the manifest and in component metadata
+      - A lower classification cannot be asserted for the adapter after the fact
+    refs:
+      - crates/arkavo-protocol/src/data_classification.rs:15-22
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: A corpus item has no classification label
+        expected: Conservative classification applied, matching the SEQ-001 ambiguity rule
+      - condition: A declassified source is included
+        expected: Declassification evidence required; otherwise the original label stands
+
+  - id: KP-007
+    name: Select adapters from the session entitlement set
+    criticality: critical
+    wip: true
+    given:
+      - A session holds a resolved entitlement set
+      - A pack offers adapters at more than one clearance level
+    when: The model is loaded for the session
+    then:
+      - Only adapters the session is entitled to are loaded
+      - Adapters partition by clearance level; compartments within a level are served by capsules, not by extra adapters
+      - Mixed-level adapter stacking is refused unless the session accepts the high-water-mark ceiling
+      - The selected adapter set is recorded in the session's decision trace
+    refs:
+      - crates/arkavo-llama-cpp/src/lib.rs:1-40
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: The session is entitled to no adapter
+        expected: Base model serves the session with no adapter applied
+      - condition: Entitlements change mid-session
+        expected: Adapters cleared and reselected; prior generation is not retroactively covered
+
+  - id: KP-008
+    name: Apply the model classification ceiling to generated output
+    criticality: critical
+    wip: true
+    given:
+      - A served model records a classification ceiling in its component metadata
+      - A request carries its own input taint
+    when: The model produces output
+    then:
+      - Output taint is the union of input taint and the model ceiling
+      - Ceiling is read from component metadata rather than from local configuration
+      - A model with no recorded ceiling is treated conservatively
+      - The applied ceiling appears in egress decision evidence
+    refs:
+      - crates/arkavo-gguf-tdf/src/writer.rs:28-48
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: Metadata and configuration disagree on the ceiling
+        expected: The higher of the two applies
+
+  # ============================================================================
+  # Keyed reference index
+  # ============================================================================
+  - id: KP-009
+    name: Build a keyed reference index from a corpus
+    criticality: critical
+    wip: true
+    given:
+      - A corpus directory and a taxonomy map version are supplied
+      - A tenant index key is provisioned through the KAS-backed configuration path
+    when: The index build runs
+    then:
+      - Content is normalized and shingled before hashing
+      - Exact-match entries are HMAC-keyed with the tenant key
+      - Near-duplicate signatures are tenant-keyed rather than raw
+      - Unkeyed content hashes are never written to the index
+      - The index is TDF-wrapped on output
+    refs:
+      - crates/arkavo-config-encryption/src/lib.rs:35-98
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: The tenant key is unavailable
+        expected: Build fails rather than falling back to unkeyed hashes
+      - condition: The corpus contains a duplicate document
+        expected: One entry retained; duplication does not inflate confidence
+
+  - id: KP-010
+    name: Suppress boilerplate from the reference index
+    criticality: high
+    wip: true
+    given:
+      - A corpus contains license headers, public documentation, and common code idioms
+    when: The suppression index is applied at build time
+    then:
+      - Boilerplate shingles are excluded from exact and near-duplicate tiers
+      - Suppression entries are versioned with the index
+      - A seeded boilerplate false positive no longer matches after suppression
+      - Suppression cannot remove a shingle that carries a classified label
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: Classified text is embedded inside boilerplate
+        expected: The classified span survives suppression
+
+  - id: KP-011
+    name: Serve index lookups inside the hot-path budget
+    criticality: critical
+    wip: true
+    given:
+      - A built index is loaded
+      - An outbound span is being classified
+    when: The exact-match tier is queried
+    then:
+      - Lookup completes within the 50µs per-call sequence budget at p99
+      - A miss costs no more than a hit
+      - Near-duplicate scoring runs after the exact tier, not before it
+      - Budget overrun degrades to asynchronous scoring rather than blocking the call
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: The index is not yet loaded
+        expected: Tier reports unavailable; the cascade proceeds without it and the gap is logged
+
+  # ============================================================================
+  # Distillation pipeline
+  # ============================================================================
+  - id: KP-012
+    name: Derive training and detector data with a local provider
+    criticality: critical
+    wip: true
+    given:
+      - A chunked corpus with source metadata retained
+    when: The derivation pass runs
+    then:
+      - Paraphrases, summaries, and question-answer pairs are produced per chunk
+      - Every derivation is produced by a provider running locally
+      - No corpus content is sent to a remote provider at any stage
+      - Derivations retain a link to their source chunk and its labels
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: A remote provider is configured
+        expected: The run refuses to start rather than silently downgrading confidentiality
+
+  - id: KP-013
+    name: Split train and eval by source family
+    criticality: critical
+    wip: true
+    given:
+      - Derivations exist for every corpus chunk
+    when: The dataset is split
+    then:
+      - Splitting is by original source family, never by synthetic example
+      - Evaluation derivations are produced by a different method than training derivations
+      - A leakage check proves no source family spans both sides
+      - The split manifest digest is recorded in the pack manifest
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: A source family is too small to split
+        expected: The family is assigned wholly to one side and the choice is recorded
+
+  - id: KP-014
+    name: Bind calibrated thresholds into the pack manifest
+    criticality: critical
+    wip: true
+    given:
+      - A trained sentinel head and a held-out calibration set
+    when: Calibration completes
+    then:
+      - Per-label thresholds are fitted on the held-out set
+      - Thresholds are written into the manifest and covered by its signature
+      - The runtime reads thresholds from the manifest, never from a compiled-in constant
+      - Threshold provenance names the calibration set digest
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: A label has too few positives to calibrate
+        expected: The label ships with a conservative threshold marked as uncalibrated
+
+  - id: KP-015
+    name: Leave no plaintext intermediate artifact behind
+    criticality: critical
+    wip: true
+    given:
+      - A pack build that materializes chunks, derivations, checkpoints, and temporary model files
+    when: The build completes, fails, or is interrupted
+    then:
+      - Every intermediate artifact is TDF-wrapped or shredded
+      - Temporary directories contain no readable corpus content afterward
+      - Interruption triggers the same cleanup path as completion
+      - Cleanup failure is reported as a build failure, not a warning
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: The process is killed without running cleanup
+        expected: Intermediates were written wrapped, so no plaintext is exposed by the gap
+
+  - id: KP-016
+    name: Require signed provenance for reviewer corrections
+    criticality: high
+    wip: true
+    given:
+      - Reviewers submit label corrections from production sentinel evidence
+    when: Corrections are admitted to the next training cycle
+    then:
+      - Each correction carries the reviewer identity and the evidence it corrects
+      - Each correction carries a signature verifiable against the organization anchor
+      - Unsigned corrections are rejected rather than downweighted
+      - Admitted corrections are recorded in the next pack's lineage
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: A correction would lower a label's classification
+        expected: Treated as declassification and routed through the signed human workflow
+
+  - id: KP-017
+    name: Keep revocation on the capsule side of the boundary
+    criticality: high
+    wip: true
+    given:
+      - A pack serves both adapters and TDF-RAG capsules
+      - A fact must be revoked
+    when: Revocation is requested
+    then:
+      - Capsule revocation takes effect immediately through key revocation
+      - Adapter content is not claimed to be revocable
+      - The pack manifest states which facts are capsule-backed and therefore revocable
+      - Revoking a capsule does not invalidate the adapter or the pack signature
+    changed: "2026-08-30"
+    edge_cases:
+      - condition: A revoked fact was also present in adapter training data
+        expected: Revocation is reported as incomplete and a repack is required
