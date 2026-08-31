@@ -35,6 +35,9 @@ pub struct GgufTdfArchive {
     members: TdfMemberIndex,
     manifest: TdfManifest,
     map: SegmentMap,
+    /// What this archive is within a pack, when it says. Read at `open`, so it
+    /// is available before any key is requested.
+    component: Option<crate::component::ComponentMetadata>,
 }
 
 impl GgufTdfArchive {
@@ -63,11 +66,14 @@ impl GgufTdfArchive {
             &members,
         )?;
 
+        let component = read_component(&mut file, &members)?;
+
         Ok(Self {
             path: path.to_path_buf(),
             file,
             members,
             manifest,
+            component,
             map,
         })
     }
@@ -88,6 +94,15 @@ impl GgufTdfArchive {
     }
 
     /// The parsed manifest, for a KAS client that needs `keyAccess`.
+    /// What this archive is within a pack, when it says.
+    ///
+    /// Available before `unlock`, which is the point: an egress node decides
+    /// whether it is entitled to ask for this component's key by reading this,
+    /// and that decision necessarily precedes any decryption.
+    pub fn component(&self) -> Option<&crate::component::ComponentMetadata> {
+        self.component.as_ref()
+    }
+
     pub fn manifest(&self) -> &TdfManifest {
         &self.manifest
     }
@@ -201,6 +216,39 @@ fn map_member_open_error(err: opentdf::TdfError) -> GgufTdfError {
 }
 
 /// Reads `0.manifest.json`, falling back to `manifest.json` (spec §6.5).
+/// Largest component-metadata member accepted.
+///
+/// Small on purpose: this is a handful of short strings, and it is parsed
+/// before anything has been authenticated, so the bound is what stops a
+/// hostile archive from making a reader allocate on its say-so.
+const MAX_COMPONENT_BYTES: u64 = 64 * 1024;
+
+/// Read the plaintext component member, if the archive carries one.
+///
+/// An archive without one is not an error: every artifact wrapped before this
+/// member existed has none, and the runtime treats a missing ceiling
+/// conservatively rather than refusing to open the file.
+fn read_component(
+    file: &mut File,
+    members: &TdfMemberIndex,
+) -> Result<Option<crate::component::ComponentMetadata>, GgufTdfError> {
+    let Some(location) = members.get(crate::COMPONENT_ENTRY) else {
+        return Ok(None);
+    };
+    if location.size > MAX_COMPONENT_BYTES {
+        return Err(GgufTdfError::BadIndex(format!(
+            "component member is {} bytes, over the {MAX_COMPONENT_BYTES} byte cap",
+            location.size
+        )));
+    }
+    let mut json = vec![0u8; location.size as usize];
+    file.seek(SeekFrom::Start(location.data_start))?;
+    file.read_exact(&mut json)?;
+    serde_json::from_slice(&json)
+        .map(Some)
+        .map_err(|e| GgufTdfError::BadIndex(format!("component metadata: {e}")))
+}
+
 fn read_manifest(file: &mut File, members: &TdfMemberIndex) -> Result<TdfManifest, GgufTdfError> {
     let location = match members.get(MANIFEST_ENTRY) {
         Some(loc) => {

@@ -34,6 +34,12 @@ pub struct ProtectOptions {
     pub dissem: Vec<String>,
     /// `payload.mimeType`: the original unencrypted type.
     pub mime_type: String,
+    /// What this artifact is within a pack, and how far its output may travel.
+    ///
+    /// Recorded here so it is a wrap-time decision rather than something read
+    /// back off a file name later (KP-001, KP-008). Absent for a plain
+    /// protected model that is not part of a pack.
+    pub component: Option<crate::component::ComponentMetadata>,
 }
 
 impl Default for ProtectOptions {
@@ -43,6 +49,7 @@ impl Default for ProtectOptions {
             attributes: Vec::new(),
             dissem: Vec::new(),
             mime_type: "application/x-gguf".to_string(),
+            component: None,
         }
     }
 }
@@ -189,6 +196,17 @@ fn write_archive(
         tags.push(encrypted.tag.to_vec());
     }
     drop(scratch);
+
+    // Plaintext, and written before the manifest so it is inside the archive
+    // whatever happens next. An egress node reads it to decide whether it is
+    // even entitled to ask for a key, which is necessarily before it could
+    // decrypt anything; the pack signature over its digest is what makes the
+    // claim trustworthy.
+    if let Some(component) = &opts.component {
+        let encoded = serde_json::to_vec(component)
+            .map_err(|e| GgufTdfError::BadIndex(format!("component metadata: {e}")))?;
+        builder.add_member(crate::COMPONENT_ENTRY, &encoded)?;
+    }
 
     let manifest = build_manifest(payload_key, wrapped, index.clone(), rows, &tags, opts)?;
     let archive_bytes = builder.finish_with_manifest(MANIFEST_ENTRY, &manifest)?;
