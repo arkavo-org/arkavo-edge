@@ -138,7 +138,13 @@ impl HttpTransport {
             crate::taint_tracker::DEFAULT_FLOOR,
         ));
 
-        let mut destinations = vec![Destination::External {
+        // The peer this transport is connected to was named by configuration,
+        // not by the payload, so it counts as inside the boundary — and the
+        // receiving agent applies its own conservative floor to whatever
+        // arrives (SEQ-001 edge case: upstream taint is inherited, never
+        // laundered by the hop). What is attacker-influenced is the envelope's
+        // contents, so that is what gets the full gate.
+        let mut destinations = vec![Destination::Internal {
             url: endpoint.url.clone(),
         }];
         destinations.extend(extract_destinations(
@@ -147,8 +153,20 @@ impl HttpTransport {
         ));
 
         for destination in &destinations {
-            let decision = egress.gate.evaluate(&taint, destination, &egress.requester);
-            if decision.is_release() {
+            let mut decision = egress.gate.evaluate(&taint, destination, &egress.requester);
+            // This transport sends the envelope as it stands, so a wrap it
+            // cannot perform is a refusal, not permission (SEQ-003 case 4: never
+            // silently downgrade to plaintext).
+            if let crate::egress_taint::EgressDisposition::Wrap { attributes, .. } =
+                &decision.disposition
+            {
+                decision.disposition = crate::egress_taint::EgressDisposition::Block(
+                    crate::egress_taint::DenialReason::NoWrapPath {
+                        attributes: attributes.clone(),
+                    },
+                );
+            }
+            if decision.may_send_plaintext() {
                 continue;
             }
             // Full provenance to the log the operator owns; the peer and the

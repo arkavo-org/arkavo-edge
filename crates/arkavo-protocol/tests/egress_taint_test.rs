@@ -115,7 +115,7 @@ fn internal_data_is_blocked_from_external_endpoints() {
 
     let decision = gate().evaluate(&taint, &external(), &RequesterEntitlements::none());
 
-    assert!(!decision.is_release(), "{:?}", decision.disposition);
+    assert!(!decision.permits_delivery(), "{:?}", decision.disposition);
 }
 
 /// SEQ-003 edge case: a sanctioned internal endpoint proceeds.
@@ -214,7 +214,7 @@ fn an_unknown_tool_with_an_unknown_parameter_is_still_gated() {
     assert!(
         !gate
             .evaluate(&taint, &destinations[0], &RequesterEntitlements::none())
-            .is_release()
+            .permits_delivery()
     );
 }
 
@@ -281,7 +281,7 @@ fn taint_policy_overrides_the_destination_allowlist() {
     assert!(
         !gate
             .evaluate(&taint, &external(), &RequesterEntitlements::none())
-            .is_release()
+            .permits_delivery()
     );
 }
 

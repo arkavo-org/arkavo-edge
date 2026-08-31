@@ -41,8 +41,22 @@ impl Destination {
         )
     }
 
-    /// Short, non-revealing description for an audit record.
-    pub fn describe(&self) -> String {
+    /// Coarse class, safe anywhere a refused caller might read.
+    ///
+    /// Separate from [`Destination::audit_detail`] because a denial that names
+    /// the destination is a denial that confirms a guess about it.
+    pub fn class(&self) -> &'static str {
+        match self {
+            Destination::Internal { .. } => "internal-endpoint",
+            Destination::External { .. } => "external-url",
+            Destination::Workspace { .. } => "workspace-path",
+            Destination::ExternalPath { .. } => "external-path",
+            Destination::Unresolved { .. } => "unresolved",
+        }
+    }
+
+    /// Full identity of the destination. Audit sinks only.
+    pub fn audit_detail(&self) -> String {
         match self {
             Destination::Internal { url } => format!("internal:{url}"),
             Destination::External { url } => format!("external:{url}"),
@@ -94,13 +108,16 @@ impl DestinationPolicy {
 
     /// Whether a destination can receive a wrapped payload.
     ///
-    /// Anything inside the workspace can: the file stays under the agent's own
-    /// root. Anything else must be declared, because assuming a remote peer
-    /// understands a TDF and being wrong means shipping a blob it will store or
-    /// forward as opaque bytes.
+    /// A remote peer must be declared: assuming one understands a TDF and being
+    /// wrong means shipping a blob it stores or forwards as opaque bytes.
     pub fn can_consume_tdf(&self, destination: &Destination) -> bool {
         match destination {
-            Destination::Workspace { .. } | Destination::ExternalPath { .. } => true,
+            // A path inside the workspace stays under the agent's own root, so
+            // a wrapped file there is still governed. A path outside it is not
+            // a consumer of anything — whoever picks the file up has no key
+            // request path, so "wrapped" there is just bytes leaving.
+            Destination::Workspace { .. } => true,
+            Destination::ExternalPath { .. } => false,
             Destination::Internal { url } | Destination::External { url } => {
                 host_of(url).is_some_and(|h| self.tdf_capable_hosts.contains(&normalize_host(&h)))
             }

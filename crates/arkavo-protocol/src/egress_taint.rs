@@ -85,6 +85,13 @@ pub enum DenialReason {
     /// The destination cannot consume a TDF, and the alternative to wrapping is
     /// shipping plaintext, which is not an alternative.
     DestinationCannotWrap { destination: String },
+    /// The gate allowed delivery under a wrap this caller cannot perform. The
+    /// destination is not at fault — nothing on this path can produce a TDF, so
+    /// the only way to proceed would be to send the plaintext the wrap exists
+    /// to prevent.
+    NoWrapPath {
+        attributes: Vec<AttributeRequirement>,
+    },
     /// The destination checks that predate taint refused it.
     Destination { detail: String },
     /// Provenance for this payload is incomplete, so the gate cannot show the
@@ -98,6 +105,7 @@ impl DenialReason {
             DenialReason::NeverRelease { .. } => "never_release",
             DenialReason::NotEntitled { .. } => "not_entitled",
             DenialReason::DestinationCannotWrap { .. } => "destination_cannot_wrap",
+            DenialReason::NoWrapPath { .. } => "no_wrap_path",
             DenialReason::Destination { .. } => "destination_blocked",
             DenialReason::ProvenanceIncomplete { .. } => "provenance_incomplete",
         }
@@ -125,6 +133,14 @@ impl DenialReason {
             DenialReason::DestinationCannotWrap { destination } => {
                 format!("{destination} cannot consume a wrapped payload")
             }
+            DenialReason::NoWrapPath { attributes } => format!(
+                "delivery required a wrap under {} and this path cannot produce one",
+                attributes
+                    .iter()
+                    .map(|a| format!("{}={}", a.fqn, a.value))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
             DenialReason::Destination { detail } => detail.clone(),
             DenialReason::ProvenanceIncomplete { detail } => detail.clone(),
         }
@@ -173,7 +189,18 @@ impl EgressDisposition {
         }
     }
 
-    pub fn is_release(&self) -> bool {
+    /// Whether the payload may go out as it stands.
+    ///
+    /// `Wrap` is deliberately not included. It says the payload may travel
+    /// *wrapped*; a caller that cannot wrap and reads this as permission sends
+    /// the plaintext the wrap existed to prevent. Naming the question after the
+    /// plaintext makes that misreading hard to write.
+    pub fn may_send_plaintext(&self) -> bool {
+        matches!(self, EgressDisposition::Allow)
+    }
+
+    /// Whether the payload may travel at all, in some form.
+    pub fn permits_delivery(&self) -> bool {
         matches!(
             self,
             EgressDisposition::Allow | EgressDisposition::Wrap { .. }
@@ -238,7 +265,7 @@ impl EgressEvidence {
             sources: taint.source_ids().map(str::to_string).collect(),
             provenance,
             truncated_hops,
-            destination: destination.describe(),
+            destination: destination.audit_detail(),
             taxonomy_version: taxonomy.version().to_string(),
         }
     }
@@ -263,8 +290,14 @@ pub struct EgressDecision {
 }
 
 impl EgressDecision {
-    pub fn is_release(&self) -> bool {
-        self.disposition.is_release()
+    /// Whether this payload may go out as it stands. See
+    /// [`EgressDisposition::may_send_plaintext`].
+    pub fn may_send_plaintext(&self) -> bool {
+        self.disposition.may_send_plaintext()
+    }
+
+    pub fn permits_delivery(&self) -> bool {
+        self.disposition.permits_delivery()
     }
 
     /// What the caller is told. Never names a category, a source, or a reason.
@@ -435,7 +468,15 @@ impl EgressTaintGate {
             return EgressDisposition::Allow;
         }
 
-        let required = self.taxonomy.requirements_for(categories.iter().copied());
+        let mut required = self.taxonomy.requirements_for(categories.iter().copied());
+        // Sensitivity alone carries a requirement. Without this a payload the
+        // detector found no category in — the common case, since ingestion
+        // applies a floor whether or not anything matched — would require
+        // nothing, satisfy every subject vacuously, and be wrapped under an
+        // empty attribute set.
+        if let Some(clearance) = self.taxonomy.clearance_requirement(taint.sensitivity()) {
+            required.insert(clearance);
+        }
         let missing = requester.missing(&required);
         if !missing.is_empty() {
             // Wrapping does not rescue an unauthorized disclosure: the wrapped
@@ -445,7 +486,7 @@ impl EgressTaintGate {
 
         if !self.destinations.can_consume_tdf(destination) {
             return EgressDisposition::Block(DenialReason::DestinationCannotWrap {
-                destination: destination.describe(),
+                destination: destination.audit_detail(),
             });
         }
 

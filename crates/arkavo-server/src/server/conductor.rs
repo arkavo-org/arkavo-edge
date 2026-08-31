@@ -474,8 +474,12 @@ pub async fn execute_with_conductor_and_learning(
         if let Ok(cwd) = std::env::current_dir() {
             destinations = destinations.workspace_root(cwd);
         }
-        super::egress_guard::EgressGuard::new(session_id, agent_id)
-            .with_destination_policy(destinations)
+        let guard = super::egress_guard::EgressGuard::new(session_id, agent_id)
+            .with_destination_policy(destinations);
+        // The task text is ingested data: a secret handed to the agent in its
+        // prompt must be labelled before the first tool call, not after one.
+        guard.observe_input("task", &task_content);
+        std::sync::Arc::new(guard)
     };
 
     // Use parallel three-track loop for all agents with tools.
@@ -492,6 +496,8 @@ pub async fn execute_with_conductor_and_learning(
             tool_memory,
             compute_budget,
             granted_tools,
+            #[cfg(feature = "taint")]
+            Some(egress_guard.clone()),
         )
         .await?
     } else {

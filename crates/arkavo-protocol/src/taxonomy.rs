@@ -31,6 +31,10 @@ pub enum TaxonomyError {
     NoLabels,
     #[error("taxonomy map label '{0}' names unknown category '{1}'")]
     UnknownCategory(String, String),
+    #[error("taxonomy map label '{0}' names unknown sensitivity '{1}'")]
+    UnknownSensitivity(String, String),
+    #[error("taxonomy map declares category '{0}' more than once")]
+    DuplicateCategory(String),
 }
 
 /// One attribute a subject must hold, as an OpenTDF fully-qualified name and
@@ -79,6 +83,35 @@ pub struct TaxonomyMap {
     version: String,
     namespace: String,
     labels: BTreeMap<DataCategory, LabelPolicy>,
+    /// The hierarchical clearance definition, if the map declares one.
+    clearance: Option<ClearanceDefinition>,
+}
+
+/// The hierarchical clearance attribute.
+///
+/// Kept separately from the labels because it answers a question the labels
+/// cannot: what a payload requires when the detector found no category at all.
+/// Sensitivity is always known — an ingestion floor guarantees it — so without
+/// this a floor-only payload carries no requirement and satisfies any subject
+/// vacuously.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClearanceDefinition {
+    pub fqn: String,
+    /// Levels from least to most privileged, matching `SensitivityLevel` order.
+    pub order: Vec<String>,
+}
+
+impl ClearanceDefinition {
+    /// The clearance value a subject needs to receive data at `level`.
+    pub fn value_for(&self, level: SensitivityLevel) -> Option<&str> {
+        let index = match level {
+            SensitivityLevel::Public => 0,
+            SensitivityLevel::Internal => 1,
+            SensitivityLevel::Confidential => 2,
+            SensitivityLevel::Restricted => 3,
+        };
+        self.order.get(index).map(String::as_str)
+    }
 }
 
 impl TaxonomyMap {
@@ -100,8 +133,14 @@ impl TaxonomyMap {
                 TaxonomyError::UnknownCategory(label.name.clone(), label.category.clone())
             })?;
             let sensitivity = parse_sensitivity(&label.sensitivity).ok_or_else(|| {
-                TaxonomyError::UnknownCategory(label.name.clone(), label.sensitivity.clone())
+                TaxonomyError::UnknownSensitivity(label.name.clone(), label.sensitivity.clone())
             })?;
+            if labels.contains_key(&category) {
+                // Last-wins would let a second entry drop `neverRelease` and
+                // make credentials wrappable. A map that contradicts itself has
+                // no safe reading.
+                return Err(TaxonomyError::DuplicateCategory(label.category));
+            }
             labels.insert(
                 category,
                 LabelPolicy {
@@ -116,10 +155,20 @@ impl TaxonomyMap {
             );
         }
 
+        let clearance = doc
+            .attribute_definitions
+            .into_iter()
+            .find(|d| d.rule == "hierarchy" && !d.order.is_empty())
+            .map(|d| ClearanceDefinition {
+                fqn: d.fqn,
+                order: d.order,
+            });
+
         Ok(Self {
             version: doc.version,
             namespace: doc.namespace,
             labels,
+            clearance,
         })
     }
 
@@ -133,6 +182,25 @@ impl TaxonomyMap {
 
     pub fn policy_for(&self, category: DataCategory) -> Option<&LabelPolicy> {
         self.labels.get(&category)
+    }
+
+    pub fn clearance(&self) -> Option<&ClearanceDefinition> {
+        self.clearance.as_ref()
+    }
+
+    /// The clearance a subject needs for data at `sensitivity`, independent of
+    /// any category. Public data needs nothing.
+    pub fn clearance_requirement(
+        &self,
+        sensitivity: SensitivityLevel,
+    ) -> Option<AttributeRequirement> {
+        if sensitivity <= SensitivityLevel::Public {
+            return None;
+        }
+        let clearance = self.clearance.as_ref()?;
+        clearance
+            .value_for(sensitivity)
+            .map(|value| AttributeRequirement::new(&clearance.fqn, value))
     }
 
     /// Every attribute a subject must hold for all of `categories`.
@@ -218,7 +286,17 @@ mod raw {
     pub(super) struct Document {
         pub(super) version: String,
         pub(super) namespace: String,
+        #[serde(default, rename = "attributeDefinitions")]
+        pub(super) attribute_definitions: Vec<AttributeDefinition>,
         pub(super) labels: Vec<Label>,
+    }
+
+    #[derive(Deserialize)]
+    pub(super) struct AttributeDefinition {
+        pub(super) fqn: String,
+        pub(super) rule: String,
+        #[serde(default)]
+        pub(super) order: Vec<String>,
     }
 
     #[derive(Deserialize)]
@@ -325,6 +403,53 @@ mod tests {
         assert_eq!(
             TaxonomyMap::from_json(json).unwrap_err(),
             TaxonomyError::NoLabels
+        );
+    }
+
+    #[test]
+    fn a_duplicate_category_is_rejected() {
+        // Last-wins would let the second entry drop neverRelease.
+        let json = r#"{"version":"9","namespace":"https://x/","labels":[
+            {"label":"a","category":"Credentials","sensitivity":"Restricted","unentitled":"block","neverRelease":true},
+            {"label":"b","category":"Credentials","sensitivity":"Public","unentitled":"redact"}]}"#;
+
+        assert!(matches!(
+            TaxonomyMap::from_json(json).unwrap_err(),
+            TaxonomyError::DuplicateCategory(_)
+        ));
+    }
+
+    #[test]
+    fn an_unknown_sensitivity_reports_itself_as_one() {
+        let json = r#"{"version":"9","namespace":"https://x/","labels":[
+            {"label":"a","category":"Pii","sensitivity":"Nonsense","unentitled":"block"}]}"#;
+
+        assert!(matches!(
+            TaxonomyMap::from_json(json).unwrap_err(),
+            TaxonomyError::UnknownSensitivity(_, _)
+        ));
+    }
+
+    #[test]
+    fn sensitivity_alone_yields_a_clearance_requirement() {
+        // A payload the detector found no category in still has a floor, and a
+        // floor with no requirement satisfies every subject vacuously.
+        let map = TaxonomyMap::v1();
+
+        let internal = map
+            .clearance_requirement(SensitivityLevel::Internal)
+            .expect("internal needs clearance");
+
+        assert_eq!(internal.fqn, "https://attr.arkavo.com/clearance");
+        assert_eq!(internal.value, "internal");
+        assert_eq!(
+            map.clearance_requirement(SensitivityLevel::Restricted)
+                .map(|r| r.value),
+            Some("restricted".to_string())
+        );
+        assert!(
+            map.clearance_requirement(SensitivityLevel::Public)
+                .is_none()
         );
     }
 

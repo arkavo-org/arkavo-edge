@@ -249,6 +249,11 @@ async fn execute_subtask(
         tool_memory,
         None, // compute_budget: planner doesn't enforce per-iteration budget
         None, // granted_tools: subtask planner is called from the orchestrator's own loop
+        // The orchestrator's own loop owns the session guard; a subtask plan
+        // executed here re-enters through that loop, so passing a second guard
+        // would give the subtask a taint history the session never had.
+        #[cfg(feature = "taint")]
+        None,
     )
     .await
     {

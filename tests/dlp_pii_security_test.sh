@@ -288,21 +288,31 @@ if ! command -v cargo > /dev/null 2>&1; then
 else
     GATE_LOG="$TEST_DIR/taint_gate.log"
     cargo test -p arkavo-protocol --features taint --test egress_taint_test \
-        > "$GATE_LOG" 2>&1 || true
+        > "$GATE_LOG" 2>&1
+    GATE_EXIT=$?
 
-    for test_name in "${TAINT_TESTS[@]}"; do
-        echo -n "Testing: ${test_name//_/ } ... "
-        if grep -q "^test ${test_name} \.\.\. ok" "$GATE_LOG"; then
-            echo -e "${GREEN}✅ PASS${NC}"
-            ((TESTS_PASSED++))
-        elif grep -q "^test ${test_name}" "$GATE_LOG"; then
-            echo -e "${RED}❌ FAIL${NC} (gate did not hold)"
-            ((TESTS_FAILED++))
-        else
-            echo -e "${YELLOW}⏭️  SKIP${NC} (taint feature not built)"
-            ((TESTS_SKIPPED++))
-        fi
-    done
+    # A non-zero exit means the gate tests ran and lost, or would not build.
+    # Both are failures: treating them as "not built" is how a security suite
+    # goes green having verified nothing.
+    if [ $GATE_EXIT -ne 0 ]; then
+        echo -e "${RED}❌ FAIL${NC} (taint gate tests did not pass; exit $GATE_EXIT)"
+        sed -n '1,40p' "$GATE_LOG"
+        ((TESTS_FAILED+=${#TAINT_TESTS[@]}))
+    else
+        for test_name in "${TAINT_TESTS[@]}"; do
+            echo -n "Testing: ${test_name//_/ } ... "
+            if grep -q "^test ${test_name} \.\.\. ok" "$GATE_LOG"; then
+                echo -e "${GREEN}✅ PASS${NC}"
+                ((TESTS_PASSED++))
+            else
+                # The suite passed but this named test never reported. Either it
+                # was renamed or it was filtered out; both mean the assertion
+                # this line claims to make was not made.
+                echo -e "${RED}❌ FAIL${NC} (test did not report; renamed or filtered?)"
+                ((TESTS_FAILED++))
+            fi
+        done
+    fi
 fi
 
 echo ""
