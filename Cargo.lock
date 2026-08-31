@@ -1099,6 +1099,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-fingerprint"
+version = "0.91.0"
+dependencies = [
+ "arkavo-protocol",
+ "arkavo-test-macros",
+ "blake3",
+ "criterion",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "zeroize",
+]
+
+[[package]]
 name = "arkavo-gemini"
 version = "0.91.0"
 dependencies = [

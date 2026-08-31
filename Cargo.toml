@@ -29,6 +29,7 @@ members = [
     "crates/arkavo-router",
     "crates/arkavo-context",
     "crates/arkavo-events",
+    "crates/arkavo-fingerprint",
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
@@ -116,6 +117,7 @@ default-members = [
     "crates/arkavo-router",
     "crates/arkavo-context",
     "crates/arkavo-events",
+    "crates/arkavo-fingerprint",
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
@@ -426,6 +428,9 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.aho-corasick]
 opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+
 [profile.dev.package.sha2]
 opt-level = 3
 [profile.dev.package.digest]
