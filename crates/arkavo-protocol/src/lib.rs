@@ -32,6 +32,10 @@ pub mod config;
 pub mod config_transport;
 pub mod data_classification;
 pub mod discovery;
+#[cfg(feature = "taint")]
+pub mod egress_destination;
+#[cfg(feature = "taint")]
+pub mod egress_taint;
 pub mod error;
 pub mod file_transfer;
 pub mod http;
@@ -50,10 +54,22 @@ pub mod rate_limit_middleware;
 pub mod registration;
 pub mod security;
 pub mod security_fixes;
+#[cfg(feature = "taint")]
+pub mod sequence_graph;
 pub mod session_persistence;
+#[cfg(feature = "taint")]
+pub mod taint;
+#[cfg(feature = "taint")]
+pub mod taint_inference;
+#[cfg(feature = "taint")]
+mod taint_ledger;
+#[cfg(feature = "taint")]
+pub mod taint_tracker;
 pub mod task_contract;
 pub mod task_executor;
 pub mod task_store;
+#[cfg(feature = "taint")]
+pub mod taxonomy;
 pub mod transport;
 pub mod types;
 pub mod websocket;
@@ -76,6 +92,13 @@ pub use data_classification::{
     ClassifiedDatum, DataCategory, DatumType, DlpAction, DlpPolicy, SensitivityLevel,
 };
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
+#[cfg(feature = "taint")]
+pub use egress_destination::{Destination, DestinationPolicy, extract_destinations};
+#[cfg(feature = "taint")]
+pub use egress_taint::{
+    DenialReason, EgressDecision, EgressDisposition, EgressEvidence, EgressTaintGate, HoldReason,
+    RequesterEntitlements,
+};
 pub use error::{A2aError, Result};
 pub use http::HttpTransport;
 pub use mcp_registry::{McpConnectionTrait, McpRegistry};
@@ -94,9 +117,22 @@ pub use registration::{
     VerifyResponse,
 };
 pub use security::{AuthMethod, SecurityConfig, TlsSettings, TlsVersion};
+#[cfg(feature = "taint")]
+pub use sequence_graph::{GraphError, NodeId, SequenceGraphBuilder, SequenceNode};
 pub use session_persistence::SqliteSessionPersistence;
+#[cfg(feature = "taint")]
+pub use taint::{
+    MAX_LABELS, MAX_PROVENANCE_HOPS, ProvenanceHop, SourceKind, TaintLabel, TaintSet, TaintSource,
+    Transformation,
+};
+#[cfg(feature = "taint")]
+pub use taint_inference::{ClassificationInferencer, RegexInferencer};
+#[cfg(feature = "taint")]
+pub use taint_tracker::{DEFAULT_FLOOR, DataTaintTracker, ModelCeilings};
 pub use task_executor::{TaskEvent, TaskExecutor, TaskExecutorConfig};
 pub use task_store::{SqliteTaskStore, Task, TaskStore};
+#[cfg(feature = "taint")]
+pub use taxonomy::{AttributeRequirement, LabelPolicy, TaxonomyMap};
 pub use transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
 pub use types::{
     AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType, DiscoverFeaturesDisclose,

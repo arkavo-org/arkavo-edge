@@ -15,6 +15,8 @@ pub mod consolidation_teacher;
 mod contract_negotiation;
 mod conversation_window;
 mod curiosity;
+#[cfg(feature = "taint")]
+mod egress_guard;
 mod episode_buffer;
 mod event_loop;
 mod gossip_transport;

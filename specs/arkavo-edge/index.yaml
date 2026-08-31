@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.87.0
-last_updated: 2026-06-28
+version: 0.91.0
+last_updated: 2026-08-30
 
 components:
   - name: trusted-agent
@@ -891,6 +891,35 @@ components:
       - CriticPipeline CircuitCheck evaluates sequence context
       - Egress decisions incorporate data provenance
 
+  - name: sentinel
+    file: sentinel.spec.yaml
+    module: arkavo_sentinel
+    description: DLP sentinel classifier that labels content for the policy decision point
+    criticality: critical
+    scenario_count: 16
+    invariants:
+      - The sentinel labels; the policy decision point authorizes
+      - Sentinel output merges by monotonic union and can only add restrictions
+      - Calibrated thresholds come from the signed pack manifest
+      - The classifier is protected by the mechanism it enforces
+      - Sentinel scoring stays off the 50μs per-tool-call hot path
+      - Raw scores never cross a trust boundary
+      - Declassification is a signed human workflow
+
+  - name: knowledge-pack
+    file: knowledge-pack.spec.yaml
+    module: arkavo_knowledge_pack
+    description: Sealed knowledge packs — policy-scoped adapters, sentinel, indices, signed manifest
+    criticality: critical
+    scenario_count: 17
+    invariants:
+      - Every pack component is TDF-wrapped separately
+      - ABAC is evaluated before any component key is released
+      - The signed manifest binds every component digest and the calibration thresholds
+      - A model carries the highest classification present in its training corpus
+      - No plaintext intermediate artifact survives a pack build
+      - Volatile facts live in TDF-RAG capsules, not in adapters
+
   - name: server
     file: server.spec.yaml
     module: arkavo_server
@@ -937,10 +966,22 @@ components:
       - Partial outputs survive budget exhaustion and call failures
       - Sampling caps are recorded in the ledger, never silent
 
+  - name: identity-session
+    file: identity-session.spec.yaml
+    module: arkavo_identity
+    description: OIDC login/logout session brokered by Arkavo Creator (PKCE, loopback callback, token store)
+    criticality: critical
+    scenario_count: 21
+    invariants:
+      - Public client arkavo-edge; no client_secret ever sent
+      - Loopback callback on numeric 127.0.0.1 ports 52171-52178, path /cb, state-matched
+      - Token file written atomically at unix mode 0o600
+      - Refresh-before-expiry with 60-second skew; dead refresh deletes the token file
+
 stats:
-  total_specs: 80
-  total_scenarios: 751
-  critical_scenarios: 204
+  total_specs: 83
+  total_scenarios: 805
+  critical_scenarios: 245
   coverage_areas:
     - authentication
     - authorization
@@ -999,6 +1040,8 @@ stats:
     - taint_tracking
     - behavioral_baseline
     - cross_session_analysis
+    - content_classification
+    - knowledge_distillation
 
 # Cross-component behaviors
 integration_points:
@@ -1377,3 +1420,27 @@ integration_points:
   - name: Validation → Session Security
     description: Validation log sanitization is used to redact session secrets and PII
     specs: [VAL-003, SESS-010, SESS-011, SESS-012]
+
+  - name: Sentinel → Sequence Integrity
+    description: The sentinel fills the SEQ-001 classification inference seam and feeds taint by monotonic union
+    specs: [SENT-001, SENT-003, SEQ-001, SEQ-002]
+
+  - name: Sentinel → Validation
+    description: Egress gating consumes sentinel evidence; the gate, not the sentinel, decides
+    specs: [SENT-001, SENT-011, SEQ-003, SEQ-014, VAL-005]
+
+  - name: Sentinel → Critic
+    description: SentinelCheck runs after CircuitCheck and contributes evidence rather than a verdict
+    specs: [SENT-014, CRIT-001, SEQ-010]
+
+  - name: Knowledge Pack → TDF Security
+    description: Pack components are wrapped separately and ABAC is evaluated before any key release
+    specs: [KP-001, KP-003, TDFS-001, TDFS-002]
+
+  - name: Knowledge Pack → Sentinel
+    description: The pack ships the sentinel classifier and the calibrated thresholds it reads
+    specs: [KP-002, KP-014, SENT-004, SENT-005]
+
+  - name: Knowledge Pack → Sequence Integrity
+    description: The model classification ceiling is an input to taint propagation through inference
+    specs: [KP-006, KP-008, SEQ-002]

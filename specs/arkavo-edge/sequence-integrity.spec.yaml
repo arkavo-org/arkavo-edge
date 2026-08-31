@@ -32,8 +32,13 @@ scenarios:
       - Classification level inferred (PII, credentials, internal, public)
       - Label persists through variable assignments and context
       - Taint metadata stored in sequence ledger
-    refs: [crates/arkavo-protocol/src/data_classification.rs:1-107]
-    changed: "2026-03-21"
+    refs:
+      - crates/arkavo-protocol/src/data_classification.rs:1-107
+      - crates/arkavo-protocol/src/taint.rs:1-347
+      - crates/arkavo-protocol/src/taint_inference.rs:1-135
+      - crates/arkavo-protocol/src/taint_tracker.rs:1-209
+      - crates/arkavo-events/src/payload.rs:77-125
+    changed: "2026-08-30"
     edge_cases:
       - condition: Data source classification ambiguous
         expected: Conservative classification (assume sensitive)
@@ -56,7 +61,10 @@ scenarios:
       - Transformation type recorded in provenance chain
       - Encoding changes do not strip taint (base64, JSON, etc.)
       - Summarization preserves source taint classification
-    changed: "2026-03-21"
+    refs:
+      - crates/arkavo-protocol/src/taint.rs:245-347
+      - crates/arkavo-protocol/src/taint_tracker.rs:150-209
+    changed: "2026-08-30"
     edge_cases:
       - condition: Agent extracts single field from tainted record
         expected: Extracted field inherits parent taint
@@ -81,8 +89,16 @@ scenarios:
       - PII-classified data requires explicit authorization
       - Credential-classified data blocked unconditionally
       - Violation logged with full provenance chain
-    refs: [crates/arkavo-validation/src/url.rs:1-142]
-    changed: "2026-03-21"
+    refs:
+      - crates/arkavo-protocol/src/egress_taint.rs:1-420
+      - crates/arkavo-protocol/src/egress_destination.rs:1-240
+      - crates/arkavo-protocol/src/taxonomy.rs:1-210
+      - crates/arkavo-server/src/server/egress_guard.rs:1-250
+      - crates/arkavo-server/src/server/conductor_tool_loop.rs:700-760
+      - crates/arkavo-protocol/src/http.rs:110-190
+      - crates/arkavo-validation/src/url.rs:83-142
+      - schemas/taxonomy-map.v1.json
+    changed: "2026-08-30"
     edge_cases:
       - condition: Destination is sanctioned internal endpoint
         expected: Taint policy allows, action proceeds
@@ -90,6 +106,12 @@ scenarios:
         expected: Taint tracks through encoding, still blocked
       - condition: Agent splits tainted data across multiple small requests
         expected: Sequence-level detection catches split pattern
+        status: deferred
+        note: >-
+          The gate evaluates one call at a time. Catching a split needs the
+          cross-call baseline of #552/#556; until that lands the scenario stays
+          wip and the session-wide taint union is the partial mitigation — every
+          request after an ingestion carries that ingestion's label.
 
   # ============================================================================
   # Action Sequence Graph
@@ -108,7 +130,11 @@ scenarios:
       - Edges connect data flow between calls (output → input)
       - Node metadata includes tool name, parameters hash, taint labels
       - Graph updated atomically
-    changed: "2026-03-21"
+    refs:
+      - crates/arkavo-protocol/src/sequence_graph.rs:1-129
+      - crates/arkavo-protocol/src/taint_ledger.rs:1-60
+      - crates/arkavo-events/src/payload.rs:77-125
+    changed: "2026-08-30"
 
   - id: SEQ-005
     name: Learn behavioral baselines per agent skill
@@ -319,7 +345,6 @@ scenarios:
   - id: SEQ-014
     name: Egress filter enhanced with provenance
     criticality: critical
-    wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/548
     given:
       - EgressFilter from arkavo-validation active
@@ -332,8 +357,12 @@ scenarios:
       - Legitimate external API calls with public data pass
       - External calls carrying internal-tainted data blocked
       - Decision logged with provenance chain for forensics
-    refs: [crates/arkavo-validation/src/url.rs:1-142]
-    changed: "2026-03-21"
+    refs:
+      - crates/arkavo-validation/src/url.rs:83-142
+      - crates/arkavo-protocol/src/egress_taint.rs:210-300
+      - crates/arkavo-server/src/server/egress_guard.rs:125-215
+      - crates/arkavo-observability/src/decision_trace.rs:107-150
+    changed: "2026-08-30"
     edge_cases:
       - condition: Destination on allowlist but payload tainted
         expected: Taint policy overrides destination allowlist
@@ -352,11 +381,19 @@ scenarios:
     then:
       - Event includes full action graph (serialized)
       - Taint chain from source to violation point included
-      - Baseline comparison included (expected vs actual)
+      - >-
+        Baseline comparison included (expected vs actual) — deferred to issue
+        552; the payload carries the field and omits it rather than fabricating
+        a comparison that was never made
       - Correlation ID links to cross-session decomposition if applicable
       - Evidence suitable for forensic reconstruction
-    refs: [crates/arkavo-events/src/event.rs:1-59, crates/arkavo-events/src/payload.rs:1-74]
-    changed: "2026-03-21"
+    refs:
+      - crates/arkavo-events/src/event.rs:18-35
+      - crates/arkavo-events/src/payload.rs:75-140
+      - crates/arkavo-arp/src/observability.rs:151-215
+      - crates/arkavo-observability/src/decision_trace.rs:107-150
+      - crates/arkavo-server/src/server/egress_guard.rs:150-235
+    changed: "2026-08-30"
 
   # ============================================================================
   # Configuration and Lifecycle

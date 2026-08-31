@@ -156,7 +156,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.90.1"
+version = "0.91.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -412,4 +412,21 @@ opt-level = 3
 [profile.dev.package.opentdf-crypto]
 opt-level = 3
 [profile.dev.package.arkavo-gguf-tdf]
+opt-level = 3
+
+# Taint tracking: the sequence-integrity invariant is <50µs added per tool
+# call, and that cost is dominated by pattern classification and the parameter
+# digest. At opt-level 0 both run an order of magnitude slower than they ship,
+# so a debug run cannot tell a real regression from the profile.
+[profile.dev.package.regex]
+opt-level = 3
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
+opt-level = 3
+[profile.dev.package.aho-corasick]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.digest]
 opt-level = 3

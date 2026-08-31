@@ -39,6 +39,9 @@ cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 iroh = ["arkavo-server/iroh", "arkavo-server/swarm-apply"]
 kas = ["arkavo-protocol/kas", "arkavo-server/kas"]
+# Taint-aware egress enforcement (SEQ-003, SEQ-014, SEQ-015). Off until the
+# sequence-integrity work reaches GA; the security suite builds a binary with it.
+taint = ["arkavo-protocol/taint", "arkavo-server/taint"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }

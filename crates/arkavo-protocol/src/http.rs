@@ -11,6 +11,22 @@ pub struct HttpTransport {
     config: TransportConfig,
     client: Client,
     endpoint: Arc<RwLock<Option<A2aEndpoint>>>,
+    /// SEQ-003: taint-aware gate for outbound envelopes. `None` leaves the
+    /// transport exactly as it was, which is what a build without the feature
+    /// and a caller that installs no gate both get.
+    #[cfg(feature = "taint")]
+    egress: Option<Arc<OutboundEgress>>,
+}
+
+/// The gate plus the entitlements the sending agent presents.
+///
+/// Held together because a decision needs both, and separating them invites a
+/// caller to install a gate and forget the entitlements — which would silently
+/// evaluate every send as an unentitled requester.
+#[cfg(feature = "taint")]
+pub struct OutboundEgress {
+    pub gate: crate::egress_taint::EgressTaintGate,
+    pub requester: crate::egress_taint::RequesterEntitlements,
 }
 
 fn format_reqwest_error(err: &reqwest::Error) -> String {
@@ -86,7 +102,70 @@ impl HttpTransport {
             config,
             client,
             endpoint: Arc::new(RwLock::new(None)),
+            #[cfg(feature = "taint")]
+            egress: None,
         })
+    }
+
+    /// Gate outbound envelopes on the taint their params carry (SEQ-003).
+    #[cfg(feature = "taint")]
+    #[must_use]
+    pub fn with_egress_gate(mut self, egress: Arc<OutboundEgress>) -> Self {
+        self.egress = Some(egress);
+        self
+    }
+
+    /// SEQ-003: an outbound envelope is an egress. The peer's URL is the
+    /// destination whatever the params also name, so it is evaluated even when
+    /// the params carry no destination-shaped value of their own.
+    #[cfg(feature = "taint")]
+    fn check_egress(&self, request: &A2aRequest, endpoint: &A2aEndpoint) -> Result<()> {
+        use crate::egress_destination::{Destination, extract_destinations};
+        use crate::taint::{SourceKind, TaintSource};
+        use crate::taint::{TaintLabel, TaintSet};
+        use crate::taint_inference::{ClassificationInferencer, RegexInferencer};
+
+        let Some(egress) = &self.egress else {
+            return Ok(());
+        };
+
+        let rendered = serde_json::to_string(&request.params).unwrap_or_default();
+        let source = TaintSource::new(SourceKind::A2aReceive, &endpoint.agent_id);
+        let found = RegexInferencer::new().infer(&rendered);
+        let taint = TaintSet::from_label(TaintLabel::from_classifications(
+            source.source_id(),
+            &found,
+            crate::taint_tracker::DEFAULT_FLOOR,
+        ));
+
+        let mut destinations = vec![Destination::External {
+            url: endpoint.url.clone(),
+        }];
+        destinations.extend(extract_destinations(
+            &request.params,
+            egress.gate.destinations(),
+        ));
+
+        for destination in &destinations {
+            let decision = egress.gate.evaluate(&taint, destination, &egress.requester);
+            if decision.is_release() {
+                continue;
+            }
+            // Full provenance to the log the operator owns; the peer and the
+            // calling agent get the uniform message.
+            warn!(
+                method = %request.method,
+                audit = %decision.audit_detail(),
+                "outbound A2A envelope refused by the egress gate"
+            );
+            return Err(A2aError::Transport(
+                decision
+                    .public_message()
+                    .unwrap_or("egress refused")
+                    .to_string(),
+            ));
+        }
+        Ok(())
     }
 
     fn validate_endpoint(&self, endpoint: &A2aEndpoint) -> Result<()> {
@@ -133,6 +212,9 @@ impl A2aTransport for HttpTransport {
             let guard = self.endpoint.read().unwrap();
             guard.as_ref().ok_or(A2aError::NotConnected)?.clone()
         };
+
+        #[cfg(feature = "taint")]
+        self.check_egress(&request, &endpoint)?;
 
         let rpc_url = format!("{}/rpc", endpoint.url.trim_end_matches('/'));
 

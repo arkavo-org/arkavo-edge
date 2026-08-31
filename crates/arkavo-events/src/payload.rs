@@ -71,6 +71,84 @@ pub enum EventPayload {
         #[serde(skip_serializing_if = "Option::is_none")]
         summary: Option<SessionSummary>,
     },
+    /// SEQ-004, SEQ-015: one node of a session's action graph, carrying the
+    /// taint the call handled and the nodes whose output flowed into it.
+    SequenceNode {
+        node_id: String,
+        tool_name: String,
+        /// Digest of the call parameters. Two calls correlate only when their
+        /// parameters really were identical, so the digest has to be
+        /// collision-resistant rather than merely fast.
+        params_hash: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        inputs: Vec<String>,
+        taint: TaintRecord,
+    },
+    /// SEQ-015: forensic record of a refused or held egress.
+    ///
+    /// Carries the evidence a reconstruction needs and nothing a caller could
+    /// use as an oracle: this payload goes to the audit sink, never to the
+    /// party whose action was refused.
+    SequenceViolation {
+        /// What was detected: `egress_denied`, `egress_held`, `taint_gap`.
+        violation_type: String,
+        /// Disposition the gate reached.
+        disposition: String,
+        /// Where the payload was headed, as the gate resolved it.
+        destination: String,
+        /// Taint carried at the violation point, source through provenance.
+        taint: TaintRecord,
+        /// The session action graph up to this point, serialized.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        action_graph: Vec<String>,
+        /// Expected versus actual, when a baseline exists to compare against.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        baseline: Option<SequenceBaseline>,
+        /// Links this violation to a cross-session decomposition.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        correlation_id: Option<String>,
+    },
+}
+
+/// SEQ-015: what the sequence was expected to look like, beside what it was.
+///
+/// Populated only where a baseline has been established; a `None` here means
+/// no baseline existed, which is different from a baseline that matched.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SequenceBaseline {
+    pub expected: String,
+    pub actual: String,
+    /// How the baseline was derived, so a reader can judge how much it is worth.
+    pub derived_from: String,
+}
+
+/// Taint as the ledger stores it.
+///
+/// Deliberately made of plain strings rather than the richer types in
+/// `arkavo-protocol`: that crate already depends on this one, so the ledger
+/// schema cannot depend back on it without a cycle. Producers convert on the
+/// way in; a reader needs no types from the producer to replay a session.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaintRecord {
+    /// Highest sensitivity the node handled.
+    pub sensitivity: String,
+    /// Every data category present, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
+    /// Source identifiers that contributed, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<String>,
+    /// Flattened provenance chain, in order, as `source|transformation|detail`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provenance: Vec<String>,
+    /// Provenance steps the producer had to drop. Non-zero means this chain is
+    /// incomplete for forensic reconstruction.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub truncated_hops: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -396,5 +474,51 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn sequence_node_round_trips() {
+        let payload = EventPayload::SequenceNode {
+            node_id: "n-2".to_string(),
+            tool_name: "http_post".to_string(),
+            params_hash: "b0a1".to_string(),
+            inputs: vec!["n-1".to_string()],
+            taint: TaintRecord {
+                sensitivity: "restricted".to_string(),
+                categories: vec!["credentials".to_string()],
+                sources: vec!["file:/etc/creds".to_string()],
+                provenance: vec!["file:/etc/creds|encode|base64".to_string()],
+                truncated_hops: 0,
+            },
+        };
+
+        match roundtrip(&payload) {
+            EventPayload::SequenceNode {
+                node_id,
+                tool_name,
+                params_hash,
+                inputs,
+                taint,
+            } => {
+                assert_eq!(node_id, "n-2");
+                assert_eq!(tool_name, "http_post");
+                assert_eq!(params_hash, "b0a1");
+                assert_eq!(inputs, vec!["n-1".to_string()]);
+                assert_eq!(taint.sensitivity, "restricted");
+                assert_eq!(taint.provenance, vec!["file:/etc/creds|encode|base64"]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn empty_taint_record_omits_optional_fields() {
+        let json = serde_json::to_string(&TaintRecord {
+            sensitivity: "public".to_string(),
+            ..TaintRecord::default()
+        })
+        .expect("serialize");
+
+        assert_eq!(json, r#"{"sensitivity":"public"}"#);
     }
 }
