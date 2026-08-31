@@ -808,6 +808,7 @@ dependencies = [
  "arkavo-dataflow",
  "arkavo-device-identity",
  "arkavo-events",
+ "arkavo-fingerprint",
  "arkavo-gguf-tdf",
  "arkavo-git",
  "arkavo-gossip",
@@ -1096,6 +1097,20 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "arkavo-fingerprint"
+version = "0.91.0"
+dependencies = [
+ "arkavo-protocol",
+ "arkavo-test-macros",
+ "blake3",
+ "criterion",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "zeroize",
 ]
 
 [[package]]

@@ -1,0 +1,31 @@
+[package]
+name = "arkavo-fingerprint"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Keyed reference index: shingled, tenant-keyed content fingerprints for the DLP cascade's fast tier"
+repository.workspace = true
+keywords = ["dlp", "fingerprint", "shingling", "simhash"]
+categories = ["algorithms"]
+
+[dependencies]
+# Keyed hashing. BLAKE3's keyed mode is a PRF over the whole input, so a shingle
+# hash is one pass rather than HMAC's two, and the crate is already vendored.
+blake3 = "1.5"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { version = "1.8", features = ["derive"] }
+arkavo-protocol = { path = "../arkavo-protocol", features = ["taint"] }
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+criterion = { workspace = true }
+
+[[bench]]
+name = "index_lookup"
+harness = false
+
+[lints]
+workspace = true

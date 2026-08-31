@@ -127,9 +127,10 @@ Resolved:
 - **Pack naming:** `.knowpack.tdf`, with components named `adapter-<compartment>.gguf.tdf`, `sentinel.gguf.tdf`, `index.tdf`, `manifest.json`, `manifest.sig`. A pack is a multi-component archive with its own lifecycle; `.swarmkit.tdf` stays what it is today, a role-policy kit.
 - **Training stack** and **embedding tier:** the plan's stated defaults are recorded as advisory defaults, not spec invariants — a Rust-first training path with GGUF export, and a hash-plus-sentinel cascade with no embedding tier. KP and SENT scenarios specify outcomes (calibrated thresholds bound into the manifest, split by source family, cascade tier ordering and budget), so swapping either default is an implementation change, not a spec change.
 
+- **Sentinel base:** Qwen3.5-0.8B (`ModelChoice::LocalQwen3`), decided 2026-08-30 under Paul's explicit delegation rather than silently — the ground rule is a trail, not a veto. It is the only registry model under the ≤1B target, its GGUF download and load path is already proven here, and the registry notes it as DeltaNet-fast, which is what holdback latency needs. Apache-2.0, verified against the Hugging Face API for both the official weights and the unsloth requant, so derivatives and redistribution are unrestricted; `deny.toml` is untouched because no crate changes. Ministral 3B was rejected on size, Gemma on terms that flow down to derivatives — legal surface a shipped pack should not carry. Phase 6 fine-tunes from the **official** Qwen weights, not the requant: the requant is fine for runtime bring-up, where the router already trusts it, but a security classifier's training base should be first-party.
+
 Open:
 
-- **Sentinel base:** model family and size target (≤1B) plus license compatibility with `deny.toml` and `THIRD-PARTY-LICENSES.md`.
 - **Release mapping proposal:** 0.91 → P0–P2 · 0.92 → P3–P4 · 0.93 → P5 · 0.94 → P6–P7.
 
 ## Milestone map

@@ -28,6 +28,8 @@ pub mod agent_specialization;
 pub mod auth;
 pub mod chat_commands;
 pub mod chat_session;
+#[cfg(feature = "taint")]
+pub mod classification_evidence;
 pub mod config;
 pub mod config_transport;
 pub mod data_classification;
@@ -87,6 +89,10 @@ pub use chat_commands::{
     ChatSession, CommandResult, ContextMode, PendingContext, execute_command, parse_command,
 };
 pub use chat_session::ChatSessionManager;
+#[cfg(feature = "taint")]
+pub use classification_evidence::{
+    ClassificationEvidence, Confidence, LabelFinding, TierOutcome, TierReport,
+};
 pub use config::{A2aConfig, A2aConfigBuilder, BufferConfig, ConfigManager};
 pub use data_classification::{
     ClassifiedDatum, DataCategory, DatumType, DlpAction, DlpPolicy, SensitivityLevel,
