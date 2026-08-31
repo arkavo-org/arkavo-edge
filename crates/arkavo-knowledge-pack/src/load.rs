@@ -46,6 +46,17 @@ pub enum LoadError {
          refusing before a key request"
     )]
     PolicyTooWeak { component: String, ceiling: String },
+    #[error("component {component} changed on disk after the pack was verified")]
+    DigestChanged { component: String },
+    #[error(
+        "component {component} is recorded at {recorded} but its contents are classified \
+         {content}; the recorded ceiling cannot be lower than what it covers"
+    )]
+    CeilingBelowContent {
+        component: String,
+        recorded: String,
+        content: String,
+    },
     #[error(transparent)]
     Key(#[from] arkavo_gguf_tdf::GgufTdfError),
 }
@@ -200,6 +211,16 @@ fn open_indexes(
     }
     let bytes =
         std::fs::read(pack.path(&record.file)).map_err(|_| LoadError::Read(record.file.clone()))?;
+    // KP-004 is a rule about *use*, not about listing. `verify_pack` digested
+    // this file earlier; a file swapped between then and now would otherwise be
+    // loaded on the strength of a check that no longer describes it. Re-digest
+    // the bytes actually about to be used. Every future component loader owes
+    // the same check for the same reason.
+    if crate::manifest::digest_of(&bytes) != record.digest {
+        return Err(LoadError::DigestChanged {
+            component: record.file.clone(),
+        });
+    }
     let blob: SealedBlob = serde_json::from_slice(&bytes)
         .map_err(|e| LoadError::BadIndex(format!("index envelope: {e}")))?;
     // KP-003: the component's own policy is checked before any key request. An
@@ -215,5 +236,25 @@ fn open_indexes(
     let plaintext = open_blob(&blob, unwrapper)?;
     let indexes: PackIndexes = serde_json::from_slice(&plaintext)
         .map_err(|e| LoadError::BadIndex(format!("index contents: {e}")))?;
+
+    // The recorded ceiling is what the policy pre-check enforces, and it was
+    // typed by whoever sealed the pack. The index's own entries say how
+    // sensitive its corpus actually is, and that is computable — so a recorded
+    // ceiling below the content it covers is a lie the pre-check would
+    // faithfully enforce. Inference may add restrictions, never remove them.
+    let content = indexes.reference.max_sensitivity().max(
+        indexes
+            .near
+            .as_ref()
+            .map(NearDuplicateIndex::max_sensitivity)
+            .unwrap_or(SensitivityLevel::Public),
+    );
+    if content > sensitivity_of(record.effective_ceiling()) {
+        return Err(LoadError::CeilingBelowContent {
+            component: record.file.clone(),
+            recorded: record.effective_ceiling().as_str().to_string(),
+            content: format!("{content:?}").to_lowercase(),
+        });
+    }
     Ok(Some(indexes))
 }

@@ -34,6 +34,8 @@ pub enum ManifestError {
     UnsupportedVersion(String),
     #[error("compartment {0} is served by more than one adapter")]
     DuplicateCompartment(String),
+    #[error("the pack lists more than one {0} component")]
+    DuplicateRole(String),
     #[error("component {0} has no digest")]
     MissingDigest(String),
     #[error("pack lists no components")]
@@ -159,14 +161,28 @@ impl PackManifest {
             return Err(ManifestError::Empty);
         }
         let mut compartments: BTreeSet<&str> = BTreeSet::new();
+        let mut singletons: BTreeSet<&str> = BTreeSet::new();
         for component in &self.components {
             if component.digest.is_empty() {
                 return Err(ManifestError::MissingDigest(component.file.clone()));
             }
-            if let Some(compartment) = component.role.compartment()
-                && !compartments.insert(compartment)
-            {
-                return Err(ManifestError::DuplicateCompartment(compartment.to_string()));
+            match component.role.compartment() {
+                Some(compartment) => {
+                    if !compartments.insert(compartment) {
+                        return Err(ManifestError::DuplicateCompartment(compartment.to_string()));
+                    }
+                }
+                // A second sentinel or index is not additive: lookup is by
+                // role, so one of them would be silently ignored — and which
+                // one depends on manifest order, which is not a security
+                // property anybody should be relying on.
+                None => {
+                    if !singletons.insert(component.role.as_str()) {
+                        return Err(ManifestError::DuplicateRole(
+                            component.role.as_str().to_string(),
+                        ));
+                    }
+                }
             }
         }
         Ok(())

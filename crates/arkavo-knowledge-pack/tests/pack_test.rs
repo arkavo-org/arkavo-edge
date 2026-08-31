@@ -649,3 +649,115 @@ fn an_over_protected_component_is_accepted() {
 
     assert!(loaded.is_ok(), "over-protection must not be a refusal");
 }
+
+/// KP-004: the digest rule is about *use*, not about listing. A component
+/// swapped after verification must not be loaded on the strength of a check
+/// that no longer describes it.
+#[spec("KP-004")]
+#[test]
+fn a_component_swapped_after_verification_is_refused_at_load() {
+    let fixture = build_pack();
+    let verified =
+        verify_pack(&pack_root(&fixture), Some(&fixture.key.public_key())).expect("verify");
+
+    // Verified, then swapped — the window a load-time check has to close.
+    std::fs::write(pack_root(&fixture).join("index.tdf"), b"{}").expect("swap");
+
+    let refused = load_pack(
+        &verified,
+        Some(&index_key()),
+        &PreResolvedKey::new(fixture.payload_key),
+    );
+
+    let message = match refused {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("a swapped component must not be loaded"),
+    };
+    assert!(message.contains("changed on disk"), "{message}");
+}
+
+/// KP-006: a recorded ceiling below the content it covers is a lie the policy
+/// pre-check would faithfully enforce, so the content gets the last word.
+#[spec("KP-006")]
+#[test]
+fn a_ceiling_below_the_content_it_covers_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let staging = dir.path().join("staging");
+    std::fs::create_dir_all(&staging).expect("staging");
+
+    let key = index_key();
+    let mut reference = ReferenceIndex::builder(&key, "1.0.0");
+    reference.add_document(
+        &key,
+        &corpus_document(),
+        DataCategory::Credentials,
+        SensitivityLevel::Restricted,
+        "secrets",
+    );
+    let indexes = PackIndexes {
+        reference: reference.build(),
+        near: None,
+    };
+    let wrapper = CapturingWrapper {
+        captured: std::sync::Mutex::new(None),
+    };
+    // Wrapped and recorded as internal; the entries inside are restricted.
+    let blob = seal_blob(
+        &serde_json::to_vec(&indexes).expect("serialize"),
+        &wrapper,
+        &["https://attr.arkavo.com/clearance/internal".to_string()],
+        "application/json",
+    )
+    .expect("seal");
+    std::fs::write(
+        staging.join("index.tdf"),
+        serde_json::to_vec(&blob).expect("serialize"),
+    )
+    .expect("write");
+    let payload_key = wrapper.captured.lock().expect("lock").expect("a key");
+
+    let mut builder = PackBuilder::new("understated", "1.0.0", "tok").with_thresholds(thresholds());
+    builder
+        .add_component(
+            &staging.join("index.tdf"),
+            ComponentRole::Index,
+            Some(Classification::Internal),
+        )
+        .expect("add");
+    let signing = AgentKeypair::generate();
+    let root = dir.path().join("pack");
+    builder.build(&root, &signing).expect("build");
+
+    let verified = verify_pack(&root, Some(&signing.public_key())).expect("verify");
+    let refused = load_pack(&verified, Some(&key), &PreResolvedKey::new(payload_key));
+
+    let message = match refused {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("a ceiling below its content must be refused"),
+    };
+    assert!(message.contains("classified"), "{message}");
+}
+
+/// A second index or sentinel is not additive: lookup is by role, so one would
+/// be silently ignored, and which one would depend on manifest order.
+#[spec("KP-001")]
+#[test]
+fn a_pack_with_two_indexes_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("a.tdf"), b"a").expect("write");
+    std::fs::write(dir.path().join("b.tdf"), b"b").expect("write");
+    let mut builder = PackBuilder::new("two-indexes", "1.0.0", "tok");
+    for file in ["a.tdf", "b.tdf"] {
+        builder
+            .add_component(
+                &dir.path().join(file),
+                ComponentRole::Index,
+                Some(Classification::Internal),
+            )
+            .expect("add");
+    }
+
+    let refused = builder.build(&dir.path().join("pack"), &AgentKeypair::generate());
+
+    assert!(refused.is_err());
+}

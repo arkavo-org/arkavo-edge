@@ -130,6 +130,7 @@ scenarios:
   - id: KP-006
     name: Carry the high-water mark of the training corpus
     criticality: critical
+    wip: true
     given:
       - An adapter is trained on a corpus spanning more than one classification
     when: The adapter's classification is computed at pack time

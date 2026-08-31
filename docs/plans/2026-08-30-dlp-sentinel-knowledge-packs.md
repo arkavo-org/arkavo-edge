@@ -111,7 +111,7 @@ Two deviations from the plan text, both deliberate:
 
 **Accept:** KP tripwires flipped; pack build and verify round-trip in e2e; adapter selection integration test with two clearance levels; tampered manifest rejected.
 
-**Delivered (2026-08-31, 0.93.0).** KP-001 through KP-006 and KP-008 flipped, plus SENT-004, which this phase unblocked: thresholds now come from a verified manifest rather than from anything an operator can edit. `arkavo pack seal`, `verify` and `anchor` complete the command family, and `SentinelRuntime::from_pack` is the runtime call site Phase 4 left open — the gate and the critic check are now built from a signed pack instead of being constructible and unconstructed.
+**Delivered (2026-08-31, 0.93.0).** KP-001 through KP-005 and KP-008 flipped, plus SENT-004, which this phase unblocked: thresholds now come from a verified manifest rather than from anything an operator can edit. `arkavo pack seal`, `verify` and `anchor` complete the command family, and `SentinelRuntime::from_pack` is the runtime call site Phase 4 left open — the gate and the critic check are now built from a signed pack instead of being constructible and unconstructed.
 
 Decisions taken under delegation, with the reasoning:
 
@@ -123,6 +123,7 @@ Decisions taken under delegation, with the reasoning:
 
 Still `wip`, with the reason each is not green:
 
+- **KP-006** — `high_water` and the manifest binding are in, and a recorded ceiling below the content it covers is now refused at load. But the headline clause is "adapter classification equals the maximum classification in its corpus", and nothing computes a corpus ceiling because no adapter and no distillation exist yet; the seal-time ceiling is still operator-typed. Green for the index, whose content classification is computable today; red until Phase 6 makes it true for adapters. Held to the same standard that kept SENT-005 red.
 - **KP-007** — selection ships; loading waits on the llama.cpp adapter API above.
 - **KP-009** — the index is now wrapped as a pack component and `pack seal` refuses a plaintext one, but the tenant key still arrives as `--key-file`; KAS-backed provisioning is unbuilt.
 - **KP-010** — the near-duplicate tier's fingerprint still votes over suppressed shingles, so boilerplate is excluded from the exact tier only.
