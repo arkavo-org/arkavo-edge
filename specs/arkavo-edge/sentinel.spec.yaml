@@ -2,7 +2,7 @@
 
 feature: DLP Sentinel Classifier
 module: arkavo_sentinel
-version: 0.90.0
+version: 0.92.0
 
 invariants:
   - The sentinel labels; the policy decision point authorizes
@@ -20,7 +20,6 @@ scenarios:
   - id: SENT-001
     name: Emit evidence rather than an authorization decision
     criticality: critical
-    wip: true
     given:
       - A span of content is submitted to the sentinel
       - A policy decision point is configured downstream
@@ -31,7 +30,8 @@ scenarios:
       - No sentinel code path can release content that policy denied
       - No sentinel code path can deny content on its own authority
     refs:
-      - crates/arkavo-protocol/src/data_classification.rs:76-107
+      - crates/arkavo-protocol/src/classification_evidence.rs:1-60
+      - crates/arkavo-sentinel/src/scoring.rs:56-140
     changed: "2026-08-30"
     edge_cases:
       - condition: The policy decision point is unavailable
@@ -40,7 +40,6 @@ scenarios:
   - id: SENT-002
     name: Carry the full evidence contract
     criticality: critical
-    wip: true
     given:
       - The sentinel has scored a span
     when: Evidence is handed to the policy layer
@@ -51,7 +50,9 @@ scenarios:
       - Evidence carries the signals that fired, sufficient for an auditor to reconstruct the call
       - Evidence carries matched source families when a reference tier contributed
     refs:
-      - crates/arkavo-protocol/src/data_classification.rs:60-74
+      - crates/arkavo-protocol/src/classification_evidence.rs:44-160
+      - crates/arkavo-sentinel/src/pattern_tier.rs:1-75
+      - crates/arkavo-fingerprint/src/tier.rs:96-135
     changed: "2026-08-30"
     edge_cases:
       - condition: A tier contributed no signal
@@ -60,7 +61,6 @@ scenarios:
   - id: SENT-003
     name: Merge sentinel labels by monotonic union
     criticality: critical
-    wip: true
     given:
       - A payload already carries known taint labels
       - The sentinel infers additional labels for the same payload
@@ -71,7 +71,8 @@ scenarios:
       - A known label is never removed or downgraded by inference
       - The merge is evaluated over the whole payload, not per matched datum
     refs:
-      - crates/arkavo-protocol/src/data_classification.rs:15-22
+      - crates/arkavo-sentinel/src/merge.rs:1-55
+      - crates/arkavo-protocol/src/taint.rs:207-300
     changed: "2026-08-30"
     edge_cases:
       - condition: The sentinel infers a lower sensitivity than the known label
@@ -92,6 +93,8 @@ scenarios:
       - No threshold is compiled into the sentinel crate
       - A label marked uncalibrated uses the conservative threshold recorded for it
       - The detector and taxonomy versions in evidence match those in the manifest
+    refs:
+      - crates/arkavo-sentinel/src/calibration.rs:1-80
     changed: "2026-08-30"
     edge_cases:
       - condition: The manifest omits a threshold for a label the model emits
@@ -114,6 +117,7 @@ scenarios:
       - Key material is zeroized after the load completes
       - Plaintext weights are never written to disk
     refs:
+      - crates/arkavo-sentinel/src/loader.rs:1-45
       - crates/arkavo-gguf-tdf/src/reader.rs:1-40
       - crates/arkavo-gguf-tdf/src/key.rs:1-40
     changed: "2026-08-30"
@@ -124,7 +128,6 @@ scenarios:
   - id: SENT-006
     name: Order the cascade and keep the sentinel off the hot path
     criticality: critical
-    wip: true
     given:
       - A keyed exact tier, a near-duplicate tier, and the sentinel are all available
       - An outbound span is being classified
@@ -135,6 +138,10 @@ scenarios:
       - Sentinel scoring runs asynchronously against a holdback buffer
       - Synchronous cascade cost stays inside the 50µs per-call budget
       - Evidence names which tier produced each label
+    refs:
+      - crates/arkavo-sentinel/src/cascade.rs:1-135
+      - crates/arkavo-fingerprint/src/near_tier.rs:1-60
+      - crates/arkavo-sentinel/src/scoring.rs:150-200
     changed: "2026-08-30"
     edge_cases:
       - condition: An earlier tier already fires the maximum label
@@ -145,7 +152,6 @@ scenarios:
   - id: SENT-007
     name: Hold back streamed tokens until inspected
     criticality: critical
-    wip: true
     given:
       - A model is streaming a completion
       - Holdback is configured with a sliding window and overlap
@@ -156,7 +162,9 @@ scenarios:
       - A held window that fires a label is never released
       - Holdback latency percentiles are observable
     refs:
-      - crates/arkavo-llm/src/lib.rs:1-40
+      - crates/arkavo-sentinel/src/holdback.rs:1-230
+      - crates/arkavo-llm/src/release_gate.rs:1-175
+      - crates/arkavo-cli/src/sentinel_wiring.rs:44-115
     changed: "2026-08-30"
     edge_cases:
       - condition: The completion ends mid-window
@@ -167,7 +175,6 @@ scenarios:
   - id: SENT-008
     name: Inspect tool-call arguments whole before execution
     criticality: critical
-    wip: true
     given:
       - A model emits a structured tool call
     when: The call is dispatched
@@ -177,7 +184,7 @@ scenarios:
       - A label firing on any field blocks the call before side effects occur
       - Evidence names the field that fired
     refs:
-      - crates/arkavo-mcp-runtime/src/server.rs:1-40
+      - crates/arkavo-server/src/server/egress_guard.rs:104-175
     changed: "2026-08-30"
     edge_cases:
       - condition: An argument is a nested structure
@@ -186,7 +193,6 @@ scenarios:
   - id: SENT-009
     name: Refuse partial streaming above the confidential ceiling
     criticality: critical
-    wip: true
     given:
       - The serving model records a classification ceiling of Confidential or higher
     when: A completion is requested
@@ -195,6 +201,9 @@ scenarios:
       - The completion is released whole after inspection, or not at all
       - The refusal to stream is driven by the recorded ceiling, not by a request flag
       - A caller cannot opt out of the restriction
+    refs:
+      - crates/arkavo-sentinel/src/holdback.rs:96-120
+      - crates/arkavo-cli/src/sentinel_wiring.rs:52-70
     changed: "2026-08-30"
     edge_cases:
       - condition: A client requests streaming explicitly
@@ -216,7 +225,8 @@ scenarios:
       - Throttling events are recorded for the caller identity
       - Legitimate traffic within budget is unaffected
     refs:
-      - crates/arkavo-security/src/rate_limit.rs:1-40
+      - crates/arkavo-sentinel/src/budget.rs:1-80
+      - crates/arkavo-protocol/src/egress_taint.rs:333-420
     changed: "2026-08-30"
     edge_cases:
       - condition: Probes arrive across several sessions of one identity
@@ -236,6 +246,8 @@ scenarios:
       - Full evidence including scores is written to the audit sink
       - Audit and external paths are separate sinks, not one message filtered twice
     refs:
+      - crates/arkavo-sentinel/src/scoring.rs:95-135
+      - crates/arkavo-llm/src/release_gate.rs:50-58
       - crates/arkavo-observability/src/decision_trace.rs:1-40
     changed: "2026-08-30"
     edge_cases:
@@ -272,7 +284,8 @@ scenarios:
       - The gap appears in the decision trace with the reason
       - Recovery is attempted on the next action rather than requiring a restart
     refs:
-      - crates/arkavo-protocol/src/error.rs:1-87
+      - crates/arkavo-sentinel/src/cascade.rs:31-60
+      - crates/arkavo-protocol/src/classification_evidence.rs:160-215
     changed: "2026-08-30"
     edge_cases:
       - condition: The sentinel is permanently absent on an egress-only node
@@ -281,7 +294,6 @@ scenarios:
   - id: SENT-014
     name: Return sentinel evidence from the critic pipeline
     criticality: high
-    wip: true
     given:
       - A critic pipeline with a circuit check active
     when: A sentinel check is added to the pipeline
@@ -291,7 +303,8 @@ scenarios:
       - Existing circuit check behavior is unchanged when the sentinel is absent
       - Pipeline latency stays within its existing budget
     refs:
-      - crates/arkavo-critic/src/pipeline.rs:43-180
+      - crates/arkavo-critic/src/checks/sentinel.rs:1-125
+      - crates/arkavo-critic/src/pipeline.rs:100-125
       - crates/arkavo-critic/src/checks/circuit.rs:29-170
     changed: "2026-08-30"
     edge_cases:
@@ -301,7 +314,6 @@ scenarios:
   - id: SENT-015
     name: Detect detector and taxonomy version mismatch
     criticality: high
-    wip: true
     given:
       - Loaded sentinel weights and a loaded taxonomy map
     when: Versions are compared at load
@@ -310,6 +322,9 @@ scenarios:
       - A refused pairing does not silently map unknown labels to known attributes
       - The mismatch names both versions in the operator alert
       - A matching pairing records both versions in every piece of evidence
+    refs:
+      - crates/arkavo-sentinel/src/scoring.rs:60-95
+      - crates/arkavo-sentinel/src/calibration.rs:70-80
     changed: "2026-08-30"
     edge_cases:
       - condition: The taxonomy map adds a label the detector cannot emit
@@ -318,7 +333,6 @@ scenarios:
   - id: SENT-016
     name: Keep sentinel cost out of the per-call budget
     criticality: critical
-    wip: true
     given:
       - Sentinel scoring is running for a session
     when: Tool calls execute during scoring
@@ -327,6 +341,9 @@ scenarios:
       - Scoring work runs on its own executor, not the caller's
       - Queue depth is bounded and overflow holds content rather than dropping inspection
       - Latency percentiles for scoring are published separately from per-call overhead
+    refs:
+      - crates/arkavo-sentinel/src/scoring.rs:160-235
+      - crates/arkavo-sentinel/benches/holdback.rs:1-40
     changed: "2026-08-30"
     edge_cases:
       - condition: The scoring queue is saturated

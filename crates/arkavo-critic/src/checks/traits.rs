@@ -101,6 +101,16 @@ pub trait VerificationCheck: Send + Sync {
     fn is_applicable(&self, _input: &VerificationInput) -> bool {
         true
     }
+
+    /// Whether to skip this check once an earlier one has already failed.
+    ///
+    /// Default false, so existing checks are unaffected. A check that only
+    /// contributes evidence sets it: once the action is blocked there is
+    /// nothing left for evidence to inform, and running anyway spends the
+    /// pipeline's latency budget to produce a note nobody acts on (SENT-014).
+    fn skip_after_failure(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

@@ -36,6 +36,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [features]
 default = []
+# The DLP sentinel check. Off until the sentinel work reaches GA.
+sentinel = []
 
 [[bench]]
 name = "circuit_eval"

@@ -211,6 +211,7 @@ scenarios:
       - The index is TDF-wrapped on output
     refs:
       - crates/arkavo-config-encryption/src/lib.rs:35-98
+      - crates/arkavo-fingerprint/src/simhash.rs:1-120
     changed: "2026-08-30"
     edge_cases:
       - condition: The tenant key is unavailable
@@ -248,6 +249,9 @@ scenarios:
       - A miss costs no more than a hit
       - Near-duplicate scoring runs after the exact tier, not before it
       - Budget overrun degrades to asynchronous scoring rather than blocking the call
+    refs:
+      - crates/arkavo-fingerprint/src/near_tier.rs:1-140
+      - crates/arkavo-sentinel/src/cascade.rs:20-110
     changed: "2026-08-30"
     edge_cases:
       - condition: The index is not yet loaded

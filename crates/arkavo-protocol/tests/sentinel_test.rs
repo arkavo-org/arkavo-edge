@@ -2,13 +2,17 @@
 //! SENT-001, SENT-002, SENT-003, SENT-013: the split between labelling and
 //! authorizing.
 //!
-//! `DlpPolicy` today fuses detection and authorization: it looks at one datum
-//! and answers Allow or Block. The sentinel splits those apart — it produces
-//! evidence, the policy decision point authorizes — so every test here pins
-//! down a property of the current fused design that has to change.
+//! `DlpPolicy` fuses detection and authorization: it looks at one datum and
+//! answers Allow or Block. The sentinel splits those apart — a tier produces
+//! evidence, the policy decision point authorizes. These were tripwires against
+//! the fused design; they now assert the separated one, and the `DlpPolicy`
+//! tests that remain document the fused surface still in place beside it.
 
+use arkavo_protocol::classification_evidence::{
+    ClassificationEvidence, Confidence, LabelFinding, TierReport,
+};
 use arkavo_protocol::data_classification::{
-    ClassifiedDatum, DatumType, DlpAction, DlpPolicy, SensitivityLevel,
+    ClassifiedDatum, DataCategory, DatumType, DlpAction, DlpPolicy, SensitivityLevel,
 };
 use arkavo_test_macros::spec;
 
@@ -32,66 +36,138 @@ fn dlp_policy_returns_an_authorization_verdict() {
 }
 
 /// SENT-001: the sentinel labels and the policy decision point authorizes, so
-/// the classifier's return value must be evidence rather than a verdict.
-/// Tripwire: flips when detection returns labels instead of Allow/Block.
+/// the classifier's return value is evidence rather than a verdict. Nothing a
+/// tier can return names a disposition, which is what makes it structurally
+/// impossible for a classifier to release or deny on its own authority.
 #[spec("SENT-001")]
 #[test]
-#[should_panic(expected = "SENT-001")]
-fn classification_result_is_not_separable_from_the_verdict() {
-    let policy = DlpPolicy::strict();
+fn classification_yields_labels_for_a_policy_decision_point() {
+    let report = TierReport::matched(
+        "reference-index",
+        "1+1.0.0",
+        vec![LabelFinding::new(
+            DataCategory::Credentials,
+            SensitivityLevel::Restricted,
+            Confidence::CERTAIN,
+            "12/40 shingles matched",
+        )],
+    );
 
-    let action = policy.evaluate(&datum(DatumType::ApiKey, fake_api_key().as_str()));
-    let action_str = format!("{action:?}");
-
+    let finding = report.findings().first().expect("a label");
+    assert_eq!(finding.category, DataCategory::Credentials);
+    assert_eq!(finding.sensitivity, SensitivityLevel::Restricted);
+    // And no disposition is reachable from it: there is no verdict to read out.
+    let rendered = format!("{report:?}");
     assert!(
-        action_str.contains("labels"),
-        "SENT-001: classification should yield labels for a policy decision point, \
-         but evaluate returned the verdict itself: {action_str}"
+        !rendered.contains("Allow") && !rendered.contains("Block"),
+        "SENT-001: a tier report must not carry a disposition: {rendered}"
     );
 }
 
-/// SENT-002: evidence must carry calibrated confidence plus the detector and
-/// taxonomy versions that produced it, so an auditor can reconstruct the call.
-/// Tripwire: flips when the evidence contract lands.
+/// SENT-002: evidence carries calibrated confidence plus the detector and
+/// taxonomy versions that produced it, and the source family when a reference
+/// tier contributed — everything an auditor needs to reconstruct the call.
 #[spec("SENT-002")]
 #[test]
-#[should_panic(expected = "SENT-002")]
-fn classified_datum_carries_no_calibrated_evidence() {
-    let classified = datum(DatumType::SocialSecurityNumber, fake_ssn().as_str());
-    let evidence = format!("{classified:?}");
+fn evidence_carries_confidence_and_both_versions() {
+    let evidence = ClassificationEvidence::new("1.0.0").with_tier(TierReport::matched(
+        "reference-index",
+        "1+1.0.0",
+        vec![
+            LabelFinding::new(
+                DataCategory::Pii,
+                SensitivityLevel::Restricted,
+                Confidence::new(0.87),
+                "national identity number",
+            )
+            .from_family("hr-records")
+            .at(4, 15),
+        ],
+    ));
 
+    assert_eq!(evidence.taxonomy_version, "1.0.0");
+    let tier = evidence.tiers.first().expect("a consulted tier");
+    assert_eq!(tier.version, "1+1.0.0", "the detector version is recorded");
+    let finding = tier.findings().first().expect("a label");
+    assert_eq!(finding.confidence, Confidence::new(0.87));
+    assert_eq!(finding.source_family.as_deref(), Some("hr-records"));
+    assert_eq!(finding.span, Some((4, 15)));
     assert!(
-        evidence.contains("calibrated_confidence")
-            && evidence.contains("detector_version")
-            && evidence.contains("taxonomy_version"),
-        "SENT-002: evidence should carry calibrated confidence and detector \
-         plus taxonomy versions, but the classification is: {evidence}"
+        !finding.signal.is_empty(),
+        "the signal that fired is recorded"
     );
 }
 
-/// SENT-003: labels merge by monotonic union over the whole payload. Evaluating
-/// one datum at a time lets the low-sensitivity half of a payload answer Allow
-/// while a credential sits in the same buffer.
-/// Tripwire: flips when evaluation takes a payload taint set rather than a datum.
+/// SENT-002 edge case: a tier that contributed no signal is recorded as
+/// consulted with no match, never omitted. Evidence that shrinks when a tier
+/// finds nothing cannot be told apart from evidence that shrinks when a tier
+/// stops running.
+#[spec("SENT-002")]
+#[test]
+fn a_tier_that_found_nothing_is_still_recorded() {
+    let evidence = ClassificationEvidence::new("1.0.0")
+        .with_tier(TierReport::matched("pattern", "1", Vec::new()))
+        .with_tier(TierReport::unavailable("near-duplicate", "1", "not loaded"));
+
+    assert_eq!(evidence.tiers.len(), 2);
+    // And the two are distinguishable: one looked and found nothing, the other
+    // did not look.
+    assert!(!evidence.tiers[0].is_unavailable());
+    assert!(evidence.tiers[1].is_unavailable());
+    assert!(evidence.has_gap());
+}
+
+/// SENT-003: the merge is evaluated over the whole payload, not per matched
+/// datum. Evaluating one datum at a time is what let the low-sensitivity half
+/// of a payload answer for the credential sitting in the same buffer.
 #[spec("SENT-003")]
 #[test]
-#[should_panic(expected = "SENT-003")]
-fn per_datum_evaluation_ignores_the_rest_of_the_payload() {
-    let policy = DlpPolicy::strict();
-    let payload_contains_a_credential = datum(DatumType::ApiKey, fake_api_key().as_str());
-    let same_payload_also_contains = datum(DatumType::Email, "person@example.com");
+fn a_payload_is_evaluated_at_the_level_of_the_highest_label_in_it() {
+    let evidence = ClassificationEvidence::new("1.0.0").with_tier(TierReport::matched(
+        "pattern",
+        "1",
+        vec![
+            LabelFinding::new(
+                DataCategory::Pii,
+                SensitivityLevel::Internal,
+                Confidence::CERTAIN,
+                "Email",
+            ),
+            LabelFinding::new(
+                DataCategory::Credentials,
+                SensitivityLevel::Restricted,
+                Confidence::CERTAIN,
+                "ApiKey",
+            ),
+        ],
+    ));
 
     assert_eq!(
-        policy.evaluate(&payload_contains_a_credential),
+        evidence.sensitivity_at(Confidence::new(0.5)),
+        Some(SensitivityLevel::Restricted),
+        "SENT-003: a payload holding a credential and an email is a credential payload"
+    );
+    let categories = evidence.categories_at(Confidence::new(0.5));
+    assert!(categories.contains(&DataCategory::Pii));
+    assert!(categories.contains(&DataCategory::Credentials));
+}
+
+/// SENT-003: the fused per-datum surface is still in place beside the evidence
+/// contract, and still answers about one datum at a time. Documents what the
+/// policy layer must not be built on.
+#[spec("SENT-003")]
+#[test]
+fn the_fused_per_datum_surface_still_answers_about_one_datum() {
+    let policy = DlpPolicy::strict();
+
+    assert_eq!(
+        policy.evaluate(&datum(DatumType::ApiKey, fake_api_key().as_str())),
         DlpAction::Block
     );
-    let action = policy.evaluate(&same_payload_also_contains);
-
-    assert_eq!(
-        action,
+    assert_ne!(
+        policy.evaluate(&datum(DatumType::Email, "person@example.com")),
         DlpAction::Block,
-        "SENT-003: the whole payload carries the credential's classification, \
-         but per-datum evaluation answered {action:?} for the email in it"
+        "per-datum evaluation cannot see the rest of the payload"
     );
 }
 
@@ -156,10 +232,4 @@ fn fake_api_key() -> String {
         .map(|i| char::from(b'a' + ((i * 7 + 3) % 26) as u8))
         .collect();
     format!("{prefix}-{body}")
-}
-
-/// A national-identity-number-shaped string, assembled at run time for the same
-/// reason as [`fake_api_key`].
-fn fake_ssn() -> String {
-    format!("{:03}-{:02}-{:04}", 123, 45, 6789)
 }

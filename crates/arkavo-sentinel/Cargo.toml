@@ -1,0 +1,40 @@
+[package]
+name = "arkavo-sentinel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "DLP sentinel: the classification cascade, streaming holdback, and off-hot-path scoring"
+repository.workspace = true
+keywords = ["dlp", "classification", "cascade", "holdback"]
+categories = ["algorithms"]
+
+[dependencies]
+arkavo-protocol = { path = "../arkavo-protocol", features = ["taint"] }
+arkavo-fingerprint = { path = "../arkavo-fingerprint" }
+# Rate limiting shared with the egress gate, so probing one throttles the other.
+governor = "0.10"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros"] }
+tracing = { workspace = true }
+# The sentinel's own weights ship protected by the mechanism it enforces.
+arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf", optional = true }
+
+[features]
+default = ["protected-weights"]
+# Loading the classifier through the KAS-gated GGUF-TDF reader. Off on nodes
+# that run only the reference tiers and never hold weights.
+protected-weights = ["dep:arkavo-gguf-tdf"]
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+criterion = { workspace = true }
+
+[[bench]]
+name = "holdback"
+harness = false
+
+[lints]
+workspace = true

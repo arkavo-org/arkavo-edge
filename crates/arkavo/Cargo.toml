@@ -38,6 +38,7 @@ claude-agent = ["arkavo-cli/claude-agent"]
 # sequence-integrity work reaches GA; the security suite builds a binary with it.
 taint = ["arkavo-cli/taint"]
 fingerprint = ["arkavo-cli/fingerprint"]
+sentinel = ["arkavo-cli/sentinel"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }
