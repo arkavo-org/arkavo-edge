@@ -761,3 +761,70 @@ fn a_pack_with_two_indexes_is_refused() {
 
     assert!(refused.is_err());
 }
+
+/// Two adapters in different directories with the same file name must not
+/// collapse onto one pack path. Lookup is by file name; a silent overwrite
+/// would leave two digest records pointing at one blob.
+#[spec("KP-001")]
+#[test]
+fn two_components_cannot_share_a_pack_file_name() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let legal = dir.path().join("legal");
+    let finance = dir.path().join("finance");
+    std::fs::create_dir_all(&legal).expect("legal");
+    std::fs::create_dir_all(&finance).expect("finance");
+    std::fs::write(legal.join("adapter.gguf.tdf"), b"legal").expect("write");
+    std::fs::write(finance.join("adapter.gguf.tdf"), b"finance").expect("write");
+
+    let mut builder = PackBuilder::new("same-name", "1.0.0", "tok");
+    builder
+        .add_component(
+            &legal.join("adapter.gguf.tdf"),
+            ComponentRole::Adapter {
+                compartment: "legal".into(),
+            },
+            Some(Classification::Confidential),
+        )
+        .expect("legal");
+    let refused = builder.add_component(
+        &finance.join("adapter.gguf.tdf"),
+        ComponentRole::Adapter {
+            compartment: "finance".into(),
+        },
+        Some(Classification::Restricted),
+    );
+
+    let message = match refused {
+        Err(e) => e.to_string(),
+        Ok(()) => panic!("a second component with the same file name must be refused"),
+    };
+    assert!(message.contains("adapter.gguf.tdf"), "{message}");
+}
+
+/// A missing tenant key is a provisioning gap, not a reason to ask the KAS
+/// for a payload key that cannot be used.
+#[spec("KP-009")]
+#[test]
+fn a_pack_without_a_tenant_key_does_not_request_the_index_payload_key() {
+    let fixture = build_pack();
+    let verified =
+        verify_pack(&pack_root(&fixture), Some(&fixture.key.public_key())).expect("verify");
+
+    struct CountingKas(std::sync::atomic::AtomicUsize);
+    impl PayloadKeyUnwrapper for CountingKas {
+        fn unwrap_key(&self, _manifest: &TdfManifest) -> Result<[u8; 32], GgufTdfError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(GgufTdfError::KasDenied("should not be asked".into()))
+        }
+    }
+    let kas = CountingKas(std::sync::atomic::AtomicUsize::new(0));
+
+    let loaded = load_pack(&verified, None, &kas).expect("provisioning gap is not a refusal");
+
+    assert_eq!(kas.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(
+        loaded.inventory.contains("index.tdf"),
+        "{}",
+        loaded.inventory
+    );
+}

@@ -261,10 +261,10 @@ fn build_index(args: &[String]) -> Result<(), String> {
     }
     println!("Wrote {}", options.out.display());
     println!(
-        "Note: this output is plaintext. `arkavo pack seal --component {}:index` \
-         wraps it before distribution; treat it as classified at the level above \
-         until it is sealed.",
-        options.out.display()
+        "Note: this output is plaintext. Wrap it before `arkavo pack seal` — \
+         seal copies a SealedBlob and refuses a plaintext index, because the \
+         labels beside each entry say how sensitive the corpus is. Treat it as \
+         classified at the level above until it is wrapped."
     );
     Ok(())
 }

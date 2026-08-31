@@ -36,6 +36,8 @@ pub enum ManifestError {
     DuplicateCompartment(String),
     #[error("the pack lists more than one {0} component")]
     DuplicateRole(String),
+    #[error("two components would be written as {0}")]
+    DuplicateFile(String),
     #[error("component {0} has no digest")]
     MissingDigest(String),
     #[error("pack lists no components")]
@@ -162,9 +164,13 @@ impl PackManifest {
         }
         let mut compartments: BTreeSet<&str> = BTreeSet::new();
         let mut singletons: BTreeSet<&str> = BTreeSet::new();
+        let mut files: BTreeSet<&str> = BTreeSet::new();
         for component in &self.components {
             if component.digest.is_empty() {
                 return Err(ManifestError::MissingDigest(component.file.clone()));
+            }
+            if !files.insert(component.file.as_str()) {
+                return Err(ManifestError::DuplicateFile(component.file.clone()));
             }
             match component.role.compartment() {
                 Some(compartment) => {
@@ -193,8 +199,14 @@ impl PackManifest {
     /// Pretty-printed and stable: the signature covers these bytes, so the
     /// only safe reading of a manifest is the one that reads the file rather
     /// than re-serializing a parsed struct.
+    ///
+    /// # Panics
+    ///
+    /// If a field cannot be serialized. Signing a fallback empty buffer would
+    /// produce a pack whose signature verifies over the wrong bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = serde_json::to_vec_pretty(self).unwrap_or_default();
+        let mut bytes =
+            serde_json::to_vec_pretty(self).expect("PackManifest fields are all serializable");
         bytes.push(b'\n');
         bytes
     }

@@ -93,7 +93,6 @@ impl GgufTdfArchive {
         self.index().max_segment
     }
 
-    /// The parsed manifest, for a KAS client that needs `keyAccess`.
     /// What this archive is within a pack, when it says.
     ///
     /// Available before `unlock`, which is the point: an egress node decides
@@ -103,6 +102,7 @@ impl GgufTdfArchive {
         self.component.as_ref()
     }
 
+    /// The parsed manifest, for a KAS client that needs `keyAccess`.
     pub fn manifest(&self) -> &TdfManifest {
         &self.manifest
     }

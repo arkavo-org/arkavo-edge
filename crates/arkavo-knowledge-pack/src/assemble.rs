@@ -2,9 +2,10 @@
 //!
 //! Assembly is where the invariants are enforced, because it is the last moment
 //! at which they can be. Once a manifest is signed, a contradiction inside it
-//! is a signed contradiction: two adapters claiming one compartment, a
-//! component with no digest, a ceiling lower than the corpus it came from. The
-//! builder refuses those rather than recording them.
+//! is a signed contradiction: two adapters claiming one compartment, two
+//! components that would occupy the same file, a missing digest. The builder
+//! refuses those rather than recording them. A recorded ceiling below the
+//! corpus it covers is load-time — the index has to be decrypted first.
 
 use std::path::{Path, PathBuf};
 
@@ -103,6 +104,9 @@ impl PackBuilder {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "component".to_string());
+        if self.manifest.components.iter().any(|c| c.file == file) {
+            return Err(AssembleError::Manifest(ManifestError::DuplicateFile(file)));
+        }
         let mut record = ComponentRecord::new(file, role, &bytes);
         record.classification_ceiling = ceiling;
         self.manifest.components.push(record);

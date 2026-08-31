@@ -292,10 +292,12 @@ async fn a_verified_pack_provisions_a_gate_that_catches_its_own_corpus() {
         near: None,
     };
     let wrapper = Capturing(std::sync::Mutex::new(None));
+    // The entries are Confidential; wrap and record at that level. Anything
+    // weaker is the lie the load-time ceiling check exists to catch.
     let blob = seal_blob(
         &serde_json::to_vec(&indexes).expect("serialize"),
         &wrapper,
-        &["https://attr.arkavo.com/clearance/internal".to_string()],
+        &["https://attr.arkavo.com/clearance/confidential".to_string()],
         "application/json",
     )
     .expect("seal");
@@ -316,7 +318,7 @@ async fn a_verified_pack_provisions_a_gate_that_catches_its_own_corpus() {
         .add_component(
             &staging.join("index.tdf"),
             ComponentRole::Index,
-            Some(arkavo_gguf_tdf::Classification::Internal),
+            Some(arkavo_gguf_tdf::Classification::Confidential),
         )
         .expect("component");
     let signing = AgentKeypair::generate();

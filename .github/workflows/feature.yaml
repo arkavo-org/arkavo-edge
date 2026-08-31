@@ -276,12 +276,12 @@ jobs:
             cargo test --locked -p arkavo-protocol --features taint --test sentinel_test --test taint_propagation_test --test egress_taint_test
             cargo test --locked -p arkavo-server --features taint --lib egress_guard
             cargo test --locked -p arkavo-critic --features sentinel --lib checks::sentinel
-            # Pack-index unit tests live in arkavo-cli and only compile when
-            # the fingerprint crate is linked.
+            # Pack command tests live in arkavo-cli and only compile when the
+            # knowledge-pack feature (which pulls fingerprint) is on.
             cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel commands::pack
             # Phase 4's acceptance test: a seeded canary in a completion never
-            # reaches the consumer.
-            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --lib commands::pack
+            # reaches the consumer. Phase 5 extends it: the gate is provisioned
+            # from a signed pack.
             cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary
           fi
 

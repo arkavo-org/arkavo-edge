@@ -96,9 +96,9 @@ pub fn load_pack(
     let mut cascade = Cascade::new(&pack.manifest.taxonomy_version)
         .with_tier(Arc::new(PatternTier::new(Arc::new(RegexInferencer::new()))));
 
-    if let Some(indexes) = open_indexes(pack, unwrapper)? {
-        match index_key {
-            Some(key) => {
+    match index_key {
+        Some(key) => {
+            if let Some(indexes) = open_indexes(pack, unwrapper)? {
                 let reference = Arc::new(indexes.reference);
                 cascade = cascade
                     .with_tier(Arc::new(ReferenceTier::loaded(reference, key.clone()))
@@ -110,10 +110,12 @@ pub fn load_pack(
                     )) as Arc<dyn CascadeTier>);
                 }
             }
-            // The index opened but there is no tenant key to read it with. That
-            // is a provisioning gap, and it is reported rather than papered
-            // over with an unkeyed lookup, which cannot exist by design.
-            None => {
+        }
+        // No tenant key means the index cannot be read, so there is nothing to
+        // ask a KAS for. Decrypting and dropping the plaintext is unused
+        // exposure. An unkeyed lookup cannot exist by design.
+        None => {
+            if pack.manifest.role(&ComponentRole::Index).is_some() {
                 tracing::warn!(
                     "pack carries a reference index but no tenant key was provisioned; \
                      the cascade runs without it"
@@ -130,8 +132,6 @@ pub fn load_pack(
     })
 }
 
-/// SENT-004: thresholds come from the verified manifest, and the pairing with
-/// the taxonomy version is checked here rather than trusted.
 fn sensitivity_of(ceiling: Classification) -> SensitivityLevel {
     match ceiling {
         Classification::Public => SensitivityLevel::Public,
@@ -160,7 +160,9 @@ fn policy_covers_ceiling(
     }
     let map = arkavo_protocol::taxonomy::TaxonomyMap::v1();
     let Some(clearance) = map.clearance() else {
-        return Ok(true);
+        // A map with no clearance definition cannot attest that a policy
+        // covers a ceiling. Public already returned above.
+        return Ok(false);
     };
     let found = crate::blob::embedded_attributes(&blob.manifest)?;
     // The strongest clearance the policy actually demands.
@@ -180,6 +182,8 @@ fn policy_covers_ceiling(
     Ok(strongest.is_some_and(|level| level >= needed))
 }
 
+/// SENT-004: thresholds come from the verified manifest, and the pairing with
+/// the taxonomy version is checked here rather than trusted.
 fn calibration_from(pack: &VerifiedPack) -> Result<CalibrationTable, LoadError> {
     if pack.manifest.thresholds.is_null() {
         return Err(LoadError::NoThresholds);

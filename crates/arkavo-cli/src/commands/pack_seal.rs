@@ -212,14 +212,26 @@ impl SealOptions {
 }
 
 /// `<path>:<role>[:<ceiling>]`, where an adapter's role is `adapter/<compartment>`.
+///
+/// Parsed from the right so a Windows drive letter is part of the path, not a
+/// role named `\packs\index.tdf`.
 fn parse_component(spec: &str) -> Result<Component, String> {
-    let parts: Vec<&str> = spec.split(':').collect();
-    if parts.len() < 2 {
-        return Err(format!(
-            "component '{spec}' must be <path>:<role>[:<ceiling>]"
-        ));
-    }
-    let role = match parts[1] {
+    let mut parts = spec.rsplitn(3, ':');
+    let last = parts
+        .next()
+        .ok_or_else(|| format!("component '{spec}' must be <path>:<role>[:<ceiling>]"))?;
+    let middle = parts.next();
+    let first = parts.next();
+    let (path, role_name, ceiling) = match (first, middle) {
+        (Some(path), Some(role_name)) => (path, role_name, Some(last)),
+        (None, Some(path)) => (path, last, None),
+        (_, None) => {
+            return Err(format!(
+                "component '{spec}' must be <path>:<role>[:<ceiling>]"
+            ));
+        }
+    };
+    let role = match role_name {
         "sentinel" => ComponentRole::Sentinel,
         "index" => ComponentRole::Index,
         "model" => ComponentRole::Model,
@@ -233,14 +245,10 @@ fn parse_component(spec: &str) -> Result<Component, String> {
         }
         other => return Err(format!("unknown component role '{other}'")),
     };
-    let ceiling = match parts.get(2) {
-        Some(name) => Some(parse_ceiling(name)?),
-        None => None,
-    };
     Ok(Component {
-        path: PathBuf::from(parts[0]),
+        path: PathBuf::from(path),
         role,
-        ceiling,
+        ceiling: ceiling.map(parse_ceiling).transpose()?,
     })
 }
 
@@ -327,6 +335,16 @@ mod tests {
         let component = parse_component("index.tdf:index").expect("parse");
 
         assert_eq!(component.ceiling, None);
+    }
+
+    #[test]
+    fn a_windows_path_is_the_path_not_a_role() {
+        // split(':') from the left takes the drive letter as the path.
+        let component = parse_component(r"C:\packs\index.tdf:index:confidential").expect("parse");
+
+        assert_eq!(component.path.to_string_lossy(), r"C:\packs\index.tdf");
+        assert!(matches!(component.role, ComponentRole::Index));
+        assert_eq!(component.ceiling, Some(Classification::Confidential));
     }
 
     #[test]
