@@ -213,24 +213,18 @@ impl SealOptions {
 
 /// `<path>:<role>[:<ceiling>]`, where an adapter's role is `adapter/<compartment>`.
 ///
-/// Parsed from the right so a Windows drive letter is part of the path, not a
-/// role named `\packs\index.tdf`.
+/// Split from the right on known tokens so a Windows drive letter stays in the
+/// path. `rsplitn(3, ':')` is not enough: `C:\packs\index.tdf:index` has two
+/// colons and no ceiling, so a fixed three-way split takes the drive letter
+/// as the path and `index` as a classification.
 fn parse_component(spec: &str) -> Result<Component, String> {
-    let mut parts = spec.rsplitn(3, ':');
-    let last = parts
-        .next()
-        .ok_or_else(|| format!("component '{spec}' must be <path>:<role>[:<ceiling>]"))?;
-    let middle = parts.next();
-    let first = parts.next();
-    let (path, role_name, ceiling) = match (first, middle) {
-        (Some(path), Some(role_name)) => (path, role_name, Some(last)),
-        (None, Some(path)) => (path, last, None),
-        (_, None) => {
-            return Err(format!(
-                "component '{spec}' must be <path>:<role>[:<ceiling>]"
-            ));
-        }
+    let (rest, ceiling) = match spec.rsplit_once(':') {
+        Some((rest, last)) if parse_ceiling(last).is_ok() => (rest, Some(last)),
+        _ => (spec, None),
     };
+    let (path, role_name) = rest
+        .rsplit_once(':')
+        .ok_or_else(|| format!("component '{spec}' must be <path>:<role>[:<ceiling>]"))?;
     let role = match role_name {
         "sentinel" => ComponentRole::Sentinel,
         "index" => ComponentRole::Index,
@@ -345,6 +339,24 @@ mod tests {
         assert_eq!(component.path.to_string_lossy(), r"C:\packs\index.tdf");
         assert!(matches!(component.role, ComponentRole::Index));
         assert_eq!(component.ceiling, Some(Classification::Confidential));
+    }
+
+    #[test]
+    fn a_windows_path_without_a_ceiling_is_still_the_path() {
+        let component = parse_component(r"C:\packs\index.tdf:index").expect("parse");
+
+        assert_eq!(component.path.to_string_lossy(), r"C:\packs\index.tdf");
+        assert!(matches!(component.role, ComponentRole::Index));
+        assert_eq!(component.ceiling, None);
+    }
+
+    #[test]
+    fn a_windows_adapter_without_a_ceiling_keeps_its_drive_letter() {
+        let component = parse_component(r"C:\a.gguf.tdf:adapter/legal").expect("parse");
+
+        assert_eq!(component.path.to_string_lossy(), r"C:\a.gguf.tdf");
+        assert_eq!(component.role.compartment(), Some("legal"));
+        assert_eq!(component.ceiling, None);
     }
 
     #[test]

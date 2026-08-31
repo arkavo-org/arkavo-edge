@@ -2,7 +2,7 @@
 
 feature: Sealed Knowledge Packs
 module: arkavo_knowledge_pack
-version: 0.93.0
+version: 0.91.0
 
 invariants:
   - Every pack component is TDF-wrapped separately so partial distribution is possible

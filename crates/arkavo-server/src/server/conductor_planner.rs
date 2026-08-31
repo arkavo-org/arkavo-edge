@@ -31,6 +31,7 @@ pub(super) async fn execute_with_plan(
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
     system_prompt: Option<&str>,
     mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
+    #[cfg(feature = "taint")] egress: Option<Arc<super::egress_guard::EgressGuard>>,
 ) -> Result<String, String> {
     // 1. Plan subtasks via LLM
     let analyzer = LlmIntentAnalyzer::new(router.clone());
@@ -97,6 +98,8 @@ pub(super) async fn execute_with_plan(
                 learning_bus,
                 tool_memory,
                 system_prompt,
+                #[cfg(feature = "taint")]
+                egress.clone(),
             )
             .await;
             stage_outputs.push(result);
@@ -112,6 +115,8 @@ pub(super) async fn execute_with_plan(
                 let bus = learning_bus.cloned();
                 let mem = tool_memory.cloned();
                 let sys = system_prompt.map(|s| s.to_string());
+                #[cfg(feature = "taint")]
+                let subtask_egress = egress.clone();
 
                 handles.push(tokio::spawn(async move {
                     execute_subtask(
@@ -123,6 +128,8 @@ pub(super) async fn execute_with_plan(
                         bus.as_ref(),
                         mem.as_ref(),
                         sys.as_deref(),
+                        #[cfg(feature = "taint")]
+                        subtask_egress,
                     )
                     .await
                 }));
@@ -230,6 +237,7 @@ async fn execute_subtask(
     learning_bus: Option<&Arc<LearningBus>>,
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
     system_prompt: Option<&str>,
+    #[cfg(feature = "taint")] egress: Option<Arc<super::egress_guard::EgressGuard>>,
 ) -> String {
     let mut messages = Vec::new();
     if let Some(sys) = system_prompt {
@@ -249,11 +257,11 @@ async fn execute_subtask(
         tool_memory,
         None, // compute_budget: planner doesn't enforce per-iteration budget
         None, // granted_tools: subtask planner is called from the orchestrator's own loop
-        // The orchestrator's own loop owns the session guard; a subtask plan
-        // executed here re-enters through that loop, so passing a second guard
-        // would give the subtask a taint history the session never had.
+        // A subtask is a new tool loop, not a re-entry of the parent. Dropping
+        // the session guard here is how a specialist decomposition would send
+        // a credential the 1:1 path would have refused.
         #[cfg(feature = "taint")]
-        None,
+        egress,
     )
     .await
     {

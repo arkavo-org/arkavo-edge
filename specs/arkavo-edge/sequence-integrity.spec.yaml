@@ -2,7 +2,7 @@
 
 feature: Agent Behavioral Sequence Integrity
 module: arkavo_sequence_integrity
-version: 0.93.0
+version: 0.91.0
 
 invariants:
   - Every tool call is taint-tracked from data source to data sink

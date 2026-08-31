@@ -2,7 +2,7 @@
 
 feature: DLP Sentinel Classifier
 module: arkavo_sentinel
-version: 0.93.0
+version: 0.91.0
 
 invariants:
   - The sentinel labels; the policy decision point authorizes
