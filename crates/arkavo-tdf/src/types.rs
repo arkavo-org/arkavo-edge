@@ -348,14 +348,14 @@ mod tests {
     #[test]
     fn key_access_object_constructor() {
         let kao = KeyAccessObject::new(
-            "https://kas.arkavo.net",
+            "https://platform.arkavo.net",
             "wrapped_key_base64",
             PolicyBinding::new("hash_value"),
         );
 
         assert_eq!(kao.access_type, "wrapped");
         assert_eq!(kao.protocol, "kas");
-        assert_eq!(kao.url, "https://kas.arkavo.net");
+        assert_eq!(kao.url, "https://platform.arkavo.net");
     }
 
     #[spec("TDFS-008")]

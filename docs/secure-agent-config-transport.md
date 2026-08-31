@@ -114,7 +114,7 @@ use arkavo_config_encryption::{ConfigBundleEncryptor, Policy};
 
 // Create encryptor with KAS URL
 let encryptor = ConfigBundleEncryptor::new(
-    "https://100.arkavo.net/kas/v2/rewrap".to_string()
+    "https://platform.arkavo.net/kas/v2/rewrap".to_string()
 );
 
 // Encrypt bundle with policy
@@ -159,7 +159,7 @@ The `ConfigTransportServer` distributes bundles:
 use arkavo_config_transport::ConfigTransportServer;
 
 let server = ConfigTransportServer::new(
-    "https://100.arkavo.net/kas/v2/rewrap".to_string()
+    "https://platform.arkavo.net/kas/v2/rewrap".to_string()
 )?;
 
 // Distribute a bundle
@@ -217,7 +217,7 @@ async fn decrypt_with_kas(
     identity: &AgentIdentity,
 ) -> Result<ConfigurationBundle> {
     let kas_client = opentdf::KasClient::new(
-        "https://100.arkavo.net/kas/v2/rewrap",
+        "https://platform.arkavo.net/kas/v2/rewrap",
         &oauth_token
     )?;
 
@@ -232,7 +232,7 @@ use arkavo_config_encryption::KasConfig;
 
 // Production KAS
 let kas = KasConfig::production();
-// URL: https://100.arkavo.net/kas/v2/rewrap
+// URL: https://platform.arkavo.net/kas/v2/rewrap
 
 // From environment
 let kas = KasConfig::from_env();

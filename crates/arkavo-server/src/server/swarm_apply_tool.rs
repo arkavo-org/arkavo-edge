@@ -35,7 +35,7 @@ use serde_json::{Value, json};
 
 /// Default KAS endpoint when `ARKAVO_KAS_URL` is unset. Matches
 /// `arkavo_tdf::OpenTdfConfig`'s default so wrap and rewrap agree.
-const DEFAULT_KAS_URL: &str = "https://kas.arkavo.net";
+const DEFAULT_KAS_URL: &str = "https://platform.arkavo.net";
 
 /// Agent-callable tool that applies a SwarmKit manifest to the mesh.
 pub(super) struct SwarmApplyTool {
