@@ -136,6 +136,12 @@ impl CascadeTier for SentinelTier {
         SENTINEL_TIER_NAME
     }
 
+    /// A mismatched pairing is not a tier that answers sometimes; it is one
+    /// that cannot answer at all until the pairing is fixed.
+    fn is_available(&self) -> bool {
+        self.is_usable()
+    }
+
     /// SENT-006, SENT-016: never inline, at any deadline.
     fn examine_until(&self, _text: &str, _deadline: Instant) -> TierReport {
         TierReport::unavailable(

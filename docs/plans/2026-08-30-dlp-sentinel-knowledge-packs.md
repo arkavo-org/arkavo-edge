@@ -84,6 +84,22 @@ One distillation pipeline produces a **sealed knowledge pack**: policy-scoped kn
 
 **Accept:** SENT tripwires flipped; holdback latency p50/p95/p99 published in bench; e2e test proves a seeded canary in a completion is caught pre-release under mock provider.
 
+**Delivered (2026-08-30, 0.92.0).** SENT-001, 002, 003, 006, 007, 008, 009, 014, 015 and 016 flipped. Measured: cascade per-call overhead 1.39µs against the 50µs invariant; holdback window latency p50 6.21µs, p95 6.42µs, p99 6.96µs. The canary test drives a mock-provider completion through the release gate and asserts the consumer never sees it.
+
+Still `wip`, with the reason each is not green:
+
+- **SENT-004** — thresholds come from a `CalibrationTable` and none is compiled into the crate, but the scenario's `given` is a *verified* pack manifest, and manifest verification is Phase 5.
+- **SENT-005** — the loader opens the classifier through `GgufTdfArchive::open`/`unlock`, so the code path is real, but no sentinel artifact exists to load until Phase 6 and an untested load path is not a green one.
+- **SENT-010** — `ProbeBudget` is an identity-keyed bucket that several holders share, but the egress gate still owns a private limiter. Sharing one requires the budget to live in `arkavo-protocol`; the gate's crate cannot reach `arkavo-sentinel` without closing a dependency cycle.
+- **SENT-011** — denials are generic and no raw score reaches a signal, but sentinel evidence is not yet written to the audit sink, and the scenario needs both halves.
+- **SENT-012** — declassification is a signed human workflow; none of it is built.
+- **SENT-013** — gaps hold and configuration absence is distinguished from a per-span gap, but the gap does not yet reach the decision trace.
+
+Two deviations from the plan text, both deliberate:
+
+- The classifier tier is `SentinelTier: CascadeTier`, not `SentinelInferencer: ClassificationInferencer`. `ClassificationInferencer` returns `ClassifiedDatum`, whose closed `DatumType` cannot carry a confidence, a tier version, or a category that came from an index rather than a regex — which is exactly why `ClassificationEvidence` was added in Phase 3. Forcing the sentinel through the older trait would discard the evidence contract the phase exists to deliver.
+- The near-duplicate tier uses a bounded linear scan rather than banded LSH. Banding only guarantees recall below the band count, and the measured threshold a one-word edit needs is 32 of 128 bits; guaranteeing that would take enough bands that a lookup scans the corpus several times over. The bound (`MAX_DOCUMENTS`) buys the same property with none of the machinery, and this tier runs off the hot path.
+
 ## Phase 5 — Knowledge pack format, signing, adapter channel
 
 **Touch:** `arkavo-gguf-tdf` (metadata), `arkavo-llama-cpp` / `arkavo-llama-cpp-sys` (new adapter API), `arkavo-identity`/`arkavo-attestation` (signing), `arkavo-cli` (`arkavo pack build`).

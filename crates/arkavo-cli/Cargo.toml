@@ -42,6 +42,9 @@ cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 # Cargo feature unification would otherwise turn taint on for the shipped
 # binary and blow the 65MB cap.
 fingerprint = ["dep:arkavo-fingerprint"]
+# The DLP sentinel: the classification cascade wired into the critic
+# pipeline and the streaming release path. Off until the work reaches GA.
+sentinel = ["dep:arkavo-sentinel", "fingerprint", "arkavo-critic/sentinel"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 iroh = ["arkavo-server/iroh", "arkavo-server/swarm-apply"]
 kas = ["arkavo-protocol/kas", "arkavo-server/kas"]
@@ -68,6 +71,7 @@ arkavo-server = { path = "../arkavo-server" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["persistence"] }
 arkavo-critic = { path = "../arkavo-critic" }
+arkavo-sentinel = { path = "../arkavo-sentinel", optional = true }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
 arkavo-ui-core = { path = "../arkavo-ui-core", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
@@ -125,6 +129,7 @@ chrono = { workspace = true }
 serde_json = { workspace = true }
 arkavo-kimi = { path = "../arkavo-kimi" }
 arkavo-budget = { path = "../arkavo-budget" }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 # macOS-only dependencies
 [target.'cfg(target_os = "macos")'.dependencies]

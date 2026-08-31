@@ -62,29 +62,57 @@ fn benches(c: &mut Criterion) {
     c.bench_function("holdback_window_latency", |b| {
         b.iter(|| {
             let mut holdback = Holdback::default();
-            let mut released = 0usize;
-            for chunk in completion() {
-                holdback.push(&chunk);
-                while let Some(window) = holdback.take_window() {
-                    let evidence = cascade.inspect_until(
-                        &window.inspect,
-                        Instant::now() + arkavo_sentinel::CASCADE_BUDGET,
-                    );
-                    if evidence.findings().next().is_some() {
-                        holdback.block();
-                        break;
-                    }
-                    released += holdback.release().len();
-                }
-            }
-            holdback.finish();
-            while let Some(window) = holdback.take_window() {
-                black_box(cascade.inspect(&window.inspect));
-                released += holdback.release().len();
-            }
-            black_box(released)
+            holdback.push(&"a chunk of generated completion text. ".repeat(8));
+            let window = holdback.take_window().expect("a full window");
+            black_box(cascade.inspect_until(
+                &window.inspect,
+                Instant::now() + arkavo_sentinel::CASCADE_BUDGET,
+            ));
+            black_box(holdback.release().len())
         });
     });
+
+    // SENT-007 asks for percentiles, which criterion's mean and interval do not
+    // give. They are the number a consumer actually feels: a mean hides the
+    // window that took ten times as long, and that window is the one someone
+    // notices.
+    publish_percentiles(&cascade);
+}
+
+/// Print holdback latency percentiles over a full completion's worth of
+/// windows, one line, so the numbers land in the bench output alongside
+/// criterion's own.
+fn publish_percentiles(cascade: &Cascade) {
+    let mut samples: Vec<u128> = Vec::new();
+    for _ in 0..200 {
+        let mut holdback = Holdback::default();
+        for chunk in completion() {
+            holdback.push(&chunk);
+            while let Some(window) = holdback.take_window() {
+                let started = Instant::now();
+                let evidence = cascade
+                    .inspect_until(&window.inspect, started + arkavo_sentinel::CASCADE_BUDGET);
+                if evidence.findings().next().is_some() {
+                    holdback.block();
+                    break;
+                }
+                holdback.release();
+                samples.push(started.elapsed().as_nanos());
+            }
+        }
+    }
+    samples.sort_unstable();
+    let at = |p: f64| {
+        samples[((samples.len() as f64 * p) as usize).min(samples.len() - 1)] as f64 / 1000.0
+    };
+    println!(
+        "holdback_window_latency percentiles over {} windows: \
+         p50 {:.2}us p95 {:.2}us p99 {:.2}us",
+        samples.len(),
+        at(0.50),
+        at(0.95),
+        at(0.99)
+    );
 }
 
 criterion_group!(holdback, benches);

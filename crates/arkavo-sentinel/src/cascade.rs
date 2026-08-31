@@ -31,6 +31,17 @@ pub const CASCADE_BUDGET: Duration = Duration::from_micros(30);
 pub trait CascadeTier: Send + Sync {
     fn name(&self) -> &str;
 
+    /// Whether this tier can answer at all in this configuration.
+    ///
+    /// SENT-013's edge case: a tier that is permanently absent on this node is
+    /// a configuration state, not an error per call. The cascade drops such a
+    /// tier and records the absence once, because leaving it in would make it
+    /// report a gap on every span — and a gap is a reason to hold, so an
+    /// optional tier nobody provisioned would hold everything forever.
+    fn is_available(&self) -> bool {
+        true
+    }
+
     /// Examine a span, stopping at the cascade's deadline.
     fn examine_until(&self, text: &str, deadline: Instant) -> TierReport;
 
@@ -41,6 +52,9 @@ pub trait CascadeTier: Send + Sync {
 /// Ordered tiers over one taxonomy version.
 pub struct Cascade {
     tiers: Vec<Arc<dyn CascadeTier>>,
+    /// Tiers not provisioned on this node, kept so an operator can see what
+    /// this cascade is not covering without it costing a gap per span.
+    absent: Vec<String>,
     taxonomy_version: String,
     budget: Duration,
 }
@@ -49,6 +63,7 @@ impl Cascade {
     pub fn new(taxonomy_version: impl Into<String>) -> Self {
         Self {
             tiers: Vec::new(),
+            absent: Vec::new(),
             taxonomy_version: taxonomy_version.into(),
             budget: CASCADE_BUDGET,
         }
@@ -56,10 +71,27 @@ impl Cascade {
 
     /// Append a tier. Order is the cascade's contract, so tiers run in the
     /// order they were added rather than in an order chosen at run time.
+    ///
+    /// A tier that reports itself unavailable is recorded as absent rather than
+    /// added, so its absence costs one operator log line instead of a gap on
+    /// every span (SENT-013).
     #[must_use]
     pub fn with_tier(mut self, tier: Arc<dyn CascadeTier>) -> Self {
+        if !tier.is_available() {
+            tracing::info!(
+                tier = tier.name(),
+                "tier is not provisioned on this node; the cascade runs without it"
+            );
+            self.absent.push(tier.name().to_string());
+            return self;
+        }
         self.tiers.push(tier);
         self
+    }
+
+    /// Tiers this cascade is running without.
+    pub fn absent_tiers(&self) -> &[String] {
+        &self.absent
     }
 
     #[must_use]
@@ -110,6 +142,10 @@ impl CascadeTier for arkavo_fingerprint::ReferenceTier {
         arkavo_fingerprint::TIER_NAME
     }
 
+    fn is_available(&self) -> bool {
+        self.is_loaded()
+    }
+
     fn examine_until(&self, text: &str, deadline: Instant) -> TierReport {
         arkavo_fingerprint::ReferenceTier::examine_until(self, text, deadline)
     }
@@ -122,6 +158,10 @@ impl CascadeTier for arkavo_fingerprint::ReferenceTier {
 impl CascadeTier for arkavo_fingerprint::NearDuplicateTier {
     fn name(&self) -> &str {
         arkavo_fingerprint::NEAR_TIER_NAME
+    }
+
+    fn is_available(&self) -> bool {
+        self.is_loaded()
     }
 
     fn examine_until(&self, text: &str, deadline: Instant) -> TierReport {
@@ -321,11 +361,34 @@ mod tests {
                 "none",
             )));
 
-        // An already-expired deadline: every tier must report a gap rather than
-        // spend the caller's time.
+        // An already-expired deadline: every provisioned tier must report a gap
+        // rather than spend the caller's time.
         let evidence = cascade.inspect_until(&"word ".repeat(400), Instant::now());
 
         assert!(evidence.has_gap());
-        assert_eq!(evidence.tiers.len(), 2, "a deferral is still recorded");
+        assert_eq!(evidence.tiers.len(), 1, "a deferral is still recorded");
+        assert_eq!(
+            cascade.absent_tiers(),
+            [arkavo_fingerprint::NEAR_TIER_NAME],
+            "an unprovisioned tier is recorded as absent, not as a gap per span"
+        );
+    }
+
+    /// SENT-013 edge case: absence is a configuration state, not an error per
+    /// call. An unprovisioned tier must not make every span look incomplete.
+    #[spec("SENT-013")]
+    #[test]
+    fn an_unprovisioned_tier_does_not_put_a_gap_in_every_span() {
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let cascade = Cascade::new("1.0.0")
+            .with_tier(Arc::new(Recording::new("exact", order)))
+            .with_tier(Arc::new(arkavo_fingerprint::NearDuplicateTier::unloaded(
+                "no near index on this node",
+            )));
+
+        let evidence = cascade.inspect("some text");
+
+        assert!(!evidence.has_gap());
+        assert_eq!(cascade.absent_tiers().len(), 1);
     }
 }

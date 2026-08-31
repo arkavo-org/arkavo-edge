@@ -19,6 +19,7 @@ pub mod ollama;
 pub mod provider;
 #[cfg(feature = "llm-remote")]
 pub mod providers;
+pub mod release_gate;
 pub mod stream;
 pub mod stream_adapter;
 pub mod stream_model;
@@ -34,6 +35,7 @@ pub use image::{ImageFormat, decode_image, encode_image_bytes, encode_image_file
 pub use mcp_converter::{LocalToolFormat, McpConverter};
 pub use message::{Message, Role, ToolCall};
 pub use provider::{InferenceTiming, Provider, ProviderResponse};
+pub use release_gate::{GATE_BLOCKED, GateOutcome, GatedStream, ReleaseGate, gated};
 pub use stream::StreamResponse;
 pub use tool_executor::{ToolExecutionError, ToolExecutionResult, ToolExecutor};
 pub use tool_parser::{ParsedToolCall, ToolParseError, ToolParser};
