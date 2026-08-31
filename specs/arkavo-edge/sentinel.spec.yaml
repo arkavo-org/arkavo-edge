@@ -2,7 +2,7 @@
 
 feature: DLP Sentinel Classifier
 module: arkavo_sentinel
-version: 0.92.0
+version: 0.93.0
 
 invariants:
   - The sentinel labels; the policy decision point authorizes
@@ -83,7 +83,6 @@ scenarios:
   - id: SENT-004
     name: Read calibrated thresholds from the pack manifest
     criticality: critical
-    wip: true
     given:
       - A verified knowledge pack is loaded
       - The manifest carries per-label calibrated thresholds
@@ -95,7 +94,9 @@ scenarios:
       - The detector and taxonomy versions in evidence match those in the manifest
     refs:
       - crates/arkavo-sentinel/src/calibration.rs:1-80
-    changed: "2026-08-30"
+      - crates/arkavo-knowledge-pack/src/load.rs:118-140
+      - crates/arkavo-knowledge-pack/src/manifest.rs:110-130
+    changed: "2026-08-31"
     edge_cases:
       - condition: The manifest omits a threshold for a label the model emits
         expected: The label fires conservatively and the omission is reported

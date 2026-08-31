@@ -9,10 +9,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use arkavo_critic::{ClassificationSource, SentinelEvidence};
+use arkavo_critic::{ClassificationSource, SentinelCheck, SentinelEvidence};
+use arkavo_fingerprint::IndexKey;
+use arkavo_gguf_tdf::{Classification, PayloadKeyUnwrapper};
+use arkavo_knowledge_pack::{LoadError, VerifiedPack, load_pack};
 use arkavo_llm::{GateOutcome, ReleaseGate};
 use arkavo_protocol::data_classification::SensitivityLevel;
-use arkavo_sentinel::{Cascade, Holdback};
+use arkavo_sentinel::{CalibrationTable, Cascade, Holdback};
 
 /// The cascade as the critic pipeline sees it.
 pub struct CascadeSource {
@@ -109,5 +112,94 @@ impl ReleaseGate for CascadeGate {
 
     fn discard(&self) {
         self.buffer().discard();
+    }
+}
+
+/// Everything a session needs to enforce classification, provisioned from one
+/// verified pack.
+///
+/// This is the seam Phase 4 left open. The cascade, the gate and the critic
+/// check were all constructible then and nothing constructed them, because the
+/// indices and thresholds they need come from a pack — and there was no pack.
+/// The ordering that matters is inside `load_pack`: the manifest's signature
+/// and every present component's digest have been checked before any of this
+/// exists, so none of it can be built from content nobody vouched for.
+pub struct SentinelRuntime {
+    cascade: Arc<Cascade>,
+    /// Calibrated thresholds, from the signed manifest rather than from
+    /// anything an operator can edit locally (SENT-004).
+    pub calibration: CalibrationTable,
+    /// The ceiling anything served under this pack carries.
+    pub ceiling: SensitivityLevel,
+    /// What this node holds, for the audit record.
+    pub inventory: String,
+}
+
+impl SentinelRuntime {
+    /// Provision from a pack whose signature and digests already verified.
+    pub fn from_pack(
+        pack: &VerifiedPack,
+        index_key: Option<&Arc<IndexKey>>,
+        unwrapper: &dyn PayloadKeyUnwrapper,
+    ) -> Result<Self, LoadError> {
+        let loaded = load_pack(pack, index_key, unwrapper)?;
+        Ok(Self {
+            cascade: loaded.cascade,
+            calibration: loaded.calibration,
+            ceiling: sensitivity_of(loaded.ceiling),
+            inventory: loaded.inventory,
+        })
+    }
+
+    /// The critic-pipeline check this pack's cascade backs.
+    pub fn check(&self) -> SentinelCheck {
+        SentinelCheck::new(Arc::new(CascadeSource::new(self.cascade.clone())))
+    }
+
+    /// A release gate for one completion.
+    ///
+    /// One gate per completion, never shared: the holdback buffer holds *that*
+    /// completion's text, and a shared one would let two streams block each
+    /// other or, worse, release each other's windows. The ceiling comes from
+    /// the pack rather than from the caller (SENT-009).
+    pub fn gate(&self) -> CascadeGate {
+        CascadeGate::new(self.cascade.clone(), self.ceiling)
+    }
+
+    pub fn cascade(&self) -> Arc<Cascade> {
+        self.cascade.clone()
+    }
+}
+
+/// Map the pack's classification vocabulary onto the taint vocabulary.
+///
+/// Two enums rather than one because the format crate sits underneath the crate
+/// that owns classification and cannot depend on it. This is the one place the
+/// two meet, so it is the one place the mapping can drift.
+fn sensitivity_of(classification: Classification) -> SensitivityLevel {
+    match classification {
+        Classification::Public => SensitivityLevel::Public,
+        Classification::Internal => SensitivityLevel::Internal,
+        Classification::Confidential => SensitivityLevel::Confidential,
+        Classification::Restricted => SensitivityLevel::Restricted,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_two_classification_scales_stay_aligned() {
+        // Ordering is what the high-water merge relies on, so the mapping has
+        // to preserve it as well as the names.
+        assert!(
+            sensitivity_of(Classification::Restricted)
+                > sensitivity_of(Classification::Confidential)
+        );
+        assert!(
+            sensitivity_of(Classification::Confidential) > sensitivity_of(Classification::Internal)
+        );
+        assert!(sensitivity_of(Classification::Internal) > sensitivity_of(Classification::Public));
     }
 }

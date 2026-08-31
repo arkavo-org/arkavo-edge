@@ -1,7 +1,7 @@
 #![allow(clippy::disallowed_methods)]
 #![cfg(target_os = "macos")]
 
-use arkavo_mcp_macos::mcp::idb_wrapper::IdbWrapper;
+use arkavo_mcp_macos::mcp::simulator_tap::SimulatorTap;
 use std::process::Command;
 
 #[tokio::test]
@@ -100,7 +100,7 @@ async fn test_calibration_tap_sequence() -> Result<(), Box<dyn std::error::Error
     for (idx, (x, y)) in test_points.iter().enumerate() {
         eprintln!("   Tapping point {}: ({:.0}, {:.0})", idx + 1, x, y);
 
-        match IdbWrapper::tap(device_id, *x, *y).await {
+        match SimulatorTap::tap(device_id, *x, *y).await {
             Ok(result) => {
                 eprintln!("   ✓ Tap {} succeeded: {:?}", idx + 1, result);
             }

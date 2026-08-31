@@ -51,7 +51,7 @@ import CoreGraphics
         // 3. Or communicate with the host app to perform the tap
         
         // For now, we'll return success and let the calling code handle the actual tap
-        // through alternative means (like IDB or AppleScript)
+        // through alternative means (like simctl or AppleScript)
         return true
     }
     
@@ -87,7 +87,7 @@ extension ArkavoAXBridgeMinimal {
             return [
                 "success": true,
                 "mode": "minimal",
-                "note": "Tap acknowledged - use IDB or AppleScript for actual injection"
+                "note": "Tap acknowledged - use simctl or AppleScript for actual injection"
             ]
             
         case "snapshot":

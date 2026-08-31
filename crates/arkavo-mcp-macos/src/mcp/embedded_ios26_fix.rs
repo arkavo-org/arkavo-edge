@@ -33,7 +33,7 @@ let is_ios26_beta = device.runtime.contains("iOS-26");
 
 ### Runtime Behavior
 - Reports iOS 26 beta in capabilities
-- Falls back to IDB for touch injection
+- Falls back to simctl/AppleScript for touch injection
 - Provides clear guidance in error messages
 
 ## No Manual Intervention Needed
@@ -99,7 +99,7 @@ The fix detects these error patterns:
 
 ## Performance Impact
 - Normal (iOS 18): AXP taps <30ms
-- iOS 26 Beta: IDB taps ~100ms
+- iOS 26 Beta: simctl taps ~100ms
 - Fallback: AppleScript ~200ms
 "#;
 
@@ -113,7 +113,7 @@ If you're using iOS 26 beta simulators, the tool automatically handles XCTest fr
 ## What Happens Automatically
 1. Detects iOS 26 beta simulator
 2. Uses special templates without XCTest
-3. Falls back to IDB for touch events
+3. Falls back to simctl/AppleScript for touch events
 4. Provides clear error messages
 
 ## Performance Expectations
@@ -124,7 +124,7 @@ If you're using iOS 26 beta simulators, the tool automatically handles XCTest fr
 ## If Compilation Still Fails
 1. **Use iOS 18 simulator** (recommended)
 2. **Install Xcode 16 beta** with iOS 26 SDK
-3. **Use IDB directly** without harness
+3. **Use simctl/AppleScript** without harness
 
 ## Checking Your Setup
 Run these commands:
@@ -142,7 +142,7 @@ xcodebuild -showsdks | grep iphonesimulator26
 ## FAQ
 
 **Q: Why is iOS 26 beta slower?**
-A: XCTest framework changes prevent fast AXP injection. IDB fallback is used instead.
+A: XCTest framework changes prevent fast AXP injection. simctl/AppleScript fallback is used instead.
 
 **Q: When will this be fixed?**
 A: When iOS 26 stable is released with updated XCTest symbols.

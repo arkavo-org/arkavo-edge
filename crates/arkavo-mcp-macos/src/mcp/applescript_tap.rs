@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::{Result, TestError};
 
 /// Direct AppleScript-based tap implementation for macOS
-/// This bypasses IDB and uses the Accessibility API directly
+/// Uses the Accessibility API when AXP/simctl are unavailable
 pub struct AppleScriptTap;
 
 impl AppleScriptTap {
