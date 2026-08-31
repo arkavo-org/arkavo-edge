@@ -87,10 +87,10 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         // Hidden commands (still accessible, just not in main help)
-        #[cfg(feature = "fingerprint")]
+        #[cfg(feature = "knowledge-pack")]
         "pack" => commands::pack::execute(&args[1..]).map_err(Into::into),
-        #[cfg(not(feature = "fingerprint"))]
-        "pack" => Err("pack is not in this build; compile with the fingerprint feature".into()),
+        #[cfg(not(feature = "knowledge-pack"))]
+        "pack" => Err("pack is not in this build; compile with the knowledge-pack feature".into()),
         "terminal" => commands::terminal::execute(&args[1..]),
         #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         "test" => commands::test::execute(&args[1..]),

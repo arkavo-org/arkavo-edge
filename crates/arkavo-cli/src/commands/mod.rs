@@ -6,8 +6,10 @@ pub mod mesh;
 pub mod model;
 pub mod model_list;
 pub mod model_protect;
-#[cfg(feature = "fingerprint")]
+#[cfg(feature = "knowledge-pack")]
 pub mod pack;
+#[cfg(feature = "knowledge-pack")]
+pub mod pack_seal;
 pub mod rlm_integration;
 pub mod security_audit;
 pub mod task;

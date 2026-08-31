@@ -74,15 +74,62 @@ pub fn seal_blob(
     })
 }
 
-/// Recover the plaintext, evaluating attributes before the key is released.
+/// Attribute FQNs the embedded policy requires.
 ///
-/// The key comes back from `unwrapper`, which is where the KAS evaluates the
-/// policy embedded in the manifest. Nothing here decides entitlement; if the
-/// key does not arrive, nothing is decrypted.
+/// Plaintext on the manifest by design: a reader has to be able to see what a
+/// component demands before deciding whether to ask for its key.
+pub fn embedded_attributes(manifest: &TdfManifest) -> Result<Vec<String>, GgufTdfError> {
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(&manifest.encryption_information.policy)
+        .map_err(|e| GgufTdfError::BadIndex(format!("embedded policy is not base64: {e}")))?;
+    let policy: serde_json::Value = serde_json::from_slice(&raw)
+        .map_err(|e| GgufTdfError::BadIndex(format!("embedded policy is not JSON: {e}")))?;
+    Ok(policy
+        .get("body")
+        .and_then(|b| b.get("dataAttributes"))
+        .and_then(|a| a.as_array())
+        .map(|attributes| {
+            attributes
+                .iter()
+                .filter_map(|a| a.get("attribute").and_then(|v| v.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// Recover the plaintext, checking the embedded policy before asking for a key.
 pub fn open_blob(
     blob: &SealedBlob,
     unwrapper: &dyn PayloadKeyUnwrapper,
 ) -> Result<Zeroizing<Vec<u8>>, GgufTdfError> {
+    open_blob_requiring(blob, unwrapper, &[])
+}
+
+/// Recover the plaintext, refusing before any key request if the component was
+/// not wrapped under the attributes the caller expects (KP-003).
+///
+/// This is a pre-flight check, not an authorization decision — the KAS still
+/// decides whether this node may have the key. It exists to separate "this
+/// component is not what I was told it was" from "the KAS denied me", and to
+/// make the refusal happen before a round-trip rather than after one. A
+/// component whose policy is missing an expected attribute is one anybody
+/// entitled to less could open, which is a misconfiguration worth catching at
+/// the reader rather than trusting the wrapper to have got right.
+pub fn open_blob_requiring(
+    blob: &SealedBlob,
+    unwrapper: &dyn PayloadKeyUnwrapper,
+    required: &[String],
+) -> Result<Zeroizing<Vec<u8>>, GgufTdfError> {
+    if !required.is_empty() {
+        let found = embedded_attributes(&blob.manifest)?;
+        let missing: Vec<&String> = required.iter().filter(|r| !found.contains(r)).collect();
+        if !missing.is_empty() {
+            return Err(GgufTdfError::KasDenied(format!(
+                "component policy is missing {missing:?}; refusing before a key request"
+            )));
+        }
+    }
     let ciphertext = base64::engine::general_purpose::STANDARD
         .decode(&blob.ciphertext)
         .map_err(|e| GgufTdfError::BadIndex(format!("ciphertext is not base64: {e}")))?;

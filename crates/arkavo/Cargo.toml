@@ -37,7 +37,7 @@ claude-agent = ["arkavo-cli/claude-agent"]
 # Taint-aware egress enforcement (SEQ-003, SEQ-014, SEQ-015). Off until the
 # sequence-integrity work reaches GA; the security suite builds a binary with it.
 taint = ["arkavo-cli/taint"]
-fingerprint = ["arkavo-cli/fingerprint"]
+knowledge-pack = ["arkavo-cli/knowledge-pack"]
 sentinel = ["arkavo-cli/sentinel"]
 
 [dependencies]

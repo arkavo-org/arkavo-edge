@@ -17,6 +17,7 @@ use arkavo_fingerprint::{
 };
 use arkavo_gguf_tdf::{Classification, ComponentRole, PayloadKeyUnwrapper};
 use arkavo_protocol::RegexInferencer;
+use arkavo_protocol::data_classification::SensitivityLevel;
 use arkavo_sentinel::{CalibrationTable, Cascade, CascadeTier, PatternTier};
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +41,11 @@ pub enum LoadError {
     Read(String),
     #[error("the index component is unusable: {0}")]
     BadIndex(String),
+    #[error(
+        "component {component} is recorded at {ceiling} but was wrapped under a weaker policy; \
+         refusing before a key request"
+    )]
+    PolicyTooWeak { component: String, ceiling: String },
     #[error(transparent)]
     Key(#[from] arkavo_gguf_tdf::GgufTdfError),
 }
@@ -115,6 +121,54 @@ pub fn load_pack(
 
 /// SENT-004: thresholds come from the verified manifest, and the pairing with
 /// the taxonomy version is checked here rather than trusted.
+fn sensitivity_of(ceiling: Classification) -> SensitivityLevel {
+    match ceiling {
+        Classification::Public => SensitivityLevel::Public,
+        Classification::Internal => SensitivityLevel::Internal,
+        Classification::Confidential => SensitivityLevel::Confidential,
+        Classification::Restricted => SensitivityLevel::Restricted,
+    }
+}
+
+/// KP-003: does this component's own policy demand at least the clearance its
+/// recorded ceiling implies?
+///
+/// At least, not exactly. Clearance is hierarchical, so a component wrapped
+/// under a *higher* clearance than it claims is over-protected — harmless, and
+/// refusing it would reject a legitimate pack. The dangerous direction is the
+/// other one: a component recorded as Confidential but wrapped under Internal
+/// is one that anybody cleared for Internal can open, and no KAS will catch
+/// that because the KAS is faithfully enforcing the weaker policy it was given.
+fn policy_covers_ceiling(
+    blob: &SealedBlob,
+    ceiling: Classification,
+) -> Result<bool, arkavo_gguf_tdf::GgufTdfError> {
+    let needed = sensitivity_of(ceiling);
+    if needed <= SensitivityLevel::Public {
+        return Ok(true);
+    }
+    let map = arkavo_protocol::taxonomy::TaxonomyMap::v1();
+    let Some(clearance) = map.clearance() else {
+        return Ok(true);
+    };
+    let found = crate::blob::embedded_attributes(&blob.manifest)?;
+    // The strongest clearance the policy actually demands.
+    let strongest = [
+        SensitivityLevel::Restricted,
+        SensitivityLevel::Confidential,
+        SensitivityLevel::Internal,
+    ]
+    .into_iter()
+    .find(|level| {
+        clearance.value_for(*level).is_some_and(|value| {
+            found
+                .iter()
+                .any(|attribute| attribute == &format!("{}/{}", clearance.fqn, value))
+        })
+    });
+    Ok(strongest.is_some_and(|level| level >= needed))
+}
+
 fn calibration_from(pack: &VerifiedPack) -> Result<CalibrationTable, LoadError> {
     if pack.manifest.thresholds.is_null() {
         return Err(LoadError::NoThresholds);
@@ -124,7 +178,7 @@ fn calibration_from(pack: &VerifiedPack) -> Result<CalibrationTable, LoadError> 
     if !table.accepts_taxonomy(&pack.manifest.taxonomy_version) {
         return Err(LoadError::TaxonomyMismatch {
             manifest: pack.manifest.taxonomy_version.clone(),
-            thresholds: table.taxonomy_version.clone(),
+            thresholds: table.taxonomy_version,
         });
     }
     Ok(table)
@@ -148,6 +202,16 @@ fn open_indexes(
         std::fs::read(pack.path(&record.file)).map_err(|_| LoadError::Read(record.file.clone()))?;
     let blob: SealedBlob = serde_json::from_slice(&bytes)
         .map_err(|e| LoadError::BadIndex(format!("index envelope: {e}")))?;
+    // KP-003: the component's own policy is checked before any key request. An
+    // index labelled Confidential that was wrapped under nothing is not an
+    // index this node should be asking a KAS about — and the KAS would not
+    // catch it, because it would be faithfully enforcing the weaker policy.
+    if !policy_covers_ceiling(&blob, record.effective_ceiling())? {
+        return Err(LoadError::PolicyTooWeak {
+            component: record.file.clone(),
+            ceiling: record.effective_ceiling().as_str().to_string(),
+        });
+    }
     let plaintext = open_blob(&blob, unwrapper)?;
     let indexes: PackIndexes = serde_json::from_slice(&plaintext)
         .map_err(|e| LoadError::BadIndex(format!("index contents: {e}")))?;

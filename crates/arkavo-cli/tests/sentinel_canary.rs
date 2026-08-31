@@ -8,6 +8,7 @@
 //! property that survives the fact that a completion cannot be unstreamed.
 
 #![cfg(feature = "sentinel")]
+#![allow(clippy::disallowed_methods)]
 
 use std::sync::Arc;
 
@@ -77,11 +78,13 @@ async fn completion_containing(text: &str) -> String {
     });
     assert!(MockProvider::is_enabled());
 
-    let mut config = MockProviderConfig::default();
     // No key validation here: this test is about what leaves on the way out,
     // and an auth failure would answer a different question.
-    config.validate_api_key = false;
-    config.response_delay_ms = 0;
+    let mut config = MockProviderConfig {
+        validate_api_key: false,
+        response_delay_ms: 0,
+        ..Default::default()
+    };
     config
         .custom_responses
         .insert("summarize".to_string(), text.to_string());
@@ -239,4 +242,114 @@ async fn the_critic_pipeline_receives_evidence_for_the_same_span() {
     // And the check built on it never fails the pipeline.
     let check = SentinelCheck::new(Arc::new(CascadeSource::new(cascade_with_canary())));
     assert!(arkavo_critic::VerificationCheck::skip_after_failure(&check));
+}
+
+/// KP-003 through SENT-007, end to end: a pack is sealed, verified, loaded, and
+/// the gate it provisions catches the pack's own corpus in a completion.
+///
+/// This is the phase's point. Phase 4 built the gate and nothing constructed
+/// one; here the construction comes from a signed manifest, so what the gate
+/// enforces is what somebody signed rather than what the local operator
+/// configured.
+#[spec("KP-003")]
+#[tokio::test]
+async fn a_verified_pack_provisions_a_gate_that_catches_its_own_corpus() {
+    use arkavo_cli::sentinel_wiring::SentinelRuntime;
+    use arkavo_crypto::AgentKeypair;
+    use arkavo_gguf_tdf::{
+        ComponentRole, GgufTdfError, PayloadKeyWrapper, PreResolvedKey, WrappedKey,
+    };
+    use arkavo_knowledge_pack::{PackBuilder, PackIndexes, seal_blob, verify_pack};
+
+    struct Capturing(std::sync::Mutex<Option<[u8; 32]>>);
+    impl PayloadKeyWrapper for Capturing {
+        fn wrap(&self, payload_key: &[u8; 32]) -> Result<WrappedKey, GgufTdfError> {
+            *self.0.lock().expect("lock") = Some(*payload_key);
+            Ok(WrappedKey {
+                kas_url: "https://kas.example".into(),
+                kid: None,
+                wrapped_key: "AA==".into(),
+            })
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let staging = dir.path().join("staging");
+    std::fs::create_dir_all(&staging).expect("staging");
+
+    // An index over the canary, wrapped as a component.
+    let key = Arc::new(IndexKey::derive(&[21u8; 32], "e2e-pack").expect("derive"));
+    let mut reference = ReferenceIndex::builder(&key, "1.0.0");
+    reference.add_document(
+        &key,
+        CANARY,
+        DataCategory::Internal,
+        SensitivityLevel::Confidential,
+        "board-minutes",
+    );
+    let indexes = PackIndexes {
+        reference: reference.build(),
+        near: None,
+    };
+    let wrapper = Capturing(std::sync::Mutex::new(None));
+    let blob = seal_blob(
+        &serde_json::to_vec(&indexes).expect("serialize"),
+        &wrapper,
+        &["https://attr.arkavo.com/clearance/internal".to_string()],
+        "application/json",
+    )
+    .expect("seal");
+    std::fs::write(
+        staging.join("index.tdf"),
+        serde_json::to_vec(&blob).expect("serialize"),
+    )
+    .expect("write");
+    let payload_key = wrapper.0.lock().expect("lock").expect("a key");
+
+    let mut builder =
+        PackBuilder::new("e2e-pack", "1.0.0", "qwen3.5-0.8b").with_thresholds(serde_json::json!({
+            "detector_version": "sentinel-0.1",
+            "taxonomy_version": "1.0.0",
+            "thresholds": { "credentials": 0.8 }
+        }));
+    builder
+        .add_component(
+            &staging.join("index.tdf"),
+            ComponentRole::Index,
+            Some(arkavo_gguf_tdf::Classification::Internal),
+        )
+        .expect("component");
+    let signing = AgentKeypair::generate();
+    let root = dir.path().join("pack");
+    builder.build(&root, &signing).expect("build");
+
+    let verified = verify_pack(&root, Some(&signing.public_key())).expect("verify");
+    let runtime =
+        SentinelRuntime::from_pack(&verified, Some(&key), &PreResolvedKey::new(payload_key))
+            .expect("provision from the pack");
+
+    // SENT-004: the thresholds came out of the signed manifest.
+    assert_eq!(runtime.calibration.detector_version, "sentinel-0.1");
+
+    let completion = completion_containing(&format!("Summary. {CANARY}. Regards.")).await;
+    let gate: Arc<dyn ReleaseGate> = Arc::new(runtime.gate());
+    let mut stream = gated(
+        Box::pin(futures::stream::iter(stream_of(&completion))),
+        gate,
+    );
+
+    let mut seen = String::new();
+    let mut refused = false;
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(chunk) => seen.push_str(&chunk.content),
+            Err(_) => {
+                refused = true;
+                break;
+            }
+        }
+    }
+
+    assert!(refused, "the pack's own corpus must be caught");
+    assert!(!seen.contains("northwind"), "{seen}");
 }

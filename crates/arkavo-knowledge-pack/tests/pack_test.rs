@@ -386,7 +386,7 @@ fn mixed_level_stacking_is_refused_until_the_ceiling_is_accepted() {
     let refused = select_adapters(&verified.manifest, &both);
 
     assert!(matches!(refused, Err(SelectionError::MixedLevels { .. })));
-    let accepted = select_adapters(&verified.manifest, &both.clone().accepting_high_water())
+    let accepted = select_adapters(&verified.manifest, &both.accepting_high_water())
         .expect("accepting the ceiling permits the stack");
     assert_eq!(accepted.adapters.len(), 2);
     assert_eq!(accepted.ceiling, Classification::Restricted);
@@ -509,7 +509,7 @@ fn a_component_without_a_digest_is_refused_before_signing() {
     let fixture = build_pack();
     let verified =
         verify_pack(&pack_root(&fixture), Some(&fixture.key.public_key())).expect("verify");
-    let mut manifest = verified.manifest.clone();
+    let mut manifest = verified.manifest;
     manifest.components[0].digest.clear();
 
     let refused = manifest.check();
@@ -533,4 +533,119 @@ fn the_signature_covers_the_manifest_bytes_as_written() {
         on_disk,
         "a round trip must reproduce the signed bytes exactly"
     );
+}
+
+/// KP-003: the embedded policy is checked before a key is requested, so a
+/// component that was not wrapped under the clearance its ceiling implies is
+/// refused without a KAS round-trip.
+#[spec("KP-003")]
+#[test]
+fn a_component_wrapped_under_the_wrong_policy_is_refused_before_any_key_request() {
+    /// Fails the test if it is ever asked for a key: reaching this would mean
+    /// the pre-flight check did not fire.
+    struct NeverAsked;
+    impl PayloadKeyUnwrapper for NeverAsked {
+        fn unwrap_key(&self, _manifest: &TdfManifest) -> Result<[u8; 32], GgufTdfError> {
+            panic!("a key was requested for a component whose policy did not match");
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let staging = dir.path().join("staging");
+    std::fs::create_dir_all(&staging).expect("staging");
+
+    // Wrapped under no attributes at all, but recorded as Confidential.
+    let wrapper = CapturingWrapper {
+        captured: std::sync::Mutex::new(None),
+    };
+    let blob = seal_blob(b"{}", &wrapper, &[], "application/json").expect("seal");
+    std::fs::write(
+        staging.join("index.tdf"),
+        serde_json::to_vec(&blob).expect("serialize"),
+    )
+    .expect("write");
+
+    let mut builder = PackBuilder::new("mislabelled", "1.0.0", "tok").with_thresholds(thresholds());
+    builder
+        .add_component(
+            &staging.join("index.tdf"),
+            ComponentRole::Index,
+            Some(Classification::Confidential),
+        )
+        .expect("add");
+    let key = AgentKeypair::generate();
+    let root = dir.path().join("pack");
+    builder.build(&root, &key).expect("build");
+
+    let verified = verify_pack(&root, Some(&key.public_key())).expect("verify");
+    let refused = load_pack(&verified, Some(&index_key()), &NeverAsked);
+
+    let message = match refused {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("a component wrapped under nothing must not be opened"),
+    };
+    assert!(message.contains("policy"), "{message}");
+}
+
+/// KP-003: a component wrapped under a *higher* clearance than it claims is
+/// over-protected, which is harmless. Refusing it would reject a legitimate
+/// pack, so the check is "at least", not "exactly".
+#[spec("KP-003")]
+#[test]
+fn an_over_protected_component_is_accepted() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let staging = dir.path().join("staging");
+    std::fs::create_dir_all(&staging).expect("staging");
+
+    let key = index_key();
+    let mut reference = ReferenceIndex::builder(&key, "1.0.0");
+    reference.add_document(
+        &key,
+        &corpus_document(),
+        DataCategory::Internal,
+        SensitivityLevel::Internal,
+        "notes",
+    );
+    let indexes = PackIndexes {
+        reference: reference.build(),
+        near: None,
+    };
+    let wrapper = CapturingWrapper {
+        captured: std::sync::Mutex::new(None),
+    };
+    // Wrapped under restricted, recorded as internal.
+    let blob = seal_blob(
+        &serde_json::to_vec(&indexes).expect("serialize"),
+        &wrapper,
+        &["https://attr.arkavo.com/clearance/restricted".to_string()],
+        "application/json",
+    )
+    .expect("seal");
+    std::fs::write(
+        staging.join("index.tdf"),
+        serde_json::to_vec(&blob).expect("serialize"),
+    )
+    .expect("write");
+    let payload_key = wrapper.captured.lock().expect("lock").expect("a key");
+
+    let mut builder = PackBuilder::new("over", "1.0.0", "tok").with_thresholds(thresholds());
+    builder
+        .add_component(
+            &staging.join("index.tdf"),
+            ComponentRole::Index,
+            Some(Classification::Internal),
+        )
+        .expect("add");
+    let signing = AgentKeypair::generate();
+    let root = dir.path().join("pack");
+    builder.build(&root, &signing).expect("build");
+
+    let verified = verify_pack(&root, Some(&signing.public_key())).expect("verify");
+    let loaded = load_pack(
+        &verified,
+        Some(&index_key()),
+        &PreResolvedKey::new(payload_key),
+    );
+
+    assert!(loaded.is_ok(), "over-protection must not be a refusal");
 }

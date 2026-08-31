@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use arkavo_fingerprint::{IndexKey, ReferenceIndex};
+use arkavo_fingerprint::{EntryMeta, IndexKey, NearDuplicateIndex, ReferenceIndex};
 use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
 use arkavo_protocol::taxonomy::TaxonomyMap;
 
@@ -30,6 +30,9 @@ const TEXT_EXTENSIONS: &[&str] = &[
 pub fn execute(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("index") => build_index(&args[1..]),
+        Some("seal") => super::pack_seal::run(&args[1..]),
+        Some("verify") => super::pack_seal::verify(&args[1..]),
+        Some("anchor") => super::pack_seal::anchor(&args[1..]),
         Some("help" | "--help" | "-h") | None => {
             print_help();
             Ok(())
@@ -41,8 +44,14 @@ pub fn execute(args: &[String]) -> Result<(), String> {
 }
 
 fn print_help() {
-    println!("Build sealed knowledge-pack components.\n");
-    println!("Usage: arkavo pack index --corpus <DIR> --key-file <PATH> --out <PATH> [options]\n");
+    println!("Build and open sealed knowledge packs.\n");
+    println!("Usage:");
+    println!("  arkavo pack index --corpus <DIR> --key-file <PATH> --out <PATH> [options]");
+    println!(
+        "  arkavo pack seal --out <DIR> --signing-key <PATH> --pack-id <ID> [--component ...]"
+    );
+    println!("  arkavo pack verify --pack <DIR> --anchor <PATH>");
+    println!("  arkavo pack anchor --signing-key <PATH> --out <PATH>\n");
     println!("Options:");
     println!("  --corpus <DIR>        Directory of corpus material to index");
     println!("  --key-file <PATH>     Tenant index key material (>= 16 bytes)");
@@ -53,6 +62,18 @@ fn print_help() {
     println!("  --sensitivity <NAME>  Sensitivity for corpus documents (default: confidential)");
     println!("  --family <NAME>       Source family recorded on matches");
     println!("  --boilerplate <DIR>   Directory of material to suppress");
+    println!("\nSeal options:");
+    println!("  --out <DIR>           Where to write the pack");
+    println!("  --signing-key <PATH>  Organization signing key (32 raw bytes)");
+    println!("  --pack-id <ID>        Identity of the pack being built");
+    println!("  --taxonomy-version <V>  Taxonomy map version the pack was derived against");
+    println!("  --tokenizer <NAME>    Tokenizer identity");
+    println!("  --thresholds <PATH>   Calibration table JSON bound into the manifest");
+    println!("  --component <PATH>:<ROLE>[:<CEILING>]  A component and its role");
+    println!("  --parent <ID>:<DIGEST>  Parent pack lineage (default: root)");
+    println!("\nVerify options:");
+    println!("  --pack <DIR>          Pack directory to verify");
+    println!("  --anchor <PATH>       Organization anchor public key (32 raw bytes)");
 }
 
 #[derive(Debug)]
@@ -159,7 +180,9 @@ fn build_index(args: &[String]) -> Result<(), String> {
         .map_err(|e| format!("tenant key is unusable: {e}"))?;
 
     let mut builder = ReferenceIndex::builder(&key, taxonomy.version());
+    let mut near = NearDuplicateIndex::builder(&key, taxonomy.version());
     let mut documents = 0usize;
+    let mut near_documents = 0usize;
     for path in text_files(&options.corpus)? {
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
@@ -177,6 +200,21 @@ fn build_index(args: &[String]) -> Result<(), String> {
             options.sensitivity,
             &options.family,
         );
+        // The near-duplicate tier refuses documents too short for a stable
+        // fingerprint. That is not a failure to index them: the exact tier
+        // covers that size well, and a fingerprint over a handful of shingles
+        // would only ever match itself.
+        if near.add_document(
+            &key,
+            &text,
+            EntryMeta {
+                category: options.category,
+                sensitivity: options.sensitivity,
+                source_family: options.family.clone(),
+            },
+        ) {
+            near_documents += 1;
+        }
         documents += 1;
     }
 
@@ -191,12 +229,25 @@ fn build_index(args: &[String]) -> Result<(), String> {
     }
 
     let index = builder.build();
+    let near = near.build();
     let wrap = taxonomy.clearance_requirement(index.max_sensitivity());
 
-    fs::write(&options.out, index.to_json())
+    // Both tiers travel as one component: they are built from one corpus under
+    // one tenant key, and shipping them separately is how they drift apart.
+    let indexes = arkavo_knowledge_pack::PackIndexes {
+        reference: index,
+        near: Some(near),
+    };
+    let encoded =
+        serde_json::to_vec(&indexes).map_err(|e| format!("cannot serialize the index: {e}"))?;
+    fs::write(&options.out, &encoded)
         .map_err(|e| format!("cannot write {}: {e}", options.out.display()))?;
+    let index = &indexes.reference;
 
-    println!("Indexed {documents} documents, {} entries", index.len());
+    println!(
+        "Indexed {documents} documents, {} entries ({near_documents} near-duplicate signatures)",
+        index.len()
+    );
     if boilerplate_files > 0 {
         println!(
             "Suppressed {} shingles from {boilerplate_files} boilerplate files",
@@ -209,13 +260,11 @@ fn build_index(args: &[String]) -> Result<(), String> {
         None => println!("Wrap under: no clearance required (public)"),
     }
     println!("Wrote {}", options.out.display());
-    // The TDF wrap needs a KAS to release the payload key, so it belongs with
-    // Phase 5's pack tooling rather than being faked here. The classification
-    // and the attribute it implies are computed and reported now so the
-    // wrapping step has nothing left to decide.
     println!(
-        "Note: TDF wrapping is performed by `arkavo pack seal` (Phase 5). \
-         Treat this output as classified at the level above."
+        "Note: this output is plaintext. `arkavo pack seal --component {}:index` \
+         wraps it before distribution; treat it as classified at the level above \
+         until it is sealed.",
+        options.out.display()
     );
     Ok(())
 }

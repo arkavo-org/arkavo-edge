@@ -111,6 +111,23 @@ Two deviations from the plan text, both deliberate:
 
 **Accept:** KP tripwires flipped; pack build and verify round-trip in e2e; adapter selection integration test with two clearance levels; tampered manifest rejected.
 
+**Delivered (2026-08-31, 0.93.0).** KP-001 through KP-006 and KP-008 flipped, plus SENT-004, which this phase unblocked: thresholds now come from a verified manifest rather than from anything an operator can edit. `arkavo pack seal`, `verify` and `anchor` complete the command family, and `SentinelRuntime::from_pack` is the runtime call site Phase 4 left open — the gate and the critic check are now built from a signed pack instead of being constructible and unconstructed.
+
+Decisions taken under delegation, with the reasoning:
+
+- **The adapter *load* half is deferred; selection ships.** `llama_adapter_lora_init` takes a filesystem path and nothing else, and unlike `llama_model_load_from_file_ptr` — which is genuinely upstream — it has no pointer variant. A sealed adapter therefore cannot reach llama.cpp without either patching llama.cpp or writing plaintext weights to disk, and the second is what KP-003 and KP-015 exist to prevent. The load half is also untestable until Phase 6 produces an adapter artifact, which is the same reasoning that kept SENT-005 red. **KP-007 stays `wip`** for the load half; selection, ceilings and mixed-level refusal are implemented and tested at two clearance levels.
+- **No DID resolver.** `webvh` appears nowhere in the workspace, so verification takes a *resolved* anchor public key and anchor resolution stays a named seam. A verifier that fetched its own trust root would be choosing what to trust. KP-003's "no trust-on-first-use" edge is therefore: refuse when no anchor is supplied, which `arkavo pack verify` does.
+- **The signature covers the manifest bytes as written.** Not a re-serialization of a parsed struct: canonical-JSON round-tripping is where signature schemes quietly break, and a test pins that a parse-and-re-emit reproduces the signed bytes exactly.
+- **Component metadata lives in a plaintext archive member**, readable before any key request, because an egress node decides whether it is entitled to ask for a component's key by reading it. `GgufIndex` belongs to the external `opentdf-protocol` crate and `TdfManifest` has no extension field, so there was nowhere else for it; the signed pack manifest binds the member's digest, which is what makes the claim trustworthy.
+- **The `fingerprint` cargo feature is renamed `knowledge-pack`**, matching this plan's ground rule 3. It now gates the whole `arkavo pack` family rather than one crate.
+
+Still `wip`, with the reason each is not green:
+
+- **KP-007** — selection ships; loading waits on the llama.cpp adapter API above.
+- **KP-009** — the index is now wrapped as a pack component and `pack seal` refuses a plaintext one, but the tenant key still arrives as `--key-file`; KAS-backed provisioning is unbuilt.
+- **KP-010** — the near-duplicate tier's fingerprint still votes over suppressed shingles, so boilerplate is excluded from the exact tier only.
+- **KP-011..KP-017** — distillation, calibration fitting, intermediate-artifact hygiene, reviewer provenance and capsule revocation are Phase 6 and beyond.
+
 ## Phase 6 — Distillation and training pipeline (extends the small-stories draft PR)
 
 **New:** `crates/arkavo-distill` (orchestration) plus `scripts/distill/` (Python has precedent in `scripts/*.py`).

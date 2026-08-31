@@ -271,6 +271,8 @@ jobs:
             # compiles them and nothing else would notice them breaking.
             cargo test --locked -p arkavo-fingerprint
             cargo test --locked -p arkavo-sentinel
+            cargo test --locked -p arkavo-knowledge-pack
+            cargo test --locked -p arkavo-gguf-tdf --test knowledge_pack_test
             cargo test --locked -p arkavo-protocol --features taint --test sentinel_test --test taint_propagation_test --test egress_taint_test
             cargo test --locked -p arkavo-server --features taint --lib egress_guard
             cargo test --locked -p arkavo-critic --features sentinel --lib checks::sentinel
@@ -279,6 +281,7 @@ jobs:
             cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel commands::pack
             # Phase 4's acceptance test: a seeded canary in a completion never
             # reaches the consumer.
+            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --lib commands::pack
             cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary
           fi
 
@@ -315,6 +318,7 @@ jobs:
           elif [ "${{ matrix.group }}" = "dlp" ]; then
             cargo clippy --locked -p arkavo-fingerprint --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-sentinel --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-knowledge-pack --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-protocol --lib --bins --features taint -- -D warnings
             cargo clippy --locked -p arkavo-critic --lib --bins --features sentinel -- -D warnings
             cargo clippy --locked -p arkavo-cli --lib --bins --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel -- -D warnings
