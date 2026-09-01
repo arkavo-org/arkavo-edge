@@ -13,6 +13,7 @@ pub mod judge;
 pub mod learning;
 pub mod metrics;
 pub mod model_discovery;
+pub mod model_spec;
 pub mod optimal_config;
 pub mod orchestrator;
 pub mod planes;
@@ -48,6 +49,7 @@ pub use deliberation::{DeliberationConfig, DeliberationResult, Deliberator};
 pub use error::{Error, Result};
 pub use judge::{IssueType, JudgmentResult, ResponseJudge};
 pub use metrics::RoutingMetrics;
+pub use model_spec::ModelSpec;
 pub use orchestrator::{
     ArchitectRoutingResult, CostOrchestrator, CostRecommendation, OrchestratorMetrics,
     ScalingDecision,
@@ -1252,22 +1254,48 @@ impl Router {
     /// When a tool registry is provided, tools are passed to the LLM so it can
     /// produce structured tool calls (e.g. `get_time`) instead of hallucinating.
     ///
-    /// `model_override` forces a specific model (for testing/benchmarking).
+    /// `model_override` forces a specific catalog model (for testing/benchmarking).
     pub async fn route_chat(
         &self,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
         model_override: Option<&ModelChoice>,
     ) -> Result<arkavo_llm::ProviderResponse> {
-        let model = model_override
-            .cloned()
-            .unwrap_or_else(|| self.selector.fastest_local_model());
-        tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
+        let owned = model_override.cloned().map(ModelSpec::Named);
+        self.route_chat_spec(messages, tool_registry, owned.as_ref())
+            .await
+    }
 
-        let use_spec = self.decide_spec_with_event(model.name());
-        let provider = self
-            .instantiate_provider_with_spec(&model, use_spec)
-            .await?;
+    /// Chat routing with a catalog model or an on-disk GGUF path.
+    pub async fn route_chat_spec(
+        &self,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        spec: Option<&ModelSpec>,
+    ) -> Result<arkavo_llm::ProviderResponse> {
+        let fallback_model;
+        let named: Option<&ModelChoice> = match spec {
+            Some(ModelSpec::GgufPath(_)) => None,
+            Some(ModelSpec::Named(model)) => Some(model),
+            None => {
+                fallback_model = self.selector.fastest_local_model();
+                Some(&fallback_model)
+            }
+        };
+
+        let provider = if let Some(path) = spec.and_then(ModelSpec::as_gguf_path) {
+            let key = format!("gguf:{}", path.display());
+            tracing::debug!(model = %key, "Chat-path routing from GGUF path");
+            let use_spec = self.decide_spec_with_event(&key);
+            self.instantiate_gguf_path(path, use_spec).await?
+        } else {
+            let model = named.ok_or_else(|| {
+                Error::ModelExecution("catalog model required when spec is not a GGUF path".into())
+            })?;
+            tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
+            let use_spec = self.decide_spec_with_event(model.name());
+            self.instantiate_provider_with_spec(model, use_spec).await?
+        };
 
         let _permit = self
             .chat_semaphore
@@ -1278,7 +1306,8 @@ impl Router {
         // Build tool JSON from registry (same pattern as quality_gate.rs)
         let tools_json = match tool_registry {
             Some(registry) => {
-                let detail_level = tool_extraction::detail_level_for_model(&model);
+                let detail_model = named.cloned().unwrap_or(ModelChoice::LocalQwen3);
+                let detail_level = tool_extraction::detail_level_for_model(&detail_model);
                 let last_user_msg = messages
                     .iter()
                     .rev()
