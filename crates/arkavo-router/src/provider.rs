@@ -2,6 +2,7 @@ use crate::decision::ModelChoice;
 use crate::error::{Error, Result};
 use crate::model_discovery;
 use arkavo_llm::Provider;
+use std::path::Path;
 
 #[cfg(feature = "llama-cpp")]
 fn sampling_config_for(
@@ -204,6 +205,73 @@ impl super::Router {
         };
 
         Ok(Box::new(provider))
+    }
+
+    /// Load an on-disk GGUF (or `.gguf.tdf`) by path. Not a named catalog model.
+    #[cfg(feature = "llama-cpp")]
+    pub(crate) async fn instantiate_gguf_path(
+        &self,
+        path: &Path,
+        use_spec_decoding: bool,
+    ) -> Result<Box<dyn Provider>> {
+        let resolved = model_discovery::resolve_gguf_path(path);
+        if !resolved.exists() {
+            return Err(Error::ModelExecution(format!(
+                "GGUF not found: {}",
+                path.display()
+            )));
+        }
+        let canonical = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
+        let registry_name = format!("gguf:{}", canonical.display());
+
+        if !self.model_registry.is_loaded(&registry_name) {
+            tracing::info!(
+                model = %registry_name,
+                path = %canonical.display(),
+                "Loading GGUF path into registry"
+            );
+            self.ensure_loaded(&registry_name, &canonical).await?;
+
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            if let Ok(ctx) = self.model_registry.acquire_fresh_context(&registry_name) {
+                let _ = self
+                    .model_registry
+                    .release_context(&registry_name, ctx, true);
+                tracing::info!(model = %registry_name, "Context pool pre-warmed");
+            }
+            tracing::info!(model = %registry_name, "GGUF loaded and cached in registry");
+        } else {
+            tracing::debug!(model = %registry_name, "Using cached GGUF from registry");
+        }
+
+        let sampling = arkavo_llm::SamplingConfig {
+            use_spec_decoding,
+            thinking_mode: Some(arkavo_llm::ThinkingMode::Off),
+            ..arkavo_llm::SamplingConfig::default()
+        };
+        let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
+            self.model_registry.clone(),
+            registry_name.clone(),
+            sampling,
+        )
+        .map_err(|e| {
+            Error::ModelExecution(format!(
+                "Failed to create provider for {registry_name}: {e}"
+            ))
+        })?;
+        Ok(Box::new(provider))
+    }
+
+    #[cfg(not(feature = "llama-cpp"))]
+    pub(crate) async fn instantiate_gguf_path(
+        &self,
+        path: &Path,
+        _use_spec_decoding: bool,
+    ) -> Result<Box<dyn Provider>> {
+        Err(Error::ModelExecution(format!(
+            "llama-cpp required to load GGUF {}",
+            path.display()
+        )))
     }
 
     /// Create a provider with execution-mode overrides: temp 0.1, thinking off.

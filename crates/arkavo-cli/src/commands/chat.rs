@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 use std::io::{self, Write};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use tokio::runtime::Runtime;
 
@@ -91,47 +92,69 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         SHOW_DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    // Parse --prompt, --agent-id, and --model from args
-    let mut prompt: Option<String> = None;
-    let mut agent_id: Option<String> = None;
-    let mut model_name: Option<String> = None;
+    let flags = parse_cli_args(args)?;
+
+    // Direct A2A chat with a specific mesh agent
+    if let Some(id) = flags.agent_id {
+        return execute_a2a_direct_chat(&id, flags.prompt.as_deref());
+    }
+
+    // Default: route through local in-process Router
+    execute_a2a_chat(flags.prompt.as_deref(), flags.model.as_deref())
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ChatCliArgs {
+    prompt: Option<String>,
+    agent_id: Option<String>,
+    model: Option<String>,
+}
+
+fn parse_cli_args(args: &[String]) -> Result<ChatCliArgs, Box<dyn std::error::Error>> {
+    let mut flags = ChatCliArgs::default();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--prompt" | "--print" if i + 1 < args.len() => {
-                prompt = Some(args[i + 1].clone());
+                flags.prompt = Some(args[i + 1].clone());
                 i += 1;
             }
             "--agent-id" => {
                 if i + 1 < args.len() {
-                    agent_id = Some(args[i + 1].clone());
+                    flags.agent_id = Some(args[i + 1].clone());
                     i += 1;
                 } else {
                     return Err("--agent-id requires an argument".into());
                 }
             }
-            "--model" => {
-                if i + 1 < args.len() {
-                    model_name = Some(args[i + 1].clone());
-                    i += 1;
-                } else {
-                    return Err(
-                        "--model requires a model name (e.g., ministral-3b, qwen3.5-0.8b)".into(),
-                    );
+            "--model" | "--gguf" => {
+                let flag = args[i].as_str();
+                if i + 1 >= args.len() {
+                    return Err(if flag == "--gguf" {
+                        "--gguf requires a path to a .gguf or .gguf.tdf file".into()
+                    } else {
+                        "--model requires a model name or a .gguf path (e.g., ministral-3b, ./adapter.gguf)".into()
+                    });
                 }
+                let value = args[i + 1].clone();
+                if flag == "--gguf" && !arkavo_router::model_spec::is_gguf_spec(&value) {
+                    return Err("--gguf requires a path ending in .gguf or .gguf.tdf".into());
+                }
+                if arkavo_router::model_spec::is_gguf_spec(&value) {
+                    let resolved =
+                        arkavo_router::model_discovery::resolve_gguf_path(Path::new(&value));
+                    if !resolved.exists() {
+                        return Err(format!("GGUF not found: {value}").into());
+                    }
+                }
+                flags.model = Some(value);
+                i += 1;
             }
             _ => {}
         }
         i += 1;
     }
-
-    // Direct A2A chat with a specific mesh agent
-    if let Some(id) = agent_id {
-        return execute_a2a_direct_chat(&id, prompt.as_deref());
-    }
-
-    // Default: route through local in-process Router
-    execute_a2a_chat(prompt.as_deref(), model_name.as_deref())
+    Ok(flags)
 }
 
 fn print_usage() {
@@ -145,12 +168,15 @@ fn print_usage() {
     println!("    arkavo chat");
     println!("    arkavo chat --prompt \"What is 2+2?\"");
     println!("    arkavo chat --model ministral-3b --prompt \"What time is it?\"");
+    println!("    arkavo chat --model ./adapter.gguf --prompt \"What is the procedure?\"");
+    println!("    arkavo chat --gguf ./adapter.gguf --prompt \"What is the procedure?\"");
     println!("    arkavo chat --agent-id security-auditor-agent --prompt \"Audit this code\"");
     println!("    arkavo chat --agent-id code-analyzer-agent\n");
     println!("OPTIONS:");
     println!(
-        "    --model <NAME>         Override model (e.g., ministral-3b, qwen3.5-0.8b, glm-4.7-flash)"
+        "    --model <NAME|PATH>    Catalog name or a .gguf / .gguf.tdf path (not a named registry entry)"
     );
+    println!("    --gguf <PATH>          Alias of --model for a .gguf / .gguf.tdf file");
     println!("    --agent-id <ID>        Chat directly with a mesh agent via A2A");
     println!("    --prompt <TEXT>         One-shot query (exits after response)");
     println!("    --debug                 Show debug output");
@@ -667,6 +693,49 @@ mod tests {
     fn test_parse_regular_input() {
         let cmd = parse_command("hello world");
         assert!(cmd.is_none());
+    }
+
+    #[test]
+    fn test_parse_cli_model_name() {
+        let flags = parse_cli_args(&[
+            "--model".into(),
+            "qwen3.5-0.8b".into(),
+            "--prompt".into(),
+            "hi".into(),
+        ])
+        .unwrap();
+        assert_eq!(flags.model.as_deref(), Some("qwen3.5-0.8b"));
+        assert_eq!(flags.prompt.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn test_parse_cli_gguf_alias_requires_suffix() {
+        let err = parse_cli_args(&["--gguf".into(), "not-a-model".into()]).unwrap_err();
+        assert!(err.to_string().contains(".gguf"));
+    }
+
+    #[test]
+    fn test_parse_cli_missing_gguf_path_errors() {
+        let err =
+            parse_cli_args(&["--model".into(), "models/missing-adapter.gguf".into()]).unwrap_err();
+        assert!(err.to_string().contains("GGUF not found"));
+    }
+
+    #[test]
+    fn test_parse_cli_gguf_flag_missing_arg() {
+        let err = parse_cli_args(&["--gguf".into()]).unwrap_err();
+        assert!(err.to_string().contains("--gguf requires a path"));
+    }
+
+    #[test]
+    fn test_parse_cli_existing_gguf_path() {
+        let path = std::env::temp_dir().join("arkavo-chat-cli-test.gguf");
+        std::fs::write(&path, b"gguf").unwrap();
+        let flags = parse_cli_args(&["--gguf".into(), path.to_string_lossy().into()]).unwrap();
+        assert_eq!(flags.model.as_deref(), path.to_str());
+        let flags = parse_cli_args(&["--model".into(), path.to_string_lossy().into()]).unwrap();
+        assert_eq!(flags.model.as_deref(), path.to_str());
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

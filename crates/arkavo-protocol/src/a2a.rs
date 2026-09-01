@@ -66,11 +66,11 @@ impl A2aClient {
     ) -> Self {
         let mut session_manager = ChatSessionManager::with_router(router, tool_registry);
         if let Some(name) = model_name {
-            if let Some(model) = arkavo_router::ModelChoice::from_name(name) {
-                session_manager.set_model_override(model);
+            if let Some(spec) = arkavo_router::ModelSpec::parse(name) {
+                session_manager.set_model_spec(spec);
             } else {
                 eprintln!(
-                    "Warning: unknown model '{name}', using default. Available: ministral-3b, ministral-8b, qwen3.5-0.8b, qwen3.5-9b, qwen3.5-27b, glm-4.7-flash"
+                    "Warning: unknown model '{name}', using default. Available: ministral-3b, ministral-8b, qwen3.5-0.8b, qwen3.5-9b, qwen3.5-27b, glm-4.7-flash, or a .gguf path"
                 );
             }
         }

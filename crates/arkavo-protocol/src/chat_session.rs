@@ -58,8 +58,8 @@ pub struct ChatSessionManager {
     teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
     /// Agent purpose/system prompt from AGENTS.md, prepended to every chat context
     system_prompt: Option<String>,
-    /// Override the default model selection (for testing/benchmarking)
-    model_override: Option<arkavo_router::ModelChoice>,
+    /// Override the default model selection (catalog name or GGUF path)
+    model_override: Option<arkavo_router::ModelSpec>,
     /// Shared task context string with recent task history and last observed state.
     /// Updated by the server from ToolMemory + conductor task store.
     /// Injected as a system message so chat can reference what the agent has been doing.
@@ -110,7 +110,8 @@ impl ChatSessionState {
 impl ChatSessionManager {
     /// Create a new chat session manager with observability
     pub fn new(llm_adapter: Option<Arc<LlmClientAdapter>>) -> Self {
-        Self::with_config(llm_adapter, None, None, 3600, BufferConfig::default()) // Default 1 hour TTL
+        Self::with_config(llm_adapter, None, None, 3600, BufferConfig::default())
+        // Default 1 hour TTL
     }
 
     /// Create a new chat session manager with router and tool registry
@@ -191,7 +192,12 @@ impl ChatSessionManager {
 
     /// Override the default model selection for chat inference.
     pub fn set_model_override(&mut self, model: arkavo_router::ModelChoice) {
-        self.model_override = Some(model);
+        self.set_model_spec(arkavo_router::ModelSpec::Named(model));
+    }
+
+    /// Override chat inference with a catalog model or an on-disk GGUF path.
+    pub fn set_model_spec(&mut self, spec: arkavo_router::ModelSpec) {
+        self.model_override = Some(spec);
     }
 
     /// Set a shared task context that will be injected into chat sessions.
@@ -876,7 +882,7 @@ impl ChatSessionManager {
         learning_context: Option<Arc<RwLock<String>>>,
         teaching_tx: Option<mpsc::Sender<ChatTeachingEvent>>,
         system_prompt: Option<String>,
-        model_override: Option<arkavo_router::ModelChoice>,
+        model_override: Option<arkavo_router::ModelSpec>,
         task_context: Option<Arc<RwLock<String>>>,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
@@ -1029,11 +1035,12 @@ impl ChatSessionManager {
                         );
                     }
 
-                    let model = model_override
-                        .clone()
-                        .unwrap_or_else(|| router.fastest_local_model());
+                    let spec = model_override.clone().unwrap_or_else(|| {
+                        arkavo_router::ModelSpec::Named(router.fastest_local_model())
+                    });
+                    let model_label = spec.display_name();
                     let reasoning = if model_override.is_some() {
-                        format!("--model override: {}", model.name())
+                        format!("--model override: {model_label}")
                     } else {
                         "Chat path: fastest local model, separate semaphore".to_string()
                     };
@@ -1044,7 +1051,7 @@ impl ChatSessionManager {
                         delta: MessageDeltaContent::Metadata {
                             key: "model_selected".to_string(),
                             value: serde_json::json!({
-                                "model": model.name(),
+                                "model": model_label,
                                 "category": "chat",
                                 "reasoning": reasoning,
                             }),
@@ -1054,10 +1061,16 @@ impl ChatSessionManager {
                     let _ = delta_tx.send(metadata_delta);
 
                     let inference_start = std::time::Instant::now();
-                    let chat_timeout_secs = 60;
+                    // First GGUF-path load includes mmap + Metal init, which
+                    // can exceed the 60s named-model budget.
+                    let chat_timeout_secs = if spec.as_gguf_path().is_some() {
+                        180
+                    } else {
+                        60
+                    };
                     let route_result = match tokio::time::timeout(
                         std::time::Duration::from_secs(chat_timeout_secs),
-                        router.route_chat(windowed_context, tool_registry.as_deref(), model_override.as_ref()),
+                        router.route_chat_spec(windowed_context, tool_registry.as_deref(), model_override.as_ref()),
                     )
                     .await
                     {
@@ -1183,7 +1196,7 @@ impl ChatSessionManager {
                                     // Route again with same model to synthesize final answer from tool results
                                     let retry_result = tokio::time::timeout(
                                         std::time::Duration::from_mins(2),
-                                        router.route_chat(conversation_context.clone(), None, model_override.as_ref()),
+                                        router.route_chat_spec(conversation_context.clone(), None, model_override.as_ref()),
                                     )
                                     .await;
                                     let retry_result = match retry_result {
