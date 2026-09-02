@@ -65,7 +65,12 @@ mod tests {
 
     const NOW: i64 = 1_700_000_060;
 
-    fn permit_for(signer: &PermitSigner, tool: &str, args: &serde_json::Value) -> Vec<u8> {
+    fn permit_for(
+        issuer: &PermitSigner,
+        holder: &PermitSigner,
+        tool: &str,
+        args: &serde_json::Value,
+    ) -> Vec<u8> {
         let claims = PermitClaims {
             issuer: "edge".into(),
             subject: "agent-1".into(),
@@ -85,22 +90,23 @@ mod tests {
             sequence_state_hash: vec![9; 32],
             parent_permit: None,
         };
-        mint(&claims, signer).unwrap()
+        mint(&claims, issuer, &holder.public_key()).unwrap()
     }
 
     #[test]
     fn proof_from_the_cnf_key_verifies() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 42});
-        let cwt = permit_for(&signer, "github.merge_pr", &args);
+        let cwt = permit_for(&issuer, &holder, "github.merge_pr", &args);
         let proof = prove_invocation(
-            &signer,
+            &holder,
             &cwt,
             "github.merge_pr",
             &args,
             HashAlgorithm::Sha256,
         );
-        let permit = verify(&cwt, NOW).unwrap();
+        let permit = verify(&cwt, NOW, &[issuer.public_key()]).unwrap();
         verify_invocation_proof(
             &permit,
             &cwt,
@@ -114,17 +120,18 @@ mod tests {
 
     #[test]
     fn replay_with_different_arguments_is_rejected() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 42});
-        let cwt = permit_for(&signer, "github.merge_pr", &args);
+        let cwt = permit_for(&issuer, &holder, "github.merge_pr", &args);
         let proof = prove_invocation(
-            &signer,
+            &holder,
             &cwt,
             "github.merge_pr",
             &args,
             HashAlgorithm::Sha256,
         );
-        let permit = verify(&cwt, NOW).unwrap();
+        let permit = verify(&cwt, NOW, &[issuer.public_key()]).unwrap();
         let other = json!({"pr": 43});
         assert!(matches!(
             verify_invocation_proof(
@@ -141,10 +148,11 @@ mod tests {
 
     #[test]
     fn proof_from_another_agent_is_rejected() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let intruder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 42});
-        let cwt = permit_for(&signer, "github.merge_pr", &args);
+        let cwt = permit_for(&issuer, &holder, "github.merge_pr", &args);
         let proof = prove_invocation(
             &intruder,
             &cwt,
@@ -152,7 +160,7 @@ mod tests {
             &args,
             HashAlgorithm::Sha256,
         );
-        let permit = verify(&cwt, NOW).unwrap();
+        let permit = verify(&cwt, NOW, &[issuer.public_key()]).unwrap();
         assert!(matches!(
             verify_invocation_proof(
                 &permit,
