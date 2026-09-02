@@ -79,7 +79,7 @@ timeout fires and takes the whole `tools/call` down with it.
 |---|---|---|
 | authn | permit signature against the trusted-issuer list (by `kid`), `nbf`/`exp`/`iat` at now, proof-of-possession over the permit's identity, tool, and arguments against the `cnf` key | `authn:` |
 | policy | permit's `policy_bundle_hash` equals the proxy's configured bundle; tool name and argument hash match the permit | `policy:` |
-| budget | invocations of this permit (keyed on `Permit::id`, the digest of the permit's signed content, so re-encoding one permit cannot buy a second budget) stay below `budget.max_invocations` | `budget:` |
+| budget | invocations of this permit (keyed on `Permit::id`, the digest of the permit's signed content, so re-encoding one permit cannot buy a second budget) stay below `budget.max_invocations`, and the bounded usage table has room to count it | `budget:` |
 
 The proof-of-possession names the permit by that same `Permit::id`, so one
 proof covers every valid encoding of one issuance — the same notion of "the
@@ -104,11 +104,14 @@ A refused call returns JSON-RPC error `-32000` and never reaches the
 upstream server.
 
 The budget stage's usage table is bounded rather than unbounded per-permit
-state: once it holds more than 4096 entries, expired counters are pruned
-first, and if it is still over that threshold, entries are evicted by
-soonest expiry until at most 3072 remain. A live (not-yet-expired) counter
-can be evicted under that memory pressure — a caller can mint arbitrarily
-many permits — but never otherwise.
+state: it counts at most 65 536 permits at once. Only *expired* counters are
+ever dropped. Evicting a live one would restart a still-valid permit's count
+at zero, which is precisely the second budget a flood of freshly minted
+permits would be buying, so when pruning frees nothing the gate fails closed
+instead: a permit the table is not already counting is denied at the budget
+stage with `gate capacity exhausted; retry after permits expire`, while every
+permit already counted goes on being counted normally. Room returns as
+entries expire — those permits are refused at authn from then on anyway.
 
 ## Running it
 

@@ -10,10 +10,11 @@
 //! for every re-encoding.
 //!
 //! Budget is spent when a call is admitted, which is before the call runs.
-//! A dispatcher whose upstream never received the call returns the
-//! invocation with [`DispatchGate::refund`], so transient upstream failures
-//! do not exhaust a permit; a call the upstream ran and answered with an
-//! error is a completed call and keeps its invocation.
+//! A dispatcher that can prove its upstream never received the call returns
+//! the invocation with [`DispatchGate::refund`], so a failure the holder
+//! never benefited from does not exhaust a permit; a call the upstream ran —
+//! or may have run, which includes one that timed out — keeps its
+//! invocation, whatever it answered.
 //!
 //! `GateConfig::trusted_issuers` forms one trust domain: authn passes for a
 //! permit signed by any listed issuer, with no per-issuer policy and no
@@ -24,6 +25,7 @@
 use arkavo_permit::{HashAlgorithm, PermitVerifier, verify, verify_invocation_proof};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt;
 use std::sync::Mutex;
 
@@ -88,24 +90,36 @@ struct Usage {
     expires_at: i64,
 }
 
-/// Counters are keyed by `Permit::id`. Once the map holds more than
-/// `PRUNE_ABOVE` entries, expired counters are pruned first; if the map is
-/// still over the threshold after that, entries are evicted in bulk by
-/// soonest `expires_at` until at most `PRUNE_TARGET` remain. A caller can
-/// mint arbitrarily many permits, so a live (not-yet-expired) counter can be
-/// evicted too — but only under that memory pressure, never otherwise.
-const PRUNE_ABOVE: usize = 4096;
-const PRUNE_TARGET: usize = 3072;
+/// How many permits the usage table counts at once.
+///
+/// Counters are keyed by `Permit::id`, and a caller can mint arbitrarily many
+/// permits, so the table has to be bounded. Only *expired* counters are ever
+/// dropped: evicting a live one would restart a still-valid permit's
+/// invocation count at zero, which is exactly the budget a flood of fresh
+/// permits would be trying to buy. When pruning frees nothing, the gate fails
+/// closed instead — a permit the table is not already counting is denied at
+/// [`Stage::Budget`] until entries expire, while every permit already counted
+/// keeps being counted normally.
+const MAX_TRACKED_PERMITS: usize = 65_536;
 
 pub struct DispatchGate {
     config: GateConfig,
+    /// The most counters [`Self::usage`] holds; `MAX_TRACKED_PERMITS` outside
+    /// tests, which use a small table to reach the limit cheaply.
+    capacity: usize,
     usage: Mutex<HashMap<[u8; 32], Usage>>,
 }
 
 impl DispatchGate {
     pub fn new(config: GateConfig) -> Self {
+        Self::with_capacity(config, MAX_TRACKED_PERMITS)
+    }
+
+    /// A gate whose usage table counts at most `capacity` permits at once.
+    fn with_capacity(config: GateConfig, capacity: usize) -> Self {
         Self {
             config,
+            capacity,
             usage: Mutex::new(HashMap::new()),
         }
     }
@@ -156,24 +170,28 @@ impl DispatchGate {
             .usage
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if usage.len() > PRUNE_ABOVE {
+        // A full table drops its expired counters, which cost nothing: the
+        // permits they belong to are refused at authn from now on.
+        if usage.len() >= self.capacity {
             usage.retain(|_, entry| entry.expires_at > now);
         }
-        if usage.len() > PRUNE_ABOVE {
-            let mut by_expiry: Vec<([u8; 32], i64)> = usage
-                .iter()
-                .map(|(key, entry)| (*key, entry.expires_at))
-                .collect();
-            by_expiry.sort_unstable_by_key(|(_, expires_at)| *expires_at);
-            let evict = usage.len() - PRUNE_TARGET;
-            for (key, _) in by_expiry.into_iter().take(evict) {
-                usage.remove(&key);
+        let full = usage.len() >= self.capacity;
+        let entry = match usage.entry(permit_id) {
+            Entry::Occupied(counted) => counted.into_mut(),
+            // Nothing is evicted to make room. A live counter reset to zero
+            // would hand its permit a second budget, so a permit this gate is
+            // not already counting waits instead.
+            Entry::Vacant(_) if full => {
+                return deny(
+                    Stage::Budget,
+                    "gate capacity exhausted; retry after permits expire".into(),
+                );
             }
-        }
-        let entry = usage.entry(permit_id).or_insert(Usage {
-            invocations: 0,
-            expires_at: permit.claims.expires_at,
-        });
+            Entry::Vacant(slot) => slot.insert(Usage {
+                invocations: 0,
+                expires_at: permit.claims.expires_at,
+            }),
+        };
         if entry.invocations >= permit.claims.budget.max_invocations {
             return deny(
                 Stage::Budget,
@@ -198,11 +216,17 @@ impl DispatchGate {
     /// Return one invocation to a permit's budget.
     ///
     /// The counter is spent when the gate admits a call, which is before the
-    /// call runs. A dispatcher whose upstream never received the call — a
-    /// transport failure, a timeout — hands the invocation back with this,
-    /// so a permit with a small budget is not exhausted by failures its
-    /// holder never benefited from. A call the upstream did run and answered
-    /// with an error is a completed call and keeps its invocation.
+    /// call runs. A dispatcher whose upstream never received the call — the
+    /// connection was already down, the request never made it onto the wire —
+    /// hands the invocation back with this, so a permit with a small budget is
+    /// not exhausted by failures its holder never benefited from.
+    ///
+    /// Everything else keeps its invocation, including the two cases that
+    /// look like failures from the caller's side: a call the upstream ran and
+    /// answered with an error is a completed call, and a call that timed out
+    /// was dispatched and may still be running there. Refunding a timeout
+    /// would let any tool slower than the dispatcher's timeout be invoked
+    /// without ever depleting a budget.
     ///
     /// Returns whether a counter was found and decremented. Never goes below
     /// zero, and never creates a counter: refunding a permit that never spent
@@ -617,34 +641,40 @@ mod tests {
         ));
     }
 
+    /// The usage table is bounded, and filling it must not buy anyone budget.
+    /// A permit the table is not already counting is denied at the budget
+    /// stage rather than evicting a live counter — a counter reset to zero is
+    /// a second budget for a permit that has already spent its first — and
+    /// the room comes back as entries expire.
     #[test]
-    fn usage_table_stays_bounded_under_permit_flood() {
-        let (gate, issuer) = gate();
+    fn a_full_usage_table_denies_new_permits_rather_than_evicting_live_ones() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        // The gate's clock is a plain `fn`, so "later" is a value this test
+        // moves rather than a captured variable.
+        static CLOCK: AtomicI64 = AtomicI64::new(NOW);
+        fn moving_clock() -> i64 {
+            CLOCK.load(Ordering::SeqCst)
+        }
+        CLOCK.store(NOW, Ordering::SeqCst);
+
+        const CAPACITY: usize = 8;
+        let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
-        let args = json!({"pr": 1});
-        let mut last_cwt = Vec::new();
-        let mut last_proof = Vec::new();
-        for i in 0..4_200i64 {
-            let claims = PermitClaims {
-                issuer: "edge".into(),
-                subject: "agent-1".into(),
-                expires_at: NOW + 300,
-                not_before: NOW - 60,
-                issued_at: NOW - 60 - i,
-                agent_workload_id: "wl-1".into(),
+        let gate = DispatchGate::with_capacity(
+            GateConfig {
                 policy_bundle_hash: vec![7; 32],
-                tool_name: "merge".into(),
-                argument_hash: argument_hash(&args, HashAlgorithm::Sha256),
-                data_classifications: vec![],
-                budget: Budget {
-                    max_invocations: 2,
-                    token_ceiling: None,
-                    cost_micro_usd: None,
-                },
-                sequence_state_hash: vec![9; 32],
-                parent_permit: None,
-            };
-            let cwt = mint(&claims, &issuer, &holder.public_key()).unwrap();
+                hash: HashAlgorithm::Sha256,
+                clock: moving_clock,
+                trusted_issuers: vec![issuer.public_key()],
+            },
+            CAPACITY,
+        );
+        // Distinct arguments make distinct permits, so each takes its own
+        // counter. Each carries a budget of two.
+        let mint_one = |n: i64, expires_at: i64| {
+            let args = json!({"n": n});
+            let cwt = permit(&issuer, &holder, "merge", &args, 2, expires_at, 7);
             let proof = prove_invocation(
                 &holder,
                 &permit_id(&cwt),
@@ -652,18 +682,67 @@ mod tests {
                 &args,
                 HashAlgorithm::Sha256,
             );
-            assert!(matches!(
-                gate.evaluate(&call("merge", &args, &cwt, &proof)),
-                GateDecision::Allow { .. }
-            ));
-            last_cwt = cwt;
-            last_proof = proof;
+            (args, cwt, proof)
+        };
+
+        // Fill the table exactly: half the permits expire while the gate is
+        // still running, half outlive the whole test.
+        let filling: Vec<_> = (0..4)
+            .map(|n| mint_one(n, NOW + 30))
+            .chain((4..8).map(|n| mint_one(n, NOW + 3600)))
+            .collect();
+        for (args, cwt, proof) in &filling {
+            let decision = gate.evaluate(&call("merge", args, cwt, proof));
+            assert!(
+                matches!(decision, GateDecision::Allow { .. }),
+                "{decision:?}"
+            );
         }
-        assert!(gate.usage_len() <= 4096);
-        assert!(matches!(
-            gate.evaluate(&call("merge", &args, &last_cwt, &last_proof)),
-            GateDecision::Allow { .. }
-        ));
+        assert_eq!(gate.usage_len(), CAPACITY, "the table is full");
+
+        // A permit with no counter yet is refused, and refusing it leaves
+        // every live counter where it was.
+        let (new_args, new_cwt, new_proof) = mint_one(99, NOW + 3600);
+        let denied = gate.evaluate(&call("merge", &new_args, &new_cwt, &new_proof));
+        assert!(
+            matches!(
+                &denied,
+                GateDecision::Deny {
+                    stage: Stage::Budget,
+                    reason,
+                } if reason.contains("capacity")
+            ),
+            "{denied:?}"
+        );
+        assert_eq!(gate.usage_len(), CAPACITY, "nothing was evicted");
+
+        // A permit the table already counts keeps being counted normally: it
+        // spends its second invocation and is then out of budget, which is
+        // exactly what an eviction would have undone.
+        let (args, cwt, proof) = &filling[0];
+        let second = gate.evaluate(&call("merge", args, cwt, proof));
+        assert!(matches!(second, GateDecision::Allow { .. }), "{second:?}");
+        let third = gate.evaluate(&call("merge", args, cwt, proof));
+        assert!(
+            matches!(
+                &third,
+                GateDecision::Deny {
+                    stage: Stage::Budget,
+                    reason,
+                } if reason.contains("budget of 2")
+            ),
+            "a full table must not reset a live counter: {third:?}"
+        );
+
+        // Past the first four permits' expiry, pruning frees their counters —
+        // they are refused at authn from here on — and the new permit fits.
+        CLOCK.store(NOW + 60, Ordering::SeqCst);
+        let admitted = gate.evaluate(&call("merge", &new_args, &new_cwt, &new_proof));
+        assert!(
+            matches!(admitted, GateDecision::Allow { .. }),
+            "expired counters must make room: {admitted:?}"
+        );
+        assert_eq!(gate.usage_len(), 5, "four expired counters, one new permit");
     }
 
     /// A call the upstream never received must not cost its permit an
