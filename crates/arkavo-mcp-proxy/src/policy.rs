@@ -5,6 +5,41 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashSet;
 
+/// One of the credentials a call carries under `params._meta.arkavo`, as it
+/// arrived.
+///
+/// A hook that only saw `Option<Vec<u8>>` could not tell a client that sent
+/// nothing from one that sent something it could not decode, and told both
+/// the same unhelpful thing.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Credential {
+    /// The field was not present.
+    #[default]
+    Absent,
+    /// The field was present but is not base64url without padding.
+    Undecodable,
+    /// The field was present but longer than any permit or proof can be, so
+    /// it was refused without decoding it.
+    Oversized,
+    /// The decoded bytes.
+    Present(Vec<u8>),
+}
+
+impl Credential {
+    /// The decoded bytes, if this credential has any.
+    pub fn bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Present(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+
+    /// Whether the client sent this field at all, in any state.
+    pub fn is_present(&self) -> bool {
+        !matches!(self, Self::Absent)
+    }
+}
+
 /// Context for a single `tools/call` policy evaluation.
 ///
 /// Fields are additive by design: a calling-identity/principal field can be
@@ -16,10 +51,10 @@ pub struct CallContext {
     pub tool_name: String,
     /// Arguments supplied by the caller.
     pub arguments: Value,
-    /// Raw CWT permit bytes from `params._meta.arkavo.permit`, if present.
-    pub permit: Option<Vec<u8>>,
-    /// Raw proof-of-possession signature from `params._meta.arkavo.pop`.
-    pub proof: Option<Vec<u8>>,
+    /// The CWT permit from `params._meta.arkavo.permit`.
+    pub permit: Credential,
+    /// The proof-of-possession signature from `params._meta.arkavo.pop`.
+    pub proof: Credential,
 }
 
 /// Outcome of a policy evaluation.
@@ -49,6 +84,17 @@ impl Decision {
 pub trait PolicyHook: Send + Sync {
     /// Decide whether the call described by `ctx` may proceed.
     async fn evaluate(&self, ctx: &CallContext) -> Decision;
+
+    /// Called when a call this hook allowed never reached the upstream
+    /// server — the connection failed, or the request timed out — so a hook
+    /// that spent something admitting it can give that back.
+    ///
+    /// It is *not* called when the upstream ran the call and answered with a
+    /// JSON-RPC error: that is a completed call whose result happens to be a
+    /// failure, and it keeps whatever it spent.
+    ///
+    /// Default: nothing to return.
+    async fn on_forward_failed(&self, _ctx: &CallContext) {}
 }
 
 /// Default policy that permits every tool call.
@@ -95,8 +141,10 @@ impl PolicyHook for DenyListPolicy {
 }
 
 #[cfg(test)]
+// The `#[tokio::test]` macro expands to `Runtime::block_on`, which
+// `.clippy.toml` disallows outside test code.
+#[allow(clippy::disallowed_methods)]
 mod tests {
-    #![allow(clippy::disallowed_methods)]
     use super::*;
     use serde_json::json;
 
@@ -104,9 +152,32 @@ mod tests {
         CallContext {
             tool_name: tool_name.to_string(),
             arguments: json!({}),
-            permit: None,
-            proof: None,
+            permit: Credential::Absent,
+            proof: Credential::Absent,
         }
+    }
+
+    #[test]
+    fn a_credential_yields_bytes_only_when_it_has_them() {
+        assert_eq!(Credential::Present(vec![1, 2]).bytes(), Some(&[1u8, 2][..]));
+        assert_eq!(Credential::Absent.bytes(), None);
+        assert_eq!(Credential::Undecodable.bytes(), None);
+        assert_eq!(Credential::Oversized.bytes(), None);
+
+        // "Present" in the sense the deny messages use: the client sent the
+        // field, whatever state it arrived in.
+        assert!(!Credential::Absent.is_present());
+        assert!(Credential::Undecodable.is_present());
+        assert!(Credential::Oversized.is_present());
+        assert!(Credential::Present(Vec::new()).is_present());
+    }
+
+    /// The default hook does nothing on a failed forward, so an
+    /// implementation that spends nothing needs no code for it.
+    #[tokio::test]
+    async fn on_forward_failed_defaults_to_doing_nothing() {
+        AllowAllPolicy.on_forward_failed(&ctx("anything")).await;
+        assert!(AllowAllPolicy.evaluate(&ctx("anything")).await.is_allowed());
     }
 
     #[tokio::test]

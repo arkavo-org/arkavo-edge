@@ -1,12 +1,13 @@
 //! Stdio pass-through MCP proxy with per-call policy enforcement.
 
-use crate::policy::{CallContext, Decision, PolicyHook};
+use crate::framing::{self, Line, MAX_LINE_BYTES};
+use crate::policy::{CallContext, Credential, Decision, PolicyHook};
 use crate::upstream::{UpstreamConnection, UpstreamError};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncBufRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info, warn};
 
 /// JSON-RPC parse error (invalid JSON received).
@@ -17,6 +18,12 @@ pub const INVALID_REQUEST: i64 = -32600;
 pub const POLICY_DENIED: i64 = -32000;
 /// Server error: the upstream connection failed.
 pub const UPSTREAM_ERROR: i64 = -32603;
+
+/// The longest base64url string `_meta.arkavo` may carry: the permit size cap
+/// re-expressed in encoded characters (four per three bytes, plus a partial
+/// group). Anything longer cannot decode to a permit this stack would accept,
+/// so it is refused without decoding it.
+const MAX_ENCODED_CREDENTIAL: usize = 4 * arkavo_dispatch_gate::MAX_PERMIT_BYTES / 3 + 4;
 
 /// Configuration for connecting to the upstream MCP server.
 #[derive(Debug, Clone)]
@@ -109,17 +116,30 @@ impl McpProxy {
         R: AsyncBufRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        let mut line = String::new();
         loop {
-            line.clear();
-            if reader.read_line(&mut line).await? == 0 {
-                break;
-            }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            if let Some(response) = self.handle_message(trimmed).await {
+            let response = match framing::read_line(&mut reader).await? {
+                Line::Eof => break,
+                Line::TooLong => {
+                    warn!(
+                        max_bytes = MAX_LINE_BYTES,
+                        "dropped an over-long message; no id could be read from it, so the \
+                         error carries a null id"
+                    );
+                    Some(error_response(
+                        Value::Null,
+                        INVALID_REQUEST,
+                        format!("message exceeds the {MAX_LINE_BYTES} byte limit"),
+                    ))
+                }
+                Line::Message(line) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    self.handle_message(trimmed).await
+                }
+            };
+            if let Some(response) = response {
                 let mut bytes = serde_json::to_vec(&response)?;
                 bytes.push(b'\n');
                 writer.write_all(&bytes).await?;
@@ -143,6 +163,18 @@ impl McpProxy {
                 ));
             }
         };
+
+        // A JSON-RPC batch. Every message in one would have to be gated
+        // individually and answered in a single array, which this slice does
+        // not do; answering says so instead of leaving the client waiting.
+        if message.is_array() {
+            warn!("rejected a JSON-RPC batch: this proxy handles one message per line");
+            return Some(error_response(
+                Value::Null,
+                INVALID_REQUEST,
+                "JSON-RPC batches are not supported; send one request per line".to_string(),
+            ));
+        }
 
         let id = message.get("id").cloned().filter(|v| !v.is_null());
         let params = message.get("params");
@@ -201,14 +233,8 @@ impl McpProxy {
         let meta = params
             .and_then(|p| p.get("_meta"))
             .and_then(|m| m.get("arkavo"));
-        let permit = meta
-            .and_then(|m| m.get("permit"))
-            .and_then(Value::as_str)
-            .and_then(decode_b64url);
-        let proof = meta
-            .and_then(|m| m.get("pop"))
-            .and_then(Value::as_str)
-            .and_then(decode_b64url);
+        let permit = credential(meta, "permit");
+        let proof = credential(meta, "pop");
         let ctx = CallContext {
             tool_name,
             arguments,
@@ -236,16 +262,34 @@ impl McpProxy {
             }
             Decision::Allow => {
                 let forwarded_params = strip_arkavo_meta(params);
-                let response = self
-                    .forward(id, "tools/call", forwarded_params.as_ref())
-                    .await;
-                info!(
-                    tool = %ctx.tool_name,
-                    decision = "allow",
-                    latency_ms = started.elapsed().as_millis(),
-                    "tool call forwarded"
-                );
-                response
+                match self
+                    .upstream
+                    .request(&id, "tools/call", forwarded_params.as_ref())
+                    .await
+                {
+                    Ok(response) => {
+                        info!(
+                            tool = %ctx.tool_name,
+                            decision = "allow",
+                            latency_ms = started.elapsed().as_millis(),
+                            "tool call forwarded"
+                        );
+                        response
+                    }
+                    Err(error) => {
+                        // The upstream never ran the call, so whatever the
+                        // policy spent admitting it is handed back. An error
+                        // returned *by the tool* is a completed call and does
+                        // not come through here.
+                        self.policy.on_forward_failed(&ctx).await;
+                        warn!(
+                            tool = %ctx.tool_name,
+                            error = %error,
+                            "tool call never reached the upstream server"
+                        );
+                        error_response(id, UPSTREAM_ERROR, error.to_string())
+                    }
+                }
             }
         }
     }
@@ -265,6 +309,20 @@ impl std::fmt::Debug for McpProxy {
         f.debug_struct("McpProxy")
             .field("upstream", &self.upstream)
             .finish_non_exhaustive()
+    }
+}
+
+/// Read one `_meta.arkavo` credential, keeping *why* it is unusable.
+fn credential(meta: Option<&Value>, key: &str) -> Credential {
+    match meta.and_then(|m| m.get(key)) {
+        None => Credential::Absent,
+        Some(value) => match value.as_str() {
+            // A non-string is as unusable as a malformed string, and saying
+            // so is more use to the client than calling it absent.
+            None => Credential::Undecodable,
+            Some(text) if text.len() > MAX_ENCODED_CREDENTIAL => Credential::Oversized,
+            Some(text) => decode_b64url(text).map_or(Credential::Undecodable, Credential::Present),
+        },
     }
 }
 
@@ -309,5 +367,49 @@ mod tests {
         assert_eq!(resp["error"]["code"], -32000);
         assert_eq!(resp["error"]["message"], "nope");
         assert!(resp.get("result").is_none());
+    }
+
+    #[test]
+    fn decode_b64url_accepts_only_unpadded_base64url() {
+        assert_eq!(decode_b64url("aGk").as_deref(), Some(&b"hi"[..]));
+        assert_eq!(decode_b64url("").as_deref(), Some(&b""[..]));
+        // Padding, the standard alphabet and stray characters are refused
+        // rather than silently decoding to something else.
+        assert_eq!(decode_b64url("aGk="), None);
+        assert_eq!(decode_b64url("a+/b"), None);
+        assert_eq!(decode_b64url("not base64!"), None);
+    }
+
+    /// The ways a credential can be unusable have to stay distinguishable: a
+    /// client that sent nothing, one whose encoding is wrong, and one whose
+    /// field is too long to be a permit at all.
+    #[test]
+    fn credential_distinguishes_absent_undecodable_and_oversized() {
+        let meta = json!({
+            "permit": "aGk",
+            "pop": "!!! not base64",
+            "huge": "A".repeat(MAX_ENCODED_CREDENTIAL + 1),
+            "number": 7,
+        });
+        let meta = Some(&meta);
+
+        assert_eq!(
+            credential(meta, "permit"),
+            Credential::Present(b"hi".to_vec())
+        );
+        assert_eq!(credential(meta, "pop"), Credential::Undecodable);
+        assert_eq!(credential(meta, "huge"), Credential::Oversized);
+        assert_eq!(credential(meta, "number"), Credential::Undecodable);
+        assert_eq!(credential(meta, "missing"), Credential::Absent);
+        assert_eq!(credential(None, "permit"), Credential::Absent);
+    }
+
+    /// A string at the cap is still decoded: the bound refuses what cannot be
+    /// a permit, not what merely approaches the size of one.
+    #[test]
+    fn a_credential_at_the_encoded_cap_is_not_oversized() {
+        let at_cap = "A".repeat(MAX_ENCODED_CREDENTIAL);
+        let meta = json!({ "permit": at_cap });
+        assert_ne!(credential(Some(&meta), "permit"), Credential::Oversized);
     }
 }

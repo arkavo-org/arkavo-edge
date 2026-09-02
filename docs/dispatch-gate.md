@@ -37,7 +37,13 @@ The client places two base64url (no padding) strings under
 - `pop`: the proof-of-possession signature over this invocation (same
   document, "Proof of Possession per Invocation")
 
-A call without both is refused before any stage runs.
+A call without both is refused before any stage runs, and the refusal says
+which of the four things went wrong — both absent, one present without the
+other, a string that is not base64url, or a string longer than any permit can
+be. All four are `authn:` refusals.
+
+Both strings are bounded before they are decoded, at the encoded size of the
+largest permit the parser accepts (16 KiB, so 21 849 characters).
 
 An allowed `tools/call` has `_meta.arkavo` removed before the request is
 forwarded upstream, so the permit and proof-of-possession never reach the
@@ -48,13 +54,51 @@ A `tools/call` sent as a notification (no `id`, so no response could ever
 carry a denial back) cannot be policy-evaluated. The proxy drops it outright
 — logging a warning — instead of forwarding it or answering it.
 
+## Bounds on untrusted input
+
+Everything a client can make the proxy allocate or hash is bounded, and each
+bound answers rather than disconnects:
+
+| Input | Bound | On breach |
+|---|---|---|
+| one JSON-RPC line | 1 MiB | `INVALID_REQUEST` (id null), the line is skipped, the connection continues |
+| a JSON-RPC batch (top-level array) | not supported | `INVALID_REQUEST` (id null) with a warning, never silence |
+| `_meta.arkavo.permit` / `.pop` | encoded size of a 16 KiB permit | `authn:` denial, without decoding |
+| the permit itself | 16 KiB, nesting depth 16 | `authn:` denial from the parser |
+| `arguments` | 256 KiB serialized | `policy:` denial, before either hash of them runs |
+
+Server-initiated requests travel the other way and are not relayed to the
+client in this slice: a `sampling/createMessage`, `elicitation/create` or
+`roots/list` from the upstream is answered with JSON-RPC `-32601` so the
+server learns at once, rather than blocking until the proxy's own per-request
+timeout fires and takes the whole `tools/call` down with it.
+
 ## Stages
 
 | Stage | Checks | Deny message prefix |
 |---|---|---|
-| authn | permit signature against the trusted-issuer list (by `kid`), `nbf`/`exp`/`iat` at now, proof-of-possession over the permit, tool, and arguments against the `cnf` key | `authn:` |
+| authn | permit signature against the trusted-issuer list (by `kid`), `nbf`/`exp`/`iat` at now, proof-of-possession over the permit's identity, tool, and arguments against the `cnf` key | `authn:` |
 | policy | permit's `policy_bundle_hash` equals the proxy's configured bundle; tool name and argument hash match the permit | `policy:` |
 | budget | invocations of this permit (keyed on `Permit::id`, the digest of the permit's signed content, so re-encoding one permit cannot buy a second budget) stay below `budget.max_invocations` | `budget:` |
+
+The proof-of-possession names the permit by that same `Permit::id`, so one
+proof covers every valid encoding of one issuance — the same notion of "the
+same permit" the budget counter uses.
+
+### When budget is spent, and when it is returned
+
+The counter increments when the gate admits the call, which is before the
+call is dispatched. If the upstream never received it — the connection
+failed, the request timed out — the proxy calls
+`PolicyHook::on_forward_failed`, which returns the invocation via
+`DispatchGate::refund`. A permit with a budget of one therefore survives a
+transient upstream failure.
+
+A call the upstream *ran* and answered with a JSON-RPC error is a completed
+call: the tool did its work and reported a failure, and the invocation stays
+spent. A refund never takes a counter below zero and never creates one, and
+`refund_invocation` verifies the permit it credits rather than decoding it,
+so a refund can only ever be aimed at a permit the caller can present.
 
 A refused call returns JSON-RPC error `-32000` and never reaches the
 upstream server.
@@ -90,7 +134,3 @@ through verification but the gate never resolves it, so it does not check
 that the parent exists, is still valid, or has budget left. A delegated
 permit is admitted on its own merits alone.
 
-Budget is consumed at gate time, not at completion. The counter increments
-when the call is allowed, so an upstream call that fails afterwards — a
-crashed server, a transport error, a tool that errors — has still spent one
-invocation of the permit's budget.

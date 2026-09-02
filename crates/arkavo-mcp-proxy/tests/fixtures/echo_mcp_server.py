@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """Minimal MCP server fixture for arkavo-mcp-proxy integration tests.
 
-Speaks line-delimited JSON-RPC over stdio. Serves two tools ("echo" and
-"blocked_tool") and echoes the tool name, arguments, and `_meta` back from
-tools/call so tests can verify pass-through content. When
-MCP_PROXY_TEST_RECORD is set, every tool call that reaches tools/call is
-appended to that file as "<name> <arguments json>", which lets tests prove
-a denied or dropped call never arrived upstream.
+Speaks line-delimited JSON-RPC over stdio. Serves the tools listed in TOOLS
+and echoes the tool name, arguments, and `_meta` back from tools/call so tests
+can verify pass-through content. When MCP_PROXY_TEST_RECORD is set, every tool
+call that reaches tools/call is appended to that file as
+"<name> <arguments json>", which lets tests prove a denied or dropped call
+never arrived upstream.
+
+Three tools exist to drive proxy behaviour that a well-behaved server cannot:
+
+- "never_replies" returns nothing at all, so the proxy's per-request timeout
+  fires and the call never reaches the tool.
+- "failing_tool" answers with a JSON-RPC error, which is a completed call
+  whose result happens to be a failure.
+- "server_request" sends a server-initiated request (the shape of
+  sampling/createMessage) and reports whatever the proxy answers, which is how
+  a test observes the proxy's reply to traffic in that direction.
 """
 
 import json
@@ -26,6 +36,21 @@ TOOLS = [
         "description": "Denied by the proxy policy in tests",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "never_replies",
+        "description": "Sends no response, so the proxy's request times out",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "failing_tool",
+        "description": "Answers with a JSON-RPC error: a completed, failed call",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "server_request",
+        "description": "Asks the client something and reports the answer",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -35,8 +60,46 @@ def record(tool_name: str) -> None:
             handle.write(tool_name + "\n")
 
 
+def send(message: dict) -> None:
+    print(json.dumps(message), flush=True)
+
+
+def ask_the_client() -> dict:
+    """Send a server-initiated request and read whatever comes back.
+
+    MCP allows a server to ask the client for something mid-call
+    (sampling/createMessage and friends). This proxy does not relay those, so
+    the reply read here is the proxy's own.
+    """
+    send(
+        {
+            "jsonrpc": "2.0",
+            "id": "server-initiated-1",
+            "method": "sampling/createMessage",
+            "params": {"messages": []},
+        }
+    )
+    line = sys.stdin.readline()
+    if not line:
+        return {"error": "no reply: the connection closed"}
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return {"error": "reply was not JSON"}
+
+
+def tool_result(content: object, meta: object) -> dict:
+    return {
+        "content": [{"type": "text", "text": json.dumps(content)}],
+        "meta": meta,
+    }
+
+
 def main() -> None:
-    for line in sys.stdin:
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
         line = line.strip()
         if not line:
             continue
@@ -67,24 +130,33 @@ def main() -> None:
             name = params.get("name", "")
             arguments = params.get("arguments", {})
             record(f"{name} {json.dumps(arguments)}")
-            response = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "tool": name,
-                                    "arguments": arguments,
-                                }
-                            ),
-                        }
-                    ],
-                    "meta": params.get("_meta"),
-                },
-            }
+            if name == "never_replies":
+                continue
+            if name == "failing_tool":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32000, "message": "the tool itself failed"},
+                }
+            elif name == "server_request":
+                reply = ask_the_client()
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": tool_result(
+                        {"tool": name, "server_request_reply": reply},
+                        params.get("_meta"),
+                    ),
+                }
+            else:
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": tool_result(
+                        {"tool": name, "arguments": arguments},
+                        params.get("_meta"),
+                    ),
+                }
         else:
             response = {
                 "jsonrpc": "2.0",
@@ -92,7 +164,7 @@ def main() -> None:
                 "error": {"code": -32601, "message": f"unknown method: {method}"},
             }
 
-        print(json.dumps(response), flush=True)
+        send(response)
 
 
 if __name__ == "__main__":

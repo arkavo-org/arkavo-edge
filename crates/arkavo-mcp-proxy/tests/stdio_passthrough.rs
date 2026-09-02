@@ -2,17 +2,78 @@
 //! the proxy over in-memory duplex streams standing in for the downstream
 //! stdio connection.
 
+// Every test here is a `#[tokio::test]`, and that macro expands to
+// `Runtime::block_on`, which `.clippy.toml` disallows outside test code. An
+// integration test file has no `mod tests` to hang the narrower attribute on.
 #![allow(clippy::disallowed_methods)]
 
+use arkavo_crypto::AgentKeypair;
+use arkavo_dispatch_gate::{DispatchGate, GateConfig};
 use arkavo_mcp_proxy::{
-    AllowAllPolicy, DenyListPolicy, McpProxy, POLICY_DENIED, PolicyHook, ProxyConfig,
+    AllowAllPolicy, DenyListPolicy, INVALID_REQUEST, MAX_LINE_BYTES, McpProxy, POLICY_DENIED,
+    PermitPolicy, PolicyHook, ProxyConfig, UPSTREAM_ERROR,
 };
+use arkavo_permit::{
+    Budget, HashAlgorithm, PermitClaims, PermitSigner, argument_hash, decode, mint,
+    prove_invocation,
+};
+use base64::Engine as _;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 use tokio::task::JoinHandle;
+
+const POLICY_BUNDLE: [u8; 32] = [7; 32];
+
+/// A permit for one tool and one set of arguments, with the client-side
+/// `_meta.arkavo` a caller would send to exercise it.
+fn permit_meta(
+    issuer: &PermitSigner,
+    holder: &PermitSigner,
+    tool: &str,
+    arguments: &Value,
+    max_invocations: u64,
+) -> Value {
+    let now = arkavo_dispatch_gate::unix_now();
+    let claims = PermitClaims {
+        issuer: "edge".into(),
+        subject: "agent-1".into(),
+        expires_at: now + 300,
+        not_before: now - 60,
+        issued_at: now - 60,
+        agent_workload_id: "wl-1".into(),
+        policy_bundle_hash: POLICY_BUNDLE.to_vec(),
+        tool_name: tool.into(),
+        argument_hash: argument_hash(arguments, HashAlgorithm::Sha256),
+        data_classifications: vec![],
+        budget: Budget {
+            max_invocations,
+            token_ceiling: None,
+            cost_micro_usd: None,
+        },
+        sequence_state_hash: vec![9; 32],
+        parent_permit: None,
+    };
+    let cwt = mint(&claims, issuer, &holder.public_key()).expect("mint permit");
+    let permit_id = decode(&cwt).expect("decode permit").id;
+    let proof = prove_invocation(holder, &permit_id, tool, arguments, HashAlgorithm::Sha256);
+    let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    json!({"arkavo": {"permit": b64(&cwt), "pop": b64(&proof)}, "trace": "t-1"})
+}
+
+/// A gate trusting exactly `issuer`, on the same policy bundle the permits
+/// above cite.
+fn permit_gate(issuer: &PermitSigner) -> DispatchGate {
+    DispatchGate::new(GateConfig {
+        policy_bundle_hash: POLICY_BUNDLE.to_vec(),
+        hash: HashAlgorithm::Sha256,
+        clock: arkavo_dispatch_gate::unix_now,
+        trusted_issuers: vec![issuer.public_key()],
+    })
+}
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -64,11 +125,28 @@ impl TestClient {
     async fn send(&mut self, message: &Value) {
         let mut bytes = serde_json::to_vec(message).expect("serialize request");
         bytes.push(b'\n');
+        self.send_raw(&bytes).await;
+    }
+
+    /// Write bytes the JSON-RPC helpers cannot produce: a batch, an
+    /// over-long line, anything malformed on purpose.
+    async fn send_raw(&mut self, bytes: &[u8]) {
         self.writer
-            .write_all(&bytes)
+            .write_all(bytes)
             .await
             .expect("writing request failed");
         self.writer.flush().await.expect("flush failed");
+    }
+
+    /// Read one response without matching it to a request id.
+    async fn read_response(&mut self) -> Value {
+        let line = self
+            .lines
+            .next_line()
+            .await
+            .expect("reading response failed")
+            .expect("proxy closed the stream without responding");
+        serde_json::from_str(&line).expect("response is not valid JSON")
     }
 
     async fn handshake(&mut self) -> Value {
@@ -126,7 +204,16 @@ async fn pass_through_relays_initialize_tools_and_errors() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
-    assert_eq!(names, ["echo", "blocked_tool"]);
+    assert_eq!(
+        names,
+        [
+            "echo",
+            "blocked_tool",
+            "never_replies",
+            "failing_tool",
+            "server_request"
+        ]
+    );
 
     let call = client
         .request(
@@ -268,52 +355,119 @@ async fn tools_call_notification_never_reaches_upstream() {
     let _ = std::fs::remove_file(&record_file);
 }
 
+/// The upstream may ask the client for something mid-call
+/// (`sampling/createMessage` and friends). This slice does not relay those,
+/// and dropping them silently left the upstream blocked until the proxy's own
+/// timeout fired and the whole `tools/call` failed. It is answered instead.
+#[tokio::test]
+async fn a_server_initiated_request_is_refused_rather_than_dropped() {
+    let (mut client, handle) = start_proxy(fixture_config(), Arc::new(AllowAllPolicy));
+    client.handshake().await;
+
+    let call = client
+        .request(
+            "tools/call",
+            Some(json!({"name": "server_request", "arguments": {}})),
+        )
+        .await;
+    let text = call["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("tool result: {call}"));
+    let reported: Value = serde_json::from_str(text).expect("tool payload");
+    let reply = &reported["server_request_reply"];
+
+    assert_eq!(
+        reply["id"], "server-initiated-1",
+        "the refusal must answer the server's own request: {reply}"
+    );
+    assert_eq!(
+        reply["error"]["code"], -32601,
+        "a server-initiated request is method-not-found here: {reply}"
+    );
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("sampling/createMessage"),
+        "the refusal must name the method: {reply}"
+    );
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}
+
+/// A JSON-RPC batch is a top-level array. Nothing here handles one, and
+/// dropping it left the client waiting for a response that never came.
+#[tokio::test]
+async fn a_json_rpc_batch_is_refused() {
+    let (mut client, handle) = start_proxy(fixture_config(), Arc::new(AllowAllPolicy));
+    client.handshake().await;
+
+    client
+        .send_raw(b"[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}]\n")
+        .await;
+    let response = client.read_response().await;
+    assert_eq!(response["id"], Value::Null);
+    assert_eq!(response["error"]["code"], INVALID_REQUEST);
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("batch"),
+        "response: {response}"
+    );
+
+    // The connection is still usable afterwards.
+    let list = client.request("tools/list", None).await;
+    assert!(list["result"]["tools"].is_array(), "list: {list}");
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}
+
+/// One client must not be able to decide how much the proxy buffers. An
+/// over-long line is answered and skipped, and the next message still works.
+#[tokio::test]
+async fn an_over_long_message_is_refused_and_the_connection_survives() {
+    let (mut client, handle) = start_proxy(fixture_config(), Arc::new(AllowAllPolicy));
+    client.handshake().await;
+
+    let mut oversized = Vec::with_capacity(MAX_LINE_BYTES + 2);
+    oversized
+        .extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"pad\":\"");
+    oversized.resize(MAX_LINE_BYTES + 1, b'x');
+    oversized.extend_from_slice(b"\"}\n");
+    client.send_raw(&oversized).await;
+
+    let response = client.read_response().await;
+    assert_eq!(response["id"], Value::Null);
+    assert_eq!(response["error"]["code"], INVALID_REQUEST);
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("limit"),
+        "response: {response}"
+    );
+
+    let list = client.request("tools/list", None).await;
+    assert!(list["result"]["tools"].is_array(), "list: {list}");
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}
+
 #[tokio::test]
 async fn permit_bound_call_is_allowed_once_and_refused_on_replay_or_tamper() {
-    use arkavo_crypto::AgentKeypair;
-    use arkavo_dispatch_gate::{DispatchGate, GateConfig};
-    use arkavo_mcp_proxy::PermitPolicy;
-    use arkavo_permit::{
-        Budget, HashAlgorithm, PermitClaims, PermitSigner, argument_hash, mint, prove_invocation,
-    };
-    use base64::Engine as _;
-
-    let now = arkavo_dispatch_gate::unix_now();
     let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
     let holder = PermitSigner::Ed25519(AgentKeypair::generate());
     let args = json!({"n": 1});
-    let claims = PermitClaims {
-        issuer: "edge".into(),
-        subject: "agent-1".into(),
-        expires_at: now + 300,
-        not_before: now - 60,
-        issued_at: now - 60,
-        agent_workload_id: "wl-1".into(),
-        policy_bundle_hash: vec![7; 32],
-        tool_name: "echo".into(),
-        argument_hash: argument_hash(&args, HashAlgorithm::Sha256),
-        data_classifications: vec![],
-        budget: Budget {
-            max_invocations: 1,
-            token_ceiling: None,
-            cost_micro_usd: None,
-        },
-        sequence_state_hash: vec![9; 32],
-        parent_permit: None,
-    };
-    let cwt = mint(&claims, &issuer, &holder.public_key()).unwrap();
-    let permit_id = arkavo_permit::decode(&cwt).unwrap().id;
-    let proof = prove_invocation(&holder, &permit_id, "echo", &args, HashAlgorithm::Sha256);
-    let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    let meta = json!({"arkavo": {"permit": b64(&cwt), "pop": b64(&proof)}, "trace": "t-1"});
+    let meta = permit_meta(&issuer, &holder, "echo", &args, 1);
 
-    let gate = DispatchGate::new(GateConfig {
-        policy_bundle_hash: vec![7; 32],
-        hash: HashAlgorithm::Sha256,
-        clock: arkavo_dispatch_gate::unix_now,
-        trusted_issuers: vec![issuer.public_key()],
-    });
-    let (mut client, handle) = start_proxy(fixture_config(), Arc::new(PermitPolicy::new(gate)));
+    let (mut client, handle) = start_proxy(
+        fixture_config(),
+        Arc::new(PermitPolicy::new(permit_gate(&issuer))),
+    );
     client.handshake().await;
 
     let allowed = client
@@ -371,7 +525,146 @@ async fn permit_bound_call_is_allowed_once_and_refused_on_replay_or_tamper() {
         bare["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("no permit")
+            .contains("no permit and proof")
+    );
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}
+
+/// "No permit and proof" is a misleading thing to tell a client that sent
+/// both fields and mis-encoded one, or that sent only one of the two. Each
+/// case has to name itself, and all of them stay `authn:` refusals.
+#[tokio::test]
+async fn malformed_credentials_are_refused_by_what_is_actually_wrong() {
+    let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+    let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+    let args = json!({"n": 1});
+    let good = permit_meta(&issuer, &holder, "echo", &args, 5);
+    let permit = good["arkavo"]["permit"].clone();
+    let pop = good["arkavo"]["pop"].clone();
+
+    let (mut client, handle) = start_proxy(
+        fixture_config(),
+        Arc::new(PermitPolicy::new(permit_gate(&issuer))),
+    );
+    client.handshake().await;
+
+    let deny_reason = |response: &Value| -> String {
+        assert_eq!(response["error"]["code"], POLICY_DENIED, "{response}");
+        response["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .to_string()
+    };
+
+    for (meta, expected) in [
+        (
+            json!({"arkavo": {"permit": "not base64!", "pop": pop}}),
+            "not base64url",
+        ),
+        (
+            json!({"arkavo": {"permit": permit, "pop": "%%%"}}),
+            "not base64url",
+        ),
+        (
+            json!({"arkavo": {"permit": good["arkavo"]["permit"]}}),
+            "permit present without pop",
+        ),
+        (
+            json!({"arkavo": {"pop": good["arkavo"]["pop"]}}),
+            "pop present without permit",
+        ),
+        (
+            json!({"arkavo": {"permit": "A".repeat(4 * 16 * 1024 / 3 + 8), "pop": good["arkavo"]["pop"]}}),
+            "longer than any permit can be",
+        ),
+    ] {
+        let response = client
+            .request(
+                "tools/call",
+                Some(json!({"name": "echo", "arguments": args, "_meta": meta})),
+            )
+            .await;
+        let reason = deny_reason(&response);
+        assert!(
+            reason.contains(expected),
+            "expected {expected:?} in {reason:?}"
+        );
+        assert!(reason.contains("authn:"), "reason: {reason}");
+    }
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}
+
+/// The gate spends an invocation to admit a call, and the upstream then never
+/// received it. Without a refund a permit with a budget of one is destroyed by
+/// a single timeout: the second attempt would be refused for want of budget
+/// rather than reaching the upstream at all.
+#[tokio::test]
+async fn a_call_that_never_reaches_the_upstream_keeps_its_budget() {
+    let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+    let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+    let args = json!({});
+    let meta = permit_meta(&issuer, &holder, "never_replies", &args, 1);
+
+    let config = fixture_config().with_timeout(Duration::from_millis(300));
+    let (mut client, handle) =
+        start_proxy(config, Arc::new(PermitPolicy::new(permit_gate(&issuer))));
+    client.handshake().await;
+
+    let params = json!({"name": "never_replies", "arguments": args, "_meta": meta});
+    let first = client.request("tools/call", Some(params.clone())).await;
+    assert_eq!(
+        first["error"]["code"], UPSTREAM_ERROR,
+        "the tool never answers, so the request times out: {first}"
+    );
+
+    let second = client.request("tools/call", Some(params)).await;
+    assert_eq!(
+        second["error"]["code"], UPSTREAM_ERROR,
+        "the refunded invocation must be spendable again, not refused for budget: {second}"
+    );
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}
+
+/// The other half of the rule: a tool that ran and returned an error is a
+/// completed call. It keeps the invocation it spent, so a budget of one
+/// covers exactly one failed tool call and no more.
+#[tokio::test]
+async fn a_tool_that_answers_with_an_error_keeps_its_invocation() {
+    let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+    let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+    let args = json!({});
+    let meta = permit_meta(&issuer, &holder, "failing_tool", &args, 1);
+
+    let (mut client, handle) = start_proxy(
+        fixture_config(),
+        Arc::new(PermitPolicy::new(permit_gate(&issuer))),
+    );
+    client.handshake().await;
+
+    let params = json!({"name": "failing_tool", "arguments": args, "_meta": meta});
+    let first = client.request("tools/call", Some(params.clone())).await;
+    assert!(
+        first["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("the tool itself failed"),
+        "the upstream's own error must be relayed verbatim: {first}"
+    );
+
+    let second = client.request("tools/call", Some(params)).await;
+    assert_eq!(second["error"]["code"], POLICY_DENIED);
+    assert!(
+        second["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("budget"),
+        "a completed call keeps its invocation: {second}"
     );
 
     drop(client);

@@ -5,6 +5,15 @@
 //! handshake of its own and returns the upstream response object verbatim,
 //! so the proxy can relay the downstream client's `initialize` and preserve
 //! upstream error codes and messages exactly.
+//!
+//! Traffic flows one way: the downstream client asks, the upstream server
+//! answers. A server-initiated request — `sampling/createMessage`,
+//! `elicitation/create`, `roots/list` — is **not** relayed to the client in
+//! this slice, because the client's permit and proof cover the call it made
+//! and nothing the server thinks of afterwards. Such a request is answered
+//! here with JSON-RPC `-32601`, so the upstream learns immediately instead of
+//! blocking until its own timeout. Server notifications, which expect no
+//! answer, are logged and dropped.
 
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -45,6 +54,10 @@ pub enum UpstreamError {
 /// Default per-request timeout when the caller does not configure one.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// JSON-RPC method-not-found, the answer to a server-initiated request this
+/// slice does not relay to the downstream client.
+const METHOD_NOT_FOUND: i64 = -32601;
+
 /// Key used to correlate responses with pending requests. JSON-RPC allows
 /// string or numeric ids; the serialized form is a stable key for both.
 fn id_key(id: &Value) -> String {
@@ -54,7 +67,8 @@ fn id_key(id: &Value) -> String {
 /// A spawned upstream MCP server reached over stdio.
 pub struct UpstreamConnection {
     child: Mutex<Child>,
-    stdin: Mutex<tokio::process::ChildStdin>,
+    /// Shared with the reader task, which answers server-initiated requests.
+    stdin: Arc<Mutex<tokio::process::ChildStdin>>,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
     connected: Arc<AtomicBool>,
     timeout: Duration,
@@ -83,7 +97,7 @@ impl UpstreamConnection {
             source,
         })?;
 
-        let stdin = child.stdin.take().ok_or(UpstreamError::Closed)?;
+        let stdin = Arc::new(Mutex::new(child.stdin.take().ok_or(UpstreamError::Closed)?));
         let stdout = child.stdout.take().ok_or(UpstreamError::Closed)?;
 
         let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>> =
@@ -94,16 +108,27 @@ impl UpstreamConnection {
         // when the upstream closes its stdout.
         let reader_pending = Arc::clone(&pending);
         let reader_connected = Arc::clone(&connected);
+        let reader_stdin = Arc::clone(&stdin);
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             loop {
                 match lines.next_line().await {
                     Ok(Some(line)) => match serde_json::from_str::<Value>(&line) {
                         Ok(message) => {
-                            if let Some(id) = message.get("id").filter(|v| !v.is_null()) {
-                                let sender = reader_pending.lock().await.remove(&id_key(id));
-                                if let Some(sender) = sender {
-                                    let _ = sender.send(message);
+                            if let Some(id) = message.get("id").filter(|v| !v.is_null()).cloned() {
+                                let sender = reader_pending.lock().await.remove(&id_key(&id));
+                                match sender {
+                                    Some(sender) => {
+                                        let _ = sender.send(message);
+                                    }
+                                    // An id nothing is waiting on. If it
+                                    // names a method it is a request the
+                                    // server made of us; answering it is what
+                                    // keeps the server from blocking on a
+                                    // reply this slice will never send.
+                                    None => {
+                                        refuse_server_request(&reader_stdin, &id, &message).await;
+                                    }
                                 }
                             } else {
                                 debug!("upstream notification (dropped): {line}");
@@ -126,7 +151,7 @@ impl UpstreamConnection {
 
         Ok(Self {
             child: Mutex::new(child),
-            stdin: Mutex::new(stdin),
+            stdin,
             pending,
             connected,
             timeout: timeout.unwrap_or(DEFAULT_TIMEOUT),
@@ -163,7 +188,7 @@ impl UpstreamConnection {
             self.pending.lock().await.remove(&key);
             return Err(UpstreamError::Closed);
         }
-        if let Err(e) = self.write_line(&request).await {
+        if let Err(e) = write_line(&self.stdin, &request).await {
             self.pending.lock().await.remove(&key);
             return Err(e);
         }
@@ -188,7 +213,7 @@ impl UpstreamConnection {
             "method": method,
             "params": params.cloned().unwrap_or_else(|| json!({})),
         });
-        self.write_line(&notification).await
+        write_line(&self.stdin, &notification).await
     }
 
     /// Terminate the upstream server process.
@@ -198,20 +223,57 @@ impl UpstreamConnection {
             debug!("upstream process already exited: {e}");
         }
     }
+}
 
-    async fn write_line(&self, message: &Value) -> Result<(), UpstreamError> {
-        let mut bytes = serde_json::to_vec(message).unwrap_or_default();
-        bytes.push(b'\n');
-        let mut stdin = self.stdin.lock().await;
-        stdin
-            .write_all(&bytes)
-            .await
-            .map_err(|e| UpstreamError::Write(e.to_string()))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|e| UpstreamError::Write(e.to_string()))
+/// Answer a request the upstream server made of us.
+///
+/// A message with an id that matches no pending request is either a stray
+/// response — nothing to do about that but say so — or a server-initiated
+/// request. The proxy does not relay those to the downstream client, so it
+/// refuses them here rather than letting the server wait out its own timeout.
+async fn refuse_server_request(
+    stdin: &Mutex<tokio::process::ChildStdin>,
+    id: &Value,
+    message: &Value,
+) {
+    let Some(method) = message.get("method").and_then(Value::as_str) else {
+        warn!("upstream response with an id nothing is waiting on (dropped)");
+        return;
+    };
+    warn!(
+        method,
+        "refusing a server-initiated request: not relayed to the downstream client"
+    );
+    let refusal = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": METHOD_NOT_FOUND,
+            "message": format!(
+                "this proxy does not relay server-initiated requests to the client ({method})"
+            ),
+        },
+    });
+    if let Err(e) = write_line(stdin, &refusal).await {
+        warn!("failed to refuse server-initiated request '{method}': {e}");
     }
+}
+
+async fn write_line(
+    stdin: &Mutex<tokio::process::ChildStdin>,
+    message: &Value,
+) -> Result<(), UpstreamError> {
+    let mut bytes = serde_json::to_vec(message).unwrap_or_default();
+    bytes.push(b'\n');
+    let mut stdin = stdin.lock().await;
+    stdin
+        .write_all(&bytes)
+        .await
+        .map_err(|e| UpstreamError::Write(e.to_string()))?;
+    stdin
+        .flush()
+        .await
+        .map_err(|e| UpstreamError::Write(e.to_string()))
 }
 
 impl std::fmt::Debug for UpstreamConnection {
@@ -224,8 +286,10 @@ impl std::fmt::Debug for UpstreamConnection {
 }
 
 #[cfg(test)]
+// The `#[tokio::test]` macro expands to `Runtime::block_on`, which
+// `.clippy.toml` disallows outside test code.
+#[allow(clippy::disallowed_methods)]
 mod tests {
-    #![allow(clippy::disallowed_methods)]
     use super::*;
     use std::time::Instant;
 
