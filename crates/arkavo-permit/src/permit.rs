@@ -1,9 +1,13 @@
 //! Minting, decoding, and verifying CWT permits.
 //!
-//! Wire format: CBOR tag 61 (CWT) wrapping a tagged COSE_Sign1 (tag 18)
-//! whose payload is the CBOR-encoded claims set. The protected header carries
-//! the signing algorithm, the issuer's key identifier, and a content type of
-//! `application/cwt`.
+//! Wire format: CBOR tag 61 (CWT) wrapping a COSE_Sign1 whose payload is the
+//! CBOR-encoded claims set. [`mint`] emits the COSE_Sign1 tagged (tag 18);
+//! the shared `arkavo-cwt` parser also accepts it bare, as authnz-rs emits
+//! it. The protected header carries the signing algorithm, the issuer's key
+//! identifier, and a content type of `application/cwt`; the unprotected
+//! header must be empty. Because those encodings differ in bytes but not in
+//! what was signed, a permit's identity is [`Permit::id`] — a digest of the
+//! signed Sig_structure — and never a hash of the token bytes.
 //!
 //! The issuer signs the permit and the `cnf` claim names the presenter's key
 //! (RFC 8747), so verifiers hold a list of trusted issuer keys: a permit
@@ -30,6 +34,19 @@ pub const MAX_PERMIT_BYTES: usize = 16 * 1024;
 pub struct Permit {
     pub claims: PermitClaims,
     pub confirmation_key: PermitVerifier,
+    /// The permit's stable identity: SHA-256 over the COSE Sig_structure the
+    /// issuer signed (protected header plus payload), never over the wire
+    /// bytes.
+    ///
+    /// The wire bytes are not an identity. The unprotected header is outside
+    /// the signature, the COSE_Sign1 parses whether tagged or bare, and ECDSA
+    /// signatures are malleable, so a holder can re-encode one issuance into
+    /// unboundedly many distinct byte strings that all still verify. Every
+    /// byte this digest covers is signed, so all re-encodings of one issuance
+    /// share an `id` while two distinct issuances do not. Callers keeping
+    /// per-permit state — a budget counter, a replay record — must key it on
+    /// this, never on a hash of the token bytes.
+    pub id: [u8; 32],
 }
 
 /// The key identifier an issuer is named by on the wire: SHA-256 over the
@@ -88,16 +105,23 @@ pub fn decode(cwt: &[u8]) -> Result<Permit, PermitError> {
     extract(&parsed)
 }
 
-/// Decode and fully verify a permit: structure, an issuer drawn from
-/// `trusted_issuers` by the protected header's `kid`, that issuer's
-/// signature, and the nbf/exp/iat window at `now` (seconds since UNIX epoch).
+/// Decode and fully verify a permit.
+///
+/// Checks its structure, an issuer drawn from `trusted_issuers` by the
+/// protected header's `kid`, that issuer's signature, and the nbf/exp/iat
+/// window at `now` (seconds since UNIX epoch).
 ///
 /// The returned [`Permit::confirmation_key`] is the presenter's key from the
 /// `cnf` claim; proving possession of it is a separate step.
 ///
-/// Checks run in order: size cap, CWT tag, COSE parse, issuer lookup,
-/// signature, claim extraction, validity window. A permit from an unknown
-/// issuer is refused before its claims are parsed.
+/// Checks run in order: size cap, CWT tag, COSE parse, empty unprotected
+/// header, issuer lookup, signature, claim extraction, validity window. A
+/// permit from an unknown issuer is refused before its claims are parsed.
+///
+/// The unprotected header must be empty: nothing is expected there and it
+/// sits outside the signature, so refusing it stops a holder re-encoding one
+/// issuance into fresh, still-valid byte strings. That is belt and braces
+/// alongside [`Permit::id`], which digests signed bytes only.
 ///
 /// Input larger than [`MAX_PERMIT_BYTES`] is rejected before parse.
 pub fn verify(
@@ -106,6 +130,11 @@ pub fn verify(
     trusted_issuers: &[PermitVerifier],
 ) -> Result<Permit, PermitError> {
     let parsed = parse_sign1(cwt)?;
+    if !parsed.sign1.unprotected.is_empty() {
+        return Err(PermitError::Cose(
+            "unprotected header must be empty".to_string(),
+        ));
+    }
     let issuer = find_trusted_issuer(&parsed, trusted_issuers)?;
     parsed.verify(&issuer.0)?;
     let permit = extract(&parsed)?;
@@ -166,9 +195,14 @@ fn extract(parsed: &arkavo_cwt::ParsedSign1) -> Result<Permit, PermitError> {
         .map_err(|e| PermitError::CborDeserialize(format!("claims set: {e}")))?;
     let (claims, cose_key) = PermitClaims::from_cbor_value(&value)?;
     let confirmation_key = PermitVerifier::from_cose_key(&cose_key)?;
+    // `tbs_data` rebuilds the Sig_structure the issuer signed, so the digest
+    // covers signed bytes only and is identical for every re-encoding of one
+    // permit.
+    let id = Sha256::digest(parsed.sign1.tbs_data(b"")).into();
     Ok(Permit {
         claims,
         confirmation_key,
+        id,
     })
 }
 
@@ -409,12 +443,12 @@ mod tests {
         let cwt = mint(&sample_claims(), &issuer, &ed25519_signer().public_key()).unwrap();
         // Flip a bit in the final byte: Ed25519 signatures sit at the tail
         // of the COSE_Sign1 array.
-        let mut tampered = cwt.clone();
+        let mut tampered = cwt;
         let last = tampered.len() - 1;
         tampered[last] ^= 0x01;
         assert!(matches!(
             verify(&tampered, NOW, &[issuer.public_key()]),
-            Err(PermitError::InvalidSignature) | Err(PermitError::Cose(_))
+            Err(PermitError::InvalidSignature | PermitError::Cose(_))
         ));
     }
 
@@ -423,7 +457,7 @@ mod tests {
         let issuer = ed25519_signer();
         let cwt = mint(&sample_claims(), &issuer, &ed25519_signer().public_key()).unwrap();
         // Corrupt a byte in the middle of the claims payload.
-        let mut tampered = cwt.clone();
+        let mut tampered = cwt;
         let mid = tampered.len() / 2;
         tampered[mid] ^= 0x40;
         assert!(verify(&tampered, NOW, &[issuer.public_key()]).is_err());
@@ -620,6 +654,79 @@ mod tests {
             permit.confirmation_key.public_key_bytes(),
             holder.public_key().public_key_bytes()
         );
+    }
+
+    #[test]
+    fn id_is_stable_across_reencodings() {
+        // One issuance, three byte strings. The permit's identity has to be
+        // the same for all of them, or a holder re-encodes their way to a
+        // fresh budget counter.
+        let issuer = ed25519_signer();
+        let holder = ed25519_signer();
+        let cwt = mint(&sample_claims(), &issuer, &holder.public_key()).unwrap();
+        let trusted = [issuer.public_key()];
+        let original = verify(&cwt, NOW, &trusted).unwrap();
+        let sign1 = parse_sign1(&cwt).unwrap().sign1;
+
+        // Variant 1: the same COSE_Sign1 serialized bare (no tag 18), still
+        // under the tag-61 prefix. The shared parser accepts both shapes.
+        let mut bare = CWT_TAG_PREFIX.to_vec();
+        bare.extend_from_slice(&sign1.clone().to_vec().unwrap());
+        assert_ne!(bare, cwt, "dropping tag 18 must change the raw bytes");
+
+        // Variant 2: an entry added to the unprotected header, which is
+        // outside the signature and so leaves the issuer's signature valid.
+        let mut padded_sign1 = sign1;
+        padded_sign1
+            .unprotected
+            .rest
+            .push((coset::Label::Int(-1000), Value::Text("padding".to_string())));
+        let mut padded = CWT_TAG_PREFIX.to_vec();
+        padded.extend_from_slice(&padded_sign1.to_tagged_vec().unwrap());
+        assert_ne!(padded, cwt, "the extra header must change the raw bytes");
+
+        // The padded variant never gets that far: verify refuses a non-empty
+        // unprotected header outright.
+        assert!(matches!(
+            verify(&padded, NOW, &trusted),
+            Err(PermitError::Cose(msg)) if msg.contains("unprotected header")
+        ));
+
+        // The bare variant verifies, and shares the original's identity.
+        let reencoded = verify(&bare, NOW, &trusted).unwrap();
+        assert_eq!(reencoded.id, original.id);
+        assert_eq!(reencoded.claims, original.claims);
+        // The unsigned header does not enter the digest either.
+        assert_eq!(decode(&padded).unwrap().id, original.id);
+
+        // A different issuance is a different identity.
+        let mut other_claims = sample_claims();
+        other_claims.tool_name = "arkavo.fs.write".to_string();
+        let other = mint(&other_claims, &issuer, &holder.public_key()).unwrap();
+        assert_ne!(verify(&other, NOW, &trusted).unwrap().id, original.id);
+    }
+
+    #[test]
+    fn decode_reports_the_same_id_as_verify() {
+        let issuer = ed25519_signer();
+        let cwt = mint(&sample_claims(), &issuer, &ed25519_signer().public_key()).unwrap();
+        assert_eq!(
+            decode(&cwt).unwrap().id,
+            verify(&cwt, NOW, &[issuer.public_key()]).unwrap().id
+        );
+    }
+
+    #[test]
+    fn id_covers_the_signed_structure_only() {
+        // Sanity: the digest is SHA-256 over the COSE Sig_structure, not over
+        // the wire bytes.
+        let issuer = ed25519_signer();
+        let cwt = mint(&sample_claims(), &issuer, &ed25519_signer().public_key()).unwrap();
+        let permit = verify(&cwt, NOW, &[issuer.public_key()]).unwrap();
+        let sign1 = parse_sign1(&cwt).unwrap().sign1;
+        let expected: [u8; 32] = Sha256::digest(sign1.tbs_data(b"")).into();
+        assert_eq!(permit.id, expected);
+        assert_ne!(permit.id.as_slice(), Sha256::digest(&cwt).as_slice());
     }
 
     #[test]
