@@ -211,3 +211,107 @@ async fn denied_tool_call_never_reaches_upstream() {
         .expect("proxy run failed");
     let _ = std::fs::remove_file(&record_file);
 }
+
+#[tokio::test]
+async fn permit_bound_call_is_allowed_once_and_refused_on_replay_or_tamper() {
+    use arkavo_crypto::AgentKeypair;
+    use arkavo_dispatch_gate::{DispatchGate, GateConfig};
+    use arkavo_mcp_proxy::PermitPolicy;
+    use arkavo_permit::{
+        Budget, HashAlgorithm, PermitClaims, PermitSigner, argument_hash, mint, prove_invocation,
+    };
+    use base64::Engine as _;
+
+    let now = arkavo_dispatch_gate::unix_now();
+    let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+    let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+    let args = json!({"n": 1});
+    let claims = PermitClaims {
+        issuer: "edge".into(),
+        subject: "agent-1".into(),
+        expires_at: now + 300,
+        not_before: now - 60,
+        issued_at: now - 60,
+        agent_workload_id: "wl-1".into(),
+        policy_bundle_hash: vec![7; 32],
+        tool_name: "echo".into(),
+        argument_hash: argument_hash(&args, HashAlgorithm::Sha256),
+        data_classifications: vec![],
+        budget: Budget {
+            max_invocations: 1,
+            token_ceiling: None,
+            cost_micro_usd: None,
+        },
+        sequence_state_hash: vec![9; 32],
+        parent_permit: None,
+    };
+    let cwt = mint(&claims, &issuer, &holder.public_key()).unwrap();
+    let proof = prove_invocation(&holder, &cwt, "echo", &args, HashAlgorithm::Sha256);
+    let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    let meta = json!({"arkavo": {"permit": b64(&cwt), "pop": b64(&proof)}});
+
+    let gate = DispatchGate::new(GateConfig {
+        policy_bundle_hash: vec![7; 32],
+        hash: HashAlgorithm::Sha256,
+        clock: arkavo_dispatch_gate::unix_now,
+        trusted_issuers: vec![issuer.public_key()],
+    });
+    let (mut client, handle) = start_proxy(fixture_config(), Arc::new(PermitPolicy::new(gate)));
+    client.handshake().await;
+
+    let allowed = client
+        .request(
+            "tools/call",
+            Some(json!({"name": "echo", "arguments": args, "_meta": meta})),
+        )
+        .await;
+    assert!(
+        allowed.get("error").is_none(),
+        "first call must pass: {allowed}"
+    );
+
+    let replay = client
+        .request(
+            "tools/call",
+            Some(json!({"name": "echo", "arguments": args, "_meta": meta})),
+        )
+        .await;
+    assert_eq!(replay["error"]["code"], POLICY_DENIED);
+    assert!(
+        replay["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("budget")
+    );
+
+    let tampered = client
+        .request(
+            "tools/call",
+            Some(json!({"name": "echo", "arguments": {"n": 2}, "_meta": meta})),
+        )
+        .await;
+    assert_eq!(tampered["error"]["code"], POLICY_DENIED);
+    assert!(
+        tampered["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("authn")
+    );
+
+    let bare = client
+        .request(
+            "tools/call",
+            Some(json!({"name": "echo", "arguments": {"n": 3}})),
+        )
+        .await;
+    assert_eq!(bare["error"]["code"], POLICY_DENIED);
+    assert!(
+        bare["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no permit")
+    );
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}

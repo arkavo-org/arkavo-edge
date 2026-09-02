@@ -10,13 +10,20 @@ keywords = ["mcp", "proxy", "policy", "agent"]
 categories = ["development-tools"]
 
 [dependencies]
+arkavo-dispatch-gate = { path = "../arkavo-dispatch-gate" }
+arkavo-observability = { path = "../arkavo-observability" }
+arkavo-permit = { path = "../arkavo-permit" }
 async-trait.workspace = true
+base64.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
 tracing.workspace = true
 
 [dev-dependencies]
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-dispatch-gate = { path = "../arkavo-dispatch-gate" }
+arkavo-permit = { path = "../arkavo-permit" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

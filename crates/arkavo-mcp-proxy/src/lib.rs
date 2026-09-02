@@ -12,10 +12,12 @@
 //! [`CallContext`] struct is the extension point where a principal will be
 //! attached without changing the [`PolicyHook`] trait.
 
+mod permit_hook;
 pub mod policy;
 mod proxy;
 mod upstream;
 
+pub use permit_hook::PermitPolicy;
 pub use policy::{AllowAllPolicy, CallContext, Decision, DenyListPolicy, PolicyHook};
 pub use proxy::{
     INVALID_REQUEST, McpProxy, PARSE_ERROR, POLICY_DENIED, ProxyConfig, ProxyError, UPSTREAM_ERROR,

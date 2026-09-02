@@ -172,16 +172,31 @@ impl McpProxy {
     }
 
     async fn handle_tool_call(&self, id: Value, params: Option<&Value>) -> Value {
+        let tool_name = params
+            .and_then(|p| p.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let arguments = params
+            .and_then(|p| p.get("arguments"))
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let meta = params
+            .and_then(|p| p.get("_meta"))
+            .and_then(|m| m.get("arkavo"));
+        let permit = meta
+            .and_then(|m| m.get("permit"))
+            .and_then(Value::as_str)
+            .and_then(decode_b64url);
+        let proof = meta
+            .and_then(|m| m.get("pop"))
+            .and_then(Value::as_str)
+            .and_then(decode_b64url);
         let ctx = CallContext {
-            tool_name: params
-                .and_then(|p| p.get("name"))
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            arguments: params
-                .and_then(|p| p.get("arguments"))
-                .cloned()
-                .unwrap_or_else(|| json!({})),
+            tool_name,
+            arguments,
+            permit,
+            proof,
         };
 
         let started = Instant::now();
@@ -231,6 +246,14 @@ impl std::fmt::Debug for McpProxy {
             .field("upstream", &self.upstream)
             .finish_non_exhaustive()
     }
+}
+
+/// Decode a base64url-without-padding string, as used by `_meta.arkavo`.
+fn decode_b64url(text: &str) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(text)
+        .ok()
 }
 
 #[cfg(test)]

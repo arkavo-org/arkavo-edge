@@ -16,6 +16,10 @@ pub struct CallContext {
     pub tool_name: String,
     /// Arguments supplied by the caller.
     pub arguments: Value,
+    /// Raw CWT permit bytes from `params._meta.arkavo.permit`, if present.
+    pub permit: Option<Vec<u8>>,
+    /// Raw proof-of-possession signature from `params._meta.arkavo.pop`.
+    pub proof: Option<Vec<u8>>,
 }
 
 /// Outcome of a policy evaluation.
@@ -100,6 +104,8 @@ mod tests {
         CallContext {
             tool_name: tool_name.to_string(),
             arguments: json!({}),
+            permit: None,
+            proof: None,
         }
     }
 

@@ -1559,7 +1559,12 @@ dependencies = [
 name = "arkavo-mcp-proxy"
 version = "0.92.0"
 dependencies = [
+ "arkavo-crypto",
+ "arkavo-dispatch-gate",
+ "arkavo-observability",
+ "arkavo-permit",
  "async-trait",
+ "base64 0.22.1",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
