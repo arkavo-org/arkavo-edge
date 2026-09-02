@@ -37,6 +37,11 @@ pub fn parse(bytes: &[u8]) -> Result<ParsedSign1, CwtError> {
 }
 
 impl ParsedSign1 {
+    /// The key identifier from the **protected** header only.
+    ///
+    /// A `kid` in the unprotected header is deliberately ignored: that bucket
+    /// is outside the signature, so honouring it would let anyone redirect a
+    /// token at a different published key.
     pub fn kid(&self) -> &[u8] {
         &self.sign1.protected.header.key_id
     }
@@ -62,6 +67,10 @@ mod tests {
     use ed25519_dalek::Signer as _;
 
     fn signed(tagged: bool, prefix: bool) -> (Vec<u8>, VerifyingKey) {
+        signed_payload(b"payload".to_vec(), tagged, prefix)
+    }
+
+    fn signed_payload(payload: Vec<u8>, tagged: bool, prefix: bool) -> (Vec<u8>, VerifyingKey) {
         let signing = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
         let protected = HeaderBuilder::new()
             .algorithm(coset::iana::Algorithm::EdDSA)
@@ -69,7 +78,7 @@ mod tests {
             .build();
         let sign1 = CoseSign1Builder::new()
             .protected(protected)
-            .payload(b"payload".to_vec())
+            .payload(payload)
             .create_signature(b"", |data| signing.sign(data).to_bytes().to_vec())
             .build();
         let mut bytes = if prefix {
@@ -99,8 +108,21 @@ mod tests {
 
     #[test]
     fn rejects_oversized_input_before_parsing() {
-        let big = vec![0u8; MAX_TOKEN_BYTES + 1];
-        assert!(matches!(parse(&big), Err(CwtError::Cose(_))));
+        // A well-formed, correctly signed token that is merely too large:
+        // nothing but the size gate can refuse it, so the assertion pins that
+        // gate instead of passing on malformed CBOR.
+        let (big, _) = signed_payload(vec![b'a'; MAX_TOKEN_BYTES], true, true);
+        assert!(big.len() > MAX_TOKEN_BYTES);
+        assert!(matches!(
+            parse(&big),
+            Err(CwtError::Cose(msg)) if msg.contains("maximum size")
+        ));
+        // The same shape under the cap parses and verifies, so the refusal
+        // above is about size and nothing else.
+        let (small, key) = signed_payload(vec![b'a'; 64], true, true);
+        let parsed = parse(&small).unwrap();
+        assert_eq!(parsed.payload().unwrap().len(), 64);
+        parsed.verify(&key).unwrap();
     }
 
     #[test]

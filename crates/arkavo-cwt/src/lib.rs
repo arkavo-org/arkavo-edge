@@ -1,9 +1,14 @@
 //! Verification of the short-lived agent CWT issued by authnz-rs.
 //!
 //! The token is a COSE_Sign1 (ES256) carrying CWT claims, transported as
-//! base64url-without-padding and prefixed with CBOR tag 61 (`D8 3D`) around an
-//! otherwise untagged COSE_Sign1. Signing keys are published as a COSE key set
-//! at `<issuer>/.well-known/cose-keys`.
+//! base64url-without-padding. authnz-rs emits CBOR tag 61 (`D8 3D`) around an
+//! otherwise untagged COSE_Sign1, but the parser is deliberately permissive
+//! about the envelope: the tag-61 prefix is optional and the COSE_Sign1 may
+//! also be tagged (tag 18), the form `arkavo-permit` mints. Signing keys are
+//! published as a COSE key set at `<issuer>/.well-known/cose-keys`.
+//!
+//! Untrusted input over [`sign1::MAX_TOKEN_BYTES`] (16 KiB) is refused before
+//! any CBOR work.
 
 pub mod claims;
 pub mod key;
