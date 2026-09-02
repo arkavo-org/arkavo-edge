@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -16,16 +17,15 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-SYSTEM = (
-    "You are the Arkavo sentinel for the Northwind example pack. "
-    "Classify the user's text. Reply with exactly one word: public, internal, or confidential."
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from train import SYSTEM as TRAIN_SYSTEM  # noqa: E402
+
 LABELS = ("public", "internal", "confidential")
 
 
-def classify(model, tok, device, span: str) -> tuple[str, dict[str, float]]:
+def classify(model, tok, device, span: str, system: str) -> tuple[str, dict[str, float]]:
     messages = [
-        {"role": "system", "content": SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content": span},
     ]
     prompt = tok.apply_chat_template(
@@ -45,12 +45,47 @@ def classify(model, tok, device, span: str) -> tuple[str, dict[str, float]]:
     return pred, {l: float(probs[i]) for i, l in enumerate(LABELS)}
 
 
+def _confidential_probs(results: list[dict], method: str | None = None) -> list[float]:
+    return [
+        r["probs"]["confidential"]
+        for r in results
+        if r["gold"] == "confidential" and (method is None or r["method"] == method)
+    ]
+
+
+def threshold_from(results: list[dict]) -> float:
+    """Conservative confidential threshold: min gold-confidential probability.
+
+    Prefers rewrite-eval rows (faithful rewrites, the hardest confidential
+    case); falls back to gold-confidential rows of any method when the
+    corpus has no rewrite rows; falls back to 0.5 when it has no
+    gold-confidential rows at all.
+    """
+    rewrite_conf = _confidential_probs(results, "rewrite")
+    if rewrite_conf:
+        return min(rewrite_conf)
+    any_conf = _confidential_probs(results)
+    if any_conf:
+        return min(any_conf)
+    return 0.5
+
+
+def threshold_source(results: list[dict]) -> str:
+    if _confidential_probs(results, "rewrite"):
+        return "rewrite"
+    if _confidential_probs(results):
+        return "all-confidential"
+    return "default"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--system", default=TRAIN_SYSTEM)
+    parser.add_argument("--detector-version", default="qwen3.5-0.8b-lora")
     args = parser.parse_args()
 
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -65,13 +100,10 @@ def main() -> None:
     rows = json.loads((args.data / "eval.json").read_text())
     results = []
     by_method: dict[str, list[bool]] = defaultdict(list)
-    conf_probs: list[float] = []
     for row in rows:
-        pred, probs = classify(model, tok, device, row["text"])
+        pred, probs = classify(model, tok, device, row["text"], args.system)
         ok = pred == row["sensitivity"]
         by_method[row["method"]].append(ok)
-        if row["sensitivity"] == "confidential":
-            conf_probs.append(probs["confidential"])
         results.append(
             {
                 "source_id": row["source_id"],
@@ -93,18 +125,13 @@ def main() -> None:
         method: {"n": len(v), "correct": sum(v)}
         for method, v in sorted(by_method.items())
     }
-    # Conservative: fire confidential if its three-way mass is at least the
-    # lowest gold-confidential probability on rewrite (not unseen).
-    rewrite_conf = [
-        r["probs"]["confidential"]
-        for r in results
-        if r["method"] == "rewrite" and r["gold"] == "confidential"
-    ]
-    threshold = min(rewrite_conf) if rewrite_conf else 0.5
+    threshold = threshold_from(results)
+    source = threshold_source(results)
     calibration = {
-        "detector_version": "qwen3.5-0.8b-northwind-lora",
+        "detector_version": args.detector_version,
         "taxonomy_version": "1.0.0",
         "thresholds": {"confidential": threshold, "internal": 0.5, "public": 0.5},
+        "threshold_source": source,
         "example_only": True,
         "eval": summary,
     }
@@ -112,7 +139,7 @@ def main() -> None:
     (args.out / "eval.json").write_text(json.dumps(results, indent=2) + "\n")
     (args.out / "calibration.json").write_text(json.dumps(calibration, indent=2) + "\n")
     print("summary", json.dumps(summary))
-    print(f"confidential threshold (min rewrite p) {threshold:.3f}")
+    print(f"confidential threshold ({source}) {threshold:.3f}")
     print(f"wrote {args.out}")
 
 
