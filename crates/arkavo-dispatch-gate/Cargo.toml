@@ -1,0 +1,19 @@
+[package]
+name = "arkavo-dispatch-gate"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Permit-bound dispatch gate: authn, policy, and budget checks over a permit and a proof-of-possession"
+
+[lints]
+workspace = true
+
+[dependencies]
+arkavo-permit = { path = "../arkavo-permit" }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+arkavo-crypto = { path = "../arkavo-crypto" }
