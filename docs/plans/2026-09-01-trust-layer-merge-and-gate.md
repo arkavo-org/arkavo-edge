@@ -1166,6 +1166,13 @@ Expected: 5 unit + 2 integration tests pass. The integration tests spawn `python
 
 ### Task C2: Proof-of-possession over an invocation in `arkavo-permit`
 
+> **Superseded as implemented:** the digest names the permit by `Permit::id`
+> — the digest of its signed content — rather than by its wire bytes, so the
+> proof and the gate's budget counter use one notion of "the same permit".
+> The signatures below therefore take `permit_id: &[u8; 32]` where they say
+> `permit_cwt: &[u8]`, and `verify_invocation_proof` needs no token bytes at
+> all. `docs/permit-cwt-schema.md` carries the shipped definition.
+
 **Files:**
 - Create: `crates/arkavo-permit/src/pop.rs`
 - Modify: `crates/arkavo-permit/src/lib.rs` (`mod pop; pub use pop::{invocation_digest, prove_invocation, verify_invocation_proof};`)
