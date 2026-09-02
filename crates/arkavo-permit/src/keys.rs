@@ -83,6 +83,28 @@ impl PermitVerifier {
         Ok(Self(arkavo_cwt::VerifyingKey::from_cose_key(key)?))
     }
 
+    /// Build a verifier from raw public key bytes: 32 bytes for Ed25519, or
+    /// 65-byte uncompressed SEC1 for P-256. Fails closed on any other
+    /// length or malformed encoding.
+    pub fn from_public_key_bytes(bytes: &[u8]) -> Result<Self, PermitError> {
+        match bytes.len() {
+            32 => {
+                let raw: [u8; 32] = bytes.try_into().expect("length checked above");
+                let key = ed25519_dalek::VerifyingKey::from_bytes(&raw)
+                    .map_err(|e| PermitError::InvalidConfirmationKey(e.to_string()))?;
+                Ok(Self(arkavo_cwt::VerifyingKey::Ed25519(key)))
+            }
+            65 => {
+                let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(bytes)
+                    .map_err(|e| PermitError::InvalidConfirmationKey(e.to_string()))?;
+                Ok(Self(arkavo_cwt::VerifyingKey::P256(key)))
+            }
+            _ => Err(PermitError::InvalidConfirmationKey(
+                "public key must be 32 raw Ed25519 bytes or 65 SEC1 P-256 bytes".to_string(),
+            )),
+        }
+    }
+
     /// Verify a COSE signature value against a Sig_structure.
     pub fn verify(
         &self,
@@ -238,6 +260,33 @@ mod tests {
         let key =
             CoseKeyBuilder::new_ec2_pub_key(EllipticCurve::P_384, vec![1; 48], vec![2; 48]).build();
         assert!(PermitVerifier::from_cose_key(&key).is_err());
+    }
+
+    #[test]
+    fn ed25519_public_key_bytes_roundtrip_via_from_public_key_bytes() {
+        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let verifier = signer.public_key();
+        let bytes = verifier.public_key_bytes();
+        let recovered = PermitVerifier::from_public_key_bytes(&bytes).unwrap();
+        assert_eq!(recovered.public_key_bytes(), bytes);
+    }
+
+    #[test]
+    fn p256_public_key_bytes_roundtrip_via_from_public_key_bytes() {
+        let signer = PermitSigner::P256(P256SigningKeypair::generate());
+        let verifier = signer.public_key();
+        let bytes = verifier.public_key_bytes();
+        let recovered = PermitVerifier::from_public_key_bytes(&bytes).unwrap();
+        assert_eq!(recovered.public_key_bytes(), bytes);
+    }
+
+    #[test]
+    fn from_public_key_bytes_rejects_wrong_length() {
+        let bytes = vec![0u8; 33];
+        assert!(matches!(
+            PermitVerifier::from_public_key_bytes(&bytes),
+            Err(PermitError::InvalidConfirmationKey(_))
+        ));
     }
 
     #[test]
