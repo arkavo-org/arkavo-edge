@@ -92,6 +92,11 @@ the container build:
 Pass secrets with `docker run -e ...` or an orchestrator secret mechanism;
 never bake them into the image.
 
+## Health probes
+
+Liveness: `GET /healthz` on the AG-UI port returns `200 ok` once the listener is bound.
+Readiness: `GET /readyz` returns `200` while the health registry reports healthy or degraded, `503` otherwise.
+
 ## Known limitations
 
 - **Unauthenticated gateway, exposed by this image**: the AG-UI gateway

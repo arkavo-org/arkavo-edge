@@ -476,6 +476,8 @@ impl AgUiGateway {
         // Static file routes (no rate limiting — browser loads many files at once)
         let static_routes = Router::new()
             .route("/", get(crate::gateway_static::index_handler))
+            .route("/healthz", get(crate::gateway_health::healthz_handler))
+            .route("/readyz", get(crate::gateway_health::readyz_handler))
             .route(
                 "/static/*path",
                 get(crate::gateway_static::static_file_handler),
