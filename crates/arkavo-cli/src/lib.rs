@@ -76,6 +76,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "chat" => commands::chat::execute(&args[1..]),
         "task" => commands::task::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),
+        "mcp" => commands::mcp_proxy::execute(&args[1..]),
         "login" | "logout" => {
             let is_login = args[0] == "login";
             let run_async = async {
