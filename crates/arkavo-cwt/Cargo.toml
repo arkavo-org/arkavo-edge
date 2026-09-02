@@ -19,6 +19,9 @@ base64 = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# `sync` only: the cached key set serializes its refreshes so a burst of
+# unknown-kid verifications makes one request, not one each.
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }

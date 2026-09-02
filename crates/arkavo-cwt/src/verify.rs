@@ -383,6 +383,64 @@ mod tests {
         );
     }
 
+    /// The "at most once per ttl" invariant has to hold under load, not only
+    /// in sequence: several verifications of the same unknown kid arriving
+    /// together must produce one request to `/.well-known/cose-keys`, not one
+    /// each. Before the refresh was serialized they all observed the same
+    /// stale timestamp and every one of them fetched.
+    #[tokio::test]
+    #[spec("ACWT-003")]
+    async fn cached_keyset_coalesces_concurrent_unknown_kid_refetches() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let stale = new_key();
+        // A kid the endpoint never publishes, so every verification misses.
+        let token = mint(&new_key(), &[0xCCu8; 32], &["arkavo-kas"], NOW + 600, true);
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/cose-keys"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(key_set_cbor(&[(&[0x99u8; 32], *stale.verifying_key())])),
+            )
+            .mount(&server)
+            .await;
+        let url = format!("{}/.well-known/cose-keys", server.uri());
+
+        let keys = std::sync::Arc::new(CachedKeySet::new(&url, Duration::from_millis(50)));
+        // Prime the cache: one fetch, then the miss is suppressed by the ttl.
+        assert!(matches!(
+            keys.verify(&token, &opts(Some("arkavo-kas"))).await,
+            Err(CwtError::UnknownKid(_))
+        ));
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+
+        // Let the ttl lapse so both of the next verifications are entitled to
+        // refetch, then run them together.
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        let (first, second) = tokio::join!(
+            {
+                let keys = keys.clone();
+                let token = token.clone();
+                async move { keys.verify(&token, &opts(Some("arkavo-kas"))).await }
+            },
+            {
+                let keys = keys.clone();
+                let token = token.clone();
+                async move { keys.verify(&token, &opts(Some("arkavo-kas"))).await }
+            }
+        );
+        assert!(matches!(first, Err(CwtError::UnknownKid(_))));
+        assert!(matches!(second, Err(CwtError::UnknownKid(_))));
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            2,
+            "concurrent unknown-kid verifications must collapse into one refetch"
+        );
+    }
+
     /// authnz-contract.md: agent tokens carry `arkavo_npe: {type: "agent",
     /// delegation_id, depth, chain}` and omit `act` entirely when no actors
     /// are configured (not an empty array). Before this test the mint helper

@@ -3,7 +3,9 @@
 
 use crate::CwtError;
 use ciborium::Value;
-use coset::iana::{Algorithm, Ec2KeyParameter, EllipticCurve, EnumI64, KeyType, OkpKeyParameter};
+use coset::iana::{
+    Algorithm, Ec2KeyParameter, EllipticCurve, EnumI64, KeyOperation, KeyType, OkpKeyParameter,
+};
 use coset::{CoseKey, CoseKeyBuilder, Label, RegisteredLabel};
 use p256::ecdsa::signature::Verifier as _;
 
@@ -21,10 +23,19 @@ impl VerifyingKey {
         }
     }
 
+    /// Recover a verification key from a COSE_Key.
+    ///
+    /// `alg` and `key_ops` are honoured when present (RFC 8152 section 7):
+    /// a key that declares an algorithm must declare the one its type signs
+    /// with, and a key that enumerates its operations must include `verify`.
+    /// Both are optional in COSE, and a key that states neither is used as
+    /// its `kty` and curve describe it.
     pub fn from_cose_key(key: &CoseKey) -> Result<Self, CwtError> {
+        expect_key_ops(key)?;
         match key.kty {
             RegisteredLabel::Assigned(KeyType::OKP) => {
                 expect_curve(key, OkpKeyParameter::Crv.to_i64(), EllipticCurve::Ed25519)?;
+                expect_algorithm(key, Algorithm::EdDSA)?;
                 let x = bytes_param(key, OkpKeyParameter::X.to_i64(), "x")?;
                 let raw: [u8; 32] = x
                     .try_into()
@@ -35,6 +46,7 @@ impl VerifyingKey {
             }
             RegisteredLabel::Assigned(KeyType::EC2) => {
                 expect_curve(key, Ec2KeyParameter::Crv.to_i64(), EllipticCurve::P_256)?;
+                expect_algorithm(key, Algorithm::ES256)?;
                 let x = bytes_param(key, Ec2KeyParameter::X.to_i64(), "x")?;
                 let y = bytes_param(key, Ec2KeyParameter::Y.to_i64(), "y")?;
                 if x.len() != 32 || y.len() != 32 {
@@ -124,6 +136,36 @@ fn bytes_param<'a>(key: &'a CoseKey, label: i64, name: &str) -> Result<&'a [u8],
         .ok_or_else(|| CwtError::Key(format!("COSE key is missing its {name} coordinate")))
 }
 
+/// A COSE key may restrict itself to one algorithm (RFC 8152 section 7,
+/// label 3). When it does, it must be the algorithm its key type signs with:
+/// honouring a key that names something else would let a publisher's stated
+/// restriction be ignored.
+fn expect_algorithm(key: &CoseKey, expected: Algorithm) -> Result<(), CwtError> {
+    match &key.alg {
+        None => Ok(()),
+        Some(coset::RegisteredLabelWithPrivate::Assigned(actual)) if *actual == expected => Ok(()),
+        Some(actual) => Err(CwtError::Key(format!(
+            "COSE key declares alg {actual:?}, which is not {expected:?}"
+        ))),
+    }
+}
+
+/// A COSE key may enumerate the operations it is for (label 4). A key that
+/// does must include `verify`; one that does not is unrestricted.
+fn expect_key_ops(key: &CoseKey) -> Result<(), CwtError> {
+    if key.key_ops.is_empty()
+        || key
+            .key_ops
+            .contains(&RegisteredLabel::Assigned(KeyOperation::Verify))
+    {
+        Ok(())
+    } else {
+        Err(CwtError::Key(
+            "COSE key's key_ops does not include verify".into(),
+        ))
+    }
+}
+
 fn expect_curve(key: &CoseKey, label: i64, curve: EllipticCurve) -> Result<(), CwtError> {
     let actual = param(key, label).and_then(Value::as_integer);
     if actual == Some(curve.to_i64().into()) {
@@ -174,6 +216,49 @@ mod tests {
             key.verify(Algorithm::EdDSA, b"data", &sig),
             Err(CwtError::BadSignature)
         ));
+    }
+
+    /// RFC 8152 section 7: `alg` restricts the key to one algorithm. A key
+    /// published as ES256 must not be accepted as an Ed25519 verifier just
+    /// because its `kty` and curve line up.
+    #[test]
+    fn declared_algorithm_must_match_the_key_type() {
+        let signing = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let mut cose = VerifyingKey::Ed25519(signing.verifying_key()).to_cose_key();
+        cose.alg = Some(coset::RegisteredLabelWithPrivate::Assigned(
+            Algorithm::ES256,
+        ));
+        assert!(matches!(
+            VerifyingKey::from_cose_key(&cose),
+            Err(CwtError::Key(message)) if message.contains("alg")
+        ));
+
+        // A key that declares nothing is used as its type describes it.
+        cose.alg = None;
+        assert!(VerifyingKey::from_cose_key(&cose).is_ok());
+    }
+
+    /// `key_ops` says what the key may be used for. One published for signing
+    /// only is not a verification key, whatever its coordinates say.
+    #[test]
+    fn key_ops_must_include_verify_when_present() {
+        let signing = p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng);
+        let mut cose = VerifyingKey::P256(*signing.verifying_key()).to_cose_key();
+        cose.key_ops = [RegisteredLabel::Assigned(KeyOperation::Sign)]
+            .into_iter()
+            .collect();
+        assert!(matches!(
+            VerifyingKey::from_cose_key(&cose),
+            Err(CwtError::Key(message)) if message.contains("key_ops")
+        ));
+
+        cose.key_ops = [
+            RegisteredLabel::Assigned(KeyOperation::Sign),
+            RegisteredLabel::Assigned(KeyOperation::Verify),
+        ]
+        .into_iter()
+        .collect();
+        assert!(VerifyingKey::from_cose_key(&cose).is_ok());
     }
 
     #[test]

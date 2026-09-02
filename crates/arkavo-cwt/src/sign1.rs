@@ -18,11 +18,17 @@ pub struct ParsedSign1 {
 /// Parse a CWT-shaped COSE_Sign1. The tag-61 prefix is optional and the
 /// COSE_Sign1 may be tagged (18) or bare: authnz-rs emits bare, permits
 /// emit tagged, and both must verify through the same code.
+///
+/// Two bounds are applied to untrusted input before any CBOR decoder sees
+/// it: [`MAX_TOKEN_BYTES`] on the length, and
+/// [`crate::depth::MAX_NESTING_DEPTH`] on the nesting — of the token and of
+/// the CBOR its byte strings carry, since a decoder walks both recursively.
 pub fn parse(bytes: &[u8]) -> Result<ParsedSign1, CwtError> {
     if bytes.len() > MAX_TOKEN_BYTES {
         return Err(CwtError::Cose("token exceeds maximum size".into()));
     }
     let body = bytes.strip_prefix(&CWT_TAG_PREFIX[..]).unwrap_or(bytes);
+    crate::depth::check(body)?;
     let sign1 = CoseSign1::from_tagged_slice(body)
         .or_else(|_| CoseSign1::from_slice(body))
         .map_err(|e| CwtError::Cose(e.to_string()))?;
@@ -123,6 +129,34 @@ mod tests {
         let parsed = parse(&small).unwrap();
         assert_eq!(parsed.payload().unwrap().len(), 64);
         parsed.verify(&key).unwrap();
+    }
+
+    /// A token whose CBOR nests thousands of levels deep sits well under the
+    /// 16 KiB cap — one byte buys one level — and reaches ciborium's
+    /// recursive decoder before any signature is checked. The depth bound is
+    /// what refuses it.
+    #[test]
+    fn rejects_deeply_nested_cbor_under_the_size_cap() {
+        let mut deep = vec![0x81u8; 200];
+        deep.push(0x00);
+        assert!(deep.len() < MAX_TOKEN_BYTES);
+        assert!(matches!(
+            parse(&deep),
+            Err(CwtError::Cose(message)) if message.contains("nesting depth")
+        ));
+
+        // The same depth hidden in the payload byte string, where a decoder
+        // walks it just as recursively.
+        let (nested_payload, _) = signed_payload(deep, true, true);
+        assert!(matches!(
+            parse(&nested_payload),
+            Err(CwtError::Cose(message)) if message.contains("nesting depth")
+        ));
+
+        // An ordinary token is unaffected: it still parses and verifies.
+        let (bytes, key) = signed(true, true);
+        let parsed = parse(&bytes).expect("a normal token still parses");
+        parsed.verify(&key).expect("and still verifies");
     }
 
     #[test]

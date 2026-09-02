@@ -8,9 +8,12 @@
 //! published as a COSE key set at `<issuer>/.well-known/cose-keys`.
 //!
 //! Untrusted input over [`sign1::MAX_TOKEN_BYTES`] (16 KiB) is refused before
-//! any CBOR work.
+//! any CBOR work, as is input nesting deeper than
+//! [`depth::MAX_NESTING_DEPTH`] (16) — including the CBOR carried inside the
+//! COSE byte strings, which a decoder walks just as recursively.
 
 pub mod claims;
+pub mod depth;
 pub mod key;
 pub mod keys;
 pub mod sign1;

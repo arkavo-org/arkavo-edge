@@ -10,6 +10,13 @@ use coset::{CborSerializable, CoseKeySet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+/// The largest `/.well-known/cose-keys` body this crate will read.
+///
+/// A key set is a handful of 32-byte coordinates; anything past this is a
+/// misbehaving or hostile endpoint, and reading it to the end would be its
+/// denial of service.
+pub const MAX_KEY_SET_BYTES: usize = 64 * 1024;
+
 /// The ES256 verification keys the issuer currently publishes.
 pub struct KeySet {
     keys: Vec<(Vec<u8>, crate::VerifyingKey)>,
@@ -40,15 +47,29 @@ impl KeySet {
     }
 
     /// Fetch and parse the key set published at `url`.
+    ///
+    /// The body is read chunk by chunk and refused as soon as it passes
+    /// [`MAX_KEY_SET_BYTES`], so an endpoint that streams without end — or a
+    /// redirect to one — cannot make this allocate without bound. The
+    /// advertised `Content-Length` is not consulted: it is the endpoint's own
+    /// claim, and the accumulated length is the bound that actually holds.
     pub async fn fetch(url: &str) -> Result<Self, CwtError> {
-        let body = reqwest::get(url)
+        let mut response = reqwest::get(url)
             .await
             .map_err(|e| CwtError::Fetch(e.to_string()))?
             .error_for_status()
-            .map_err(|e| CwtError::Fetch(e.to_string()))?
-            .bytes()
-            .await
             .map_err(|e| CwtError::Fetch(e.to_string()))?;
+        let mut body: Vec<u8> = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| CwtError::Fetch(e.to_string()))?
+        {
+            if body.len() + chunk.len() > MAX_KEY_SET_BYTES {
+                return Err(CwtError::KeySet("key set larger than 64 KiB".into()));
+            }
+            body.extend_from_slice(&chunk);
+        }
         Self::from_cbor(&body)
     }
 
@@ -69,10 +90,15 @@ struct Cached {
 ///
 /// Refetching happens no more than once per `ttl`, so a token signed by a key
 /// that will never be published cannot turn into a fetch per verification.
+/// That holds under concurrency too: fetches are serialized on `refreshing`,
+/// and whoever waits there re-reads the cache before deciding, so a burst of
+/// unknown-kid verifications collapses into one request rather than one each.
 pub struct CachedKeySet {
     url: String,
     ttl: Duration,
     cached: RwLock<Option<Cached>>,
+    /// Held across the fetch so concurrent refreshes coalesce.
+    refreshing: tokio::sync::Mutex<()>,
 }
 
 impl CachedKeySet {
@@ -81,6 +107,7 @@ impl CachedKeySet {
             url: url.into(),
             ttl,
             cached: RwLock::new(None),
+            refreshing: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -115,22 +142,38 @@ impl CachedKeySet {
             .map(|cached| (cached.keys.clone(), cached.fetched_at))
     }
 
+    /// Fetch the key set, unless a concurrent caller just did.
+    ///
+    /// The `refreshing` lock is what makes "at most once per ttl" hold when
+    /// several verifications miss at the same time: the first fetches, the
+    /// rest wait, and each of them then finds a cache younger than the ttl
+    /// and takes it instead of issuing a request of its own.
     async fn refresh(&self) -> Result<Arc<KeySet>, CwtError> {
+        let guard = self.refreshing.lock().await;
+        if let Some((keys, fetched_at)) = self.snapshot()
+            && fetched_at.elapsed() < self.ttl
+        {
+            return Ok(keys);
+        }
         let keys = Arc::new(KeySet::fetch(&self.url).await?);
-        let mut guard = self
+        let mut cached = self
             .cached
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *guard = Some(Cached {
+        *cached = Some(Cached {
             keys: keys.clone(),
             fetched_at: Instant::now(),
         });
+        drop(cached);
         drop(guard);
         Ok(keys)
     }
 }
 
 #[cfg(test)]
+// The `#[tokio::test]` macro expands to `Runtime::block_on`, which
+// `.clippy.toml` disallows outside test code.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use coset::CoseKeyBuilder;
@@ -168,6 +211,56 @@ mod tests {
             Err(other) => panic!("expected CwtError::KeySet, got {other:?}"),
             Ok(_) => panic!("31-byte x must be rejected, not accepted"),
         }
+    }
+
+    /// A key endpoint that answers with megabytes — compromised, misbehaving,
+    /// or a redirect to something else entirely — must not be read to the
+    /// end. The body is refused as it arrives, at 64 KiB.
+    #[tokio::test]
+    async fn fetch_refuses_an_oversized_key_set() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/cose-keys"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_bytes(vec![0u8; MAX_KEY_SET_BYTES + 1]),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/.well-known/cose-keys", server.uri());
+        match KeySet::fetch(&url).await {
+            Err(CwtError::KeySet(message)) => {
+                assert!(message.contains("64 KiB"), "message: {message}");
+            }
+            Err(other) => panic!("expected a size refusal, got {other:?}"),
+            Ok(_) => panic!("an oversized body must not be parsed"),
+        }
+    }
+
+    /// The cap refuses what is too large without refusing what is not: a
+    /// real key set, served by the same path, still parses.
+    #[tokio::test]
+    async fn fetch_accepts_a_key_set_under_the_cap() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let (x, y) = valid_coordinates();
+        let body = cose_key_with(x, y);
+        assert!(body.len() < MAX_KEY_SET_BYTES);
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/cose-keys"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/.well-known/cose-keys", server.uri());
+        let keys = KeySet::fetch(&url).await.expect("key set under the cap");
+        assert!(keys.get(&[0xAA; 32]).is_some());
     }
 
     #[test]
