@@ -2,7 +2,12 @@
 //!
 //! Wire format: CBOR tag 61 (CWT) wrapping a tagged COSE_Sign1 (tag 18)
 //! whose payload is the CBOR-encoded claims set. The protected header carries
-//! the signing algorithm and a content type of `application/cwt`.
+//! the signing algorithm, the issuer's key identifier, and a content type of
+//! `application/cwt`.
+//!
+//! The issuer signs the permit and the `cnf` claim names the presenter's key
+//! (RFC 8747), so verifiers hold a list of trusted issuer keys: a permit
+//! signed by the key it confirms proves nothing about authority.
 
 use crate::claims::PermitClaims;
 use crate::error::PermitError;
@@ -10,6 +15,7 @@ use crate::keys::{PermitSigner, PermitVerifier};
 use ciborium::value::Value;
 use coset::iana::CoapContentFormat;
 use coset::{CoseSign1Builder, HeaderBuilder, TaggedCborSerializable};
+use sha2::{Digest, Sha256};
 
 /// CBOR tag 61 (CWT) prefix bytes: 0xd8 0x3d.
 const CWT_TAG_PREFIX: [u8; 2] = [0xd8, 0x3d];
@@ -18,29 +24,47 @@ const CWT_TAG_PREFIX: [u8; 2] = [0xd8, 0x3d];
 /// is rejected before COSE/CBOR parse.
 pub const MAX_PERMIT_BYTES: usize = 16 * 1024;
 
-/// A decoded permit: the validated claims plus the confirmation key they
-/// were bound to. Instances returned by [`verify`] are additionally
-/// signature- and time-checked.
+/// A decoded permit: the validated claims plus the presenter's confirmation
+/// key from the `cnf` claim. Instances returned by [`verify`] are
+/// additionally issuer-, signature- and time-checked.
 pub struct Permit {
     pub claims: PermitClaims,
     pub confirmation_key: PermitVerifier,
 }
 
-/// Mint a signed permit CWT. The `cnf` claim is derived from the signer.
-pub fn mint(claims: &PermitClaims, signer: &PermitSigner) -> Result<Vec<u8>, PermitError> {
+/// The key identifier an issuer is named by on the wire: SHA-256 over the
+/// issuer's raw public key bytes. [`mint`] writes it into the protected
+/// header and [`verify`] looks the issuer up by it.
+pub fn issuer_kid(issuer: &PermitVerifier) -> [u8; 32] {
+    Sha256::digest(issuer.public_key_bytes()).into()
+}
+
+/// Mint a permit CWT signed by `issuer`, confirming `confirmation_key` as the
+/// presenter's proof-of-possession key (RFC 8747).
+///
+/// The two keys are distinct roles: the issuer's key is the authority a
+/// verifier trusts, the confirmation key belongs to whoever will present the
+/// permit. Passing the same key for both produces a permit no verifier
+/// accepts unless that key is on its trusted issuer list.
+pub fn mint(
+    claims: &PermitClaims,
+    issuer: &PermitSigner,
+    confirmation_key: &PermitVerifier,
+) -> Result<Vec<u8>, PermitError> {
     claims.validate()?;
-    let claims_value = claims.to_cbor_value(&signer.cose_key())?;
+    let claims_value = claims.to_cbor_value(&confirmation_key.to_cose_key())?;
     let mut payload = Vec::new();
     ciborium::into_writer(&claims_value, &mut payload)
         .map_err(|e| PermitError::CborSerialize(format!("claims set: {e}")))?;
     let header = HeaderBuilder::new()
-        .algorithm(signer.algorithm())
+        .algorithm(issuer.algorithm())
+        .key_id(issuer_kid(&issuer.public_key()).to_vec())
         .content_format(CoapContentFormat::Cwt)
         .build();
     let sign1 = CoseSign1Builder::new()
         .protected(header)
         .payload(payload)
-        .create_signature(&[], |data| signer.sign(data))
+        .create_signature(&[], |data| issuer.sign(data))
         .build();
     let sign1_bytes = sign1
         .to_tagged_vec()
@@ -54,8 +78,9 @@ pub fn mint(claims: &PermitClaims, signer: &PermitSigner) -> Result<Vec<u8>, Per
 /// Decode a permit without verifying the signature or validity window.
 ///
 /// The claims are structurally validated (fail-closed on malformed input),
-/// but callers must not make authorization decisions from the result; use
-/// [`verify`] for that.
+/// but the issuer is neither identified nor trusted and the signature is not
+/// checked, so callers must not make authorization decisions from the
+/// result; use [`verify`] for that.
 ///
 /// Input larger than [`MAX_PERMIT_BYTES`] is rejected before parse.
 pub fn decode(cwt: &[u8]) -> Result<Permit, PermitError> {
@@ -63,15 +88,27 @@ pub fn decode(cwt: &[u8]) -> Result<Permit, PermitError> {
     extract(&parsed)
 }
 
-/// Decode and fully verify a permit: structure, signature against the `cnf`
-/// key, algorithm/key agreement, and the nbf/exp/iat window at `now`
-/// (seconds since UNIX epoch).
+/// Decode and fully verify a permit: structure, an issuer drawn from
+/// `trusted_issuers` by the protected header's `kid`, that issuer's
+/// signature, and the nbf/exp/iat window at `now` (seconds since UNIX epoch).
+///
+/// The returned [`Permit::confirmation_key`] is the presenter's key from the
+/// `cnf` claim; proving possession of it is a separate step.
+///
+/// Checks run in order: size cap, CWT tag, COSE parse, issuer lookup,
+/// signature, claim extraction, validity window. A permit from an unknown
+/// issuer is refused before its claims are parsed.
 ///
 /// Input larger than [`MAX_PERMIT_BYTES`] is rejected before parse.
-pub fn verify(cwt: &[u8], now: i64) -> Result<Permit, PermitError> {
+pub fn verify(
+    cwt: &[u8],
+    now: i64,
+    trusted_issuers: &[PermitVerifier],
+) -> Result<Permit, PermitError> {
     let parsed = parse_sign1(cwt)?;
+    let issuer = find_trusted_issuer(&parsed, trusted_issuers)?;
+    parsed.verify(&issuer.0)?;
     let permit = extract(&parsed)?;
-    parsed.verify(&permit.confirmation_key.0)?;
     let claims = &permit.claims;
     if now < claims.not_before {
         return Err(PermitError::NotYetValid {
@@ -92,6 +129,25 @@ pub fn verify(cwt: &[u8], now: i64) -> Result<Permit, PermitError> {
         });
     }
     Ok(permit)
+}
+
+/// The trusted issuer named by the token's `kid`, or
+/// [`PermitError::UntrustedIssuer`].
+///
+/// A candidate must match both the key identifier and the header algorithm,
+/// so a header cannot borrow a trusted issuer's identity under an algorithm
+/// that issuer does not sign with.
+fn find_trusted_issuer<'a>(
+    parsed: &arkavo_cwt::ParsedSign1,
+    trusted_issuers: &'a [PermitVerifier],
+) -> Result<&'a PermitVerifier, PermitError> {
+    let kid = parsed.kid();
+    trusted_issuers
+        .iter()
+        .find(|issuer| {
+            issuer_kid(issuer).as_slice() == kid && issuer.algorithm() == parsed.algorithm
+        })
+        .ok_or(PermitError::UntrustedIssuer)
 }
 
 fn parse_sign1(cwt: &[u8]) -> Result<arkavo_cwt::ParsedSign1, PermitError> {
@@ -119,12 +175,12 @@ fn extract(parsed: &arkavo_cwt::ParsedSign1) -> Result<Permit, PermitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::claims::{BUDGET_MAX_INVOCATIONS, Budget, CLAIM_CONFIRMATION, CNF_COSE_KEY};
+    use crate::argument_hash;
+    use crate::claims::{BUDGET_MAX_INVOCATIONS, Budget};
     use crate::hash::HashAlgorithm;
-    use crate::{argument_hash, keys::PermitVerifier as Verifier};
     use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
     use coset::iana::Algorithm;
-    use coset::{AsCborValue, CborSerializable, CoseSign1};
+    use coset::{CborSerializable, CoseSign1};
 
     const IAT: i64 = 1_700_000_000;
     const NOW: i64 = 1_700_000_060;
@@ -157,146 +213,288 @@ mod tests {
         PermitSigner::Ed25519(AgentKeypair::generate())
     }
 
+    fn p256_signer() -> PermitSigner {
+        PermitSigner::P256(P256SigningKeypair::generate())
+    }
+
+    /// The claims set as a CBOR value, so tests can perturb it before signing.
+    fn claims_value(claims: &PermitClaims, confirmation_key: &PermitVerifier) -> Value {
+        claims
+            .to_cbor_value(&confirmation_key.to_cose_key())
+            .expect("claims encode")
+    }
+
+    fn encode(value: &Value) -> Vec<u8> {
+        let mut payload = Vec::new();
+        ciborium::into_writer(value, &mut payload).expect("payload encodes");
+        payload
+    }
+
+    /// Assemble a permit by hand so a test can choose the protected header
+    /// and the signing key independently of [`mint`].
+    fn hand_built(
+        payload: Vec<u8>,
+        algorithm: Algorithm,
+        kid: &[u8],
+        signer: &PermitSigner,
+    ) -> Vec<u8> {
+        let header = HeaderBuilder::new()
+            .algorithm(algorithm)
+            .key_id(kid.to_vec())
+            .build();
+        let sign1 = CoseSign1Builder::new()
+            .protected(header)
+            .payload(payload)
+            .create_signature(&[], |data| signer.sign(data))
+            .build();
+        let mut cwt = CWT_TAG_PREFIX.to_vec();
+        cwt.extend_from_slice(&sign1.to_tagged_vec().expect("sign1 encodes"));
+        cwt
+    }
+
     #[test]
     fn roundtrip_ed25519() {
-        let signer = ed25519_signer();
+        let issuer = ed25519_signer();
+        let holder = ed25519_signer();
         let claims = sample_claims();
-        let cwt = mint(&claims, &signer).unwrap();
-        let permit = verify(&cwt, NOW).unwrap();
+        let cwt = mint(&claims, &issuer, &holder.public_key()).unwrap();
+        let permit = verify(&cwt, NOW, &[issuer.public_key()]).unwrap();
         assert_eq!(permit.claims, claims);
         assert_eq!(
             permit.confirmation_key.public_key_bytes(),
-            signer.public_key().public_key_bytes()
+            holder.public_key().public_key_bytes(),
+            "cnf must name the presenter, not the issuer"
         );
     }
 
     #[test]
     fn roundtrip_es256() {
-        let signer = PermitSigner::P256(P256SigningKeypair::generate());
+        let issuer = p256_signer();
+        let holder = p256_signer();
         let claims = sample_claims();
-        let cwt = mint(&claims, &signer).unwrap();
-        let permit = verify(&cwt, NOW).unwrap();
+        let cwt = mint(&claims, &issuer, &holder.public_key()).unwrap();
+        let permit = verify(&cwt, NOW, &[issuer.public_key()]).unwrap();
         assert_eq!(permit.claims, claims);
+        assert_eq!(
+            permit.confirmation_key.public_key_bytes(),
+            holder.public_key().public_key_bytes()
+        );
+    }
+
+    #[test]
+    fn issuer_and_confirmation_algorithms_are_independent() {
+        // RFC 8747 puts no relationship between the algorithm the issuer
+        // signs with and the algorithm of the presenter's key.
+        let issuer = ed25519_signer();
+        let holder = p256_signer();
+        let cwt = mint(&sample_claims(), &issuer, &holder.public_key()).unwrap();
+        let permit = verify(&cwt, NOW, &[issuer.public_key()]).unwrap();
+        assert_eq!(permit.confirmation_key.algorithm(), Algorithm::ES256);
+    }
+
+    #[test]
+    fn mint_records_the_issuer_kid_in_the_protected_header() {
+        let issuer = ed25519_signer();
+        let holder = ed25519_signer();
+        let cwt = mint(&sample_claims(), &issuer, &holder.public_key()).unwrap();
+        let parsed = parse_sign1(&cwt).unwrap();
+        assert_eq!(parsed.kid(), issuer_kid(&issuer.public_key()));
+        assert_ne!(parsed.kid(), issuer_kid(&holder.public_key()));
+    }
+
+    #[test]
+    fn issuer_kid_is_sha256_of_public_key_bytes() {
+        let issuer = ed25519_signer();
+        let key = issuer.public_key();
+        assert_eq!(
+            issuer_kid(&key).as_slice(),
+            HashAlgorithm::Sha256
+                .digest(&key.public_key_bytes())
+                .as_slice()
+        );
+        assert_ne!(issuer_kid(&key), issuer_kid(&ed25519_signer().public_key()));
+    }
+
+    #[test]
+    fn self_minted_permit_is_untrusted() {
+        // The defect this model closes: holding a keypair is not authority to
+        // issue. A permit signed by its own cnf holder must be refused by a
+        // verifier whose trusted list does not name that key.
+        let rogue = ed25519_signer();
+        let cwt = mint(&sample_claims(), &rogue, &rogue.public_key()).unwrap();
+        let trusted = [ed25519_signer().public_key(), p256_signer().public_key()];
+        assert!(matches!(
+            verify(&cwt, NOW, &trusted),
+            Err(PermitError::UntrustedIssuer)
+        ));
+        assert!(matches!(
+            verify(&cwt, NOW, &[]),
+            Err(PermitError::UntrustedIssuer)
+        ));
+    }
+
+    #[test]
+    fn cnf_key_alone_does_not_authorize() {
+        // Trusting the presenter's key must not make its permits verify: the
+        // signature is the issuer's, and the kid names the issuer.
+        let issuer = ed25519_signer();
+        let holder = ed25519_signer();
+        let cwt = mint(&sample_claims(), &issuer, &holder.public_key()).unwrap();
+        assert!(matches!(
+            verify(&cwt, NOW, &[holder.public_key()]),
+            Err(PermitError::UntrustedIssuer)
+        ));
+    }
+
+    #[test]
+    fn issuer_selected_by_kid_among_several() {
+        let first = ed25519_signer();
+        let second = p256_signer();
+        let third = ed25519_signer();
+        let holder = ed25519_signer();
+        let cwt = mint(&sample_claims(), &second, &holder.public_key()).unwrap();
+        let trusted = [first.public_key(), second.public_key(), third.public_key()];
+        let permit = verify(&cwt, NOW, &trusted).unwrap();
+        assert_eq!(permit.claims, sample_claims());
+    }
+
+    #[test]
+    fn wrong_algorithm_issuer_with_same_kid_is_rejected() {
+        // Only reachable by construction: `kid` is a SHA-256 digest, so two
+        // keys of different algorithms never share one. A forged header can
+        // still claim a trusted issuer's kid under the wrong `alg`.
+        let issuer = ed25519_signer();
+        let holder = ed25519_signer();
+        let payload = encode(&claims_value(&sample_claims(), &holder.public_key()));
+        let cwt = hand_built(
+            payload,
+            Algorithm::ES256,
+            &issuer_kid(&issuer.public_key()),
+            &issuer,
+        );
+        assert!(matches!(
+            verify(&cwt, NOW, &[issuer.public_key()]),
+            Err(PermitError::UntrustedIssuer)
+        ));
+    }
+
+    #[test]
+    fn untrusted_issuer_checked_before_claim_extraction() {
+        // An untrusted token must learn nothing about its payload: the kid
+        // lookup runs before the claims are parsed.
+        let stranger = ed25519_signer();
+        let cwt = hand_built(
+            b"not a claims set".to_vec(),
+            Algorithm::EdDSA,
+            &issuer_kid(&stranger.public_key()),
+            &stranger,
+        );
+        assert!(matches!(
+            verify(&cwt, NOW, &[ed25519_signer().public_key()]),
+            Err(PermitError::UntrustedIssuer)
+        ));
     }
 
     #[test]
     fn wire_format_starts_with_cwt_tag() {
-        let cwt = mint(&sample_claims(), &ed25519_signer()).unwrap();
+        let issuer = ed25519_signer();
+        let cwt = mint(&sample_claims(), &issuer, &ed25519_signer().public_key()).unwrap();
         // Tag 61 (CWT) then tag 18 (COSE_Sign1), both in canonical CBOR.
         assert_eq!(&cwt[..4], &[0xd8, 0x3d, 0xd2, 0x84], "tag 61 then tag 18");
     }
 
     #[test]
     fn tampered_signature_rejected() {
-        let signer = ed25519_signer();
-        let cwt = mint(&sample_claims(), &signer).unwrap();
+        let issuer = ed25519_signer();
+        let cwt = mint(&sample_claims(), &issuer, &ed25519_signer().public_key()).unwrap();
         // Flip a bit in the final byte: Ed25519 signatures sit at the tail
         // of the COSE_Sign1 array.
         let mut tampered = cwt.clone();
         let last = tampered.len() - 1;
         tampered[last] ^= 0x01;
         assert!(matches!(
-            verify(&tampered, NOW),
+            verify(&tampered, NOW, &[issuer.public_key()]),
             Err(PermitError::InvalidSignature) | Err(PermitError::Cose(_))
         ));
     }
 
     #[test]
     fn tampered_payload_rejected() {
-        let signer = ed25519_signer();
-        let claims = sample_claims();
-        let cwt = mint(&claims, &signer).unwrap();
+        let issuer = ed25519_signer();
+        let cwt = mint(&sample_claims(), &issuer, &ed25519_signer().public_key()).unwrap();
         // Corrupt a byte in the middle of the claims payload.
         let mut tampered = cwt.clone();
         let mid = tampered.len() / 2;
         tampered[mid] ^= 0x40;
-        assert!(verify(&tampered, NOW).is_err());
+        assert!(verify(&tampered, NOW, &[issuer.public_key()]).is_err());
     }
 
     #[test]
     fn expired_permit_rejected() {
-        let signer = ed25519_signer();
-        let cwt = mint(&sample_claims(), &signer).unwrap();
+        let issuer = ed25519_signer();
+        let cwt = mint(&sample_claims(), &issuer, &ed25519_signer().public_key()).unwrap();
+        let trusted = [issuer.public_key()];
         assert!(matches!(
-            verify(&cwt, EXP),
+            verify(&cwt, EXP, &trusted),
             Err(PermitError::Expired { .. })
         ));
         assert!(matches!(
-            verify(&cwt, EXP + 10_000),
+            verify(&cwt, EXP + 10_000, &trusted),
             Err(PermitError::Expired { .. })
         ));
     }
 
     #[test]
     fn not_yet_valid_permit_rejected() {
-        let signer = ed25519_signer();
+        let issuer = ed25519_signer();
         let mut claims = sample_claims();
         claims.not_before = NOW + 60;
         claims.issued_at = IAT;
-        let cwt = mint(&claims, &signer).unwrap();
+        let cwt = mint(&claims, &issuer, &ed25519_signer().public_key()).unwrap();
         assert!(matches!(
-            verify(&cwt, NOW),
+            verify(&cwt, NOW, &[issuer.public_key()]),
             Err(PermitError::NotYetValid { .. })
         ));
     }
 
     #[test]
     fn future_iat_rejected() {
-        let signer = ed25519_signer();
+        let issuer = ed25519_signer();
         let mut claims = sample_claims();
         claims.issued_at = NOW + 60;
-        let cwt = mint(&claims, &signer).unwrap();
+        let cwt = mint(&claims, &issuer, &ed25519_signer().public_key()).unwrap();
         assert!(matches!(
-            verify(&cwt, NOW),
+            verify(&cwt, NOW, &[issuer.public_key()]),
             Err(PermitError::IssuedInFuture { .. })
         ));
     }
 
     #[test]
-    fn wrong_cnf_key_rejected() {
-        // Sign with key A but place key B in the cnf claim: the signature
-        // cannot verify against the confirmation key.
-        let signer_a = ed25519_signer();
-        let signer_b = ed25519_signer();
-        let claims = sample_claims();
-        let mut value = claims.to_cbor_value(&signer_a.cose_key()).unwrap();
-        if let Value::Map(entries) = &mut value {
-            for (k, v) in entries.iter_mut() {
-                if matches!(k, Value::Integer(i) if i128::from(*i) == CLAIM_CONFIRMATION as i128) {
-                    let cnf_key = signer_b
-                        .cose_key()
-                        .to_cbor_value()
-                        .expect("cnf key encodes");
-                    *v = Value::Map(vec![(
-                        Value::Integer(ciborium::value::Integer::from(CNF_COSE_KEY)),
-                        cnf_key,
-                    )]);
-                }
-            }
-        }
-        let mut payload = Vec::new();
-        ciborium::into_writer(&value, &mut payload).unwrap();
-        let header = HeaderBuilder::new().algorithm(Algorithm::EdDSA).build();
-        let sign1 = CoseSign1Builder::new()
-            .protected(header)
-            .payload(payload)
-            .create_signature(&[], |data| signer_a.sign(data))
-            .build();
-        let sign1_bytes = sign1.to_tagged_vec().unwrap();
-        let mut cwt = CWT_TAG_PREFIX.to_vec();
-        cwt.extend_from_slice(&sign1_bytes);
+    fn signature_by_non_issuer_key_rejected() {
+        // The header names a trusted issuer, so the kid lookup succeeds and
+        // the failure surfaces at the signature check, not as
+        // `UntrustedIssuer`.
+        let issuer = ed25519_signer();
+        let forger = ed25519_signer();
+        let payload = encode(&claims_value(&sample_claims(), &forger.public_key()));
+        let cwt = hand_built(
+            payload,
+            Algorithm::EdDSA,
+            &issuer_kid(&issuer.public_key()),
+            &forger,
+        );
         assert!(matches!(
-            verify(&cwt, NOW),
+            verify(&cwt, NOW, &[issuer.public_key()]),
             Err(PermitError::InvalidSignature)
         ));
     }
 
     #[test]
     fn canonical_argument_hash_mismatch_rejected() {
-        let signer = ed25519_signer();
+        let issuer = ed25519_signer();
         let claims = sample_claims();
-        let cwt = mint(&claims, &signer).unwrap();
-        let permit = verify(&cwt, NOW).unwrap();
+        let cwt = mint(&claims, &issuer, &ed25519_signer().public_key()).unwrap();
+        let permit = verify(&cwt, NOW, &[issuer.public_key()]).unwrap();
 
         let expected_args = serde_json::json!({"max_bytes": 4096, "path": "/tmp/data.csv"});
         assert!(
@@ -317,44 +515,46 @@ mod tests {
 
     #[test]
     fn unknown_claims_are_tolerated() {
-        let signer = ed25519_signer();
+        let issuer = ed25519_signer();
         let claims = sample_claims();
-        let mut value = claims.to_cbor_value(&signer.cose_key()).unwrap();
+        let mut value = claims_value(&claims, &ed25519_signer().public_key());
         if let Value::Map(entries) = &mut value {
             entries.push((
                 Value::Integer(ciborium::value::Integer::from(-79999)),
                 Value::Text("future extension".to_string()),
             ));
         }
-        let mut payload = Vec::new();
-        ciborium::into_writer(&value, &mut payload).unwrap();
-        let sign1 = CoseSign1Builder::new()
-            .protected(HeaderBuilder::new().algorithm(Algorithm::EdDSA).build())
-            .payload(payload)
-            .create_signature(&[], |data| signer.sign(data))
-            .build();
-        let mut cwt = CWT_TAG_PREFIX.to_vec();
-        cwt.extend_from_slice(&sign1.to_tagged_vec().unwrap());
-        let permit = verify(&cwt, NOW).unwrap();
+        let cwt = hand_built(
+            encode(&value),
+            Algorithm::EdDSA,
+            &issuer_kid(&issuer.public_key()),
+            &issuer,
+        );
+        let permit = verify(&cwt, NOW, &[issuer.public_key()]).unwrap();
         assert_eq!(permit.claims, claims);
     }
 
     #[test]
     fn parent_permit_chain_roundtrip() {
-        let parent_signer = ed25519_signer();
-        let parent = mint(&sample_claims(), &parent_signer).unwrap();
+        let issuer = ed25519_signer();
+        let parent_holder = ed25519_signer();
+        let parent = mint(&sample_claims(), &issuer, &parent_holder.public_key()).unwrap();
 
-        let child_signer = ed25519_signer();
+        let child_holder = ed25519_signer();
         let mut child_claims = sample_claims();
         child_claims.tool_name = "arkavo.a2a.delegate".to_string();
         child_claims.parent_permit = Some(HashAlgorithm::Sha256.digest(&parent));
-        let child = mint(&child_claims, &child_signer).unwrap();
+        let child = mint(&child_claims, &issuer, &child_holder.public_key()).unwrap();
 
-        let permit = verify(&child, NOW).unwrap();
+        let permit = verify(&child, NOW, &[issuer.public_key()]).unwrap();
         // The parent hash binds the child to the exact parent CWT bytes.
         assert_eq!(
             permit.claims.parent_permit.as_deref(),
             Some(HashAlgorithm::Sha256.digest(&parent).as_slice())
+        );
+        assert_eq!(
+            permit.confirmation_key.public_key_bytes(),
+            child_holder.public_key().public_key_bytes()
         );
     }
 
@@ -366,17 +566,18 @@ mod tests {
             Err(PermitError::Cose(msg)) if msg.contains("maximum size")
         ));
         assert!(matches!(
-            verify(&oversized, NOW),
+            verify(&oversized, NOW, &[ed25519_signer().public_key()]),
             Err(PermitError::Cose(msg)) if msg.contains("maximum size")
         ));
     }
 
     #[test]
     fn decode_does_not_verify_but_validates_structure() {
-        let signer = ed25519_signer();
+        let issuer = ed25519_signer();
         let claims = sample_claims();
-        let cwt = mint(&claims, &signer).unwrap();
-        // Expired at this instant, but decode must still succeed.
+        let cwt = mint(&claims, &issuer, &ed25519_signer().public_key()).unwrap();
+        // No trusted-issuer list and no signature check, but the structure
+        // still has to hold.
         let permit = decode(&cwt).unwrap();
         assert_eq!(permit.claims, claims);
         assert!(decode(&cwt[..10]).is_err());
@@ -385,9 +586,9 @@ mod tests {
 
     #[test]
     fn missing_budget_field_rejected() {
-        let signer = ed25519_signer();
+        let issuer = ed25519_signer();
         let claims = sample_claims();
-        let mut value = claims.to_cbor_value(&signer.cose_key()).unwrap();
+        let mut value = claims_value(&claims, &ed25519_signer().public_key());
         if let Value::Map(entries) = &mut value {
             for (k, v) in entries.iter_mut() {
                 let is_budget = matches!(k, Value::Integer(i) if i128::from(*i) == -70006);
@@ -398,37 +599,37 @@ mod tests {
                 }
             }
         }
-        let mut payload = Vec::new();
-        ciborium::into_writer(&value, &mut payload).unwrap();
-        let sign1 = CoseSign1Builder::new()
-            .protected(HeaderBuilder::new().algorithm(Algorithm::EdDSA).build())
-            .payload(payload)
-            .create_signature(&[], |data| signer.sign(data))
-            .build();
-        let mut cwt = CWT_TAG_PREFIX.to_vec();
-        cwt.extend_from_slice(&sign1.to_tagged_vec().unwrap());
+        let cwt = hand_built(
+            encode(&value),
+            Algorithm::EdDSA,
+            &issuer_kid(&issuer.public_key()),
+            &issuer,
+        );
         assert!(matches!(
-            verify(&cwt, NOW),
+            verify(&cwt, NOW, &[issuer.public_key()]),
             Err(PermitError::MissingClaim("budget.max_invocations"))
         ));
     }
 
     #[test]
     fn cnf_key_recovers_expected_verifier() {
-        let signer = ed25519_signer();
-        let cwt = mint(&sample_claims(), &signer).unwrap();
+        let holder = ed25519_signer();
+        let cwt = mint(&sample_claims(), &ed25519_signer(), &holder.public_key()).unwrap();
         let permit = decode(&cwt).unwrap();
-        let _expected: Verifier = signer.public_key();
         assert_eq!(
             permit.confirmation_key.public_key_bytes(),
-            _expected.public_key_bytes()
+            holder.public_key().public_key_bytes()
         );
     }
 
     #[test]
     fn cbor_serializable_sign1_roundtrip_used_internally() {
-        let signer = ed25519_signer();
-        let cwt = mint(&sample_claims(), &signer).unwrap();
+        let cwt = mint(
+            &sample_claims(),
+            &ed25519_signer(),
+            &ed25519_signer().public_key(),
+        )
+        .unwrap();
         let parsed = parse_sign1(&cwt).unwrap();
         let bytes = parsed.sign1.clone().to_vec().unwrap();
         let reparsed = CoseSign1::from_slice(&bytes).unwrap();
