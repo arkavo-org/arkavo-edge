@@ -35,5 +35,10 @@
   "issuer_secret_key_hex": "3333333333333333333333333333333333333333333333333333333333333333",
   "kid_hex": "6c8f8607dbe87077a62a2990ce07d94aaf749df76f87b98eb786a6d10f030765",
   "name": "ed25519-parent-chain",
-  "now_for_verification": 1700000060
+  "now_for_verification": 1700000060,
+  "permit_id_hex": "f73834779a39d10c415b62273637da3e58bde299ea7a6630da7549545068fe8a",
+  "pop_arguments_json": "{\"agent\":\"spiffe://arkavo-edge/ns/default/sa/edge-agent-002\",\"task\":\"summarize\"}",
+  "pop_digest_hex": "833a659a836cb5df79d0e777071609fac4b101acc5a634e1e7cbd7c61784948c",
+  "pop_proof_hex": "9eaacaff4488d96a52db9a13afaae0c31bc5a4275dda7534d9a823d7ac17c5f4be9bcbc7f07aa439a048b0f82f65a995d3906d889508fd6c52057651eb41bf09",
+  "pop_tool_name": "arkavo.a2a.delegate"
 }

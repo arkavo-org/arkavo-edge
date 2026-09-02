@@ -6,7 +6,8 @@ use std::path::PathBuf;
 
 use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
 use arkavo_permit::{
-    Budget, HashAlgorithm, PermitError, PermitSigner, PermitVerifier, issuer_kid, verify,
+    Budget, HashAlgorithm, PermitError, PermitSigner, PermitVerifier, invocation_digest,
+    issuer_kid, verify, verify_invocation_proof,
 };
 use serde_json::Value;
 
@@ -202,6 +203,43 @@ fn check_vector(vector: &Value) {
             hash_algorithm,
         )
         .unwrap_or_else(|e| panic!("{name}: invocation binding: {e}"));
+
+    // The proof-of-possession is pinned as a known answer, not merely as a
+    // round trip: the digest is the wire format other implementations have
+    // to reproduce, and the recorded proof is what the presenter's key
+    // produced over it.
+    assert_eq!(
+        permit.id.as_slice(),
+        hex_decode(&vector["permit_id_hex"], "permit_id_hex").as_slice(),
+        "{name} permit id"
+    );
+    let pop_tool = vector["pop_tool_name"].as_str().expect("pop_tool_name");
+    let pop_arguments: Value = serde_json::from_str(
+        vector["pop_arguments_json"]
+            .as_str()
+            .expect("pop_arguments_json"),
+    )
+    .expect("pop arguments parse");
+    assert_eq!(
+        invocation_digest(&permit.id, pop_tool, &pop_arguments, hash_algorithm),
+        hex_decode(&vector["pop_digest_hex"], "pop_digest_hex"),
+        "{name} proof-of-possession digest"
+    );
+    let proof = hex_decode(&vector["pop_proof_hex"], "pop_proof_hex");
+    assert_eq!(proof.len(), 64, "{name} proof is a raw 64-byte signature");
+    verify_invocation_proof(&permit, pop_tool, &pop_arguments, &proof, hash_algorithm)
+        .unwrap_or_else(|e| panic!("{name}: proof-of-possession: {e}"));
+
+    // The same proof must not cover a different invocation.
+    let mut other_arguments = pop_arguments;
+    other_arguments["arkavo_vector_probe"] = Value::Bool(true);
+    assert!(
+        matches!(
+            verify_invocation_proof(&permit, pop_tool, &other_arguments, &proof, hash_algorithm),
+            Err(PermitError::InvalidProof)
+        ),
+        "{name}: proof accepted for other arguments"
+    );
 
     // Expired permits must be rejected.
     assert!(

@@ -35,5 +35,10 @@
   "issuer_secret_key_hex": "1111111111111111111111111111111111111111111111111111111111111111",
   "kid_hex": "10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
   "name": "ed25519-sha256",
-  "now_for_verification": 1700000060
+  "now_for_verification": 1700000060,
+  "permit_id_hex": "5f445d4cd330c5827f2b621533090f4d5bc786a9a63ea141470ce1831ceddcb8",
+  "pop_arguments_json": "{\"max_bytes\":4096,\"path\":\"/tmp/data.csv\"}",
+  "pop_digest_hex": "7a19000674ff3c23018f27e44df3c30efe80eaab5e23b1fa688b6f6b077ed533",
+  "pop_proof_hex": "f5d9c89705943aff820e39ca8b8af357844ce260b60e810ca4684a52625e8b8ac08b1ae1d939785dae0a557aa014d27cd07c0a92c9f584fddcad9efa0c10d303",
+  "pop_tool_name": "arkavo.fs.read_file"
 }

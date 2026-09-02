@@ -39,5 +39,10 @@
   "issuer_secret_key_hex": "2222222222222222222222222222222222222222222222222222222222222222",
   "kid_hex": "6fc66a90486171ca69b512be185d66a763a68ff2d34cda639e78cff9e98caeab",
   "name": "es256-blake3",
-  "now_for_verification": 1700000060
+  "now_for_verification": 1700000060,
+  "permit_id_hex": "d4d114539021fada91e63f2f9ca59c248be13d96a2d69a3c40d3baf7f8303ef6",
+  "pop_arguments_json": "{\"argv\":[\"ls\",\"-la\"],\"cwd\":\"/tmp\",\"timeout_ms\":5000}",
+  "pop_digest_hex": "e88ba658e1f83b4f832acff6631b38c0035aa887551ed1724de8caa501aeb9c1",
+  "pop_proof_hex": "c553d38f43b253169038edb6927eea757f261b538a37b2b7b55a2f4bec18361b594ae55fbe234c86936ce4a23f7988cf9a5ae828c512950ed452e119ab78be24",
+  "pop_tool_name": "arkavo.shell.exec"
 }

@@ -302,7 +302,8 @@ async fn permit_bound_call_is_allowed_once_and_refused_on_replay_or_tamper() {
         parent_permit: None,
     };
     let cwt = mint(&claims, &issuer, &holder.public_key()).unwrap();
-    let proof = prove_invocation(&holder, &cwt, "echo", &args, HashAlgorithm::Sha256);
+    let permit_id = arkavo_permit::decode(&cwt).unwrap().id;
+    let proof = prove_invocation(&holder, &permit_id, "echo", &args, HashAlgorithm::Sha256);
     let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
     let meta = json!({"arkavo": {"permit": b64(&cwt), "pop": b64(&proof)}, "trace": "t-1"});
 

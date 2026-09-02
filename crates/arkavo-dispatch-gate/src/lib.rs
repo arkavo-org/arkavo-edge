@@ -100,7 +100,6 @@ impl DispatchGate {
         };
         if let Err(error) = verify_invocation_proof(
             &permit,
-            request.permit,
             request.tool_name,
             request.arguments,
             request.proof,
@@ -274,6 +273,15 @@ mod tests {
         wrap(sign1.to_tagged_vec().expect("re-encodes"))
     }
 
+    /// The permit's identity, which is what a proof-of-possession names.
+    /// A holder may take it from `decode`: naming their own permit is not an
+    /// authorization decision, and the gate re-derives it from `verify`.
+    fn permit_id(cwt: &[u8]) -> [u8; 32] {
+        arkavo_permit::decode(cwt)
+            .expect("a minted permit decodes")
+            .id
+    }
+
     fn call<'a>(
         tool: &'a str,
         args: &'a serde_json::Value,
@@ -294,7 +302,13 @@ mod tests {
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
         let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 7);
-        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         match gate.evaluate(&call("merge", &args, &cwt, &proof)) {
             GateDecision::Allow { subject, .. } => assert_eq!(subject, "agent-1"),
             other => panic!("{other:?}"),
@@ -307,7 +321,13 @@ mod tests {
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({});
         let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW - 1, 7);
-        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         assert!(matches!(
             gate.evaluate(&call("merge", &args, &cwt, &proof)),
             GateDecision::Deny {
@@ -323,7 +343,13 @@ mod tests {
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
         let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 7);
-        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         let other = json!({"pr": 2});
         assert!(matches!(
             gate.evaluate(&call("merge", &other, &cwt, &proof)),
@@ -341,7 +367,13 @@ mod tests {
         let intruder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
         let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 7);
-        let proof = prove_invocation(&intruder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &intruder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         assert!(matches!(
             gate.evaluate(&call("merge", &args, &cwt, &proof)),
             GateDecision::Deny {
@@ -357,7 +389,13 @@ mod tests {
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({});
         let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 8);
-        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         assert!(matches!(
             gate.evaluate(&call("merge", &args, &cwt, &proof)),
             GateDecision::Deny {
@@ -373,7 +411,13 @@ mod tests {
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({});
         let cwt = permit(&issuer, &holder, "merge", &args, 1, NOW + 300, 7);
-        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         assert!(matches!(
             gate.evaluate(&call("merge", &args, &cwt, &proof)),
             GateDecision::Allow { .. }
@@ -396,16 +440,23 @@ mod tests {
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
         let cwt = permit(&issuer, &holder, "merge", &args, 1, NOW + 300, 7);
-        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         let allowed = gate.evaluate(&call("merge", &args, &cwt, &proof));
         assert!(matches!(allowed, GateDecision::Allow { .. }), "{allowed:?}");
 
         let bare = reencoded_bare(&cwt);
         assert_ne!(bare, cwt, "the re-encoding must differ in bytes");
-        // The proof-of-possession digest covers the permit bytes, so the
-        // holder mints a fresh proof for the new encoding — as it may.
-        let bare_proof = prove_invocation(&holder, &bare, "merge", &args, HashAlgorithm::Sha256);
-        let denied = gate.evaluate(&call("merge", &args, &bare, &bare_proof));
+        // The proof names the permit by its signed identity, so the very same
+        // proof travels with the re-encoded token: one issuance, one identity,
+        // one budget counter.
+        assert_eq!(permit_id(&bare), permit_id(&cwt));
+        let denied = gate.evaluate(&call("merge", &args, &bare, &proof));
         assert!(
             matches!(
                 denied,
@@ -439,7 +490,13 @@ mod tests {
         let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 7);
         let padded = with_unprotected_entry(&cwt);
         assert_ne!(padded, cwt);
-        let proof = prove_invocation(&holder, &padded, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&padded),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         let decision = gate.evaluate(&call("merge", &args, &padded, &proof));
         assert!(
             matches!(
@@ -460,7 +517,13 @@ mod tests {
         let rogue = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
         let cwt = permit(&rogue, &rogue, "merge", &args, 2, NOW + 300, 7);
-        let proof = prove_invocation(&rogue, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &rogue,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         assert!(matches!(
             gate.evaluate(&call("merge", &args, &cwt, &proof)),
             GateDecision::Deny {
@@ -498,7 +561,13 @@ mod tests {
                 parent_permit: None,
             };
             let cwt = mint(&claims, &issuer, &holder.public_key()).unwrap();
-            let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+            let proof = prove_invocation(
+                &holder,
+                &permit_id(&cwt),
+                "merge",
+                &args,
+                HashAlgorithm::Sha256,
+            );
             assert!(matches!(
                 gate.evaluate(&call("merge", &args, &cwt, &proof)),
                 GateDecision::Allow { .. }
@@ -519,7 +588,13 @@ mod tests {
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
         let cwt = permit(&issuer, &holder, "merge", &args, 10_000, NOW + 300, 7);
-        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
         let mut samples: Vec<u128> = (0..200)
             .map(|_| {
                 let start = std::time::Instant::now();

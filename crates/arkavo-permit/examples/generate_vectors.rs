@@ -14,7 +14,8 @@ use std::path::PathBuf;
 
 use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
 use arkavo_permit::{
-    Budget, HashAlgorithm, PermitClaims, PermitSigner, argument_hash, issuer_kid, mint,
+    Budget, HashAlgorithm, PermitClaims, PermitSigner, argument_hash, decode, invocation_digest,
+    issuer_kid, mint, prove_invocation,
 };
 use serde_json::{Value, json};
 
@@ -69,6 +70,23 @@ impl Vector<'_> {
             PermitSigner::P256(_) => "ES256",
         };
         let claims = &self.claims;
+        // The proof-of-possession the presenter would send with this exact
+        // invocation. It names the permit by `Permit::id`, so the vector
+        // pins the digest's wire format and not merely a round trip.
+        let permit_id = decode(&cwt).expect("decode minted permit").id;
+        let pop_digest = invocation_digest(
+            &permit_id,
+            &claims.tool_name,
+            self.arguments,
+            self.hash_algorithm,
+        );
+        let pop_proof = prove_invocation(
+            &self.confirmation,
+            &permit_id,
+            &claims.tool_name,
+            self.arguments,
+            self.hash_algorithm,
+        );
         json!({
             "name": self.name,
             "description": "Signed CWT permit test vector for arkavo-permit; the issuer signs and `cnf` holds the presenter's key. Regenerate with `cargo run -p arkavo-permit --example generate_vectors`",
@@ -81,6 +99,11 @@ impl Vector<'_> {
             "cnf_public_key_hex": hex::encode(confirmation_key.public_key_bytes()),
             "now_for_verification": IAT + 60,
             "cwt_hex": hex::encode(cwt),
+            "permit_id_hex": hex::encode(permit_id),
+            "pop_tool_name": claims.tool_name,
+            "pop_arguments_json": serde_json::to_string(self.arguments).expect("arguments json"),
+            "pop_digest_hex": hex::encode(pop_digest),
+            "pop_proof_hex": hex::encode(pop_proof),
             "claims": {
                 "iss": claims.issuer,
                 "sub": claims.subject,

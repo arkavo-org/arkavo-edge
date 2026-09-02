@@ -45,12 +45,11 @@ The COSE_Sign1 protected header carries:
 - `kid` (4): the issuer's key identifier — SHA-256 over the issuer's raw
   public key bytes (32 bytes for Ed25519, the 65-byte SEC1 uncompressed point
   for P-256), so 32 bytes of digest. `arkavo_permit::issuer_kid` computes it.
-  This is deliberately **not** the key thumbprint the bearer-token key set at
-  `/.well-known/cose-keys` publishes as its `kid` (an RFC 7638 thumbprint over
-  the key's JWK form, matched by byte equality in `arkavo-cwt`). Permits name
-  issuers by a digest of the raw public key bytes instead, so the two `kid`
-  spaces do not interoperate: one key appearing in both is named differently
-  in each.
+  This derivation is the permit's own and is independent of however the
+  bearer-token key set at `/.well-known/cose-keys` derives the `kid` values it
+  publishes: `arkavo-cwt` matches those by byte equality without recomputing
+  them, and nothing here assumes the two spaces agree. A key appearing in both
+  may be named differently in each.
 - `content type` (3): `application/cwt` (CoAP content format 61).
 
 ## Claims
@@ -185,8 +184,11 @@ above this crate; the schema only provides the cryptographic link.
 SHA-256, ES256 + BLAKE3, and a parent-chained A2A permit), each containing
 the signed CWT (hex), the expected claims, and two keypairs: the issuer's
 (`issuer_secret_key_hex`, `issuer_public_key_hex`, and the derived `kid_hex`)
-and the presenter's (`cnf_secret_key_hex`, `cnf_public_key_hex`). Regenerate
-with:
+and the presenter's (`cnf_secret_key_hex`, `cnf_public_key_hex`). Each also
+carries the permit's identity (`permit_id_hex`) and a proof-of-possession
+known-answer for one invocation: `pop_tool_name`, `pop_arguments_json`, the
+digest those produce (`pop_digest_hex`), and the presenter's signature over it
+(`pop_proof_hex`). Regenerate with:
 
 ```bash
 cargo run -p arkavo-permit --example generate_vectors
@@ -200,6 +202,28 @@ each vector end to end.
 
 Each `tools/call` carries, beside the permit, a raw signature by the `cnf` key over
 
-    H( "arkavo-permit-pop/v1" || H(permit_cwt) || len(tool_name) as u64 BE || tool_name || argument_hash )
+    H( "arkavo-permit-pop/v1" || permit_id || len(tool_name) as u64 BE || tool_name || argument_hash )
 
-where `H` and `argument_hash` use the same hash algorithm as the permit. The proof is 64 bytes for both Ed25519 and ES256 (r || s). A proof for different arguments, a different permit, or from a different key does not verify. Replay of an identical call is bounded by the permit's `max_invocations`, enforced by the dispatch gate.
+where `permit_id` is the permit's 32-byte `Permit::id` (SHA-256 over the signed
+Sig_structure, above), and `H` and `argument_hash` use the same hash algorithm
+as the permit. The proof is 64 bytes for both Ed25519 and ES256 (r || s). A
+proof for different arguments, a different permit, or from a different key does
+not verify. Replay of an identical call is bounded by the permit's
+`max_invocations`, enforced by the dispatch gate.
+
+The digest names the permit by identity rather than by wire bytes, which is the
+same key the gate's budget counter uses. One issuance therefore has one proof
+whatever encoding of the token carries it, instead of a proof that a legal
+re-encoding invalidates while the budget counts on regardless.
+
+`arkavo_permit::invocation_digest(permit_id, tool_name, arguments, algorithm)`
+computes it; `prove_invocation` signs it; `verify_invocation_proof(permit, …)`
+checks it against `Permit::confirmation_key`, taking the id from the permit it
+was handed. Callers obtain the id from `verify(...)?.id` — or from
+`decode(...)?.id` when minting a proof for a permit they already hold, which is
+not an authorization decision.
+
+A relying party runs three calls in order: `verify` (issuer, signature,
+window), `verify_invocation_proof` (the presenter holds the `cnf` key and
+signed this invocation), then `PermitClaims::verify_invocation` (the invocation
+is the one the permit authorizes). `arkavo-dispatch-gate` is that composition.

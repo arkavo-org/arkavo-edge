@@ -634,12 +634,52 @@ mod tests {
         let issuer = ed25519_signer();
         let claims = sample_claims();
         let cwt = mint(&claims, &issuer, &ed25519_signer().public_key()).unwrap();
-        // No trusted-issuer list and no signature check, but the structure
-        // still has to hold.
-        let permit = decode(&cwt).unwrap();
-        assert_eq!(permit.claims, claims);
+
+        // A token whose signature no longer holds: `verify` refuses it, and
+        // `decode` returns its claims anyway. That is the whole difference
+        // between the two, and why `decode` must never drive a decision.
+        let mut tampered = cwt.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0x01;
+        assert!(matches!(
+            verify(&tampered, NOW, &[issuer.public_key()]),
+            Err(PermitError::InvalidSignature)
+        ));
+        assert_eq!(decode(&tampered).unwrap().claims, claims);
+
+        // The structure still has to hold, signature or no signature.
+        assert_eq!(decode(&cwt).unwrap().claims, claims);
         assert!(decode(&cwt[..10]).is_err());
         assert!(decode(b"\xd8\x3dgarbage").is_err());
+    }
+
+    /// The order of checks is itself a rule: a permit whose signature does
+    /// not verify must be refused as `InvalidSignature`, never parsed far
+    /// enough to report what is wrong with its payload. Otherwise a forger
+    /// learns which claims a verifier reads by watching the errors it
+    /// returns, and every claim decoder becomes reachable pre-authentication.
+    #[test]
+    fn signature_is_checked_before_claims_are_parsed() {
+        let issuer = ed25519_signer();
+        let forger = ed25519_signer();
+        // Signed by the wrong key, and the payload is not a claims set at
+        // all — the claim decoder would fail first if it ran first.
+        let cwt = hand_built(
+            b"not a claims set".to_vec(),
+            Algorithm::EdDSA,
+            &issuer_kid(&issuer.public_key()),
+            &forger,
+        );
+        assert!(matches!(
+            verify(&cwt, NOW, &[issuer.public_key()]),
+            Err(PermitError::InvalidSignature)
+        ));
+        // And the payload really is undecodable, so the assertion above is
+        // about ordering rather than a payload that happens to parse.
+        assert!(matches!(
+            decode(&cwt),
+            Err(PermitError::CborDeserialize(_) | PermitError::MalformedClaim(_))
+        ));
     }
 
     #[test]
