@@ -22,6 +22,9 @@ mod keys;
 mod permit;
 mod pop;
 
+// `PermitVerifier` wraps this type in its public field, so callers can name it
+// without taking their own dependency on `arkavo-cwt`.
+pub use arkavo_cwt::VerifyingKey;
 pub use canonical::{argument_hash, canonical_json, canonicalize_json_text};
 pub use claims::{
     BUDGET_COST_MICRO_USD, BUDGET_MAX_INVOCATIONS, BUDGET_TOKEN_CEILING, Budget,

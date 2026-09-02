@@ -8,6 +8,9 @@ license.workspace = true
 repository.workspace = true
 description = "CWT (RFC 8392) permits for permit-bound tool execution, signed as COSE_Sign1 (RFC 8152)"
 
+[lints]
+workspace = true
+
 [dependencies]
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-cwt = { path = "../arkavo-cwt" }

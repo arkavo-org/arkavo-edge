@@ -16,7 +16,7 @@ pub enum PermitError {
     InvalidConfirmationKey(String),
     #[error("unsupported signing algorithm: {0}")]
     UnsupportedAlgorithm(String),
-    #[error("confirmation key does not match the COSE header algorithm")]
+    #[error("signature algorithm does not match the key type")]
     KeyAlgorithmMismatch,
     #[error("permit issuer is not trusted")]
     UntrustedIssuer,

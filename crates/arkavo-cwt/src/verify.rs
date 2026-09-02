@@ -15,8 +15,10 @@ pub struct VerifyOptions<'a> {
 
 /// Verify a base64url-encoded agent CWT and return its claims.
 ///
-/// Accepts the tag-61-prefixed wire form and a bare untagged COSE_Sign1.
-/// ES256 is the only accepted algorithm.
+/// Accepts every envelope [`crate::sign1::parse`] does: the tag-61 prefix is
+/// optional, and the COSE_Sign1 inside it may be tagged (tag 18) or bare.
+/// ES256 is the only accepted algorithm, and decoded input larger than
+/// [`crate::sign1::MAX_TOKEN_BYTES`] (16 KiB) is refused before parse.
 pub fn verify(
     token_b64url: &str,
     keys: &KeySet,
@@ -75,7 +77,14 @@ fn check_claims(claims: &Claims, opts: &VerifyOptions<'_>) -> Result<(), CwtErro
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
+            // Writing into a String cannot fail.
+            let _ = write!(out, "{b:02x}");
+            out
+        })
 }
 
 #[cfg(test)]
@@ -232,7 +241,7 @@ mod tests {
         CoseKeySet(keys).to_vec().expect("encode key set")
     }
 
-    fn opts<'a>(aud: Option<&'a str>) -> VerifyOptions<'a> {
+    fn opts(aud: Option<&str>) -> VerifyOptions<'_> {
         VerifyOptions {
             expected_iss: ISS,
             expected_aud: aud,

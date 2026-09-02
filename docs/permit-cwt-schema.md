@@ -14,9 +14,25 @@ and proves possession of that key separately when exercising the permit.
 ## Wire Format
 
 ```
-CWT = #6.61( COSE_Sign1 )        ; CBOR tag 61 wrapping tag 18
-COSE_Sign1 payload = claims set  ; CBOR map, labels below
+CWT = #6.61( #6.18( COSE_Sign1 ) )  ; tag 61 over tagged COSE_Sign1 — minted form
+    / #6.61( COSE_Sign1 )           ; tag 61 over a bare COSE_Sign1 — also accepted
+COSE_Sign1 payload = claims set     ; CBOR map, labels below
 ```
+
+Both encodings verify. `arkavo_permit::mint` emits the first; the shared
+`arkavo-cwt` parser also accepts the second, which is the shape authnz-rs
+emits for its agent CWTs. The tag-61 prefix is required by `arkavo-permit`.
+The COSE_Sign1 **unprotected header must be empty** — `verify` rejects a
+permit carrying anything there, since that bucket is outside the signature.
+
+Because the same signed permit has more than one valid byte encoding — tagged
+or bare, plus a malleable ECDSA signature for ES256 — the wire bytes are not
+an identity. A permit's identity is `Permit::id`: SHA-256 over the COSE
+Sig_structure (protected header plus payload), which covers only signed bytes
+and is therefore identical across re-encodings of one issuance and distinct
+between issuances. Anything holding per-permit state — the dispatch gate's
+budget counter, replay records — must key it on `Permit::id`, never on a hash
+of the token bytes.
 
 Untrusted `decode`/`verify` input is rejected if it exceeds 16 KiB
 (`MAX_PERMIT_BYTES`) before COSE/CBOR parse. Permit-bound hashes
@@ -29,6 +45,12 @@ The COSE_Sign1 protected header carries:
 - `kid` (4): the issuer's key identifier — SHA-256 over the issuer's raw
   public key bytes (32 bytes for Ed25519, the 65-byte SEC1 uncompressed point
   for P-256), so 32 bytes of digest. `arkavo_permit::issuer_kid` computes it.
+  This is deliberately **not** the key thumbprint the bearer-token key set at
+  `/.well-known/cose-keys` publishes as its `kid` (an RFC 7638 thumbprint over
+  the key's JWK form, matched by byte equality in `arkavo-cwt`). Permits name
+  issuers by a digest of the raw public key bytes instead, so the two `kid`
+  spaces do not interoperate: one key appearing in both is named differently
+  in each.
 - `content type` (3): `application/cwt` (CoAP content format 61).
 
 ## Claims

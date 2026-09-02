@@ -7,8 +7,11 @@ use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
 use coset::CoseKey;
 use coset::iana::Algorithm;
 
-/// A permit signing key. Determines the COSE algorithm in the protected
-/// header and the COSE_Key placed in the `cnf` claim.
+/// An issuer's permit signing key.
+///
+/// It fixes the COSE algorithm and the `kid` of the protected header, and
+/// nothing else: the `cnf` claim names the presenter, whose
+/// [`PermitVerifier`] is a separate argument to [`mint`](crate::mint).
 pub enum PermitSigner {
     Ed25519(AgentKeypair),
     P256(P256SigningKeypair),
@@ -22,6 +25,17 @@ impl PermitSigner {
         }
     }
 
+    /// The issuer's public half.
+    ///
+    /// Verifiers carry these in their `trusted_issuers` list, and
+    /// [`issuer_kid`](crate::issuer_kid) digests this key's bytes into the
+    /// `kid` that [`mint`](crate::mint) writes into the protected header.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `arkavo-crypto` hands out a public key that is not a
+    /// canonical 32-byte Ed25519 point or a valid SEC1 P-256 point, which its
+    /// key types do not allow.
     pub fn public_key(&self) -> PermitVerifier {
         match self {
             Self::Ed25519(keypair) => {
@@ -44,13 +58,23 @@ impl PermitSigner {
         }
     }
 
-    /// COSE_Key for the public half, suitable for the `cnf` claim.
+    /// COSE_Key form of the issuer's public half — the same key
+    /// [`public_key`](Self::public_key) returns.
+    ///
+    /// It is not the `cnf` key. The `cnf` claim carries the presenter's
+    /// COSE_Key, which [`mint`](crate::mint) takes as its own argument; a
+    /// signer never supplies it.
     pub fn cose_key(&self) -> CoseKey {
         self.public_key().to_cose_key()
     }
 
-    /// Sign a COSE Sig_structure, producing the encoding required by RFC
-    /// 8152: raw Ed25519 signature bytes, or IEEE P1363 r||s for ES256.
+    /// Sign `data`, producing the encoding required by RFC 8152: raw Ed25519
+    /// signature bytes, or IEEE P1363 r||s for ES256.
+    ///
+    /// Both signatures a permit involves are made here: the COSE
+    /// Sig_structure an issuer signs when minting, and the
+    /// proof-of-possession digest a presenter signs when exercising the
+    /// permit.
     pub fn sign(&self, data: &[u8]) -> Vec<u8> {
         match self {
             Self::Ed25519(keypair) => keypair.sign(data),

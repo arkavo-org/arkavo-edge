@@ -29,11 +29,8 @@ impl KeySet {
             if key.key_id.is_empty() {
                 continue;
             }
-            match crate::VerifyingKey::from_cose_key(key) {
-                Ok(crate::VerifyingKey::P256(vk)) => {
-                    keys.push((key.key_id.clone(), crate::VerifyingKey::P256(vk)))
-                }
-                _ => continue,
+            if let Ok(crate::VerifyingKey::P256(vk)) = crate::VerifyingKey::from_cose_key(key) {
+                keys.push((key.key_id.clone(), crate::VerifyingKey::P256(vk)));
             }
         }
         if keys.is_empty() {
@@ -68,9 +65,10 @@ struct Cached {
     fetched_at: Instant,
 }
 
-/// A [`KeySet`] that re-fetches when a token names a `kid` it does not hold,
-/// but no more than once per `ttl` — so a token signed by a key that will never
-/// be published cannot turn into a fetch per verification.
+/// A [`KeySet`] that re-fetches when a token names a `kid` it does not hold.
+///
+/// Refetching happens no more than once per `ttl`, so a token signed by a key
+/// that will never be published cannot turn into a fetch per verification.
 pub struct CachedKeySet {
     url: String,
     ttl: Duration,
@@ -127,6 +125,7 @@ impl CachedKeySet {
             keys: keys.clone(),
             fetched_at: Instant::now(),
         });
+        drop(guard);
         Ok(keys)
     }
 }
