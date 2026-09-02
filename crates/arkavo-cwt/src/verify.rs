@@ -2,12 +2,6 @@
 
 use crate::{Claims, CwtError, KeySet};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use coset::{CborSerializable, CoseSign1, RegisteredLabelWithPrivate};
-use p256::ecdsa::Signature;
-use p256::ecdsa::signature::Verifier;
-
-/// authnz-rs prepends CBOR tag 61 (`cwt`) to an otherwise untagged COSE_Sign1.
-const CWT_TAG: [u8; 2] = [0xD8, 0x3D];
 
 /// What the caller expects the token to say, and when "now" is.
 pub struct VerifyOptions<'a> {
@@ -31,37 +25,22 @@ pub fn verify(
     let bytes = URL_SAFE_NO_PAD
         .decode(token_b64url)
         .map_err(|e| CwtError::Base64(e.to_string()))?;
-    let body = bytes.strip_prefix(&CWT_TAG[..]).unwrap_or(&bytes);
-    let sign1 = CoseSign1::from_slice(body).map_err(|e| CwtError::Cose(e.to_string()))?;
-
-    match &sign1.protected.header.alg {
-        Some(RegisteredLabelWithPrivate::Assigned(coset::iana::Algorithm::ES256)) => {}
-        Some(other) => return Err(CwtError::UnsupportedAlgorithm(format!("{other:?}"))),
-        None => return Err(CwtError::UnsupportedAlgorithm("none".into())),
+    let parsed = crate::sign1::parse(&bytes)?;
+    if parsed.algorithm != coset::iana::Algorithm::ES256 {
+        return Err(CwtError::UnsupportedAlgorithm(format!(
+            "{:?}",
+            parsed.algorithm
+        )));
     }
-
-    // authnz-contract.md puts `kid` in the protected header. An unprotected
-    // `kid` is not covered by the signature, so honouring one would widen the
-    // accepted input surface for no gain.
-    let kid = &sign1.protected.header.key_id;
+    let kid = parsed.kid();
     if kid.is_empty() {
         return Err(CwtError::MissingKid);
     }
     let key = keys
         .get(kid)
         .ok_or_else(|| CwtError::UnknownKid(hex(kid)))?;
-
-    sign1.verify_signature(b"", |signature, signed| {
-        let signature = Signature::from_slice(signature).map_err(|_| CwtError::BadSignature)?;
-        key.verify(signed, &signature)
-            .map_err(|_| CwtError::BadSignature)
-    })?;
-
-    let payload = sign1
-        .payload
-        .as_deref()
-        .ok_or_else(|| CwtError::Cose("payload is detached".into()))?;
-    let claims = Claims::from_cbor(payload)?;
+    parsed.verify(key)?;
+    let claims = Claims::from_cbor(parsed.payload()?)?;
     check_claims(&claims, opts)?;
     Ok(claims)
 }

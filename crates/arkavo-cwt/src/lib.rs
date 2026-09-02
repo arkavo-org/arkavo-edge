@@ -6,11 +6,15 @@
 //! at `<issuer>/.well-known/cose-keys`.
 
 pub mod claims;
+pub mod key;
 pub mod keys;
+pub mod sign1;
 pub mod verify;
 
 pub use claims::Claims;
+pub use key::VerifyingKey;
 pub use keys::{CachedKeySet, KeySet};
+pub use sign1::{ParsedSign1, parse};
 pub use verify::{VerifyOptions, verify};
 
 /// Every way verification can refuse a token.
@@ -22,7 +26,7 @@ pub enum CwtError {
     Cose(String),
     #[error("malformed CWT claims: {0}")]
     Claims(String),
-    #[error("unsupported signature algorithm: expected ES256, got {0}")]
+    #[error("unsupported signature algorithm: expected EdDSA or ES256, got {0}")]
     UnsupportedAlgorithm(String),
     #[error("COSE_Sign1 carries no kid header")]
     MissingKid,
@@ -42,4 +46,8 @@ pub enum CwtError {
     KeySet(String),
     #[error("could not fetch the COSE key set: {0}")]
     Fetch(String),
+    #[error("unusable COSE key: {0}")]
+    Key(String),
+    #[error("signature algorithm does not match the key type")]
+    KeyAlgorithmMismatch,
 }

@@ -1,0 +1,127 @@
+//! COSE_Sign1 parsing shared by permit and bearer verification.
+
+use crate::{CwtError, VerifyingKey};
+use coset::iana::Algorithm;
+use coset::{CborSerializable, CoseSign1, RegisteredLabelWithPrivate, TaggedCborSerializable};
+
+/// CBOR tag 61 (CWT) as it appears on the wire.
+pub const CWT_TAG_PREFIX: [u8; 2] = [0xd8, 0x3d];
+
+/// Untrusted input larger than this is refused before any CBOR work.
+pub const MAX_TOKEN_BYTES: usize = 16 * 1024;
+
+pub struct ParsedSign1 {
+    pub sign1: CoseSign1,
+    pub algorithm: Algorithm,
+}
+
+/// Parse a CWT-shaped COSE_Sign1. The tag-61 prefix is optional and the
+/// COSE_Sign1 may be tagged (18) or bare: authnz-rs emits bare, permits
+/// emit tagged, and both must verify through the same code.
+pub fn parse(bytes: &[u8]) -> Result<ParsedSign1, CwtError> {
+    if bytes.len() > MAX_TOKEN_BYTES {
+        return Err(CwtError::Cose("token exceeds maximum size".into()));
+    }
+    let body = bytes.strip_prefix(&CWT_TAG_PREFIX[..]).unwrap_or(bytes);
+    let sign1 = CoseSign1::from_tagged_slice(body)
+        .or_else(|_| CoseSign1::from_slice(body))
+        .map_err(|e| CwtError::Cose(e.to_string()))?;
+    let algorithm = match &sign1.protected.header.alg {
+        Some(RegisteredLabelWithPrivate::Assigned(alg @ (Algorithm::EdDSA | Algorithm::ES256))) => {
+            *alg
+        }
+        Some(other) => return Err(CwtError::UnsupportedAlgorithm(format!("{other:?}"))),
+        None => return Err(CwtError::UnsupportedAlgorithm("none".into())),
+    };
+    Ok(ParsedSign1 { sign1, algorithm })
+}
+
+impl ParsedSign1 {
+    pub fn kid(&self) -> &[u8] {
+        &self.sign1.protected.header.key_id
+    }
+
+    pub fn payload(&self) -> Result<&[u8], CwtError> {
+        self.sign1
+            .payload
+            .as_deref()
+            .ok_or_else(|| CwtError::Cose("payload is detached".into()))
+    }
+
+    pub fn verify(&self, key: &VerifyingKey) -> Result<(), CwtError> {
+        self.sign1.verify_signature(b"", |signature, data| {
+            key.verify(self.algorithm, data, signature)
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use coset::{CborSerializable, CoseSign1Builder, HeaderBuilder, TaggedCborSerializable};
+    use ed25519_dalek::Signer as _;
+
+    fn signed(tagged: bool, prefix: bool) -> (Vec<u8>, VerifyingKey) {
+        let signing = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let protected = HeaderBuilder::new()
+            .algorithm(coset::iana::Algorithm::EdDSA)
+            .key_id(b"k1".to_vec())
+            .build();
+        let sign1 = CoseSign1Builder::new()
+            .protected(protected)
+            .payload(b"payload".to_vec())
+            .create_signature(b"", |data| signing.sign(data).to_bytes().to_vec())
+            .build();
+        let mut bytes = if prefix {
+            CWT_TAG_PREFIX.to_vec()
+        } else {
+            Vec::new()
+        };
+        if tagged {
+            bytes.extend(sign1.to_tagged_vec().unwrap());
+        } else {
+            bytes.extend(sign1.to_vec().unwrap());
+        }
+        (bytes, VerifyingKey::Ed25519(signing.verifying_key()))
+    }
+
+    #[test]
+    fn parses_all_four_wire_shapes() {
+        for (tagged, prefix) in [(true, true), (true, false), (false, true), (false, false)] {
+            let (bytes, key) = signed(tagged, prefix);
+            let parsed = parse(&bytes).unwrap();
+            assert_eq!(parsed.algorithm, coset::iana::Algorithm::EdDSA);
+            assert_eq!(parsed.kid(), b"k1");
+            assert_eq!(parsed.payload().unwrap(), b"payload");
+            parsed.verify(&key).unwrap();
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_input_before_parsing() {
+        let big = vec![0u8; MAX_TOKEN_BYTES + 1];
+        assert!(matches!(parse(&big), Err(CwtError::Cose(_))));
+    }
+
+    #[test]
+    fn rejects_missing_alg() {
+        let sign1 = CoseSign1Builder::new().payload(b"p".to_vec()).build();
+        let bytes = sign1.to_vec().unwrap();
+        assert!(matches!(
+            parse(&bytes),
+            Err(CwtError::UnsupportedAlgorithm(_))
+        ));
+    }
+
+    #[test]
+    fn wrong_key_fails_verification() {
+        let (bytes, _) = signed(true, true);
+        let other = VerifyingKey::Ed25519(
+            ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng).verifying_key(),
+        );
+        assert!(matches!(
+            parse(&bytes).unwrap().verify(&other),
+            Err(CwtError::BadSignature)
+        ));
+    }
+}

@@ -974,6 +974,7 @@ dependencies = [
  "base64 0.22.1",
  "ciborium",
  "coset",
+ "ed25519-dalek 2.2.0",
  "p256",
  "rand 0.8.6",
  "reqwest 0.12.28",

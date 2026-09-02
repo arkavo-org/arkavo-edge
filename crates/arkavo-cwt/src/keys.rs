@@ -6,20 +6,13 @@
 //! byte equality, never a recomputed thumbprint.
 
 use crate::{Claims, CwtError, VerifyOptions, verify::verify};
-use coset::{CborSerializable, CoseKey, CoseKeySet, Label};
-use p256::EncodedPoint;
-use p256::FieldBytes;
-use p256::ecdsa::VerifyingKey;
+use coset::{CborSerializable, CoseKeySet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-const EC2_CRV: i64 = -1;
-const EC2_X: i64 = -2;
-const EC2_Y: i64 = -3;
-
 /// The ES256 verification keys the issuer currently publishes.
 pub struct KeySet {
-    keys: Vec<(Vec<u8>, VerifyingKey)>,
+    keys: Vec<(Vec<u8>, crate::VerifyingKey)>,
 }
 
 impl KeySet {
@@ -33,10 +26,15 @@ impl KeySet {
         let set = CoseKeySet::from_slice(bytes).map_err(|e| CwtError::KeySet(e.to_string()))?;
         let mut keys = Vec::with_capacity(set.0.len());
         for key in &set.0 {
-            if key.key_id.is_empty() || !is_p256(key) {
+            if key.key_id.is_empty() {
                 continue;
             }
-            keys.push((key.key_id.clone(), verifying_key(key)?));
+            match crate::VerifyingKey::from_cose_key(key) {
+                Ok(crate::VerifyingKey::P256(vk)) => {
+                    keys.push((key.key_id.clone(), crate::VerifyingKey::P256(vk)))
+                }
+                _ => continue,
+            }
         }
         if keys.is_empty() {
             return Err(CwtError::KeySet("no usable ES256 P-256 keys".into()));
@@ -57,52 +55,12 @@ impl KeySet {
         Self::from_cbor(&body)
     }
 
-    pub(crate) fn get(&self, kid: &[u8]) -> Option<&VerifyingKey> {
+    pub(crate) fn get(&self, kid: &[u8]) -> Option<&crate::VerifyingKey> {
         self.keys
             .iter()
             .find(|(candidate, _)| candidate == kid)
             .map(|(_, key)| key)
     }
-}
-
-fn is_p256(key: &CoseKey) -> bool {
-    key.kty == coset::KeyType::Assigned(coset::iana::KeyType::EC2)
-        && param(key, EC2_CRV).and_then(ciborium::Value::as_integer)
-            == Some((coset::iana::EllipticCurve::P_256 as i64).into())
-}
-
-fn param(key: &CoseKey, label: i64) -> Option<&ciborium::Value> {
-    key.params
-        .iter()
-        .find(|(candidate, _)| *candidate == Label::Int(label))
-        .map(|(_, value)| value)
-}
-
-fn verifying_key(key: &CoseKey) -> Result<VerifyingKey, CwtError> {
-    // `generic-array`'s `From<&[T]> for &GenericArray<T, N>` panics on a length
-    // mismatch, so each coordinate is checked against the P-256 field width
-    // before conversion. Leading-zero-stripped coordinates (a classic COSE/JOSE
-    // interop bug) must be rejected, not repaired by left-padding.
-    let coordinate = |label: i64, name: &str| -> Result<FieldBytes, CwtError> {
-        let bytes = param(key, label)
-            .and_then(ciborium::Value::as_bytes)
-            .ok_or_else(|| {
-                CwtError::KeySet(format!("COSE key is missing its {name} coordinate"))
-            })?;
-        // `FieldBytes::from_exact_iter` returns `None` on a length mismatch
-        // instead of panicking, unlike `GenericArray`'s `From<&[T]>`.
-        FieldBytes::from_exact_iter(bytes.iter().copied()).ok_or_else(|| {
-            CwtError::KeySet(format!(
-                "COSE key {name} coordinate is {} bytes, expected 32",
-                bytes.len()
-            ))
-        })
-    };
-    let x = coordinate(EC2_X, "x")?;
-    let y = coordinate(EC2_Y, "y")?;
-    let point = EncodedPoint::from_affine_coordinates(&x, &y, false);
-    VerifyingKey::from_encoded_point(&point)
-        .map_err(|e| CwtError::KeySet(format!("COSE key is not a valid P-256 point: {e}")))
 }
 
 struct Cached {
