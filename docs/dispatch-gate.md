@@ -51,7 +51,7 @@ carry a denial back) cannot be policy-evaluated. The proxy drops it outright
 |---|---|---|
 | authn | permit signature against the trusted-issuer list (by `kid`), `nbf`/`exp`/`iat` at now, proof-of-possession over the permit, tool, and arguments against the `cnf` key | `authn:` |
 | policy | permit's `policy_bundle_hash` equals the proxy's configured bundle; tool name and argument hash match the permit | `policy:` |
-| budget | invocations of this permit (keyed by SHA-256 of the permit's CWT bytes) stay below `budget.max_invocations` | `budget:` |
+| budget | invocations of this permit (keyed on `Permit::id`, the digest of the permit's signed content, so re-encoding one permit cannot buy a second budget) stay below `budget.max_invocations` | `budget:` |
 
 A refused call returns JSON-RPC error `-32000` and never reaches the
 upstream server.

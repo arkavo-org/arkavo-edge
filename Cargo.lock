@@ -1077,9 +1077,8 @@ version = "0.92.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-permit",
+ "coset",
  "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
 ]
 
 [[package]]

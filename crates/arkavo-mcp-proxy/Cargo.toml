@@ -21,7 +21,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 arkavo-crypto = { path = "../arkavo-crypto" }
-arkavo-dispatch-gate = { path = "../arkavo-dispatch-gate" }
 arkavo-permit = { path = "../arkavo-permit" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

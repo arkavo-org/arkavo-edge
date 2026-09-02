@@ -107,9 +107,15 @@ impl PermitVerifier {
         Ok(Self(arkavo_cwt::VerifyingKey::from_cose_key(key)?))
     }
 
-    /// Build a verifier from raw public key bytes: 32 bytes for Ed25519, or
-    /// 65-byte uncompressed SEC1 for P-256. Fails closed on any other
-    /// length or malformed encoding.
+    /// Build a verifier from raw public key bytes.
+    ///
+    /// 32 bytes for Ed25519, or 65-byte uncompressed SEC1 for P-256. Fails
+    /// closed on any other length or malformed encoding.
+    ///
+    /// # Panics
+    ///
+    /// Never: the Ed25519 branch converts a slice whose length its own match
+    /// arm has already fixed at 32.
     pub fn from_public_key_bytes(bytes: &[u8]) -> Result<Self, PermitError> {
         match bytes.len() {
             32 => {

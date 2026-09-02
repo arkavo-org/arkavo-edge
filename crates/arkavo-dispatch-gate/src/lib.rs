@@ -4,6 +4,11 @@
 //! documented in `docs/gate-latency-baseline.md`. Sequence integrity and
 //! step-up are later stages and plug in before `Allow` is returned.
 //!
+//! The budget counter is keyed on `Permit::id`, the digest of the permit's
+//! signed content, never on the token bytes: one issuance has many valid
+//! encodings, so a byte-keyed counter would hand the holder a fresh budget
+//! for every re-encoding.
+//!
 //! `GateConfig::trusted_issuers` forms one trust domain: authn passes for a
 //! permit signed by any listed issuer, with no per-issuer policy and no
 //! binding to the permit's `iss` claim yet. `arkavo_permit::decode` must
@@ -12,7 +17,6 @@
 
 use arkavo_permit::{HashAlgorithm, PermitVerifier, verify, verify_invocation_proof};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Mutex;
@@ -65,7 +69,7 @@ struct Usage {
     expires_at: i64,
 }
 
-/// Counters are keyed by permit digest. Once the map holds more than
+/// Counters are keyed by `Permit::id`. Once the map holds more than
 /// `PRUNE_ABOVE` entries, expired counters are pruned first; if the map is
 /// still over the threshold after that, entries are evicted in bulk by
 /// soonest `expires_at` until at most `PRUNE_TARGET` remain. A caller can
@@ -119,7 +123,7 @@ impl DispatchGate {
             return deny(Stage::Policy, error.to_string());
         }
 
-        let permit_id = permit_id(request.permit);
+        let permit_id = permit.id;
         let mut usage = self
             .usage
             .lock()
@@ -172,10 +176,6 @@ impl DispatchGate {
     }
 }
 
-pub fn permit_id(permit_cwt: &[u8]) -> [u8; 32] {
-    Sha256::digest(permit_cwt).into()
-}
-
 pub fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -194,6 +194,7 @@ mod tests {
     use arkavo_permit::{
         Budget, PermitClaims, PermitSigner, argument_hash, mint, prove_invocation,
     };
+    use coset::{CborSerializable, CoseSign1, TaggedCborSerializable};
     use serde_json::json;
 
     const NOW: i64 = 1_700_000_060;
@@ -241,6 +242,36 @@ mod tests {
             parent_permit: None,
         };
         mint(&claims, issuer, &holder.public_key()).unwrap()
+    }
+
+    /// Split a minted permit into its tag-61 prefix and the COSE_Sign1 the
+    /// permit crate wrapped in tag 18.
+    fn parts(cwt: &[u8]) -> CoseSign1 {
+        assert_eq!(&cwt[..4], &[0xd8, 0x3d, 0xd2, 0x84], "tag 61 then tag 18");
+        CoseSign1::from_tagged_slice(&cwt[2..]).expect("minted permit parses")
+    }
+
+    fn wrap(sign1: Vec<u8>) -> Vec<u8> {
+        let mut cwt = vec![0xd8, 0x3d];
+        cwt.extend_from_slice(&sign1);
+        cwt
+    }
+
+    /// The same signed COSE_Sign1, serialized without its tag 18. Different
+    /// bytes, identical signed content — the shared parser accepts both.
+    fn reencoded_bare(cwt: &[u8]) -> Vec<u8> {
+        wrap(parts(cwt).to_vec().expect("re-encodes"))
+    }
+
+    /// The same signed COSE_Sign1 with a junk entry in the unprotected
+    /// header, which is outside the signature and so still verifies.
+    fn with_unprotected_entry(cwt: &[u8]) -> Vec<u8> {
+        let mut sign1 = parts(cwt);
+        sign1.unprotected.rest.push((
+            coset::Label::Int(-1000),
+            coset::cbor::value::Value::Text("padding".into()),
+        ));
+        wrap(sign1.to_tagged_vec().expect("re-encodes"))
     }
 
     fn call<'a>(
@@ -354,6 +385,73 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn reencoded_permit_shares_its_budget() {
+        // One issuance, two byte strings. Keying the counter on the permit's
+        // signed identity is what stops the second from buying a second
+        // invocation off a budget of one.
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+        let args = json!({"pr": 1});
+        let cwt = permit(&issuer, &holder, "merge", &args, 1, NOW + 300, 7);
+        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let allowed = gate.evaluate(&call("merge", &args, &cwt, &proof));
+        assert!(matches!(allowed, GateDecision::Allow { .. }), "{allowed:?}");
+
+        let bare = reencoded_bare(&cwt);
+        assert_ne!(bare, cwt, "the re-encoding must differ in bytes");
+        // The proof-of-possession digest covers the permit bytes, so the
+        // holder mints a fresh proof for the new encoding — as it may.
+        let bare_proof = prove_invocation(&holder, &bare, "merge", &args, HashAlgorithm::Sha256);
+        let denied = gate.evaluate(&call("merge", &args, &bare, &bare_proof));
+        assert!(
+            matches!(
+                denied,
+                GateDecision::Deny {
+                    stage: Stage::Budget,
+                    ..
+                }
+            ),
+            "{denied:?}"
+        );
+        assert_eq!(gate.usage_len(), 1, "both encodings share one counter");
+        let GateDecision::Allow { permit_id, .. } = allowed else {
+            unreachable!()
+        };
+        assert_eq!(
+            permit_id,
+            arkavo_permit::verify(&bare, NOW, &[issuer.public_key()])
+                .unwrap()
+                .id,
+            "the decision reports the permit's identity, not a hash of bytes"
+        );
+    }
+
+    #[test]
+    fn unprotected_header_permit_is_denied_at_authn() {
+        // The unprotected header is unsigned, so a permit carrying one is
+        // refused outright rather than admitted on its still-valid signature.
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+        let args = json!({"pr": 1});
+        let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 7);
+        let padded = with_unprotected_entry(&cwt);
+        assert_ne!(padded, cwt);
+        let proof = prove_invocation(&holder, &padded, "merge", &args, HashAlgorithm::Sha256);
+        let decision = gate.evaluate(&call("merge", &args, &padded, &proof));
+        assert!(
+            matches!(
+                decision,
+                GateDecision::Deny {
+                    stage: Stage::Authn,
+                    ..
+                }
+            ),
+            "{decision:?}"
+        );
+        assert_eq!(gate.usage_len(), 0, "a denied permit consumes no budget");
     }
 
     #[test]
