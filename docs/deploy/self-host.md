@@ -54,6 +54,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV ARKAVO_SKIP_FIRST_RUN=1
+# The gateway defaults to loopback-only; the container's network namespace
+# is the real isolation boundary, so opt back in for the published port.
+ENV ARKAVO_AGUI_BIND=0.0.0.0
 COPY --from=builder /app/target/release/arkavo /usr/local/bin/arkavo
 EXPOSE 7700
 ENTRYPOINT ["arkavo"]
@@ -221,8 +224,14 @@ ingress.
 
 ## Security
 
-The AG-UI gateway binds `0.0.0.0` with **no authentication**
-(`crates/arkavo-agui/src/gateway.rs:489`). Anyone who can reach the port can
+The AG-UI gateway defaults to loopback-only binding
+(`crates/arkavo-agui/src/gateway_bind.rs`); set `ARKAVO_AGUI_BIND` (e.g. to
+`0.0.0.0`) to opt out and listen on another interface. The container image
+sets `ARKAVO_AGUI_BIND=0.0.0.0` so the port you publish is actually
+reachable — the container's network namespace is the real isolation
+boundary, not the gateway's own bind address. Either way the gateway has
+**no authentication**: anyone who can reach the listening interface
+(loopback, a published container port, or a wider bind on bare metal) can
 drive the agent. Until gateway authentication lands:
 
 - Never publish the port directly to untrusted networks.
@@ -314,8 +323,9 @@ readinessProbe:
 
 ## Troubleshooting
 
-- **Gateway unreachable externally**: it binds `0.0.0.0`, so check proxy,
-  firewall, and port-mapping configuration first.
+- **Gateway unreachable externally**: it binds loopback only by default —
+  set `ARKAVO_AGUI_BIND=0.0.0.0` (the shipped container image sets this
+  already) before checking proxy, firewall, and port-mapping configuration.
 - **Agent requests fail**: verify the provider API key env var is set and
   valid; run with `ARKAVO_DEBUG=1` for provider error detail.
 - **State lost after container restart**: the working directory was not a

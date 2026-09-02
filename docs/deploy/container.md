@@ -20,11 +20,9 @@ cargo build --release -p arkavo \
 ```
 
 `.dockerignore` excludes `target/`, `vendor/`, and `.git/` from the build
-context, so local build artifacts and the llama.cpp submodule never reach the
-daemon. See the known gap in the feature-set rationale below: until
-`arkavo-ui-generator`'s `llama-cpp` dependency is feature-gated, the builder
-transitively compiles `arkavo-llama-cpp-sys` and needs `vendor/llama.cpp`
-plus cmake, so the image does not build from a `vendor/`-less context yet.
+context. `llama-cpp` is feature-gated end to end for this feature set (see
+below), so the builder never compiles `arkavo-llama-cpp-sys` — the build
+needs neither `vendor/llama.cpp` nor cmake.
 
 ## Run
 
@@ -42,16 +40,11 @@ The image ships `memory,mdns,mcp-tools,llm-remote,web-ui`:
 
 - `llama-cpp` is **excluded** from the feature list. Local inference is
   Apple-Metal-centric and containers are expected to use remote LLM providers
-  instead. **Known gap**: the C++ sys crate is still compiled transitively
-  today — `arkavo-agui` depends unconditionally on `arkavo-ui-generator`,
-  which declares `arkavo-llm = { features = ["llama-cpp"] }`
-  (`crates/arkavo-ui-generator/Cargo.toml:19`), pulling in
-  `arkavo-llama-cpp-sys`, whose `build.rs` unconditionally runs cmake against
-  `vendor/llama.cpp`. This affects the CI musl build the same way (that job
-  checks out submodules and has cmake available). Until that dependency is
-  feature-gated (planned follow-up), a build of this Dockerfile requires
-  either the gating fix or, as an interim workaround, removing `vendor/` from
-  `.dockerignore` and adding `cmake`/`clang` to the builder stage.
+  instead. `llama-cpp` is feature-gated end to end (`arkavo-ui-generator`,
+  `arkavo-agui`, `arkavo-orchestrator`, and `arkavo-server` each gate their
+  `llama-cpp` dependency behind their own opt-in feature), so this feature
+  set no longer pulls in `arkavo-llama-cpp-sys`: the build needs neither
+  cmake nor `vendor/llama.cpp`.
 - `llm-remote` is **included** so the binary can talk to remote providers
   (OpenAI-compatible, Gemini, Kimi, DeepSeek, xAI). This diverges deliberately
   from the musl CI variant at `.github/workflows/feature.yaml:606`, which
@@ -101,11 +94,16 @@ never bake them into the image.
 
 ## Known limitations
 
-- **Unauthenticated gateway on all interfaces**: the AG-UI gateway binds
-  `0.0.0.0` with no authentication (`crates/arkavo-agui/src/gateway.rs:489`).
-  When publishing the port (`-p 7700:7700`), any host that can reach the
-  published port can drive the agent. Run behind a reverse proxy with auth,
-  or restrict to trusted networks, until gateway authentication lands.
+- **Unauthenticated gateway, exposed by this image**: the AG-UI gateway
+  defaults to loopback-only (`ARKAVO_AGUI_BIND` opts out; see
+  `crates/arkavo-agui/src/gateway_bind.rs`), but this image sets
+  `ARKAVO_AGUI_BIND=0.0.0.0` in the runtime stage, because the container's
+  network namespace — not the process's own bind address — is the actual
+  isolation boundary: the port is reachable only where the operator
+  publishes it (`-p 7700:7700`). The gateway still has no authentication, so
+  anyone who can reach the published port can drive the agent. Run behind a
+  reverse proxy with auth, or never publish the port beyond a trusted
+  network, until gateway authentication lands.
 - No local model inference: the binary always needs network access to a
   remote LLM provider.
 - glibc runtime only; a fully static musl container variant can be added

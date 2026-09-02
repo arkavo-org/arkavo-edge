@@ -32,6 +32,11 @@ USER arkavo
 # (ARKAVO_SKIP_FIRST_RUN is added by a parallel change; harmless if unset logic absent.)
 ENV ARKAVO_SKIP_FIRST_RUN=1
 
+# The AG-UI gateway defaults to loopback-only; opt back in here because the
+# container's network namespace is the actual isolation boundary — the port
+# is only reachable where the operator publishes it (-p/ports:).
+ENV ARKAVO_AGUI_BIND=0.0.0.0
+
 # AG-UI gateway default port (crates/arkavo-cli/src/commands/ui.rs).
 EXPOSE 7700
 
