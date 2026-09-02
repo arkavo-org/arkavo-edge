@@ -206,6 +206,7 @@ fn print_usage() {
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
     println!("    pack           Build sealed knowledge-pack components");
+    println!("    mcp proxy      Permit-gated stdio MCP relay");
     println!("{}", commands::login::login_help());
     println!();
     println!("Run 'arkavo <command> --help' for detailed options");

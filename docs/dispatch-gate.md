@@ -2,9 +2,12 @@
 
 Every `tools/call` that passes through `arkavo mcp proxy` is admitted by three
 local stages, in order. No stage does I/O; the p95 budget is 25ms
-(`docs/gate-latency-baseline.md`), and the observed latency is recorded on
-`dispatch_gate` in the subsystem timing registry and shown in the AG-UI
-health panel.
+(`docs/gate-latency-baseline.md`). Each evaluation is recorded on the
+process-local `dispatch_gate` tracker in the subsystem timing registry, which
+means the samples are available to an embedder that hosts the proxy
+in-process; a standalone `arkavo mcp proxy` has no sampler reading them.
+Recording is in whole milliseconds, so a sub-millisecond evaluation — the
+normal case — records as 0 ms.
 
 ## Trust model
 
@@ -81,3 +84,13 @@ Sequence-integrity (Epic 5.1), step-up approval (3.4), and closure receipts
 (3.5) attach between the budget stage and `Allow`. Token and cost ceilings
 in the permit budget are carried but not enforced at dispatch, because the
 gate has no token counts.
+
+Delegation chains are not walked: a permit's `parent_permit` hash is carried
+through verification but the gate never resolves it, so it does not check
+that the parent exists, is still valid, or has budget left. A delegated
+permit is admitted on its own merits alone.
+
+Budget is consumed at gate time, not at completion. The counter increments
+when the call is allowed, so an upstream call that fails afterwards — a
+crashed server, a transport error, a tool that errors — has still spent one
+invocation of the permit's budget.

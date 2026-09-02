@@ -106,9 +106,11 @@ pub struct SubsystemTimingRegistry {
     pub conductor_orchestration: LatencyTracker,
     pub mcp_tools: LatencyTracker,
     pub inference: LatencyTracker,
-    /// Rolling window over dispatch-gate stage latencies (preflight, budget,
-    /// critic). Samples are recorded in milliseconds; sub-millisecond stages
-    /// read as 0 — use the gate_latency bench for sub-ms precision.
+    /// Rolling window over dispatch-gate stage latencies. Four writers share
+    /// it: preflight, budget, critic, and the permit gate the MCP proxy runs
+    /// on every `tools/call` (`arkavo_mcp_proxy::permit_hook`). Samples are
+    /// recorded in milliseconds; sub-millisecond stages read as 0 — use the
+    /// gate_latency bench for sub-ms precision.
     pub dispatch_gate: LatencyTracker,
 }
 

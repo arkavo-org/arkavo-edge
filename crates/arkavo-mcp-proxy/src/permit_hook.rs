@@ -1,6 +1,13 @@
 //! The `PolicyHook` that runs the dispatch gate on every `tools/call` and
-//! records its latency on the `dispatch_gate` tracker so the 25ms budget
-//! is visible in the AG-UI health panel.
+//! records its latency against the 25ms budget.
+//!
+//! Samples go to the `dispatch_gate` tracker of this process's
+//! `arkavo-observability` registry, which is process-local: they are visible
+//! to an embedder hosting the proxy in-process, and nowhere else — a
+//! standalone `arkavo mcp proxy` has no sampler reading them. Recording is in
+//! whole milliseconds, so a sub-millisecond evaluation, which is the normal
+//! case, records as 0 ms; the `gate_latency` bench is where sub-ms precision
+//! lives.
 
 use crate::policy::{CallContext, Decision, PolicyHook};
 use arkavo_dispatch_gate::{DispatchGate, GateDecision, GateRequest};
