@@ -3,8 +3,14 @@
 //! permit). Local crypto only, no I/O, so it fits inside the 25ms budget
 //! documented in `docs/gate-latency-baseline.md`. Sequence integrity and
 //! step-up are later stages and plug in before `Allow` is returned.
+//!
+//! `GateConfig::trusted_issuers` forms one trust domain: authn passes for a
+//! permit signed by any listed issuer, with no per-issuer policy and no
+//! binding to the permit's `iss` claim yet. `arkavo_permit::decode` must
+//! never be used for authn — it checks neither the issuer nor the
+//! signature, only claim structure.
 
-use arkavo_permit::{HashAlgorithm, verify, verify_invocation_proof};
+use arkavo_permit::{HashAlgorithm, PermitVerifier, verify, verify_invocation_proof};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -15,6 +21,7 @@ pub struct GateConfig {
     pub policy_bundle_hash: Vec<u8>,
     pub hash: HashAlgorithm,
     pub clock: fn() -> i64,
+    pub trusted_issuers: Vec<PermitVerifier>,
 }
 
 pub struct GateRequest<'a> {
@@ -58,10 +65,14 @@ struct Usage {
     expires_at: i64,
 }
 
-/// Counters are keyed by permit digest and pruned by expiry once the map
-/// grows, because a caller can mint arbitrarily many permits and the
-/// table must not become a memory sink.
+/// Counters are keyed by permit digest. Once the map holds more than
+/// `PRUNE_ABOVE` entries, expired counters are pruned first; if the map is
+/// still over the threshold after that, entries are evicted in bulk by
+/// soonest `expires_at` until at most `PRUNE_TARGET` remain. A caller can
+/// mint arbitrarily many permits, so a live (not-yet-expired) counter can be
+/// evicted too — but only under that memory pressure, never otherwise.
 const PRUNE_ABOVE: usize = 4096;
+const PRUNE_TARGET: usize = 3072;
 
 pub struct DispatchGate {
     config: GateConfig,
@@ -79,7 +90,7 @@ impl DispatchGate {
     pub fn evaluate(&self, request: &GateRequest<'_>) -> GateDecision {
         let now = (self.config.clock)();
 
-        let permit = match verify(request.permit, now) {
+        let permit = match verify(request.permit, now, &self.config.trusted_issuers) {
             Ok(permit) => permit,
             Err(error) => return deny(Stage::Authn, error.to_string()),
         };
@@ -116,6 +127,17 @@ impl DispatchGate {
         if usage.len() > PRUNE_ABOVE {
             usage.retain(|_, entry| entry.expires_at > now);
         }
+        if usage.len() > PRUNE_ABOVE {
+            let mut by_expiry: Vec<([u8; 32], i64)> = usage
+                .iter()
+                .map(|(key, entry)| (*key, entry.expires_at))
+                .collect();
+            by_expiry.sort_unstable_by_key(|(_, expires_at)| *expires_at);
+            let evict = usage.len() - PRUNE_TARGET;
+            for (key, _) in by_expiry.into_iter().take(evict) {
+                usage.remove(&key);
+            }
+        }
         let entry = usage.entry(permit_id).or_insert(Usage {
             invocations: 0,
             expires_at: permit.claims.expires_at,
@@ -129,6 +151,9 @@ impl DispatchGate {
                 ),
             );
         }
+        // Must stay the last step before `Allow`: no stage runs after this
+        // one, so a later addition must not be inserted below it, or it
+        // could consume budget on a request this function goes on to deny.
         entry.invocations += 1;
         drop(usage);
 
@@ -136,6 +161,14 @@ impl DispatchGate {
             permit_id,
             subject: permit.claims.subject,
         }
+    }
+
+    #[cfg(test)]
+    fn usage_len(&self) -> usize {
+        self.usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
     }
 }
 
@@ -168,16 +201,20 @@ mod tests {
         NOW
     }
 
-    fn gate() -> DispatchGate {
-        DispatchGate::new(GateConfig {
+    fn gate() -> (DispatchGate, PermitSigner) {
+        let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let dispatch_gate = DispatchGate::new(GateConfig {
             policy_bundle_hash: vec![7; 32],
             hash: HashAlgorithm::Sha256,
             clock,
-        })
+            trusted_issuers: vec![issuer.public_key()],
+        });
+        (dispatch_gate, issuer)
     }
 
     fn permit(
-        signer: &PermitSigner,
+        issuer: &PermitSigner,
+        holder: &PermitSigner,
         tool: &str,
         args: &serde_json::Value,
         max: u64,
@@ -203,7 +240,7 @@ mod tests {
             sequence_state_hash: vec![9; 32],
             parent_permit: None,
         };
-        mint(&claims, signer).unwrap()
+        mint(&claims, issuer, &holder.public_key()).unwrap()
     }
 
     fn call<'a>(
@@ -222,11 +259,12 @@ mod tests {
 
     #[test]
     fn valid_permit_and_proof_allow() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
-        let cwt = permit(&signer, "merge", &args, 2, NOW + 300, 7);
-        let proof = prove_invocation(&signer, &cwt, "merge", &args, HashAlgorithm::Sha256);
-        match gate().evaluate(&call("merge", &args, &cwt, &proof)) {
+        let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 7);
+        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        match gate.evaluate(&call("merge", &args, &cwt, &proof)) {
             GateDecision::Allow { subject, .. } => assert_eq!(subject, "agent-1"),
             other => panic!("{other:?}"),
         }
@@ -234,12 +272,13 @@ mod tests {
 
     #[test]
     fn expired_permit_is_denied_at_authn() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({});
-        let cwt = permit(&signer, "merge", &args, 2, NOW - 1, 7);
-        let proof = prove_invocation(&signer, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW - 1, 7);
+        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
         assert!(matches!(
-            gate().evaluate(&call("merge", &args, &cwt, &proof)),
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
             GateDecision::Deny {
                 stage: Stage::Authn,
                 ..
@@ -249,13 +288,14 @@ mod tests {
 
     #[test]
     fn replay_with_different_args_is_denied_at_authn() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
-        let cwt = permit(&signer, "merge", &args, 2, NOW + 300, 7);
-        let proof = prove_invocation(&signer, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 7);
+        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
         let other = json!({"pr": 2});
         assert!(matches!(
-            gate().evaluate(&call("merge", &other, &cwt, &proof)),
+            gate.evaluate(&call("merge", &other, &cwt, &proof)),
             GateDecision::Deny {
                 stage: Stage::Authn,
                 ..
@@ -265,13 +305,14 @@ mod tests {
 
     #[test]
     fn cross_agent_reuse_is_denied_at_authn() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let intruder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
-        let cwt = permit(&signer, "merge", &args, 2, NOW + 300, 7);
+        let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 7);
         let proof = prove_invocation(&intruder, &cwt, "merge", &args, HashAlgorithm::Sha256);
         assert!(matches!(
-            gate().evaluate(&call("merge", &args, &cwt, &proof)),
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
             GateDecision::Deny {
                 stage: Stage::Authn,
                 ..
@@ -281,12 +322,13 @@ mod tests {
 
     #[test]
     fn foreign_policy_bundle_is_denied_at_policy() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({});
-        let cwt = permit(&signer, "merge", &args, 2, NOW + 300, 8);
-        let proof = prove_invocation(&signer, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        let cwt = permit(&issuer, &holder, "merge", &args, 2, NOW + 300, 8);
+        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
         assert!(matches!(
-            gate().evaluate(&call("merge", &args, &cwt, &proof)),
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
             GateDecision::Deny {
                 stage: Stage::Policy,
                 ..
@@ -296,11 +338,11 @@ mod tests {
 
     #[test]
     fn budget_exhaustion_is_denied_at_budget() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({});
-        let cwt = permit(&signer, "merge", &args, 1, NOW + 300, 7);
-        let proof = prove_invocation(&signer, &cwt, "merge", &args, HashAlgorithm::Sha256);
-        let gate = gate();
+        let cwt = permit(&issuer, &holder, "merge", &args, 1, NOW + 300, 7);
+        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
         assert!(matches!(
             gate.evaluate(&call("merge", &args, &cwt, &proof)),
             GateDecision::Allow { .. }
@@ -315,12 +357,71 @@ mod tests {
     }
 
     #[test]
-    fn evaluation_stays_under_the_gate_budget() {
-        let signer = PermitSigner::Ed25519(AgentKeypair::generate());
+    fn self_minted_permit_is_denied_at_authn() {
+        let (gate, _issuer) = gate();
+        let rogue = PermitSigner::Ed25519(AgentKeypair::generate());
         let args = json!({"pr": 1});
-        let cwt = permit(&signer, "merge", &args, 10_000, NOW + 300, 7);
-        let proof = prove_invocation(&signer, &cwt, "merge", &args, HashAlgorithm::Sha256);
-        let gate = gate();
+        let cwt = permit(&rogue, &rogue, "merge", &args, 2, NOW + 300, 7);
+        let proof = prove_invocation(&rogue, &cwt, "merge", &args, HashAlgorithm::Sha256);
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
+            GateDecision::Deny {
+                stage: Stage::Authn,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn usage_table_stays_bounded_under_permit_flood() {
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+        let args = json!({"pr": 1});
+        let mut last_cwt = Vec::new();
+        let mut last_proof = Vec::new();
+        for i in 0..4_200i64 {
+            let claims = PermitClaims {
+                issuer: "edge".into(),
+                subject: "agent-1".into(),
+                expires_at: NOW + 300,
+                not_before: NOW - 60,
+                issued_at: NOW - 60 - i,
+                agent_workload_id: "wl-1".into(),
+                policy_bundle_hash: vec![7; 32],
+                tool_name: "merge".into(),
+                argument_hash: argument_hash(&args, HashAlgorithm::Sha256),
+                data_classifications: vec![],
+                budget: Budget {
+                    max_invocations: 2,
+                    token_ceiling: None,
+                    cost_micro_usd: None,
+                },
+                sequence_state_hash: vec![9; 32],
+                parent_permit: None,
+            };
+            let cwt = mint(&claims, &issuer, &holder.public_key()).unwrap();
+            let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
+            assert!(matches!(
+                gate.evaluate(&call("merge", &args, &cwt, &proof)),
+                GateDecision::Allow { .. }
+            ));
+            last_cwt = cwt;
+            last_proof = proof;
+        }
+        assert!(gate.usage_len() <= 4096);
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &last_cwt, &last_proof)),
+            GateDecision::Allow { .. }
+        ));
+    }
+
+    #[test]
+    fn evaluation_stays_under_the_gate_budget() {
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+        let args = json!({"pr": 1});
+        let cwt = permit(&issuer, &holder, "merge", &args, 10_000, NOW + 300, 7);
+        let proof = prove_invocation(&holder, &cwt, "merge", &args, HashAlgorithm::Sha256);
         let mut samples: Vec<u128> = (0..200)
             .map(|_| {
                 let start = std::time::Instant::now();
