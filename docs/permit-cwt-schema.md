@@ -6,6 +6,11 @@ an agent workload, a policy bundle, an execution budget, and a
 proof-of-possession key. The `arkavo-permit` crate (`crates/arkavo-permit`)
 implements this schema.
 
+Two keys are involved, in different roles. The **issuer** signs the permit and
+is named in the protected header by `kid`; verifiers accept only issuers on
+their trusted list. The **presenter** is named by the `cnf` claim (RFC 8747)
+and proves possession of that key separately when exercising the permit.
+
 ## Wire Format
 
 ```
@@ -21,6 +26,9 @@ Untrusted `decode`/`verify` input is rejected if it exceeds 16 KiB
 The COSE_Sign1 protected header carries:
 
 - `alg` (1): `EdDSA` (-8) or `ES256` (-7). No other algorithms are accepted.
+- `kid` (4): the issuer's key identifier — SHA-256 over the issuer's raw
+  public key bytes (32 bytes for Ed25519, the 65-byte SEC1 uncompressed point
+  for P-256), so 32 bytes of digest. `arkavo_permit::issuer_kid` computes it.
 - `content type` (3): `application/cwt` (CoAP content format 61).
 
 ## Claims
@@ -35,7 +43,7 @@ private-use keys below -65536 (RFC 8392 section 4).
 | 4 | exp | uint | required | Expiration, seconds since UNIX epoch. Permits are rejected at `now >= exp`. |
 | 5 | nbf | uint | required | Not-before, seconds since UNIX epoch. Must satisfy `nbf < exp`. |
 | 6 | iat | uint | required | Issued-at, seconds since UNIX epoch. Permits with `iat > now` are rejected. |
-| 8 | cnf | map | required | RFC 8747 confirmation claim: `{1: COSE_Key}` — the proof-of-possession key the signature is verified against. |
+| 8 | cnf | map | required | RFC 8747 confirmation claim: `{1: COSE_Key}` — the presenter's proof-of-possession key. Not the signing key. |
 | -70001 | agent_workload_id | tstr | required | Agent workload identity (SPIFFE-style workload ID). |
 | -70002 | policy_bundle_hash | bstr | required | Hash of the policy bundle authorizing this permit. |
 | -70003 | tool_name | tstr | required | Fully-qualified tool name this permit authorizes. |
@@ -66,11 +74,18 @@ Supported key types:
 - `EC2` (2) with curve `P-256` (1) and `x` (-2) / `y` (-3) parameters: 32-byte
   affine coordinates. Used with `ES256`.
 
-The COSE_Key's key type and curve must agree with the `alg` in the protected
-header, and the COSE_Sign1 signature must verify against this key. A permit
-therefore proves possession of the confirmation key at mint time; verifiers
-never need out-of-band key lookup to check the signature, and policy layers
-can pin the `cnf` key to a registered workload identity.
+The `cnf` key belongs to the presenter, not to the issuer, and its algorithm
+is independent of the `alg` in the protected header: an Ed25519 issuer may
+confirm a P-256 presenter. The COSE_Sign1 signature is **not** verified
+against this key — it is verified against the issuer's key found by `kid` —
+so holding the `cnf` key confers no authority by itself. Presenting a permit
+requires a separate proof of possession of the `cnf` key; policy layers can
+pin that key to a registered workload identity.
+
+An earlier revision of this crate signed permits with the `cnf` key itself and
+verified the signature against the key embedded in the token. That shape is no
+longer valid: it made any keypair holder able to mint an accepted permit.
+Tokens in that form fail verification because their `kid` is absent.
 
 ## Canonicalization of Tool Arguments
 
@@ -109,6 +124,15 @@ algorithms across the claims of one permit is discouraged.
   (e.g. iOS Secure Enclave). ES256 signature values use the IEEE P1363
   fixed-size `r || s` encoding (64 bytes) required by RFC 8152 section 8.1.
 
+The issuer holds the signing key. `arkavo_permit::verify(cwt, now,
+trusted_issuers)` takes the verifier's list of trusted issuer public keys and
+runs its checks in this order: size cap, CWT tag, COSE parse, issuer lookup by
+`kid` **and** matching algorithm, signature, claim extraction, validity
+window. A token whose `kid` names no trusted issuer is rejected with
+`UntrustedIssuer` before its claims are parsed, so an untrusted token reveals
+nothing. `decode` skips the issuer and signature checks entirely and must
+never drive an authorization decision.
+
 ## Expiry Guidance
 
 Permits are single-purpose and short-lived: `exp - nbf` should be on the
@@ -137,8 +161,10 @@ above this crate; the schema only provides the cryptographic link.
 
 `crates/arkavo-permit/tests/vectors/` holds reproducible vectors (Ed25519 +
 SHA-256, ES256 + BLAKE3, and a parent-chained A2A permit), each containing
-the signed CWT (hex), the expected claims, the public key, and the secret
-key. Regenerate with:
+the signed CWT (hex), the expected claims, and two keypairs: the issuer's
+(`issuer_secret_key_hex`, `issuer_public_key_hex`, and the derived `kid_hex`)
+and the presenter's (`cnf_secret_key_hex`, `cnf_public_key_hex`). Regenerate
+with:
 
 ```bash
 cargo run -p arkavo-permit --example generate_vectors

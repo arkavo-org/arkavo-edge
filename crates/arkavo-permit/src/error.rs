@@ -18,6 +18,8 @@ pub enum PermitError {
     UnsupportedAlgorithm(String),
     #[error("confirmation key does not match the COSE header algorithm")]
     KeyAlgorithmMismatch,
+    #[error("permit issuer is not trusted")]
+    UntrustedIssuer,
     #[error("signature verification failed")]
     InvalidSignature,
     #[error("permit is not yet valid (nbf {nbf} > now {now})")]

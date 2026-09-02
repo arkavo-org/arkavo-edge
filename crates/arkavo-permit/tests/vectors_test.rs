@@ -4,7 +4,10 @@
 
 use std::path::PathBuf;
 
-use arkavo_permit::{Budget, HashAlgorithm, verify};
+use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
+use arkavo_permit::{
+    Budget, HashAlgorithm, PermitError, PermitSigner, PermitVerifier, issuer_kid, verify,
+};
 use serde_json::Value;
 
 fn load_vector(name: &str) -> Value {
@@ -23,15 +26,51 @@ fn hex_decode(value: &Value, field: &str) -> Vec<u8> {
     hex::decode(text).unwrap_or_else(|e| panic!("{field} hex: {e}"))
 }
 
+/// Rebuild a published keypair from its secret, so the vectors prove that the
+/// recorded secret, public key, and `kid` belong together.
+fn key_from_secret(algorithm: &str, value: &Value, field: &str) -> PermitVerifier {
+    let secret: [u8; 32] = hex_decode(value, field)
+        .try_into()
+        .unwrap_or_else(|_| panic!("{field} must be 32 bytes"));
+    let signer = match algorithm {
+        "EdDSA" => {
+            PermitSigner::Ed25519(AgentKeypair::from_bytes(&secret).expect("valid ed25519 secret"))
+        }
+        "ES256" => {
+            PermitSigner::P256(P256SigningKeypair::from_bytes(&secret).expect("valid p256 secret"))
+        }
+        other => panic!("unknown algorithm {other}"),
+    };
+    signer.public_key()
+}
+
 fn check_vector(vector: &Value) {
     let name = vector["name"].as_str().unwrap();
+    let algorithm = vector["algorithm"].as_str().unwrap();
     let hash_algorithm = HashAlgorithm::from_name(vector["hash_algorithm"].as_str().unwrap())
         .expect("known hash algorithm");
     let cwt = hex_decode(&vector["cwt_hex"], "cwt_hex");
     let now = vector["now_for_verification"].as_i64().unwrap();
     let expected = &vector["claims"];
 
-    let permit = verify(&cwt, now).unwrap_or_else(|e| panic!("{name}: verify: {e}"));
+    let issuer = key_from_secret(
+        algorithm,
+        &vector["issuer_secret_key_hex"],
+        "issuer_secret_key_hex",
+    );
+    assert_eq!(
+        issuer.public_key_bytes(),
+        hex_decode(&vector["issuer_public_key_hex"], "issuer_public_key_hex"),
+        "{name} issuer public key"
+    );
+    assert_eq!(
+        issuer_kid(&issuer).as_slice(),
+        hex_decode(&vector["kid_hex"], "kid_hex").as_slice(),
+        "{name} kid"
+    );
+
+    let permit = verify(&cwt, now, std::slice::from_ref(&issuer))
+        .unwrap_or_else(|e| panic!("{name}: verify: {e}"));
     let claims = &permit.claims;
 
     assert_eq!(
@@ -119,11 +158,40 @@ fn check_vector(vector: &Value) {
         ),
     }
 
-    // The confirmation key in the permit must equal the published public key.
+    // The `cnf` claim names the presenter, not the issuer.
+    let confirmation = key_from_secret(
+        algorithm,
+        &vector["cnf_secret_key_hex"],
+        "cnf_secret_key_hex",
+    );
     assert_eq!(
         permit.confirmation_key.public_key_bytes(),
-        hex_decode(&vector["public_key_hex"], "public_key_hex"),
+        hex_decode(&vector["cnf_public_key_hex"], "cnf_public_key_hex"),
         "{name} cnf public key"
+    );
+    assert_eq!(
+        permit.confirmation_key.public_key_bytes(),
+        confirmation.public_key_bytes(),
+        "{name} cnf key must match the published presenter secret"
+    );
+    assert_ne!(
+        issuer.public_key_bytes(),
+        confirmation.public_key_bytes(),
+        "{name} issuer and presenter must be distinct keys"
+    );
+
+    // A verifier that does not trust the issuer must refuse the permit, and
+    // trusting the presenter's key instead must not help.
+    assert!(
+        matches!(verify(&cwt, now, &[]), Err(PermitError::UntrustedIssuer)),
+        "{name}: empty trusted issuer list accepted a permit"
+    );
+    assert!(
+        matches!(
+            verify(&cwt, now, &[confirmation]),
+            Err(PermitError::UntrustedIssuer)
+        ),
+        "{name}: presenter key accepted as an issuer"
     );
 
     // The recorded invocation must match the permit binding.
@@ -137,7 +205,7 @@ fn check_vector(vector: &Value) {
 
     // Expired permits must be rejected.
     assert!(
-        verify(&cwt, claims.expires_at).is_err(),
+        verify(&cwt, claims.expires_at, &[issuer]).is_err(),
         "{name}: expired permit accepted"
     );
 }
@@ -172,7 +240,18 @@ fn tampered_vector_rejected() {
     let vector = load_vector("ed25519-sha256");
     let mut cwt = hex_decode(&vector["cwt_hex"], "cwt_hex");
     let now = vector["now_for_verification"].as_i64().unwrap();
+    let issuer = key_from_secret(
+        vector["algorithm"].as_str().unwrap(),
+        &vector["issuer_secret_key_hex"],
+        "issuer_secret_key_hex",
+    );
     let last = cwt.len() - 1;
     cwt[last] ^= 0x01;
-    assert!(verify(&cwt, now).is_err(), "tampered CWT accepted");
+    assert!(
+        matches!(
+            verify(&cwt, now, &[issuer]),
+            Err(PermitError::InvalidSignature)
+        ),
+        "tampered CWT accepted"
+    );
 }

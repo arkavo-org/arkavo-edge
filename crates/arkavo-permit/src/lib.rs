@@ -1,9 +1,15 @@
 //! CWT permits for permit-bound tool execution.
 //!
 //! A permit is a CBOR Web Token (RFC 8392) signed as COSE_Sign1 (RFC 8152).
-//! Every permit carries a `cnf` confirmation claim (RFC 8747) holding the
-//! COSE_Key proof-of-possession key; the signature is verified against that
-//! key, so a permit is bound to the key that minted it.
+//! The **issuer** signs it and is named in the protected header by `kid`,
+//! the SHA-256 of its public key bytes ([`issuer_kid`]). The `cnf`
+//! confirmation claim (RFC 8747) holds a different key: the COSE_Key of the
+//! **presenter** who will exercise the permit.
+//!
+//! [`verify`] therefore takes a list of trusted issuer keys and refuses any
+//! permit whose `kid` names none of them. Signing a permit with the key it
+//! confirms proves only that the minter holds a keypair, and such a permit is
+//! rejected unless that key is itself a trusted issuer.
 //!
 //! See `docs/permit-cwt-schema.md` for the full claim schema and
 //! canonicalization rules.
@@ -26,4 +32,4 @@ pub use claims::{
 pub use error::PermitError;
 pub use hash::HashAlgorithm;
 pub use keys::{PermitSigner, PermitVerifier};
-pub use permit::{MAX_PERMIT_BYTES, Permit, decode, mint, verify};
+pub use permit::{MAX_PERMIT_BYTES, Permit, decode, issuer_kid, mint, verify};
