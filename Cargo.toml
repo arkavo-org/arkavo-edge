@@ -51,6 +51,7 @@ members = [
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
     "crates/arkavo-cwt",
+    "crates/arkavo-permit",
     "crates/arkavo-registration",
     "crates/arkavo-agent",
     "crates/arkavo-agent-auth",
@@ -139,6 +140,7 @@ default-members = [
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
     "crates/arkavo-cwt",
+    "crates/arkavo-permit",
     "crates/arkavo-registration",
     "crates/arkavo-agent-auth",
     "crates/arkavo-hrm",
@@ -164,7 +166,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.91.2"
+version = "0.91.3"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

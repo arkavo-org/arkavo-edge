@@ -1,0 +1,21 @@
+[package]
+name = "arkavo-permit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CWT (RFC 8392) permits for permit-bound tool execution, signed as COSE_Sign1 (RFC 8152)"
+
+[dependencies]
+arkavo-crypto = { path = "../arkavo-crypto" }
+coset = "0.3"
+ciborium = "0.2"
+blake3 = "1.5"
+sha2 = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
