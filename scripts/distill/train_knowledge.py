@@ -29,10 +29,11 @@ import time
 from pathlib import Path
 
 import torch
-from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model
 from torch.utils.data import DataLoader, Dataset, Sampler
-from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer
+from transformers import AutoTokenizer
+
+from train_knowledge_io import load_base, push
 
 LORA_TARGETS = [
     "q_proj",
@@ -49,42 +50,6 @@ LORA_TARGETS = [
     "out_proj",
 ]
 
-
-def drop_unused(model) -> None:
-    """Vision + MTP are unused for text LoRA and duplicate tens of GB in RAM."""
-    inner = getattr(model, "model", model)
-    for obj in (inner, model):
-        for name in ("visual", "vision_tower", "vision_model", "mtp"):
-            if hasattr(obj, name) and getattr(obj, name) is not None:
-                setattr(obj, name, None)
-                print(f"dropped {name}", flush=True)
-
-
-def load_base(path: Path, dtype, device: torch.device):
-    """Qwen3.8-27B is a VL ConditionalGeneration model, not CausalLM.
-
-    Load onto MPS directly when we can so we do not keep a CPU copy of 54GB
-    of weights (that copy is what filled swap).
-    """
-    kwargs = {
-        "dtype": dtype,
-        "trust_remote_code": True,
-        "low_cpu_mem_usage": True,
-    }
-    if device.type in ("mps", "cuda"):
-        kwargs["device_map"] = {"": device.type}
-    try:
-        model = AutoModelForImageTextToText.from_pretrained(path, **kwargs)
-    except (ValueError, OSError, AttributeError, NotImplementedError) as exc:
-        print(f"direct MPS VL load failed ({exc}); CPU then .to(mps)", flush=True)
-        kwargs.pop("device_map", None)
-        model = AutoModelForCausalLM.from_pretrained(path, **kwargs)
-        model = model.to(device)
-    drop_unused(model)
-    gc.collect()
-    if device.type == "mps":
-        torch.mps.empty_cache()
-    return model
 
 SYSTEM = (
     "You answer from this knowledge pack. Use only the pack. "
@@ -232,6 +197,27 @@ def finite_mean(losses: list[float]) -> tuple[float, int]:
     return mean, skipped
 
 
+def train_step(model, batch: dict, opt) -> float | None:
+    """Forward, backward, and one optimizer step on a single batch.
+
+    Returns None instead of stepping when the loss is non-finite: backward()
+    on a NaN loss writes NaN gradients, clip_grad_norm_ propagates NaN as
+    the clip coefficient, and opt.step() then bakes NaN into AdamW's
+    exp_avg/exp_avg_sq -- state that is permanent, so every later step would
+    also produce NaN regardless of its own batch. Skipping the step (but
+    still zeroing grads) contains a single bad batch to itself.
+    """
+    opt.zero_grad(set_to_none=True)
+    loss = model(**batch).loss
+    loss_value = float(loss.item())
+    if not math.isfinite(loss_value):
+        return None
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    opt.step()
+    return loss_value
+
+
 class BucketSampler(Sampler[list[int]]):
     """Fixed length-sorted batches; only batch order reshuffles each epoch."""
 
@@ -343,20 +329,18 @@ def main() -> None:
         step_losses: list[float] = []
         for batch in loader:
             batch = {k: v.to(device) for k, v in batch.items()}
-            opt.zero_grad(set_to_none=True)
-            loss = model(**batch).loss
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            opt.step()
-            loss_value = float(loss.item())
-            step_losses.append(loss_value)
+            loss_value = train_step(model, batch, opt)
+            # A skipped (non-finite) step is still counted for the epoch
+            # report; finite_mean is what turns this back into a skip count.
+            step_losses.append(loss_value if loss_value is not None else float("nan"))
             step += 1
             if step == 10 or step % 50 == 0 or step == total_steps:
                 elapsed = time.time() - started
                 rate = step / max(elapsed, 1e-6)
                 remain = (total_steps - step) / max(rate, 1e-6)
+                loss_desc = f"{loss_value:.4f}" if loss_value is not None else "skipped (non-finite)"
                 print(
-                    f"step {step}/{total_steps} loss {loss_value:.4f} "
+                    f"step {step}/{total_steps} loss {loss_desc} "
                     f"{rate:.2f} it/s eta {remain / 60:.1f} min",
                     flush=True,
                 )
@@ -378,21 +362,6 @@ def main() -> None:
     tok.save_pretrained(args.out)
     print(f"saved knowledge adapter to {args.out}", flush=True)
     push(args, args.out, f"{args.push_prefix}/final")
-
-
-def push(args, folder: Path, path_in_repo: str) -> None:
-    """Job containers are ephemeral; every checkpoint goes to the Hub as it lands."""
-    if not args.push_to:
-        return
-    HfApi().upload_folder(
-        repo_id=args.push_to,
-        folder_path=str(folder),
-        path_in_repo=path_in_repo,
-        allow_patterns=["*.json", "*.safetensors", "*.jinja"],
-        ignore_patterns=["epoch-*/**"],
-        commit_message=f"{path_in_repo} from {args.epochs} epoch run",
-    )
-    print(f"pushed {folder} to {args.push_to}/{path_in_repo}", flush=True)
 
 
 if __name__ == "__main__":

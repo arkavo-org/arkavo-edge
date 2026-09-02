@@ -17,7 +17,6 @@ import difflib
 import json
 import random
 import sys
-import urllib.error
 import urllib.request
 import zlib
 from collections import Counter
@@ -82,7 +81,13 @@ def accept_rewrite(text: str, source: str) -> bool:
     source_words = source.split()
     if not source_words or len(text.split()) < 0.4 * len(source_words):
         return False
-    return difflib.SequenceMatcher(None, text, source).ratio() < 0.9
+    # autojunk=False: SequenceMatcher's default autojunk heuristic treats any
+    # character appearing in >1% of a >=200-element sequence as junk, which
+    # on prose-length text is every space and common letter. That mutilates
+    # the alphabet ratio() scores over and systematically depresses it,
+    # letting near-verbatim rewrites (e.g. two swapped words) score below
+    # the 0.9 cutoff and pass as "faithful rewrites".
+    return difflib.SequenceMatcher(None, text, source, autojunk=False).ratio() < 0.9
 
 
 def row_seed(source_id: str, method: str) -> int:
@@ -256,7 +261,14 @@ def run_task(
 ) -> tuple[dict | None, str]:
     cached = cache.get(task.source_id)
     if cached is not None:
-        text, ok = cached["text"], cached["accepted"]
+        # Re-run the (cheap, pure) acceptance predicate on every cache hit
+        # rather than trusting the stored "accepted" flag: that flag was
+        # computed by whatever acceptance rules were live when the row was
+        # generated, so an acceptance-rule fix would otherwise never reach
+        # rows already sitting in generations.jsonl without a full, costly
+        # regeneration. Only the generated text itself is cached.
+        text = cached["text"]
+        ok = accepted(task, text)
     else:
         text = chat_fn(server, task.messages, max_tokens, seed=task.seed, temperature=0.8)
         ok = accepted(task, text)

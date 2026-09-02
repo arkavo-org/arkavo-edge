@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 import pytest
+import torch
 from torch.utils.data import DataLoader
 
 from train_knowledge import (
@@ -17,6 +18,7 @@ from train_knowledge import (
     collate,
     finite_mean,
     split_rows,
+    train_step,
 )
 
 TOKENIZER = Path(
@@ -148,6 +150,50 @@ def test_finite_mean_all_non_finite_reports_nan_and_full_skip_count():
     mean, skipped = finite_mean([float("nan"), float("inf")])
     assert skipped == 2
     assert math.isnan(mean)
+
+
+class _FakeOutput:
+    def __init__(self, loss: torch.Tensor) -> None:
+        self.loss = loss
+
+
+class _FakeLossModel(torch.nn.Module):
+    """loss = p * batch["value"], so a NaN batch produces a NaN loss and a
+    finite batch produces one whose backward pass moves p and touches
+    AdamW's optimizer state -- both observable without a real tokenizer."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.p = torch.nn.Parameter(torch.tensor(1.0))
+
+    def forward(self, value: torch.Tensor) -> _FakeOutput:
+        return _FakeOutput(self.p * value)
+
+
+def test_train_step_skips_optimizer_update_on_non_finite_loss():
+    model = _FakeLossModel()
+    opt = torch.optim.AdamW(model.parameters(), lr=0.1)
+    good_batch = {"value": torch.tensor(2.0)}
+    bad_batch = {"value": torch.tensor(float("nan"))}
+
+    loss = train_step(model, good_batch, opt)
+    assert loss == pytest.approx(2.0)
+    p_after_good_step = model.p.item()
+
+    # The non-finite batch must not backward/clip/step: p is unchanged and
+    # not poisoned with NaN, and the function reports the skip via None.
+    result = train_step(model, bad_batch, opt)
+    assert result is None
+    assert model.p.item() == pytest.approx(p_after_good_step)
+    assert not math.isnan(model.p.item())
+
+    # A later good batch still steps normally -- proof the NaN batch did not
+    # poison AdamW's exp_avg/exp_avg_sq state (which would otherwise be
+    # permanent and turn every later step's update into NaN too).
+    loss2 = train_step(model, good_batch, opt)
+    assert loss2 is not None and math.isfinite(loss2)
+    assert not math.isnan(model.p.item())
+    assert model.p.item() != pytest.approx(p_after_good_step)
 
 
 def test_bucket_sampler_yields_each_index_once_and_buckets_by_length():

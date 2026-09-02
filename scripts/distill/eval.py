@@ -53,29 +53,23 @@ def _confidential_probs(results: list[dict], method: str | None = None) -> list[
     ]
 
 
-def threshold_from(results: list[dict]) -> float:
+def threshold_with_source(results: list[dict]) -> tuple[float, str]:
     """Conservative confidential threshold: min gold-confidential probability.
 
     Prefers rewrite-eval rows (faithful rewrites, the hardest confidential
     case); falls back to gold-confidential rows of any method when the
     corpus has no rewrite rows; falls back to 0.5 when it has no
-    gold-confidential rows at all.
+    gold-confidential rows at all. Returns the threshold and which branch
+    produced it, computed from one pass per branch so the two values can
+    never disagree with each other.
     """
     rewrite_conf = _confidential_probs(results, "rewrite")
     if rewrite_conf:
-        return min(rewrite_conf)
+        return min(rewrite_conf), "rewrite"
     any_conf = _confidential_probs(results)
     if any_conf:
-        return min(any_conf)
-    return 0.5
-
-
-def threshold_source(results: list[dict]) -> str:
-    if _confidential_probs(results, "rewrite"):
-        return "rewrite"
-    if _confidential_probs(results):
-        return "all-confidential"
-    return "default"
+        return min(any_conf), "all-confidential"
+    return 0.5, "default"
 
 
 def main() -> None:
@@ -125,8 +119,7 @@ def main() -> None:
         method: {"n": len(v), "correct": sum(v)}
         for method, v in sorted(by_method.items())
     }
-    threshold = threshold_from(results)
-    source = threshold_source(results)
+    threshold, source = threshold_with_source(results)
     calibration = {
         "detector_version": args.detector_version,
         "taxonomy_version": "1.0.0",
