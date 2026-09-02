@@ -218,6 +218,7 @@ mod tests {
     use crate::claims::{BUDGET_MAX_INVOCATIONS, Budget};
     use crate::hash::HashAlgorithm;
     use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
+    use arkavo_test_macros::spec;
     use coset::iana::Algorithm;
     use coset::{CborSerializable, CoseSign1};
 
@@ -374,6 +375,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-002")]
     fn self_minted_permit_is_untrusted() {
         // The defect this model closes: holding a keypair is not authority to
         // issue. A permit signed by its own cnf holder must be refused by a
@@ -392,6 +394,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-002")]
     fn cnf_key_alone_does_not_authorize() {
         // Trusting the presenter's key must not make its permits verify: the
         // signature is the issuer's, and the kid names the issuer.
@@ -437,6 +440,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-001")]
     fn untrusted_issuer_checked_before_claim_extraction() {
         // An untrusted token must learn nothing about its payload: the kid
         // lookup runs before the claims are parsed.
@@ -488,6 +492,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-005")]
     fn expired_permit_rejected() {
         let issuer = ed25519_signer();
         let cwt = mint(&sample_claims(), &issuer, &ed25519_signer().public_key()).unwrap();
@@ -659,6 +664,7 @@ mod tests {
     /// learns which claims a verifier reads by watching the errors it
     /// returns, and every claim decoder becomes reachable pre-authentication.
     #[test]
+    #[spec("PDG-001")]
     fn signature_is_checked_before_claims_are_parsed() {
         let issuer = ed25519_signer();
         let forger = ed25519_signer();
@@ -721,6 +727,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-004")]
     fn id_is_stable_across_reencodings() {
         // One issuance, three byte strings. The permit's identity has to be
         // the same for all of them, or a holder re-encodes their way to a

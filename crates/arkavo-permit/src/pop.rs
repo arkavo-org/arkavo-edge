@@ -90,6 +90,7 @@ mod tests {
     use crate::keys::PermitSigner;
     use crate::{argument_hash, decode, mint, verify};
     use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
     const NOW: i64 = 1_700_000_060;
@@ -205,6 +206,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-003")]
     fn replay_with_different_arguments_is_rejected() {
         let issuer = ed25519();
         let holder = ed25519();
@@ -233,6 +235,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-003")]
     fn proof_from_another_agent_is_rejected() {
         let issuer = ed25519();
         let holder = ed25519();
@@ -265,6 +268,7 @@ mod tests {
     /// the wire bytes instead put the proof and the gate's budget counter on
     /// two different notions of "the same permit".
     #[test]
+    #[spec("PDG-004")]
     fn a_proof_survives_re_encoding_of_its_permit() {
         use coset::{CborSerializable as _, CoseSign1, TaggedCborSerializable as _};
 
@@ -299,6 +303,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-003")]
     fn digest_is_domain_separated_and_deterministic() {
         let args = json!({"b": 1, "a": 2});
         let id = [0x11u8; 32];

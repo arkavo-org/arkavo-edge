@@ -270,6 +270,7 @@ mod tests {
     use arkavo_permit::{
         Budget, PermitClaims, PermitSigner, argument_hash, mint, prove_invocation,
     };
+    use arkavo_test_macros::spec;
     use coset::{CborSerializable, CoseSign1, TaggedCborSerializable};
     use serde_json::json;
 
@@ -393,6 +394,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-005")]
     fn expired_permit_is_denied_at_authn() {
         let (gate, issuer) = gate();
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -415,6 +417,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-003")]
     fn replay_with_different_args_is_denied_at_authn() {
         let (gate, issuer) = gate();
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -438,6 +441,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-003")]
     fn cross_agent_reuse_is_denied_at_authn() {
         let (gate, issuer) = gate();
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -483,6 +487,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-006")]
     fn budget_exhaustion_is_denied_at_budget() {
         let (gate, issuer) = gate();
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -509,6 +514,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-004")]
     fn reencoded_permit_shares_its_budget() {
         // One issuance, two byte strings. Keying the counter on the permit's
         // signed identity is what stops the second from buying a second
@@ -589,6 +595,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("PDG-002")]
     fn self_minted_permit_is_denied_at_authn() {
         let (gate, _issuer) = gate();
         let rogue = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -663,6 +670,7 @@ mod tests {
     /// invocation: the gate spends the budget before the dispatch, so the
     /// dispatcher hands it back when the dispatch fails.
     #[test]
+    #[spec("PDG-006")]
     fn a_refund_returns_one_invocation_to_the_budget() {
         let (gate, issuer) = gate();
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -698,6 +706,7 @@ mod tests {
     /// A refund never invents budget: it cannot take a counter below zero,
     /// and it does not create one for a permit that has spent nothing.
     #[test]
+    #[spec("PDG-006")]
     fn a_refund_never_creates_budget() {
         let (gate, issuer) = gate();
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -774,6 +783,7 @@ mod tests {
     /// work, and it happens twice per call. Oversized arguments are refused
     /// before any of it.
     #[test]
+    #[spec("PDG-010")]
     fn oversized_arguments_are_denied_at_policy() {
         let (gate, issuer) = gate();
         let holder = PermitSigner::Ed25519(AgentKeypair::generate());

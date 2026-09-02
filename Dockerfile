@@ -28,8 +28,7 @@ COPY --from=builder /app/target/release/arkavo /usr/local/bin/arkavo
 
 USER arkavo
 
-# Skip interactive first-run model download; containers use remote LLMs only.
-# (ARKAVO_SKIP_FIRST_RUN is added by a parallel change; harmless if unset logic absent.)
+# Skip the interactive first-run model download; containers use remote LLMs only.
 ENV ARKAVO_SKIP_FIRST_RUN=1
 
 # The AG-UI gateway defaults to loopback-only; opt back in here because the

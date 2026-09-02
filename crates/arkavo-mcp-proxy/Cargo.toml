@@ -20,6 +20,7 @@ tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "tim
 tracing.workspace = true
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-permit = { path = "../arkavo-permit" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

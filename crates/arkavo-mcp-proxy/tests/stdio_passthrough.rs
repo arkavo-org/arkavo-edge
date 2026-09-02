@@ -17,6 +17,7 @@ use arkavo_permit::{
     Budget, HashAlgorithm, PermitClaims, PermitSigner, argument_hash, decode, mint,
     prove_invocation,
 };
+use arkavo_test_macros::spec;
 use base64::Engine as _;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -303,6 +304,7 @@ async fn denied_tool_call_never_reaches_upstream() {
 }
 
 #[tokio::test]
+#[spec("PDG-007")]
 async fn tools_call_notification_never_reaches_upstream() {
     let record_file = std::env::temp_dir().join(format!(
         "arkavo-mcp-proxy-test-{}-{}.log",
@@ -399,6 +401,7 @@ async fn a_server_initiated_request_is_refused_rather_than_dropped() {
 /// A JSON-RPC batch is a top-level array. Nothing here handles one, and
 /// dropping it left the client waiting for a response that never came.
 #[tokio::test]
+#[spec("PDG-010")]
 async fn a_json_rpc_batch_is_refused() {
     let (mut client, handle) = start_proxy(fixture_config(), Arc::new(AllowAllPolicy));
     client.handshake().await;
@@ -428,6 +431,7 @@ async fn a_json_rpc_batch_is_refused() {
 /// One client must not be able to decide how much the proxy buffers. An
 /// over-long line is answered and skipped, and the next message still works.
 #[tokio::test]
+#[spec("PDG-010")]
 async fn an_over_long_message_is_refused_and_the_connection_survives() {
     let (mut client, handle) = start_proxy(fixture_config(), Arc::new(AllowAllPolicy));
     client.handshake().await;
@@ -458,6 +462,7 @@ async fn an_over_long_message_is_refused_and_the_connection_survives() {
 }
 
 #[tokio::test]
+#[spec("PDG-008")]
 async fn permit_bound_call_is_allowed_once_and_refused_on_replay_or_tamper() {
     let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
     let holder = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -536,6 +541,7 @@ async fn permit_bound_call_is_allowed_once_and_refused_on_replay_or_tamper() {
 /// both fields and mis-encoded one, or that sent only one of the two. Each
 /// case has to name itself, and all of them stay `authn:` refusals.
 #[tokio::test]
+#[spec("PDG-009")]
 async fn malformed_credentials_are_refused_by_what_is_actually_wrong() {
     let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
     let holder = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -603,6 +609,7 @@ async fn malformed_credentials_are_refused_by_what_is_actually_wrong() {
 /// a single timeout: the second attempt would be refused for want of budget
 /// rather than reaching the upstream at all.
 #[tokio::test]
+#[spec("PDG-006")]
 async fn a_call_that_never_reaches_the_upstream_keeps_its_budget() {
     let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
     let holder = PermitSigner::Ed25519(AgentKeypair::generate());
@@ -635,6 +642,7 @@ async fn a_call_that_never_reaches_the_upstream_keeps_its_budget() {
 /// completed call. It keeps the invocation it spent, so a budget of one
 /// covers exactly one failed tool call and no more.
 #[tokio::test]
+#[spec("PDG-006")]
 async fn a_tool_that_answers_with_an_error_keeps_its_invocation() {
     let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
     let holder = PermitSigner::Ed25519(AgentKeypair::generate());

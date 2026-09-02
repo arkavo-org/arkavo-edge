@@ -81,8 +81,6 @@ the container build:
 - `ARKAVO_SKIP_FIRST_RUN=1` — **required in containers.** Skips the
   interactive first-run flow that downloads a local model, which is
   meaningless in a no-inference image. Set by default in the Dockerfile.
-  (This variable is being added by a parallel task; the Dockerfile already
-  exports it, and it is a no-op until that change lands.)
 - `GEMINI_API_KEY` — Gemini provider access.
 - `OPENAI_API_KEY` — OpenAI-compatible provider access.
 - `DEEPSEEK_API_KEY` — DeepSeek provider access.

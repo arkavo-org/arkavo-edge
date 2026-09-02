@@ -356,8 +356,12 @@ fn strip_arkavo_meta(params: Option<&Value>) -> Option<Value> {
 }
 
 #[cfg(test)]
+// The `#[tokio::test]` macro expands to `Runtime::block_on`, which
+// `.clippy.toml` disallows outside test code.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn error_response_shape() {
@@ -384,6 +388,7 @@ mod tests {
     /// client that sent nothing, one whose encoding is wrong, and one whose
     /// field is too long to be a permit at all.
     #[test]
+    #[spec("PDG-009")]
     fn credential_distinguishes_absent_undecodable_and_oversized() {
         let meta = json!({
             "permit": "aGk",
@@ -402,6 +407,68 @@ mod tests {
         assert_eq!(credential(meta, "number"), Credential::Undecodable);
         assert_eq!(credential(meta, "missing"), Credential::Absent);
         assert_eq!(credential(None, "permit"), Credential::Absent);
+    }
+
+    /// The permit and proof are the proxy's own credentials and must not
+    /// travel upstream, but the rest of `_meta` is the client's and must.
+    #[test]
+    #[spec("PDG-008")]
+    fn strip_arkavo_meta_removes_only_the_arkavo_key() {
+        let params = json!({
+            "name": "echo",
+            "arguments": {"n": 1},
+            "_meta": {"arkavo": {"permit": "p", "pop": "q"}, "trace": "t-1"},
+        });
+        let stripped = strip_arkavo_meta(Some(&params)).expect("params");
+        assert_eq!(stripped["_meta"], json!({"trace": "t-1"}));
+        assert_eq!(stripped["arguments"], json!({"n": 1}));
+
+        // `_meta` itself goes only when nothing else was in it.
+        let only_arkavo = json!({"name": "echo", "_meta": {"arkavo": {"permit": "p"}}});
+        let stripped = strip_arkavo_meta(Some(&only_arkavo)).expect("params");
+        assert!(stripped.get("_meta").is_none(), "stripped: {stripped}");
+
+        // Params without `_meta` are forwarded untouched, and a call with no
+        // params at all stays that way.
+        let bare = json!({"name": "echo"});
+        assert_eq!(strip_arkavo_meta(Some(&bare)), Some(bare));
+        assert_eq!(strip_arkavo_meta(None), None);
+    }
+
+    /// A `tools/call` with no id could never be answered, so it could never
+    /// be answered with a denial either. It is dropped rather than forwarded,
+    /// which is what keeps every `tools/call` gated.
+    #[tokio::test]
+    #[spec("PDG-007")]
+    async fn a_tools_call_notification_is_dropped_not_forwarded() {
+        use crate::policy::AllowAllPolicy;
+        use std::sync::Arc;
+
+        // `true` exits at once: nothing here should reach an upstream at all.
+        let proxy = McpProxy::spawn(
+            ProxyConfig::new("true", Vec::new()),
+            Arc::new(AllowAllPolicy),
+        )
+        .expect("spawn");
+
+        let notification = json!({"jsonrpc": "2.0", "method": "tools/call",
+                                  "params": {"name": "echo", "arguments": {}}})
+        .to_string();
+        assert!(
+            proxy.handle_message(&notification).await.is_none(),
+            "a notification is never answered"
+        );
+
+        // A request, by contrast, is answered — here with the upstream error
+        // that proves it was the id, not the method, that made the difference.
+        let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                             "params": {"name": "echo", "arguments": {}}})
+        .to_string();
+        let response = proxy
+            .handle_message(&request)
+            .await
+            .expect("a request is answered");
+        assert_eq!(response["error"]["code"], UPSTREAM_ERROR);
     }
 
     /// A string at the cap is still decoded: the bound refuses what cannot be

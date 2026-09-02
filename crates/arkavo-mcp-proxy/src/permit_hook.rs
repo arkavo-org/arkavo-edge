@@ -96,6 +96,7 @@ mod tests {
         Budget, HashAlgorithm, PermitClaims, PermitSigner, argument_hash, decode, mint,
         prove_invocation,
     };
+    use arkavo_test_macros::spec;
     use serde_json::{Value, json};
 
     const NOW: i64 = 1_700_000_060;
@@ -173,6 +174,7 @@ mod tests {
     /// "No permit and proof" is the wrong thing to tell a client that sent
     /// both and mis-encoded one, or that sent only one of them.
     #[tokio::test]
+    #[spec("PDG-009")]
     async fn each_way_of_arriving_without_usable_credentials_says_which() {
         assert_eq!(
             deny_reason(Credential::Absent, Credential::Absent).await,
@@ -204,6 +206,7 @@ mod tests {
     /// invocation: without the refund a budget of one is spent by a single
     /// transport failure.
     #[tokio::test]
+    #[spec("PDG-006")]
     async fn a_failed_forward_returns_the_invocation() {
         let (policy, ctx) = gated_call(1);
 

@@ -989,10 +989,22 @@ components:
       - Keys matched on raw kid bytes from the published COSE key set
       - Unknown kid refreshes the key set at most once per ttl
 
+  - name: permit-dispatch
+    file: permit-dispatch.spec.yaml
+    module: arkavo_dispatch_gate
+    description: Permit-bound tool dispatch through the MCP proxy - authn, policy and budget stages over CWT permits
+    criticality: critical
+    scenario_count: 10
+    invariants:
+      - No tools/call reaches upstream without a trusted-issuer permit and a proof of possession
+      - Per-permit state is keyed on the permit's signed identity, never its bytes
+      - The permit and proof never reach the upstream server
+      - Untrusted input is bounded before it is parsed, hashed, or buffered
+
 stats:
-  total_specs: 84
-  total_scenarios: 808
-  critical_scenarios: 247
+  total_specs: 85
+  total_scenarios: 818
+  critical_scenarios: 254
   coverage_areas:
     - authentication
     - authorization
