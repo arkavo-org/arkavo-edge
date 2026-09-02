@@ -72,9 +72,16 @@ windows = ["gemini", "llm-remote", "deepseek", "kimi", "glm", "xai"]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 criterion = { workspace = true }
 tempfile = { workspace = true }
+# Dev-only: grounds the "signature verify is sub-ms" claim in the
+# gate-latency baseline (docs/gate-latency-baseline.md) with a real measurement.
+ed25519-dalek = { workspace = true }
 
 [[bench]]
 name = "preflight"
+harness = false
+
+[[bench]]
+name = "gate_latency"
 harness = false
 
 [lints]

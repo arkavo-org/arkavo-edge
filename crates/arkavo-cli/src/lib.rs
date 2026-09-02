@@ -53,9 +53,17 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // First-run experience: check if models are available
     if !is_help_or_version && first_run::is_first_run() {
-        // Handle first-run flow in a runtime
-        let runtime = tokio::runtime::Runtime::new()?;
-        runtime.block_on(handle_first_run(verbose))?;
+        match first_run::first_run_action() {
+            first_run::FirstRunAction::Prompt => {
+                // Handle first-run flow in a runtime
+                let runtime = tokio::runtime::Runtime::new()?;
+                runtime.block_on(handle_first_run(verbose))?;
+            }
+            first_run::FirstRunAction::ProceedWithoutModels => {
+                first_run::print_non_interactive_notice();
+            }
+            first_run::FirstRunAction::Skip => {}
+        }
     }
 
     if args.is_empty() {

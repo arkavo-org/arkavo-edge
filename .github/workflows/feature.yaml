@@ -171,6 +171,7 @@ jobs:
         group:
           - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context (32K LOC)
           - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-workspace, arkavo-session, arkavo-critic
+          - integrity   # arkavo-titan, arkavo-events, arkavo-validation (sequence-integrity tripwire tests)
           - tools       # arkavo-mcp-tools (24K LOC, I/O heavy)
           - routing     # arkavo-router, arkavo-dataflow (42K LOC)
           - ui          # arkavo-terminal, arkavo-ui-generator, arkavo-agui
@@ -236,6 +237,7 @@ jobs:
             cargo test --locked -p arkavo-llm --lib --no-default-features --features llm-remote
             cargo test --locked -p arkavo-memory --lib
             cargo test --locked -p arkavo-memory --test mcp_integration_test
+            cargo test --locked -p arkavo-memory --test sequence_integrity_test
             cargo test --locked -p arkavo-budget
             cargo test --locked -p arkavo-context
           elif [ "${{ matrix.group }}" = "protocol" ]; then
@@ -244,6 +246,10 @@ jobs:
             cargo test --locked -p arkavo-mcp-workspace
             cargo test --locked -p arkavo-session --lib
             cargo test --locked -p arkavo-critic
+          elif [ "${{ matrix.group }}" = "integrity" ]; then
+            cargo test --locked -p arkavo-titan
+            cargo test --locked -p arkavo-events
+            cargo test --locked -p arkavo-validation
           elif [ "${{ matrix.group }}" = "benches" ]; then
             # Compile-check benchmarks to prevent bitrot (no execution). The bench
             # profile is release-like, so this builds a second copy of the whole
@@ -302,6 +308,10 @@ jobs:
             cargo clippy --locked -p arkavo-mcp-workspace --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-session --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-critic --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "integrity" ]; then
+            cargo clippy --locked -p arkavo-titan --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-events --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-validation --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "routing" ]; then
@@ -1652,6 +1662,12 @@ jobs:
       - name: Generate coverage report
         id: coverage
         run: |
+          # --fail-under stays at 1 for now; target is to raise the overall
+          # threshold incrementally (e.g. 50+) as coverage improves. The xtask
+          # supports --critical-required to gate on uncovered critical/high
+          # scenarios, but it is not enabled yet: as of 2026-08 it fails with
+          # 272 uncovered critical/high scenarios, so adding it would break
+          # the build. Enable it once critical/high coverage reaches zero gaps.
           cargo run -p xtask -- spec-test coverage --markdown --fail-under 1 > report.md 2>gate_result.txt || true
           echo "gate_exit_code=$?" >> "$GITHUB_OUTPUT"
           cat report.md

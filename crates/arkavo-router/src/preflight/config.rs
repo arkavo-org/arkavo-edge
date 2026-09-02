@@ -191,6 +191,24 @@ pub struct KasYamlConfig {
     pub key_id: Option<String>,
     /// Cryptographic algorithm (e.g., "ec:secp256r1")
     pub algorithm: Option<String>,
+    /// Trusted root authorities for delegation chain verification.
+    /// A `kas.rewrap` delegation chain must terminate at one of these DIDs.
+    #[serde(default)]
+    pub trusted_roots: Vec<KasTrustedRootYaml>,
+}
+
+/// A trusted root authority entry in the KAS YAML config
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KasTrustedRootYaml {
+    /// DID:key identifier of the root authority
+    pub did: String,
+    /// Optional human-readable label
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Optional Ed25519 public key (base64). The verifying key is also
+    /// recoverable from the DID:key itself; this field documents intent.
+    #[serde(default)]
+    pub public_key: Option<String>,
 }
 
 /// Preflight section in AGENTS.md
@@ -562,6 +580,47 @@ budget:
         let budget = config.budget.unwrap();
         assert!((budget.max_cost_per_session.unwrap() - 5.0).abs() < f64::EPSILON);
         assert!((budget.max_cost_per_day.unwrap() - 25.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_load_agents_md_with_kas_trusted_roots() {
+        let mut file = NamedTempFile::with_suffix(".md").unwrap();
+        writeln!(
+            file,
+            r#"---
+name: kas-root-agent
+kas:
+  enabled: true
+  key_id: my-key-42
+  algorithm: ec:secp256r1
+  trusted_roots:
+    - did: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+      name: "Demo Root Authority"
+    - did: "did:key:z6MkSecondRoot"
+      public_key: "dGVzdC1wdWJsaWMta2V5"
+---
+"#
+        )
+        .unwrap();
+
+        let path = file.path().to_path_buf();
+        let config = load_agent_config_from_agents_md(&path).unwrap();
+        let kas = config.kas.unwrap();
+        assert_eq!(kas.trusted_roots.len(), 2);
+        assert_eq!(
+            kas.trusted_roots[0].did,
+            "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+        );
+        assert_eq!(
+            kas.trusted_roots[0].name.as_deref(),
+            Some("Demo Root Authority")
+        );
+        assert!(kas.trusted_roots[0].public_key.is_none());
+        assert_eq!(kas.trusted_roots[1].did, "did:key:z6MkSecondRoot");
+        assert_eq!(
+            kas.trusted_roots[1].public_key.as_deref(),
+            Some("dGVzdC1wdWJsaWMta2V5")
+        );
     }
 
     #[test]
