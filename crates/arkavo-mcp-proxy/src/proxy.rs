@@ -153,6 +153,23 @@ impl McpProxy {
                 id.map(|id| error_response(id, INVALID_REQUEST, "missing method".to_string()))
             }
             (None, Some(method)) => {
+                if method == "tools/call" {
+                    // A `tools/call` with no `id` cannot be answered, so it
+                    // cannot be policy-evaluated either: dropping it here
+                    // (rather than forwarding it as a notification) is what
+                    // keeps every `tools/call` gated, since an adversary
+                    // could otherwise omit `id` to bypass the policy hook
+                    // entirely.
+                    let tool = params
+                        .and_then(|p| p.get("name"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    warn!(
+                        tool,
+                        "dropped tools/call notification: calls must carry an id so policy can answer them"
+                    );
+                    return None;
+                }
                 // Notification: forward upstream, no response downstream.
                 if let Err(e) = self.upstream.notify(method, params).await {
                     warn!("failed to forward notification '{method}': {e}");
@@ -218,7 +235,10 @@ impl McpProxy {
                 )
             }
             Decision::Allow => {
-                let response = self.forward(id, "tools/call", params).await;
+                let forwarded_params = strip_arkavo_meta(params);
+                let response = self
+                    .forward(id, "tools/call", forwarded_params.as_ref())
+                    .await;
                 info!(
                     tool = %ctx.tool_name,
                     decision = "allow",
@@ -254,6 +274,27 @@ fn decode_b64url(text: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(text)
         .ok()
+}
+
+/// Strip the `arkavo` key out of `params._meta` before forwarding an
+/// allowed call upstream, so the live permit and proof-of-possession never
+/// leave the proxy. Every other `_meta` key travels unchanged; `_meta`
+/// itself is dropped only if stripping `arkavo` leaves it empty.
+fn strip_arkavo_meta(params: Option<&Value>) -> Option<Value> {
+    let mut params = params?.clone();
+    if let Some(object) = params.as_object_mut() {
+        let empty = object
+            .get_mut("_meta")
+            .and_then(Value::as_object_mut)
+            .map(|meta| {
+                meta.remove("arkavo");
+                meta.is_empty()
+            });
+        if empty == Some(true) {
+            object.remove("_meta");
+        }
+    }
+    Some(params)
 }
 
 #[cfg(test)]

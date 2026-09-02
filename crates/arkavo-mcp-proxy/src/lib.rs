@@ -2,11 +2,20 @@
 //!
 //! The proxy presents itself as an MCP server on stdio toward a downstream
 //! agent/client and forwards to a single upstream MCP server spawned as a
-//! subprocess. Every `tools/call` is evaluated against a [`PolicyHook`]
-//! before forwarding; denied calls are answered with an MCP error and never
-//! reach the upstream server. All other methods (`initialize`, `tools/list`,
-//! notifications, ...) are passed through, relaying upstream responses —
-//! including errors — verbatim.
+//! subprocess. Every `tools/call` — whether it arrives as a request or as a
+//! notification — is either evaluated against a [`PolicyHook`] or dropped
+//! before it can reach the upstream server: a `tools/call` request is
+//! evaluated and, if denied, answered with an MCP error instead of being
+//! forwarded; a `tools/call` sent as a notification (no `id`, so no
+//! response could ever carry a denial back) cannot be policy-evaluated and
+//! is dropped outright rather than forwarded. All other methods
+//! (`initialize`, `tools/list`, other notifications, ...) are passed
+//! through, relaying upstream responses — including errors — verbatim.
+//!
+//! An allowed `tools/call` still has its `params._meta.arkavo` key removed
+//! before forwarding, so the permit and proof-of-possession travelling in
+//! it never reach the upstream server; every other `_meta` key is
+//! forwarded unchanged.
 //!
 //! Calling identity is deliberately out of scope for this slice; the
 //! [`CallContext`] struct is the extension point where a principal will be

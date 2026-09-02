@@ -53,9 +53,12 @@ impl TestClient {
         response
     }
 
-    async fn notify(&mut self, method: &str) {
-        self.send(&json!({"jsonrpc": "2.0", "method": method}))
-            .await;
+    async fn notify(&mut self, method: &str, params: Option<Value>) {
+        let mut message = json!({"jsonrpc": "2.0", "method": method});
+        if let Some(params) = params {
+            message["params"] = params;
+        }
+        self.send(&message).await;
     }
 
     async fn send(&mut self, message: &Value) {
@@ -79,7 +82,7 @@ impl TestClient {
                 })),
             )
             .await;
-        self.notify("notifications/initialized").await;
+        self.notify("notifications/initialized", None).await;
         init
     }
 }
@@ -213,6 +216,59 @@ async fn denied_tool_call_never_reaches_upstream() {
 }
 
 #[tokio::test]
+async fn tools_call_notification_never_reaches_upstream() {
+    let record_file = std::env::temp_dir().join(format!(
+        "arkavo-mcp-proxy-test-{}-{}.log",
+        std::process::id(),
+        NEXT_ID.fetch_add(1, Ordering::SeqCst)
+    ));
+    let config = fixture_config().with_env(
+        "MCP_PROXY_TEST_RECORD",
+        record_file.to_string_lossy().into_owned(),
+    );
+    let (mut client, handle) = start_proxy(config, Arc::new(AllowAllPolicy));
+
+    client.handshake().await;
+
+    // No `id`: a notification cannot carry a policy denial back to the
+    // caller, so this must be dropped rather than forwarded.
+    client
+        .notify(
+            "tools/call",
+            Some(json!({"name": "echo", "arguments": {"n": 9}})),
+        )
+        .await;
+
+    // A normal request that does get a response, so the proxy has finished
+    // handling the notification above (read strictly before this line) by
+    // the time we read the record file.
+    let flush = client
+        .request(
+            "tools/call",
+            Some(json!({"name": "echo", "arguments": {"n": 1}})),
+        )
+        .await;
+    assert!(
+        flush.get("error").is_none(),
+        "flush call must pass: {flush}"
+    );
+
+    let recorded = std::fs::read_to_string(&record_file).expect("record file");
+    assert!(recorded.contains("echo"), "recorded: {recorded}");
+    assert!(
+        !recorded.contains("\"n\": 9"),
+        "tools/call notification reached upstream: {recorded}"
+    );
+
+    drop(client);
+    handle
+        .await
+        .expect("proxy task panicked")
+        .expect("proxy run failed");
+    let _ = std::fs::remove_file(&record_file);
+}
+
+#[tokio::test]
 async fn permit_bound_call_is_allowed_once_and_refused_on_replay_or_tamper() {
     use arkavo_crypto::AgentKeypair;
     use arkavo_dispatch_gate::{DispatchGate, GateConfig};
@@ -248,7 +304,7 @@ async fn permit_bound_call_is_allowed_once_and_refused_on_replay_or_tamper() {
     let cwt = mint(&claims, &issuer, &holder.public_key()).unwrap();
     let proof = prove_invocation(&holder, &cwt, "echo", &args, HashAlgorithm::Sha256);
     let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    let meta = json!({"arkavo": {"permit": b64(&cwt), "pop": b64(&proof)}});
+    let meta = json!({"arkavo": {"permit": b64(&cwt), "pop": b64(&proof)}, "trace": "t-1"});
 
     let gate = DispatchGate::new(GateConfig {
         policy_bundle_hash: vec![7; 32],
@@ -268,6 +324,11 @@ async fn permit_bound_call_is_allowed_once_and_refused_on_replay_or_tamper() {
     assert!(
         allowed.get("error").is_none(),
         "first call must pass: {allowed}"
+    );
+    assert_eq!(
+        allowed["result"]["meta"],
+        json!({"trace": "t-1"}),
+        "the live permit and proof must be stripped before forwarding: {allowed}"
     );
 
     let replay = client

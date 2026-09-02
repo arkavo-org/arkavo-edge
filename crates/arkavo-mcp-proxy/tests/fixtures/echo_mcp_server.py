@@ -2,10 +2,11 @@
 """Minimal MCP server fixture for arkavo-mcp-proxy integration tests.
 
 Speaks line-delimited JSON-RPC over stdio. Serves two tools ("echo" and
-"blocked_tool") and echoes the tool name and arguments back from tools/call
-so tests can verify pass-through content. When MCP_PROXY_TEST_RECORD is set,
-every tool name that reaches tools/call is appended to that file, which lets
-tests prove a denied call never arrived upstream.
+"blocked_tool") and echoes the tool name, arguments, and `_meta` back from
+tools/call so tests can verify pass-through content. When
+MCP_PROXY_TEST_RECORD is set, every tool call that reaches tools/call is
+appended to that file as "<name> <arguments json>", which lets tests prove
+a denied or dropped call never arrived upstream.
 """
 
 import json
@@ -64,7 +65,8 @@ def main() -> None:
         elif method == "tools/call":
             params = request.get("params") or {}
             name = params.get("name", "")
-            record(name)
+            arguments = params.get("arguments", {})
+            record(f"{name} {json.dumps(arguments)}")
             response = {
                 "jsonrpc": "2.0",
                 "id": req_id,
@@ -75,11 +77,12 @@ def main() -> None:
                             "text": json.dumps(
                                 {
                                     "tool": name,
-                                    "arguments": params.get("arguments", {}),
+                                    "arguments": arguments,
                                 }
                             ),
                         }
-                    ]
+                    ],
+                    "meta": params.get("_meta"),
                 },
             }
         else:
