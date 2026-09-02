@@ -14,6 +14,7 @@ mod error;
 mod hash;
 mod keys;
 mod permit;
+mod pop;
 
 pub use canonical::{argument_hash, canonical_json, canonicalize_json_text};
 pub use claims::{
@@ -27,3 +28,4 @@ pub use error::PermitError;
 pub use hash::HashAlgorithm;
 pub use keys::{PermitSigner, PermitVerifier};
 pub use permit::{MAX_PERMIT_BYTES, Permit, decode, mint, verify};
+pub use pop::{invocation_digest, prove_invocation, verify_invocation_proof};

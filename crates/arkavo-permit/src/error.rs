@@ -28,6 +28,8 @@ pub enum PermitError {
     IssuedInFuture { iat: i64, now: i64 },
     #[error("invocation does not match the permit binding: {0}")]
     BindingMismatch(String),
+    #[error("proof-of-possession does not verify under the permit's cnf key")]
+    InvalidProof,
 }
 
 impl From<arkavo_cwt::CwtError> for PermitError {

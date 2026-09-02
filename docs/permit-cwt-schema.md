@@ -147,3 +147,11 @@ cargo run -p arkavo-permit --example generate_vectors
 Generation is deterministic (fixed keys and timestamps), so regeneration
 must leave the committed files unchanged. `tests/vectors_test.rs` verifies
 each vector end to end.
+
+## Proof of Possession per Invocation
+
+Each `tools/call` carries, beside the permit, a raw signature by the `cnf` key over
+
+    H( "arkavo-permit-pop/v1" || H(permit_cwt) || len(tool_name) as u64 BE || tool_name || argument_hash )
+
+where `H` and `argument_hash` use the same hash algorithm as the permit. The proof is 64 bytes for both Ed25519 and ES256 (r || s). A proof for different arguments, a different permit, or from a different key does not verify. Replay of an identical call is bounded by the permit's `max_invocations`, enforced by the dispatch gate.
