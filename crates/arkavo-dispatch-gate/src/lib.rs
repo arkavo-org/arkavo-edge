@@ -9,6 +9,12 @@
 //! encodings, so a byte-keyed counter would hand the holder a fresh budget
 //! for every re-encoding.
 //!
+//! Budget is spent when a call is admitted, which is before the call runs.
+//! A dispatcher whose upstream never received the call returns the
+//! invocation with [`DispatchGate::refund`], so transient upstream failures
+//! do not exhaust a permit; a call the upstream ran and answered with an
+//! error is a completed call and keeps its invocation.
+//!
 //! `GateConfig::trusted_issuers` forms one trust domain: authn passes for a
 //! permit signed by any listed issuer, with no per-issuer policy and no
 //! binding to the permit's `iss` claim yet. `arkavo_permit::decode` must
@@ -20,6 +26,19 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Mutex;
+
+// The proxy in front of this gate bounds the credentials it decodes by the
+// same cap the permit parser enforces, so it is re-exported here rather than
+// restated there.
+pub use arkavo_permit::MAX_PERMIT_BYTES;
+
+/// The largest serialized `arguments` object the gate will hash.
+///
+/// Arguments are canonicalized and hashed twice per call — once for the
+/// proof-of-possession digest, once for the permit's binding — so their size
+/// is work an unauthenticated caller can ask for. MCP tool arguments are
+/// small; a quarter of a megabyte is far above any real call.
+pub const MAX_ARGUMENTS_BYTES: usize = 256 * 1024;
 
 pub struct GateConfig {
     pub policy_bundle_hash: Vec<u8>,
@@ -98,6 +117,16 @@ impl DispatchGate {
             Ok(permit) => permit,
             Err(error) => return deny(Stage::Authn, error.to_string()),
         };
+        // Before the arguments are canonicalized and hashed — twice, below —
+        // bound the work they can ask for. This sits after the permit's
+        // signature so only a caller holding a trusted permit can reach it,
+        // and before the proof, which is the first thing to hash them.
+        if let Some(size) = oversized_arguments(request.arguments) {
+            return deny(
+                Stage::Policy,
+                format!("arguments of {size} bytes exceed the {MAX_ARGUMENTS_BYTES} byte limit"),
+            );
+        }
         if let Err(error) = verify_invocation_proof(
             &permit,
             request.tool_name,
@@ -166,6 +195,46 @@ impl DispatchGate {
         }
     }
 
+    /// Return one invocation to a permit's budget.
+    ///
+    /// The counter is spent when the gate admits a call, which is before the
+    /// call runs. A dispatcher whose upstream never received the call — a
+    /// transport failure, a timeout — hands the invocation back with this,
+    /// so a permit with a small budget is not exhausted by failures its
+    /// holder never benefited from. A call the upstream did run and answered
+    /// with an error is a completed call and keeps its invocation.
+    ///
+    /// Returns whether a counter was found and decremented. Never goes below
+    /// zero, and never creates a counter: refunding a permit that never spent
+    /// anything does nothing.
+    pub fn refund(&self, permit_id: [u8; 32]) -> bool {
+        let mut usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match usage.get_mut(&permit_id) {
+            Some(entry) if entry.invocations > 0 => {
+                entry.invocations -= 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Refund one invocation of the permit `permit` encodes.
+    ///
+    /// The permit is verified again rather than decoded, so the identity a
+    /// refund is aimed at can only ever be one the caller can actually
+    /// present: `decode` would let anyone who has seen a permit's signed
+    /// content name it. A permit that has since expired is not refunded,
+    /// which costs nothing — its budget is unusable either way.
+    pub fn refund_invocation(&self, permit: &[u8]) -> bool {
+        match verify(permit, (self.config.clock)(), &self.config.trusted_issuers) {
+            Ok(permit) => self.refund(permit.id),
+            Err(_) => false,
+        }
+    }
+
     #[cfg(test)]
     fn usage_len(&self) -> usize {
         self.usage
@@ -180,6 +249,14 @@ pub fn unix_now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs().cast_signed())
         .unwrap_or(0)
+}
+
+/// The serialized size of `arguments` when it is over the cap, or `None`.
+fn oversized_arguments(arguments: &Value) -> Option<usize> {
+    // `Value` cannot fail to serialize; treating a failure as oversized keeps
+    // the check fail-closed regardless.
+    let size = serde_json::to_vec(arguments).map_or(usize::MAX, |bytes| bytes.len());
+    (size > MAX_ARGUMENTS_BYTES).then_some(size)
 }
 
 fn deny(stage: Stage, reason: String) -> GateDecision {
@@ -578,6 +655,164 @@ mod tests {
         assert!(gate.usage_len() <= 4096);
         assert!(matches!(
             gate.evaluate(&call("merge", &args, &last_cwt, &last_proof)),
+            GateDecision::Allow { .. }
+        ));
+    }
+
+    /// A call the upstream never received must not cost its permit an
+    /// invocation: the gate spends the budget before the dispatch, so the
+    /// dispatcher hands it back when the dispatch fails.
+    #[test]
+    fn a_refund_returns_one_invocation_to_the_budget() {
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+        let args = json!({"pr": 1});
+        let cwt = permit(&issuer, &holder, "merge", &args, 1, NOW + 300, 7);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
+
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
+            GateDecision::Allow { .. }
+        ));
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
+            GateDecision::Deny {
+                stage: Stage::Budget,
+                ..
+            }
+        ));
+
+        assert!(gate.refund(permit_id(&cwt)), "the counter exists to refund");
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
+            GateDecision::Allow { .. },
+        ));
+    }
+
+    /// A refund never invents budget: it cannot take a counter below zero,
+    /// and it does not create one for a permit that has spent nothing.
+    #[test]
+    fn a_refund_never_creates_budget() {
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+        let args = json!({"pr": 1});
+        let cwt = permit(&issuer, &holder, "merge", &args, 1, NOW + 300, 7);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
+
+        // Nothing spent yet: nothing to give back, and no counter created.
+        assert!(!gate.refund(permit_id(&cwt)));
+        assert_eq!(gate.usage_len(), 0);
+
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
+            GateDecision::Allow { .. }
+        ));
+        assert!(gate.refund(permit_id(&cwt)));
+        // A second refund has nothing left to return, and the permit still
+        // has exactly the one invocation its budget allows.
+        assert!(!gate.refund(permit_id(&cwt)));
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
+            GateDecision::Allow { .. }
+        ));
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
+            GateDecision::Deny {
+                stage: Stage::Budget,
+                ..
+            }
+        ));
+    }
+
+    /// `refund_invocation` verifies the permit rather than decoding it, so a
+    /// refund can only be aimed at a permit the caller can present. A permit
+    /// this gate does not trust refunds nothing.
+    #[test]
+    fn refund_invocation_verifies_the_permit_it_credits() {
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+        let args = json!({"pr": 1});
+        let cwt = permit(&issuer, &holder, "merge", &args, 1, NOW + 300, 7);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &args,
+            HashAlgorithm::Sha256,
+        );
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
+            GateDecision::Allow { .. }
+        ));
+
+        // A permit from an issuer this gate does not trust names an identity
+        // it will not credit, even though the token decodes perfectly well.
+        let rogue = PermitSigner::Ed25519(AgentKeypair::generate());
+        let forged = permit(&rogue, &holder, "merge", &args, 1, NOW + 300, 7);
+        assert!(!gate.refund_invocation(&forged));
+
+        assert!(gate.refund_invocation(&cwt));
+        assert!(matches!(
+            gate.evaluate(&call("merge", &args, &cwt, &proof)),
+            GateDecision::Allow { .. }
+        ));
+    }
+
+    /// Canonicalizing and hashing the arguments is the gate's only unbounded
+    /// work, and it happens twice per call. Oversized arguments are refused
+    /// before any of it.
+    #[test]
+    fn oversized_arguments_are_denied_at_policy() {
+        let (gate, issuer) = gate();
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+        let huge = json!({"blob": "a".repeat(MAX_ARGUMENTS_BYTES)});
+        let cwt = permit(&issuer, &holder, "merge", &huge, 2, NOW + 300, 7);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &huge,
+            HashAlgorithm::Sha256,
+        );
+
+        let decision = gate.evaluate(&call("merge", &huge, &cwt, &proof));
+        assert!(
+            matches!(
+                &decision,
+                GateDecision::Deny {
+                    stage: Stage::Policy,
+                    reason,
+                } if reason.contains("arguments")
+            ),
+            "{decision:?}"
+        );
+        assert_eq!(gate.usage_len(), 0, "a denied call consumes no budget");
+
+        // The same permit with arguments under the cap is admitted, so the
+        // refusal is about size and nothing else.
+        let small = json!({"blob": "a"});
+        let cwt = permit(&issuer, &holder, "merge", &small, 2, NOW + 300, 7);
+        let proof = prove_invocation(
+            &holder,
+            &permit_id(&cwt),
+            "merge",
+            &small,
+            HashAlgorithm::Sha256,
+        );
+        assert!(matches!(
+            gate.evaluate(&call("merge", &small, &cwt, &proof)),
             GateDecision::Allow { .. }
         ));
     }
