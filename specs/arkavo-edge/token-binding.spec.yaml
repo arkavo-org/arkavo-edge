@@ -2,13 +2,13 @@
 
 feature: Sender-Constrained Agent Tokens and Attestation-Based Issuance
 module: arkavo-agent-auth, arkavo-protocol
-version: 0.81.0
+version: 0.81.1
 
 invariants:
   - "Proof-of-possession: a stolen bearer token is unusable without proof-of-possession of the agent's hardware key"
   - "PoP key is the attested key: the proof-of-possession key MUST equal the attestation key from hardware-attestation.spec.yaml (HATT). Binding to any other key silently loses the hardware root"
   - "IdP-agnostic by construction: token issuance is delegable to any external IdP via RFC 8693 over OIDC discovery, with no IdP-specific logic in core — only at an adapter boundary"
-  - "No silent downgrade: stripping DPoP or falling back to an unbound bearer token where binding is required fails closed"
+  - "No silent downgrade: stripping the cnf proof-of-possession binding or falling back to an unbound bearer token where binding is required fails closed"
   - "Human accountability: where an agent acts for a human, the issued token carries the human principal (RFC 8693 act / may_act) so governance attributes agent actions to the human"
 
 # Adapter boundary (structured data)
@@ -18,9 +18,17 @@ adapter_boundary:
 
 # Conformance targets (verified against live spec text on 2026-06-15 unless noted)
 conformance_targets:
-  - id: RFC9449
-    name: "OAuth 2.0 Demonstrating Proof of Possession (DPoP)"
-    url: https://www.rfc-editor.org/rfc/rfc9449
+  - id: RFC8392
+    name: "CBOR Web Token (CWT)"
+    url: https://www.rfc-editor.org/rfc/rfc8392
+    status: verified
+  - id: RFC8152
+    name: "CBOR Object Signing and Encryption (COSE)"
+    url: https://www.rfc-editor.org/rfc/rfc8152
+    status: verified
+  - id: RFC8747
+    name: "Proof-of-Possession Key Semantics for CBOR Web Tokens (CWTs)"
+    url: https://www.rfc-editor.org/rfc/rfc8747
     status: verified
   - id: RFC8693
     name: "OAuth 2.0 Token Exchange"
@@ -49,56 +57,56 @@ conformance_targets:
 
 scenarios:
   - id: TOK-001
-    name: DPoP proof-of-possession on the token request
+    name: CWT proof-of-possession on the token request
     criticality: critical
     wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/629
-    conformance: [RFC9449]
+    conformance: [RFC8392, RFC8152, RFC8747]
     conformance_status: verified
     given:
       - The hardware attestation key (HATT-001 / HATT-002)
     when: Agent requests an access token
     then:
-      - Agent sends a DPoP proof JWT (JOSE header typ = dpop+jwt) signed by the hardware key
-      - The issued access token carries cnf.jkt = base64url SHA-256 JWK thumbprint of the key (RFC 9449 sec 6.1)
+      - Agent sends a COSE_Sign1 proof (RFC 8152) over the token request, signed by the hardware key
+      - The issued token is a CWT (RFC 8392) carrying the cnf confirmation claim with the COSE_Key of the hardware key (RFC 8747)
     refs:
       - crates/arkavo-agent-auth/src/types.rs:1-70
-    changed: "2026-06-15"
+    changed: "2026-08-26"
 
   - id: TOK-002
-    name: DPoP-bound token rejected without a matching proof
+    name: cnf-bound CWT rejected without a matching proof
     criticality: critical
     wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/629
-    conformance: [RFC9449]
+    conformance: [RFC8392, RFC8747]
     conformance_status: verified
     given:
-      - An access token carrying cnf.jkt
+      - An access token carrying a cnf confirmation claim
     when: The token is presented to a resource server
     then:
-      - A request without a valid DPoP proof is rejected
+      - A request without a valid COSE proof of the cnf key is rejected
       - A proof signed by a different key is rejected
     edge_cases:
-      - condition: Replayed proof (same jti)
+      - condition: Replayed proof (same cti)
         expected: Rejected
-      - condition: htm or htu mismatch with the actual request
+      - condition: Request target (uri/method) mismatch with the values bound in the signed proof payload
         expected: Rejected
       - condition: iat outside the acceptance window
         expected: Rejected
-    changed: "2026-06-15"
+    changed: "2026-08-26"
 
   - id: TOK-003
     name: mTLS certificate-bound token, extending existing mTLS
     criticality: high
     wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/629
-    conformance: [RFC8705]
+    conformance: [RFC8705, RFC8747]
     conformance_status: verified
     given:
       - An agent client certificate whose private key is the hardware attestation key
     when: Agent requests a token over a mutually-authenticated TLS connection
     then:
-      - The token carries cnf.x5t#S256 = base64url SHA-256 of the DER client certificate
+      - The issued token is a CWT carrying the cnf confirmation claim with the COSE_Key of the client certificate's public key (RFC 8747); the RFC 8705 transport binding semantics apply
       - The token presented over a different TLS connection is rejected
     refs:
       - crates/arkavo-protocol/src/websocket.rs:101
@@ -106,23 +114,23 @@ scenarios:
     edge_cases:
       - condition: mTLS transport exists, but cert key is not yet hardware-resident
         expected: Hardware-resident cert key is the wip delta; mTLS plumbing is reused, not rebuilt
-    changed: "2026-06-15"
+    changed: "2026-08-26"
 
   - id: TOK-004
     name: Token Exchange — attestation for a scoped sender-constrained token
     criticality: critical
     wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/629
-    conformance: [RFC8693, RFC9449, OIDC-DISCOVERY]
+    conformance: [RFC8693, RFC8392, RFC8747, OIDC-DISCOVERY]
     conformance_status: verified
     given:
       - A verified attestation quote (HATT-007)
       - An external IdP that supports RFC 8693
     when: Agent calls the IdP token endpoint with grant_type urn:ietf:params:oauth:grant-type:token-exchange and subject_token set to the attestation/agent assertion
     then:
-      - The IdP returns a scoped access token bound to the agent key (cnf.jkt)
+      - The IdP returns a scoped access token bound to the agent key (CWT cnf confirmation claim, RFC 8747)
       - This is the integration seam — the IdP owns issuance and governance; Arkavo owns the hardware-rooted agent
-    changed: "2026-06-15"
+    changed: "2026-08-26"
 
   - id: TOK-005
     name: Human-to-agent accountability via the actor claim
@@ -204,18 +212,18 @@ scenarios:
     criticality: high
     wip: true
     issue: https://github.com/arkavo-org/arkavo-edge/issues/629
-    conformance: [RFC9449, RFC8693]
+    conformance: [RFC8392, RFC8693]
     conformance_status: verified
     given:
       - A disconnected or air-gapped environment with no reachable external IdP
     when: The agent needs a token
     then:
-      - A local in-environment token issuer issues sender-constrained tokens (the token-layer parallel of a self-hosted KAS)
+      - A local in-environment token issuer issues sender-constrained CWTs (the token-layer parallel of a self-hosted KAS)
       - Proof-of-possession and attestation gating continue to function offline
     edge_cases:
       - condition: RFC 8693 assumes a reachable IdP
         expected: Closed by the local issuer; mirrors the self-hosted-KAS air-gap story in SECURITY.md
-    changed: "2026-06-15"
+    changed: "2026-08-26"
 
   - id: TOK-010
     name: TDF/KAS rewrap is bound to the attested DID
@@ -243,10 +251,10 @@ security:
     description: The cnf key MUST be the HATT hardware attestation key. Binding a token to a software key, or to any key other than the attested one, is rejected. This is the critical seam between token-binding and hardware-attestation.
   - id: SEC-TB-002
     name: No bearer downgrade
-    description: Removing the DPoP proof, or presenting an unbound token where binding is required, fails closed.
+    description: Removing the COSE proof or cnf binding, or presenting an unbound token where binding is required, fails closed.
   - id: SEC-TB-003
     name: Replay resistance
-    description: DPoP jti/htm/htu/iat are enforced; mTLS connection identity is enforced for certificate-bound tokens.
+    description: COSE proof cti/iat and request-target binding are enforced; mTLS connection identity is enforced for certificate-bound tokens.
   - id: SEC-TB-004
     name: No ambient IdP trust
     description: Issuance is gated on a verified attestation (HATT) and a current, non-Suspended agent state.
