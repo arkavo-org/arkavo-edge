@@ -20,9 +20,13 @@ pub struct ProxyArgs {
     pub args: Vec<String>,
 }
 
-// `execute` is the synchronous entry point invoked from `arkavo_cli::run`'s
-// top-level command dispatch (never from inside an existing tokio runtime),
-// so building a fresh `Runtime` here and blocking on it is safe.
+// `execute` may run from a context that already has a tokio runtime, just
+// like the `"login" | "logout"` arm in `crates/arkavo-cli/src/lib.rs`, so it
+// copies that arm's guard: reuse the ambient runtime via `Handle::block_on`
+// when one exists, and only build a fresh `Runtime` otherwise. Both
+// `Handle::block_on` and `Runtime::block_on` are individually disallowed by
+// `.clippy.toml` (nesting a runtime inside a runtime can panic), so both
+// arms need the allow below.
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let parsed = match parse(args) {
@@ -32,8 +36,13 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(2);
         }
     };
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(run(parsed))
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle.block_on(run(parsed)),
+        Err(_) => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(run(parsed))
+        }
+    }
 }
 
 async fn run(parsed: ProxyArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -109,13 +118,7 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
 }
 
 fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
-    if !text.len().is_multiple_of(2) {
-        return Err("hex has odd length".into());
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).map_err(|e| e.to_string()))
-        .collect()
+    hex::decode(text).map_err(|e| e.to_string())
 }
 
 fn decode_issuer_key(text: &str) -> Result<PermitVerifier, String> {
@@ -251,6 +254,23 @@ mod tests {
                 &hex,
                 "--issuer-key",
                 &bad_issuer_key,
+                "--",
+                "cmd",
+            ]))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn non_ascii_hex_is_rejected_not_panicking() {
+        let issuer_key = ed25519_issuer_key_hex();
+        assert!(
+            parse(&s(&[
+                "proxy",
+                "--policy-bundle-hash",
+                "aé0",
+                "--issuer-key",
+                &issuer_key,
                 "--",
                 "cmd",
             ]))
