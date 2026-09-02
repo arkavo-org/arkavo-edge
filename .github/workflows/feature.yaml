@@ -248,6 +248,9 @@ jobs:
             cargo test --locked -p arkavo-critic
             cargo test --locked -p arkavo-cwt
             cargo test --locked -p arkavo-permit
+            # Guard against tokio features that dev-dependencies would otherwise mask
+            cargo check --locked -p arkavo-mcp-proxy --lib
+            cargo test --locked -p arkavo-mcp-proxy
           elif [ "${{ matrix.group }}" = "integrity" ]; then
             cargo test --locked -p arkavo-titan
             cargo test --locked -p arkavo-events
@@ -312,6 +315,7 @@ jobs:
             cargo clippy --locked -p arkavo-critic --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-cwt --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-permit --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-proxy --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "integrity" ]; then
             cargo clippy --locked -p arkavo-titan --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-events --lib --bins -- -D warnings
