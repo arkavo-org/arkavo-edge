@@ -170,7 +170,7 @@ jobs:
       matrix:
         group:
           - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context (32K LOC)
-          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-workspace, arkavo-session, arkavo-critic
+          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-workspace, arkavo-session, arkavo-critic, arkavo-cwt
           - integrity   # arkavo-titan, arkavo-events, arkavo-validation (sequence-integrity tripwire tests)
           - tools       # arkavo-mcp-tools (24K LOC, I/O heavy)
           - routing     # arkavo-router, arkavo-dataflow (42K LOC)
@@ -246,6 +246,7 @@ jobs:
             cargo test --locked -p arkavo-mcp-workspace
             cargo test --locked -p arkavo-session --lib
             cargo test --locked -p arkavo-critic
+            cargo test --locked -p arkavo-cwt
           elif [ "${{ matrix.group }}" = "integrity" ]; then
             cargo test --locked -p arkavo-titan
             cargo test --locked -p arkavo-events
@@ -308,6 +309,7 @@ jobs:
             cargo clippy --locked -p arkavo-mcp-workspace --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-session --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-critic --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-cwt --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "integrity" ]; then
             cargo clippy --locked -p arkavo-titan --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-events --lib --bins -- -D warnings

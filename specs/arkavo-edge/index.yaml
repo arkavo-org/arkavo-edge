@@ -978,10 +978,21 @@ components:
       - Token file written atomically at unix mode 0o600
       - Refresh-before-expiry with 60-second skew; dead refresh deletes the token file
 
+  - name: agent-cwt
+    file: agent-cwt.spec.yaml
+    module: arkavo_cwt
+    description: COSE_Sign1/ES256 verification of the agent CWT against the published COSE key set
+    criticality: critical
+    scenario_count: 3
+    invariants:
+      - ES256 only
+      - Keys matched on raw kid bytes from the published COSE key set
+      - Unknown kid refreshes the key set at most once per ttl
+
 stats:
-  total_specs: 83
-  total_scenarios: 805
-  critical_scenarios: 245
+  total_specs: 84
+  total_scenarios: 808
+  critical_scenarios: 247
   coverage_areas:
     - authentication
     - authorization

@@ -50,6 +50,7 @@ members = [
     "crates/arkavo-device-identity",
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
+    "crates/arkavo-cwt",
     "crates/arkavo-registration",
     "crates/arkavo-agent",
     "crates/arkavo-agent-auth",
@@ -137,6 +138,7 @@ default-members = [
     "crates/arkavo-identity",
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
+    "crates/arkavo-cwt",
     "crates/arkavo-registration",
     "crates/arkavo-agent-auth",
     "crates/arkavo-hrm",
@@ -162,7 +164,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.91.1"
+version = "0.91.2"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -217,6 +219,9 @@ bytes = "1.8"
 parking_lot = "0.12"
 sysinfo = "0.34"
 ed25519-dalek = "2.1"
+coset = "0.4"
+ciborium = "0.2"
+p256 = { version = "0.13", features = ["ecdsa"] }
 fast_qr = { version = "0.13", default-features = false }
 hex = "0.4"
 
