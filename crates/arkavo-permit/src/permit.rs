@@ -21,12 +21,17 @@ use coset::iana::CoapContentFormat;
 use coset::{CoseSign1Builder, HeaderBuilder, TaggedCborSerializable};
 use sha2::{Digest, Sha256};
 
-/// CBOR tag 61 (CWT) prefix bytes: 0xd8 0x3d.
-const CWT_TAG_PREFIX: [u8; 2] = [0xd8, 0x3d];
+// The CWT envelope belongs to one place. `arkavo-cwt` declares the tag-61
+// prefix and the size cap, parses against them, and permits mint and verify
+// against the same values rather than a second copy that could drift.
+use arkavo_cwt::sign1::CWT_TAG_PREFIX;
 
 /// Permits are small CWTs. Untrusted `decode`/`verify` input larger than this
 /// is rejected before COSE/CBOR parse.
-pub const MAX_PERMIT_BYTES: usize = 16 * 1024;
+///
+/// The same bound `arkavo-cwt` enforces on every token it parses, named here
+/// for callers who think in permits.
+pub use arkavo_cwt::sign1::MAX_TOKEN_BYTES as MAX_PERMIT_BYTES;
 
 /// A decoded permit: the validated claims plus the presenter's confirmation
 /// key from the `cnf` claim. Instances returned by [`verify`] are
@@ -183,7 +188,7 @@ fn parse_sign1(cwt: &[u8]) -> Result<arkavo_cwt::ParsedSign1, PermitError> {
     if cwt.len() > MAX_PERMIT_BYTES {
         return Err(PermitError::Cose("permit exceeds maximum size".to_string()));
     }
-    if !cwt.starts_with(&arkavo_cwt::sign1::CWT_TAG_PREFIX) {
+    if !cwt.starts_with(&CWT_TAG_PREFIX) {
         return Err(PermitError::Cose("missing CBOR tag 61 (CWT)".to_string()));
     }
     Ok(arkavo_cwt::sign1::parse(cwt)?)
@@ -313,6 +318,25 @@ mod tests {
             permit.confirmation_key.public_key_bytes(),
             holder.public_key().public_key_bytes()
         );
+    }
+
+    /// RFC 8152 section 8.1: an ES256 signature value is the fixed-size
+    /// 64-byte `r || s`, never DER. The signer emits that encoding directly,
+    /// so no conversion sits on the minting path to fail quietly and leave a
+    /// permit whose signature no verifier accepts.
+    #[test]
+    fn es256_permit_carries_a_fixed_size_signature() {
+        let issuer = p256_signer();
+        let holder = p256_signer();
+        let cwt = mint(&sample_claims(), &issuer, &holder.public_key()).unwrap();
+        let parsed = parse_sign1(&cwt).unwrap();
+        assert_eq!(parsed.algorithm, Algorithm::ES256);
+        assert_eq!(
+            parsed.sign1.signature.len(),
+            64,
+            "COSE ES256 requires raw r || s"
+        );
+        verify(&cwt, NOW, &[issuer.public_key()]).expect("and it verifies");
     }
 
     #[test]

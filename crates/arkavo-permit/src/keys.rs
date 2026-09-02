@@ -75,14 +75,14 @@ impl PermitSigner {
     /// Sig_structure an issuer signs when minting, and the
     /// proof-of-possession digest a presenter signs when exercising the
     /// permit.
+    ///
+    /// Both branches produce the wire encoding directly, so this cannot fail
+    /// and cannot fall back to a wrong-length signature that would only be
+    /// discovered by a verifier later.
     pub fn sign(&self, data: &[u8]) -> Vec<u8> {
         match self {
             Self::Ed25519(keypair) => keypair.sign(data),
-            Self::P256(keypair) => {
-                let der = keypair.sign(data);
-                // Infallible for signatures produced by p256::ecdsa.
-                der_to_p1363(&der).unwrap_or(der)
-            }
+            Self::P256(keypair) => keypair.sign_p1363(data).to_vec(),
         }
     }
 }
@@ -150,69 +150,6 @@ impl PermitVerifier {
     pub fn public_key_bytes(&self) -> Vec<u8> {
         self.0.public_key_bytes()
     }
-}
-
-/// Convert a DER-encoded ECDSA signature to the IEEE P1363 fixed-size
-/// r||s form required by COSE ES256 (RFC 8152 section 8.1).
-fn der_to_p1363(der: &[u8]) -> Result<Vec<u8>, PermitError> {
-    fn read_len(bytes: &[u8], pos: &mut usize) -> Result<usize, PermitError> {
-        let first = *bytes
-            .get(*pos)
-            .ok_or_else(|| PermitError::Cose("truncated DER signature".to_string()))?;
-        *pos += 1;
-        if first & 0x80 == 0 {
-            return Ok(first as usize);
-        }
-        let count = (first & 0x7f) as usize;
-        if count == 0 || count > 2 {
-            return Err(PermitError::Cose("invalid DER length".to_string()));
-        }
-        let mut len = 0usize;
-        for _ in 0..count {
-            let byte = *bytes
-                .get(*pos)
-                .ok_or_else(|| PermitError::Cose("truncated DER length".to_string()))?;
-            *pos += 1;
-            len = (len << 8) | byte as usize;
-        }
-        Ok(len)
-    }
-
-    let mut pos = 0usize;
-    let bad = || PermitError::Cose("malformed DER ECDSA signature".to_string());
-    if der.first() != Some(&0x30) {
-        return Err(bad());
-    }
-    pos += 1;
-    let seq_len = read_len(der, &mut pos)?;
-    if pos + seq_len != der.len() {
-        return Err(bad());
-    }
-    let mut out = Vec::with_capacity(64);
-    for _ in 0..2 {
-        if der.get(pos) != Some(&0x02) {
-            return Err(bad());
-        }
-        pos += 1;
-        let int_len = read_len(der, &mut pos)?;
-        let bytes = der.get(pos..pos + int_len).ok_or_else(bad)?;
-        pos += int_len;
-        // Strip the sign-padding zero, then left-pad to 32 bytes.
-        let significant = bytes
-            .iter()
-            .position(|b| *b != 0)
-            .map(|i| &bytes[i..])
-            .unwrap_or(&[][..]);
-        if significant.len() > 32 {
-            return Err(bad());
-        }
-        out.resize(out.len() + (32 - significant.len()), 0);
-        out.extend_from_slice(significant);
-    }
-    if pos != der.len() {
-        return Err(bad());
-    }
-    Ok(out)
 }
 
 #[cfg(test)]
@@ -317,25 +254,5 @@ mod tests {
             PermitVerifier::from_public_key_bytes(&bytes),
             Err(PermitError::InvalidConfirmationKey(_))
         ));
-    }
-
-    #[test]
-    fn der_to_p1363_converts_and_rejects_garbage() {
-        let keypair = P256SigningKeypair::generate();
-        let der = keypair.sign(b"message");
-        assert_eq!(der[0], 0x30);
-        let raw = der_to_p1363(&der).unwrap();
-        assert_eq!(raw.len(), 64);
-        keypair
-            .public_key()
-            .verify(b"message", &raw)
-            .expect("raw signature must verify");
-
-        assert!(der_to_p1363(&[]).is_err());
-        assert!(der_to_p1363(&[0x30]).is_err());
-        assert!(der_to_p1363(&[0x31, 0x00]).is_err());
-        let mut truncated = der.clone();
-        truncated.truncate(der.len() - 1);
-        assert!(der_to_p1363(&truncated).is_err());
     }
 }
