@@ -88,6 +88,7 @@ members = [
     "crates/arkavo-swarmkit",
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
+    "crates/arkavo-mcp-proxy",
     "crates/arkavo-shadow-consolidation",
     "crates/arkavo-lesson-synthesis",
     "tests/golden_dataset",
@@ -158,6 +159,7 @@ default-members = [
     "crates/arkavo-swarmkit",
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
+    "crates/arkavo-mcp-proxy",
     "crates/arkavo-shadow-consolidation",
     ".cargo/xtask",
 ]
@@ -166,7 +168,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.91.3"
+version = "0.92.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
