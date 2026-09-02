@@ -205,9 +205,11 @@ def collate(batch: list[dict], pad_id: int) -> dict[str, torch.Tensor]:
 
 def split_rows(
     rows: list[dict], lengths: list[tuple[int, int]], max_len: int
-) -> tuple[list[dict], dict[str, int], dict[str, int]]:
-    """Drop prompt-only-overlong rows; flag survivors whose target still overflows."""
+) -> tuple[list[dict], list[tuple[int, int]], dict[str, int], dict[str, int]]:
+    """Drop prompt-only-overlong rows; flag survivors whose target overflows.
+    Kept rows/lengths are index-aligned, both derived from one predicate."""
     kept: list[dict] = []
+    kept_lengths: list[tuple[int, int]] = []
     dropped: dict[str, int] = {}
     truncated: dict[str, int] = {}
     for row, (prompt_len, target_len) in zip(rows, lengths):
@@ -216,9 +218,10 @@ def split_rows(
             dropped[kind] = dropped.get(kind, 0) + 1
             continue
         kept.append(row)
+        kept_lengths.append((prompt_len, target_len))
         if prompt_len + target_len + 1 > max_len:  # +1 for the appended eos id
             truncated[kind] = truncated.get(kind, 0) + 1
-    return kept, dropped, truncated
+    return kept, kept_lengths, dropped, truncated
 
 
 def finite_mean(losses: list[float]) -> tuple[float, int]:
@@ -285,21 +288,18 @@ def main() -> None:
     else:
         raise SystemExit("pass --rows or --data")
 
-    # Length-check before the 52GB base model load: a bad --rows file should
-    # fail in seconds, not minutes.
+    # Length-check before the 52GB base model load: a bad --rows file fails fast.
     data = KnowledgeSet(rows, tok, args.max_len, args.system)
-    lengths = data.lengths()
-    kept_rows, dropped_counts, truncated_counts = split_rows(rows, lengths, args.max_len)
+    split = split_rows(rows, data.lengths(), args.max_len)
+    kept_rows, kept_lengths, dropped_counts, truncated_counts = split
     if not kept_rows:
         raise SystemExit("all rows dropped: every prompt is >= --max-len")
     n_dropped = sum(dropped_counts.values())
     print(f"dropped {n_dropped} rows with no target tokens: {dropped_counts}", flush=True)
     n_truncated = sum(truncated_counts.values())
     print(f"truncated {n_truncated} rows: {truncated_counts}", flush=True)
-    data.rows = kept_rows
-    # Same drop condition as split_rows: filters the cached lengths in step
-    # so the sampler below reuses them instead of re-tokenizing survivors.
-    data._lengths = [ln for ln in lengths if ln[0] < args.max_len]
+    # Both come from the same split_rows pass, so rows/lengths stay aligned.
+    data.rows, data._lengths = kept_rows, kept_lengths
 
     model = load_base(args.base, torch.bfloat16, device)
     if hasattr(model, "enable_input_require_grads"):

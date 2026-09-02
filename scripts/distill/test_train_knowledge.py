@@ -112,18 +112,22 @@ def test_split_rows_drops_overlong_prompts_and_flags_truncation():
         _row(None, 800, 1),  # no kind -> "?" bucket, dropped
     ]
     data = KnowledgeSet(rows, FakeTok(), max_len=768, system=SYSTEM)
-    kept, dropped, truncated = split_rows(rows, data.lengths(), 768)
+    kept, kept_lengths, dropped, truncated = split_rows(rows, data.lengths(), 768)
 
     assert kept == [rows[0], rows[2]]
     assert dropped == {"faq": 1, "?": 1}
     assert truncated == {"policy": 1}
+    # kept_lengths is the single source of truth callers must reuse for the
+    # sampler: it must be index-aligned with kept, not with the full rows.
+    assert kept_lengths == [(5, 3 + 1), (700, 100 + 1)]
 
 
 def test_split_rows_keeps_everything_under_the_cap():
     rows = [_row("faq", 5, 3), _row("faq", 6, 4)]
     data = KnowledgeSet(rows, FakeTok(), max_len=768, system=SYSTEM)
-    kept, dropped, truncated = split_rows(rows, data.lengths(), 768)
+    kept, kept_lengths, dropped, truncated = split_rows(rows, data.lengths(), 768)
     assert kept == rows
+    assert kept_lengths == data.lengths()
     assert dropped == {}
     assert truncated == {}
 
@@ -165,6 +169,18 @@ def test_bucket_sampler_yields_each_index_once_and_buckets_by_length():
     for batch in batches:
         span = max(lengths[i][0] for i in batch) - min(lengths[i][0] for i in batch)
         assert span <= max_chunk_width
+
+
+def test_bucket_sampler_ragged_last_batch():
+    lengths = [(v, 0) for v in [7, 1, 9, 3, 5]]  # 5 items, batch_size=2 -> 2,2,1
+    sampler = BucketSampler(lengths, batch_size=2, seed=1)
+    batches = list(sampler)
+
+    assert len(sampler) == len(batches) == 3
+    seen = sorted(i for batch in batches for i in batch)
+    assert seen == list(range(len(lengths)))
+    sizes = sorted(len(b) for b in batches)
+    assert sizes == [1, 2, 2]
 
 
 def test_bucket_sampler_reshuffles_batch_order_but_not_contents_across_epochs():
