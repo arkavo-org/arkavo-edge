@@ -44,7 +44,9 @@ mod upstream;
 
 pub use framing::MAX_LINE_BYTES;
 pub use permit_hook::PermitPolicy;
-pub use policy::{AllowAllPolicy, CallContext, Credential, Decision, DenyListPolicy, PolicyHook};
+pub use policy::{
+    AllowAllPolicy, CallContext, Credential, Decision, DenyListPolicy, ForwardOutcome, PolicyHook,
+};
 pub use proxy::{
     INVALID_REQUEST, McpProxy, PARSE_ERROR, POLICY_DENIED, ProxyConfig, ProxyError, UPSTREAM_ERROR,
 };

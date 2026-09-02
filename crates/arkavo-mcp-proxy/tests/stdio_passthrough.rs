@@ -604,28 +604,49 @@ async fn malformed_credentials_are_refused_by_what_is_actually_wrong() {
     handle.await.unwrap().unwrap();
 }
 
-/// The gate spends an invocation to admit a call, and the upstream then never
-/// received it. Without a refund a permit with a budget of one is destroyed by
-/// a single timeout: the second attempt would be refused for want of budget
-/// rather than reaching the upstream at all.
+/// Probe until the proxy's upstream is known to be gone, so the next call
+/// cannot even be written to it. `tools/list` is not policy-evaluated, so
+/// probing with it spends none of a permit's budget.
+async fn wait_for_a_dead_upstream(client: &mut TestClient) {
+    for _ in 0..200 {
+        let probe = client.request("tools/list", None).await;
+        // The message of `UpstreamError::Closed`: the connection was already
+        // known to be down when the request was made, so nothing was sent.
+        if probe["error"]["message"] == json!("upstream connection closed") {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the upstream never reported itself closed");
+}
+
+/// The gate spends an invocation to admit a call, and the request then never
+/// reaches the upstream at all — here because the upstream process is already
+/// gone, so the request is refused before a byte of it is written. Without a
+/// refund a permit with a budget of one is destroyed by a failure its holder
+/// got nothing at all for.
 #[tokio::test]
 #[spec("PDG-006")]
 async fn a_call_that_never_reaches_the_upstream_keeps_its_budget() {
     let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
     let holder = PermitSigner::Ed25519(AgentKeypair::generate());
     let args = json!({});
-    let meta = permit_meta(&issuer, &holder, "never_replies", &args, 1);
+    let meta = permit_meta(&issuer, &holder, "echo", &args, 1);
 
-    let config = fixture_config().with_timeout(Duration::from_millis(300));
-    let (mut client, handle) =
-        start_proxy(config, Arc::new(PermitPolicy::new(permit_gate(&issuer))));
-    client.handshake().await;
+    // `true` exits at once without reading anything, which is the upstream
+    // failure a refund exists for: the call is never dispatched.
+    let (mut client, handle) = start_proxy(
+        ProxyConfig::new("true", vec![]),
+        Arc::new(PermitPolicy::new(permit_gate(&issuer))),
+    );
+    wait_for_a_dead_upstream(&mut client).await;
 
-    let params = json!({"name": "never_replies", "arguments": args, "_meta": meta});
+    let params = json!({"name": "echo", "arguments": args, "_meta": meta});
     let first = client.request("tools/call", Some(params.clone())).await;
     assert_eq!(
-        first["error"]["code"], UPSTREAM_ERROR,
-        "the tool never answers, so the request times out: {first}"
+        first["error"]["message"],
+        json!("upstream connection closed"),
+        "the call must fail before it is written upstream: {first}"
     );
 
     let second = client.request("tools/call", Some(params)).await;
@@ -636,6 +657,73 @@ async fn a_call_that_never_reaches_the_upstream_keeps_its_budget() {
 
     drop(client);
     handle.await.unwrap().unwrap();
+}
+
+/// A timeout is not a failed dispatch. The request was written upstream and a
+/// slow tool goes on running after the proxy stops waiting for it, so the
+/// invocation stays spent — otherwise any tool slower than the request
+/// timeout could be invoked over and over on a budget of one.
+#[tokio::test]
+#[spec("PDG-006")]
+async fn a_timed_out_call_keeps_its_invocation_spent() {
+    let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+    let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+    let args = json!({});
+    let meta = permit_meta(&issuer, &holder, "never_replies", &args, 1);
+
+    let record_file = std::env::temp_dir().join(format!(
+        "arkavo-mcp-proxy-test-{}-{}.log",
+        std::process::id(),
+        NEXT_ID.fetch_add(1, Ordering::SeqCst)
+    ));
+    let config = fixture_config()
+        .with_env(
+            "MCP_PROXY_TEST_RECORD",
+            record_file.to_string_lossy().into_owned(),
+        )
+        .with_timeout(Duration::from_millis(300));
+    let (mut client, handle) =
+        start_proxy(config, Arc::new(PermitPolicy::new(permit_gate(&issuer))));
+    client.handshake().await;
+
+    let params = json!({"name": "never_replies", "arguments": args, "_meta": meta});
+    let first = client.request("tools/call", Some(params.clone())).await;
+    assert_eq!(
+        first["error"]["code"], UPSTREAM_ERROR,
+        "the tool never answers, so the request times out: {first}"
+    );
+    assert!(
+        first["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("timed out"),
+        "the failure must be the timeout, not a transport error: {first}"
+    );
+
+    let second = client.request("tools/call", Some(params)).await;
+    assert_eq!(
+        second["error"]["code"], POLICY_DENIED,
+        "a timed-out call keeps its invocation, so the budget is gone: {second}"
+    );
+    assert!(
+        second["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("budget"),
+        "the second call must be refused for budget: {second}"
+    );
+
+    // The upstream records every tools/call it is handed, which is what makes
+    // "it may have run" more than a guess here: the call did arrive.
+    let recorded = std::fs::read_to_string(&record_file).expect("record file");
+    assert!(
+        recorded.contains("never_replies"),
+        "the timed-out call did reach the upstream: {recorded}"
+    );
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+    let _ = std::fs::remove_file(&record_file);
 }
 
 /// The other half of the rule: a tool that ran and returned an error is a

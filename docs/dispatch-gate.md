@@ -88,17 +88,29 @@ same permit" the budget counter uses.
 ### When budget is spent, and when it is returned
 
 The counter increments when the gate admits the call, which is before the
-call is dispatched. If the upstream never received it — the connection
-failed, the request timed out — the proxy calls
-`PolicyHook::on_forward_failed`, which returns the invocation via
-`DispatchGate::refund`. A permit with a budget of one therefore survives a
-transient upstream failure.
+call is dispatched. When no response comes back the proxy calls
+`PolicyHook::on_forward_failed` with a `ForwardOutcome` saying how far the
+call actually got, and only one of the two is refundable:
 
-A call the upstream *ran* and answered with a JSON-RPC error is a completed
-call: the tool did its work and reported a failure, and the invocation stays
-spent. A refund never takes a counter below zero and never creates one, and
-`refund_invocation` verifies the permit it credits rather than decoding it,
-so a refund can only ever be aimed at a permit the caller can present.
+| `ForwardOutcome` | Upstream failures | Budget |
+|---|---|---|
+| `NotDelivered` | the connection was already closed, spawning failed, the write was cut short | returned via `DispatchGate::refund` |
+| `MaybeExecuted` | the request timed out, the flush failed, the upstream closed after the request was sent | stays spent, logged at `warn` |
+
+The line is drawn at the write, not at the response. A timeout means the
+request *was* delivered and a tool slower than the request timeout is still
+running once the proxy stops waiting for it — refunding that would let any
+such tool be invoked over and over on a budget of one, which is no budget at
+all. Anything ambiguous is treated as "may have run". A permit with a budget
+of one therefore survives an upstream that never took the call, and spends
+its invocation on one that may have run.
+
+A call the upstream *ran* and answered with a JSON-RPC error does not reach
+this path at all: it is a completed call — the tool did its work and reported
+a failure — and the invocation stays spent. A refund never takes a counter
+below zero and never creates one, and `refund_invocation` verifies the permit
+it credits rather than decoding it, so a refund can only ever be aimed at a
+permit the caller can present.
 
 A refused call returns JSON-RPC error `-32000` and never reaches the
 upstream server.

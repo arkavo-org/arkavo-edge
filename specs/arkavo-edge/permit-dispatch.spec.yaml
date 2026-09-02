@@ -86,14 +86,15 @@ scenarios:
       - crates/arkavo-permit/src/permit.rs
 
   - id: PDG-006
-    name: Budget is counted per signed identity, spent at admission, and returned when the dispatch fails
+    name: Budget is counted per signed identity, spent at admission, and returned only when the call never reached the upstream
     criticality: critical
     given:
       - A permit with budget.max_invocations of 1
-    when: the call is admitted, and then the upstream never receives it
+    when: the call is admitted and then fails — the upstream never took it, or took it and never answered
     then:
       - The second call on an exhausted budget is denied at the budget stage
       - A dispatch that never reached the upstream returns the invocation, so the permit is usable again
+      - A call that was written upstream and then timed out keeps its invocation, because a slow tool goes on running after the wait is abandoned
       - A call the upstream ran and answered with an error keeps its invocation
       - The counter is keyed on Permit::id and never goes below zero
     refs:

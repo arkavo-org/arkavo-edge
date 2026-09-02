@@ -1,6 +1,7 @@
 //! Policy evaluation hook applied to every `tools/call` before it is
 //! forwarded upstream.
 
+use crate::upstream::UpstreamError;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -76,6 +77,31 @@ impl Decision {
     }
 }
 
+/// How far a call that failed to be forwarded actually got.
+///
+/// A hook that spent something to admit the call needs this to decide
+/// whether it can take it back: only a call the upstream provably never
+/// received is free to undo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardOutcome {
+    /// The request never reached the upstream server, so nothing ran there.
+    NotDelivered,
+    /// The request was written to the upstream, and no answer came back. It
+    /// may have run — a tool slower than the request timeout is still
+    /// running once the proxy stops waiting for it.
+    MaybeExecuted,
+}
+
+impl From<&UpstreamError> for ForwardOutcome {
+    fn from(error: &UpstreamError) -> Self {
+        if error.may_have_reached_upstream() {
+            Self::MaybeExecuted
+        } else {
+            Self::NotDelivered
+        }
+    }
+}
+
 /// Hook evaluated on every `tools/call` request before it reaches upstream.
 ///
 /// Implementations must be cheap and non-blocking; they run on the proxy's
@@ -85,16 +111,23 @@ pub trait PolicyHook: Send + Sync {
     /// Decide whether the call described by `ctx` may proceed.
     async fn evaluate(&self, ctx: &CallContext) -> Decision;
 
-    /// Called when a call this hook allowed never reached the upstream
-    /// server — the connection failed, or the request timed out — so a hook
-    /// that spent something admitting it can give that back.
+    /// Called when a call this hook allowed produced no upstream response,
+    /// so a hook that spent something admitting it can decide what to do
+    /// about that.
+    ///
+    /// `outcome` says whether the call is safe to undo.
+    /// [`ForwardOutcome::NotDelivered`] means the upstream never received
+    /// the request and nothing ran. [`ForwardOutcome::MaybeExecuted`] means
+    /// it was written and may be running still — a timeout is the ordinary
+    /// case — so anything spent on it must stay spent, or a tool slower than
+    /// the request timeout would cost nothing to invoke.
     ///
     /// It is *not* called when the upstream ran the call and answered with a
     /// JSON-RPC error: that is a completed call whose result happens to be a
     /// failure, and it keeps whatever it spent.
     ///
     /// Default: nothing to return.
-    async fn on_forward_failed(&self, _ctx: &CallContext) {}
+    async fn on_forward_failed(&self, _ctx: &CallContext, _outcome: ForwardOutcome) {}
 }
 
 /// Default policy that permits every tool call.
@@ -172,12 +205,50 @@ mod tests {
         assert!(Credential::Present(Vec::new()).is_present());
     }
 
-    /// The default hook does nothing on a failed forward, so an
-    /// implementation that spends nothing needs no code for it.
+    /// The default hook does nothing on a failed forward, whichever way it
+    /// failed, so an implementation that spends nothing needs no code for it.
     #[tokio::test]
     async fn on_forward_failed_defaults_to_doing_nothing() {
-        AllowAllPolicy.on_forward_failed(&ctx("anything")).await;
+        for outcome in [ForwardOutcome::NotDelivered, ForwardOutcome::MaybeExecuted] {
+            AllowAllPolicy
+                .on_forward_failed(&ctx("anything"), outcome)
+                .await;
+            DenyListPolicy::default()
+                .on_forward_failed(&ctx("anything"), outcome)
+                .await;
+        }
         assert!(AllowAllPolicy.evaluate(&ctx("anything")).await.is_allowed());
+    }
+
+    /// Which upstream failures a spent invocation may be taken back from.
+    /// Everything from the write onwards may already be running upstream.
+    #[test]
+    fn only_a_failure_before_the_request_was_sent_is_undoable() {
+        for error in [
+            UpstreamError::Closed,
+            UpstreamError::Write("broken pipe".into()),
+            UpstreamError::Spawn {
+                command: "missing".into(),
+                source: std::io::Error::other("no such file"),
+            },
+        ] {
+            assert_eq!(
+                ForwardOutcome::from(&error),
+                ForwardOutcome::NotDelivered,
+                "{error}"
+            );
+        }
+        for error in [
+            UpstreamError::Timeout(std::time::Duration::from_millis(1)),
+            UpstreamError::ClosedAfterSend,
+            UpstreamError::Flush("broken pipe".into()),
+        ] {
+            assert_eq!(
+                ForwardOutcome::from(&error),
+                ForwardOutcome::MaybeExecuted,
+                "{error}"
+            );
+        }
     }
 
     #[tokio::test]

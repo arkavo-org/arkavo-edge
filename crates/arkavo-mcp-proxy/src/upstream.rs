@@ -38,17 +38,48 @@ pub enum UpstreamError {
         source: std::io::Error,
     },
 
-    /// The upstream server closed its stdout or never responded.
+    /// The upstream connection was already closed when the request was
+    /// made, so nothing was sent.
     #[error("upstream connection closed")]
     Closed,
 
-    /// Writing to the upstream server's stdin failed.
+    /// The upstream closed its stdout after the request was written, so it
+    /// may have read and run the call before it went away.
+    #[error("upstream connection closed after the request was sent")]
+    ClosedAfterSend,
+
+    /// Writing the request to the upstream server's stdin failed part-way,
+    /// so the line it would dispatch on never arrived complete.
     #[error("upstream write failed: {0}")]
     Write(String),
 
-    /// The upstream server did not respond in time.
+    /// Flushing the request failed after every byte of it, the terminating
+    /// newline included, had been written, so the upstream may already have
+    /// read and run the call.
+    #[error("upstream flush failed: {0}")]
+    Flush(String),
+
+    /// The upstream server did not respond in time. The request was
+    /// dispatched; a slow tool goes on running after the wait is abandoned.
     #[error("upstream request timed out after {0:?}")]
     Timeout(Duration),
+}
+
+impl UpstreamError {
+    /// Whether the request may have reached the upstream server and run
+    /// there.
+    ///
+    /// This is the question a caller that spent something to admit the call
+    /// has to answer before handing it back. It is deliberately
+    /// pessimistic: only the failures that happen strictly before the
+    /// request is on the wire — the connection already gone, the write
+    /// itself cut short — are reported as "never ran".
+    pub fn may_have_reached_upstream(&self) -> bool {
+        match self {
+            Self::Spawn { .. } | Self::Closed | Self::Write(_) => false,
+            Self::ClosedAfterSend | Self::Flush(_) | Self::Timeout(_) => true,
+        }
+    }
 }
 
 /// Default per-request timeout when the caller does not configure one.
@@ -195,7 +226,7 @@ impl UpstreamConnection {
 
         match tokio::time::timeout(self.timeout, rx).await {
             Ok(Ok(response)) => Ok(response),
-            Ok(Err(_)) => Err(UpstreamError::Closed),
+            Ok(Err(_)) => Err(UpstreamError::ClosedAfterSend),
             Err(_) => {
                 self.pending.lock().await.remove(&key);
                 Err(UpstreamError::Timeout(self.timeout))
@@ -270,10 +301,12 @@ async fn write_line(
         .write_all(&bytes)
         .await
         .map_err(|e| UpstreamError::Write(e.to_string()))?;
+    // The write above put the whole line, newline included, into the pipe:
+    // a failure from here on cannot promise the upstream never saw it.
     stdin
         .flush()
         .await
-        .map_err(|e| UpstreamError::Write(e.to_string()))
+        .map_err(|e| UpstreamError::Flush(e.to_string()))
 }
 
 impl std::fmt::Debug for UpstreamConnection {
@@ -326,5 +359,36 @@ mod tests {
             start.elapsed() < Duration::from_secs(5),
             "request after upstream exit must fail fast, not wait out the timeout"
         );
+        assert!(
+            !err.may_have_reached_upstream(),
+            "nothing was written, so the call provably never ran upstream"
+        );
+    }
+
+    /// The other half of the distinction a caller needs: a request that *was*
+    /// written and then got no answer because the upstream went away is not
+    /// the same failure. The bytes were on the wire, so the call may have run
+    /// there, and whatever was spent admitting it must stay spent.
+    #[tokio::test]
+    async fn a_request_the_upstream_took_before_dying_may_have_run() {
+        // Reads exactly one line, answers nothing, exits: the request is
+        // written and read, and only then does the connection go away.
+        let conn = UpstreamConnection::spawn(
+            "sh",
+            &["-c".to_string(), "read line".to_string()],
+            &HashMap::new(),
+            Some(Duration::from_secs(10)),
+        )
+        .unwrap();
+
+        let err = conn
+            .request(&json!(1), "tools/call", None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, UpstreamError::ClosedAfterSend),
+            "a request that was sent must not report as never sent, got {err}"
+        );
+        assert!(err.may_have_reached_upstream());
     }
 }

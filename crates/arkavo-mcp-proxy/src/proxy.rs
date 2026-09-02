@@ -1,7 +1,7 @@
 //! Stdio pass-through MCP proxy with per-call policy enforcement.
 
 use crate::framing::{self, Line, MAX_LINE_BYTES};
-use crate::policy::{CallContext, Credential, Decision, PolicyHook};
+use crate::policy::{CallContext, Credential, Decision, ForwardOutcome, PolicyHook};
 use crate::upstream::{UpstreamConnection, UpstreamError};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -277,15 +277,20 @@ impl McpProxy {
                         response
                     }
                     Err(error) => {
-                        // The upstream never ran the call, so whatever the
-                        // policy spent admitting it is handed back. An error
+                        // No response came back. Whether whatever the policy
+                        // spent admitting the call can be handed back turns
+                        // on how far the call got: a request that was written
+                        // upstream may be running there still, a timeout
+                        // being the ordinary way to see that. An error
                         // returned *by the tool* is a completed call and does
-                        // not come through here.
-                        self.policy.on_forward_failed(&ctx).await;
+                        // not come through here at all.
+                        let outcome = ForwardOutcome::from(&error);
+                        self.policy.on_forward_failed(&ctx, outcome).await;
                         warn!(
                             tool = %ctx.tool_name,
                             error = %error,
-                            "tool call never reached the upstream server"
+                            ?outcome,
+                            "tool call produced no upstream response"
                         );
                         error_response(id, UPSTREAM_ERROR, error.to_string())
                     }

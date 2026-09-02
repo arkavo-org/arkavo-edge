@@ -9,11 +9,12 @@
 //! case, records as 0 ms; the `gate_latency` bench is where sub-ms precision
 //! lives.
 
-use crate::policy::{CallContext, Credential, Decision, PolicyHook};
+use crate::policy::{CallContext, Credential, Decision, ForwardOutcome, PolicyHook};
 use arkavo_dispatch_gate::{DispatchGate, GateDecision, GateRequest};
 use arkavo_observability::subsystem_timing::global_timing;
 use async_trait::async_trait;
 use std::time::Instant;
+use tracing::warn;
 
 /// Policy hook that only allows a `tools/call` bound to a valid permit and
 /// a matching proof-of-possession, per [`DispatchGate::evaluate`].
@@ -76,10 +77,24 @@ impl PolicyHook for PermitPolicy {
     }
 
     /// Give the permit back the invocation the gate spent admitting a call
-    /// the upstream never received.
-    async fn on_forward_failed(&self, ctx: &CallContext) {
-        if let Some(permit) = ctx.permit.bytes() {
-            self.gate.refund_invocation(permit);
+    /// the upstream never received — and only then.
+    ///
+    /// A call that reached the upstream keeps its invocation even though the
+    /// proxy has no answer for it. A timeout is the case that matters: the
+    /// request was delivered and a slow tool goes on running after the wait
+    /// is abandoned, so refunding it would let any tool slower than the
+    /// request timeout be invoked without ever depleting `max_invocations`.
+    async fn on_forward_failed(&self, ctx: &CallContext, outcome: ForwardOutcome) {
+        match outcome {
+            ForwardOutcome::NotDelivered => {
+                if let Some(permit) = ctx.permit.bytes() {
+                    self.gate.refund_invocation(permit);
+                }
+            }
+            ForwardOutcome::MaybeExecuted => warn!(
+                tool = %ctx.tool_name,
+                "budget retained: the call reached the upstream and may have executed"
+            ),
         }
     }
 }
@@ -207,7 +222,7 @@ mod tests {
     /// transport failure.
     #[tokio::test]
     #[spec("PDG-006")]
-    async fn a_failed_forward_returns_the_invocation() {
+    async fn an_undelivered_forward_returns_the_invocation() {
         let (policy, ctx) = gated_call(1);
 
         assert_eq!(policy.evaluate(&ctx).await, Decision::Allow);
@@ -217,12 +232,37 @@ mod tests {
             Decision::Allow => panic!("a budget of one must not admit two calls"),
         }
 
-        policy.on_forward_failed(&ctx).await;
+        policy
+            .on_forward_failed(&ctx, ForwardOutcome::NotDelivered)
+            .await;
         assert_eq!(
             policy.evaluate(&ctx).await,
             Decision::Allow,
             "the invocation the failed dispatch gave back must be spendable"
         );
+    }
+
+    /// The other side of the rule, and the one that carries the security
+    /// weight: a call that reached the upstream keeps its invocation even
+    /// though no response came back. Refunding a timeout would let any tool
+    /// slower than the request timeout be invoked over and over on a budget
+    /// of one.
+    #[tokio::test]
+    #[spec("PDG-006")]
+    async fn a_forward_that_may_have_executed_keeps_the_invocation() {
+        let (policy, ctx) = gated_call(1);
+
+        assert_eq!(policy.evaluate(&ctx).await, Decision::Allow);
+        policy
+            .on_forward_failed(&ctx, ForwardOutcome::MaybeExecuted)
+            .await;
+
+        match policy.evaluate(&ctx).await {
+            Decision::Deny { reason } => assert!(reason.contains("budget"), "reason: {reason}"),
+            Decision::Allow => {
+                panic!("a call that may have run upstream must not get its invocation back")
+            }
+        }
     }
 
     /// The refund only ever credits the permit the call carried, and a call
@@ -233,13 +273,19 @@ mod tests {
         assert_eq!(policy.evaluate(&ctx).await, Decision::Allow);
 
         policy
-            .on_forward_failed(&ctx_with(Credential::Absent, Credential::Absent))
+            .on_forward_failed(
+                &ctx_with(Credential::Absent, Credential::Absent),
+                ForwardOutcome::NotDelivered,
+            )
             .await;
         policy
-            .on_forward_failed(&ctx_with(
-                Credential::Present(b"not a permit".to_vec()),
-                Credential::Absent,
-            ))
+            .on_forward_failed(
+                &ctx_with(
+                    Credential::Present(b"not a permit".to_vec()),
+                    Credential::Absent,
+                ),
+                ForwardOutcome::NotDelivered,
+            )
             .await;
 
         match policy.evaluate(&ctx).await {
