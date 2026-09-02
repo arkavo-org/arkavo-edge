@@ -1,8 +1,9 @@
 # Slim container image for Arkavo Edge (no local inference).
 # Feature set mirrors the proven CI recipe: memory,mdns,mcp-tools,llm-remote,web-ui.
 # llama-cpp is intentionally excluded from the feature list.
-# NOTE: until arkavo-ui-generator's llama-cpp dependency is feature-gated,
-# the build transitively compiles arkavo-llama-cpp-sys (cmake + vendor/llama.cpp).
+# Slim build: llama-cpp is feature-gated end to end (ui-generator, agui,
+# orchestrator, server), so this image needs neither cmake nor the vendored
+# llama.cpp tree.
 # See docs/deploy/container.md for the rationale, gap, and known limitations.
 
 FROM rust:1-bookworm AS builder
