@@ -8,10 +8,8 @@ use crate::claims::PermitClaims;
 use crate::error::PermitError;
 use crate::keys::{PermitSigner, PermitVerifier};
 use ciborium::value::Value;
-use coset::iana::{Algorithm, CoapContentFormat};
-use coset::{
-    CoseSign1, CoseSign1Builder, HeaderBuilder, RegisteredLabelWithPrivate, TaggedCborSerializable,
-};
+use coset::iana::CoapContentFormat;
+use coset::{CoseSign1Builder, HeaderBuilder, TaggedCborSerializable};
 
 /// CBOR tag 61 (CWT) prefix bytes: 0xd8 0x3d.
 const CWT_TAG_PREFIX: [u8; 2] = [0xd8, 0x3d];
@@ -61,8 +59,8 @@ pub fn mint(claims: &PermitClaims, signer: &PermitSigner) -> Result<Vec<u8>, Per
 ///
 /// Input larger than [`MAX_PERMIT_BYTES`] is rejected before parse.
 pub fn decode(cwt: &[u8]) -> Result<Permit, PermitError> {
-    let sign1 = parse_sign1(cwt)?;
-    extract(&sign1)
+    let parsed = parse_sign1(cwt)?;
+    extract(&parsed)
 }
 
 /// Decode and fully verify a permit: structure, signature against the `cnf`
@@ -71,12 +69,9 @@ pub fn decode(cwt: &[u8]) -> Result<Permit, PermitError> {
 ///
 /// Input larger than [`MAX_PERMIT_BYTES`] is rejected before parse.
 pub fn verify(cwt: &[u8], now: i64) -> Result<Permit, PermitError> {
-    let sign1 = parse_sign1(cwt)?;
-    let algorithm = header_algorithm(&sign1)?;
-    let permit = extract(&sign1)?;
-    sign1.verify_signature(&[], |signature, data| {
-        permit.confirmation_key.verify(algorithm, data, signature)
-    })?;
+    let parsed = parse_sign1(cwt)?;
+    let permit = extract(&parsed)?;
+    parsed.verify(&permit.confirmation_key.0)?;
     let claims = &permit.claims;
     if now < claims.not_before {
         return Err(PermitError::NotYetValid {
@@ -99,33 +94,19 @@ pub fn verify(cwt: &[u8], now: i64) -> Result<Permit, PermitError> {
     Ok(permit)
 }
 
-fn parse_sign1(cwt: &[u8]) -> Result<CoseSign1, PermitError> {
+fn parse_sign1(cwt: &[u8]) -> Result<arkavo_cwt::ParsedSign1, PermitError> {
     if cwt.len() > MAX_PERMIT_BYTES {
         return Err(PermitError::Cose("permit exceeds maximum size".to_string()));
     }
-    let tagged = cwt
-        .strip_prefix(&CWT_TAG_PREFIX)
-        .ok_or(PermitError::Cose("missing CBOR tag 61 (CWT)".to_string()))?;
-    CoseSign1::from_tagged_slice(tagged)
-        .map_err(|e| PermitError::Cose(format!("COSE_Sign1 decode: {e}")))
-}
-
-fn header_algorithm(sign1: &CoseSign1) -> Result<Algorithm, PermitError> {
-    match &sign1.protected.header.alg {
-        Some(RegisteredLabelWithPrivate::Assigned(alg @ (Algorithm::EdDSA | Algorithm::ES256))) => {
-            Ok(*alg)
-        }
-        Some(other) => Err(PermitError::UnsupportedAlgorithm(format!("{other:?}"))),
-        None => Err(PermitError::MalformedClaim("protected header alg")),
+    if !cwt.starts_with(&arkavo_cwt::sign1::CWT_TAG_PREFIX) {
+        return Err(PermitError::Cose("missing CBOR tag 61 (CWT)".to_string()));
     }
+    Ok(arkavo_cwt::sign1::parse(cwt)?)
 }
 
-fn extract(sign1: &CoseSign1) -> Result<Permit, PermitError> {
-    let payload = sign1
-        .payload
-        .as_ref()
-        .ok_or(PermitError::MalformedClaim("detached payload"))?;
-    let value: Value = ciborium::from_reader(payload.as_slice())
+fn extract(parsed: &arkavo_cwt::ParsedSign1) -> Result<Permit, PermitError> {
+    let payload = parsed.payload()?;
+    let value: Value = ciborium::from_reader(payload)
         .map_err(|e| PermitError::CborDeserialize(format!("claims set: {e}")))?;
     let (claims, cose_key) = PermitClaims::from_cbor_value(&value)?;
     let confirmation_key = PermitVerifier::from_cose_key(&cose_key)?;
@@ -142,7 +123,8 @@ mod tests {
     use crate::hash::HashAlgorithm;
     use crate::{argument_hash, keys::PermitVerifier as Verifier};
     use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
-    use coset::{AsCborValue, CborSerializable};
+    use coset::iana::Algorithm;
+    use coset::{AsCborValue, CborSerializable, CoseSign1};
 
     const IAT: i64 = 1_700_000_000;
     const NOW: i64 = 1_700_000_060;
@@ -447,9 +429,9 @@ mod tests {
     fn cbor_serializable_sign1_roundtrip_used_internally() {
         let signer = ed25519_signer();
         let cwt = mint(&sample_claims(), &signer).unwrap();
-        let sign1 = parse_sign1(&cwt).unwrap();
-        let bytes = sign1.clone().to_vec().unwrap();
-        let parsed = CoseSign1::from_slice(&bytes).unwrap();
-        assert_eq!(parsed.signature, sign1.signature);
+        let parsed = parse_sign1(&cwt).unwrap();
+        let bytes = parsed.sign1.clone().to_vec().unwrap();
+        let reparsed = CoseSign1::from_slice(&bytes).unwrap();
+        assert_eq!(reparsed.signature, parsed.sign1.signature);
     }
 }

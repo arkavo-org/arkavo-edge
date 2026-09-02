@@ -1,12 +1,11 @@
 //! Signing and verification keys for permits, reusing `arkavo-crypto` key
 //! types (Ed25519 primary, P-256/ES256 supported) and encoding them as
-//! COSE_Key confirmation keys per RFC 8747.
+//! COSE_Key confirmation keys per RFC 8747 via `arkavo-cwt`.
 
 use crate::error::PermitError;
-use arkavo_crypto::{AgentKeypair, AgentPublicKey, P256SigningKeypair, P256VerifyingKey};
-use ciborium::value::{Integer, Value};
-use coset::iana::{Algorithm, Ec2KeyParameter, EllipticCurve, EnumI64, KeyType, OkpKeyParameter};
-use coset::{CoseKey, CoseKeyBuilder, Label, RegisteredLabel};
+use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
+use coset::CoseKey;
+use coset::iana::Algorithm;
 
 /// A permit signing key. Determines the COSE algorithm in the protected
 /// header and the COSE_Key placed in the `cnf` claim.
@@ -25,8 +24,23 @@ impl PermitSigner {
 
     pub fn public_key(&self) -> PermitVerifier {
         match self {
-            Self::Ed25519(keypair) => PermitVerifier::Ed25519(keypair.public_key()),
-            Self::P256(keypair) => PermitVerifier::P256(keypair.public_key()),
+            Self::Ed25519(keypair) => {
+                let bytes = keypair.public_key().to_bytes();
+                // arkavo-crypto only ever hands out well-formed 32-byte Ed25519 keys.
+                let raw: [u8; 32] = bytes[..32]
+                    .try_into()
+                    .expect("Ed25519 public key is 32 bytes");
+                let key = ed25519_dalek::VerifyingKey::from_bytes(&raw)
+                    .expect("arkavo-crypto Ed25519 keys are canonical");
+                PermitVerifier(arkavo_cwt::VerifyingKey::Ed25519(key))
+            }
+            Self::P256(keypair) => {
+                let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(
+                    &keypair.public_key().to_sec1_bytes(),
+                )
+                .expect("arkavo-crypto P-256 keys are valid SEC1 points");
+                PermitVerifier(arkavo_cwt::VerifyingKey::P256(key))
+            }
         }
     }
 
@@ -49,81 +63,24 @@ impl PermitSigner {
     }
 }
 
-/// A permit verification key, recovered from the `cnf` claim or supplied
-/// out of band.
-#[derive(Clone)]
-pub enum PermitVerifier {
-    Ed25519(AgentPublicKey),
-    P256(P256VerifyingKey),
-}
+/// The permit's confirmation key. A thin wrapper so permit code keeps its
+/// error type while the COSE key handling lives in `arkavo-cwt`.
+#[derive(Clone, Debug)]
+pub struct PermitVerifier(pub arkavo_cwt::VerifyingKey);
 
 impl PermitVerifier {
     pub fn algorithm(&self) -> Algorithm {
-        match self {
-            Self::Ed25519(_) => Algorithm::EdDSA,
-            Self::P256(_) => Algorithm::ES256,
-        }
+        self.0.algorithm()
     }
 
     pub fn to_cose_key(&self) -> CoseKey {
-        match self {
-            Self::Ed25519(key) => CoseKeyBuilder::new_okp_key()
-                .algorithm(Algorithm::EdDSA)
-                .param(
-                    OkpKeyParameter::Crv.to_i64(),
-                    int_value(EllipticCurve::Ed25519.to_i64()),
-                )
-                .param(OkpKeyParameter::X.to_i64(), Value::Bytes(key.to_bytes()))
-                .build(),
-            Self::P256(key) => {
-                let sec1 = key.to_sec1_bytes();
-                CoseKeyBuilder::new_ec2_pub_key(
-                    EllipticCurve::P_256,
-                    sec1[1..33].to_vec(),
-                    sec1[33..65].to_vec(),
-                )
-                .algorithm(Algorithm::ES256)
-                .build()
-            }
-        }
+        self.0.to_cose_key()
     }
 
     /// Recover a verification key from a COSE_Key, failing closed on any
     /// unexpected key type, curve, or parameter encoding.
     pub fn from_cose_key(key: &CoseKey) -> Result<Self, PermitError> {
-        match key.kty {
-            RegisteredLabel::Assigned(KeyType::OKP) => Self::from_okp(key),
-            RegisteredLabel::Assigned(KeyType::EC2) => Self::from_ec2(key),
-            _ => Err(PermitError::InvalidConfirmationKey(
-                "kty must be OKP (Ed25519) or EC2 (P-256)".to_string(),
-            )),
-        }
-    }
-
-    fn from_okp(key: &CoseKey) -> Result<Self, PermitError> {
-        expect_curve(key, EllipticCurve::Ed25519)?;
-        let x = param_bytes(key, OkpKeyParameter::X.to_i64())?;
-        let public = AgentPublicKey::from_bytes(&x)
-            .map_err(|e| PermitError::InvalidConfirmationKey(e.to_string()))?;
-        Ok(Self::Ed25519(public))
-    }
-
-    fn from_ec2(key: &CoseKey) -> Result<Self, PermitError> {
-        expect_curve(key, EllipticCurve::P_256)?;
-        let x = param_bytes(key, Ec2KeyParameter::X.to_i64())?;
-        let y = param_bytes(key, Ec2KeyParameter::Y.to_i64())?;
-        if x.len() != 32 || y.len() != 32 {
-            return Err(PermitError::InvalidConfirmationKey(
-                "P-256 coordinates must be 32 bytes".to_string(),
-            ));
-        }
-        let mut sec1 = Vec::with_capacity(65);
-        sec1.push(0x04);
-        sec1.extend_from_slice(&x);
-        sec1.extend_from_slice(&y);
-        let public = P256VerifyingKey::from_sec1_bytes(&sec1)
-            .map_err(|e| PermitError::InvalidConfirmationKey(e.to_string()))?;
-        Ok(Self::P256(public))
+        Ok(Self(arkavo_cwt::VerifyingKey::from_cose_key(key)?))
     }
 
     /// Verify a COSE signature value against a Sig_structure.
@@ -133,61 +90,13 @@ impl PermitVerifier {
         data: &[u8],
         signature: &[u8],
     ) -> Result<(), PermitError> {
-        if algorithm != self.algorithm() {
-            return Err(PermitError::KeyAlgorithmMismatch);
-        }
-        match self {
-            Self::Ed25519(key) => key
-                .verify(data, signature)
-                .map_err(|_| PermitError::InvalidSignature),
-            Self::P256(key) => key
-                .verify(data, signature)
-                .map_err(|_| PermitError::InvalidSignature),
-        }
+        Ok(self.0.verify(algorithm, data, signature)?)
     }
 
     /// Raw public key bytes: 32 bytes for Ed25519, 65-byte SEC1 uncompressed
     /// for P-256.
     pub fn public_key_bytes(&self) -> Vec<u8> {
-        match self {
-            Self::Ed25519(key) => key.to_bytes(),
-            Self::P256(key) => key.to_sec1_bytes(),
-        }
-    }
-}
-
-fn int_value(value: i64) -> Value {
-    Value::Integer(Integer::from(value))
-}
-
-fn param_bytes(key: &CoseKey, label: i64) -> Result<Vec<u8>, PermitError> {
-    let wanted = Label::Int(label);
-    match key.params.iter().find(|(l, _)| *l == wanted) {
-        Some((_, Value::Bytes(bytes))) => Ok(bytes.clone()),
-        Some(_) => Err(PermitError::InvalidConfirmationKey(format!(
-            "parameter {label} is not a bstr"
-        ))),
-        None => Err(PermitError::InvalidConfirmationKey(format!(
-            "missing parameter {label}"
-        ))),
-    }
-}
-
-fn expect_curve(key: &CoseKey, curve: EllipticCurve) -> Result<(), PermitError> {
-    let wanted = Integer::from(curve.to_i64());
-    let found = key
-        .params
-        .iter()
-        .find_map(|(label, value)| match (label, value) {
-            (Label::Int(l), Value::Integer(v)) if *l == -1 => Some(*v),
-            _ => None,
-        });
-    match found {
-        Some(v) if v == wanted => Ok(()),
-        _ => Err(PermitError::InvalidConfirmationKey(format!(
-            "unexpected curve, want {:?}",
-            curve.to_i64()
-        ))),
+        self.0.public_key_bytes()
     }
 }
 
@@ -257,6 +166,9 @@ fn der_to_p1363(der: &[u8]) -> Result<Vec<u8>, PermitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use coset::CoseKeyBuilder;
+    use coset::RegisteredLabel;
+    use coset::iana::{EllipticCurve, KeyType};
 
     #[test]
     fn ed25519_cose_key_roundtrip() {

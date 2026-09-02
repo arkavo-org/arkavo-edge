@@ -10,8 +10,11 @@ description = "CWT (RFC 8392) permits for permit-bound tool execution, signed as
 
 [dependencies]
 arkavo-crypto = { path = "../arkavo-crypto" }
-coset = "0.3"
-ciborium = "0.2"
+arkavo-cwt = { path = "../arkavo-cwt" }
+coset = { workspace = true }
+ciborium = { workspace = true }
+ed25519-dalek = { workspace = true }
+p256 = { workspace = true }
 blake3 = "1.5"
 sha2 = { workspace = true }
 serde_json = { workspace = true }

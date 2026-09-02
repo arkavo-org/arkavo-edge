@@ -973,7 +973,7 @@ dependencies = [
  "arkavo-test-macros",
  "base64 0.22.1",
  "ciborium",
- "coset 0.4.2",
+ "coset",
  "ed25519-dalek 2.2.0",
  "p256",
  "rand 0.8.6",
@@ -1735,10 +1735,13 @@ name = "arkavo-permit"
 version = "0.91.3"
 dependencies = [
  "arkavo-crypto",
+ "arkavo-cwt",
  "blake3",
  "ciborium",
- "coset 0.3.8",
+ "coset",
+ "ed25519-dalek 2.2.0",
  "hex",
+ "p256",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
@@ -3471,16 +3474,6 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
-
-[[package]]
-name = "coset"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4c8cc80f631f8307b887faca24dcc3abc427cd0367f6eb6188f6e8f5b7ad8fb"
-dependencies = [
- "ciborium",
- "ciborium-io",
-]
 
 [[package]]
 name = "coset"

@@ -30,6 +30,19 @@ pub enum PermitError {
     BindingMismatch(String),
 }
 
+impl From<arkavo_cwt::CwtError> for PermitError {
+    fn from(error: arkavo_cwt::CwtError) -> Self {
+        use arkavo_cwt::CwtError as E;
+        match error {
+            E::BadSignature => Self::InvalidSignature,
+            E::KeyAlgorithmMismatch => Self::KeyAlgorithmMismatch,
+            E::Key(message) => Self::InvalidConfirmationKey(message),
+            E::UnsupportedAlgorithm(message) => Self::UnsupportedAlgorithm(message),
+            other => Self::Cose(other.to_string()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
