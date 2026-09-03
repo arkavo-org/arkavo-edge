@@ -19,6 +19,20 @@ pub struct LocalEngine {
 impl LocalEngine {
     /// Create a new LocalEngine with Router and full tool registration.
     pub async fn new() -> Result<Self, String> {
+        Self::new_with_release_gate(None).await
+    }
+
+    /// Create a LocalEngine whose router inspects every completion before
+    /// returning it (SENT-007).
+    ///
+    /// The gate is handed in here rather than set afterwards because the router
+    /// is shared behind an `Arc` — and that `Arc` cloned into the tool registry
+    /// — before this function returns, so there is no later moment at which it
+    /// is exclusively owned. `None` builds exactly the engine `new` built
+    /// before this existed.
+    pub async fn new_with_release_gate(
+        release_gate: Option<Arc<dyn arkavo_llm::ReleaseGate>>,
+    ) -> Result<Self, String> {
         let router = Router::new()
             .await
             .map_err(|e| format!("Failed to initialize router: {e}"))?;
@@ -48,6 +62,10 @@ impl LocalEngine {
         let router = router.with_cloud_policy(cloud_policy);
         let router = match budget_tracker {
             Some(ref tracker) => router.with_budget_tracker(tracker.clone()),
+            None => router,
+        };
+        let router = match release_gate {
+            Some(gate) => router.with_release_gate(gate),
             None => router,
         };
 

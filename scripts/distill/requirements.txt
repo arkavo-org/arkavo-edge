@@ -1,0 +1,8 @@
+torch>=2.6
+transformers>=4.57
+peft>=0.17
+accelerate
+sentencepiece
+protobuf
+gguf
+pyarrow

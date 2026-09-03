@@ -66,11 +66,11 @@ impl A2aClient {
     ) -> Self {
         let mut session_manager = ChatSessionManager::with_router(router, tool_registry);
         if let Some(name) = model_name {
-            if let Some(model) = arkavo_router::ModelChoice::from_name(name) {
-                session_manager.set_model_override(model);
+            if let Some(spec) = arkavo_router::ModelSpec::parse(name) {
+                session_manager.set_model_spec(spec);
             } else {
                 eprintln!(
-                    "Warning: unknown model '{name}', using default. Available: ministral-3b, ministral-8b, qwen3.5-0.8b, qwen3.5-9b, qwen3.5-27b, glm-4.7-flash"
+                    "Warning: unknown model '{name}', using default. Available: ministral-3b, ministral-8b, qwen3.5-0.8b, qwen3.5-9b, qwen3.5-27b, glm-4.7-flash, or a .gguf path"
                 );
             }
         }
@@ -78,6 +78,18 @@ impl A2aClient {
             mcp_bridge: None,
             session_manager: Some(session_manager),
             session_id: None,
+        }
+    }
+
+    /// Replace the system prompt every context window in this client's sessions
+    /// is built under.
+    ///
+    /// The prompt is copied into the session handler when a session is opened,
+    /// so it has to be set before [`Self::open_session`] — which is why this
+    /// sits on the client rather than on the session.
+    pub fn set_system_prompt(&mut self, prompt: String) {
+        if let Some(manager) = self.session_manager.as_mut() {
+            manager.set_system_prompt(prompt);
         }
     }
 

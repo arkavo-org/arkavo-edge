@@ -94,6 +94,14 @@ where
                     return Poll::Ready(Some(finish(&this.gate, &mut this.blocked, None)));
                 }
                 Poll::Ready(Some(Err(e))) => {
+                    // The provider stopped mid-completion. The gate outlives
+                    // this stream, so text it admitted but has not yet windowed
+                    // would otherwise sit in its buffer and be prefixed onto
+                    // the next completion — the same cross-completion
+                    // contamination the abandoned-consumer path discards for.
+                    // `discard` and not `finish`: an error is not an
+                    // inspection, and there is no consumer left to release to.
+                    this.gate.discard();
                     this.finished = true;
                     return Poll::Ready(Some(Err(e)));
                 }
@@ -115,19 +123,34 @@ where
                         // would otherwise have that text bypass the gate
                         // entirely, which is the one span most likely to hold
                         // the end of a completion.
-                        if !chunk.content.is_empty()
-                            && this.gate.admit(&chunk.content) == GateOutcome::Blocked
-                        {
-                            this.blocked = true;
-                            return Poll::Ready(Some(Err(Error::Provider(
-                                GATE_BLOCKED.to_string(),
-                            ))));
+                        //
+                        // What the admit clears is kept, not just tested for a
+                        // block. A gate releases by the window, so a whole
+                        // completion arriving as one done chunk — which is
+                        // every non-streaming provider — clears its full
+                        // windows here and only its tail at `finish`. Reading
+                        // the admit for `Blocked` alone dropped everything but
+                        // that tail, and truncated any answer longer than one
+                        // window rather than withholding it.
+                        let mut released = String::new();
+                        if !chunk.content.is_empty() {
+                            match this.gate.admit(&chunk.content) {
+                                GateOutcome::Blocked => {
+                                    this.blocked = true;
+                                    return Poll::Ready(Some(Err(Error::Provider(
+                                        GATE_BLOCKED.to_string(),
+                                    ))));
+                                }
+                                GateOutcome::Release(text) => released = text,
+                            }
                         }
-                        return Poll::Ready(Some(finish(
-                            &this.gate,
-                            &mut this.blocked,
-                            Some(chunk),
-                        )));
+                        return Poll::Ready(Some(
+                            finish(&this.gate, &mut this.blocked, Some(chunk)).map(|mut last| {
+                                released.push_str(&last.content);
+                                last.content = released;
+                                last
+                            }),
+                        ));
                     }
                     match this.gate.admit(&chunk.content) {
                         GateOutcome::Blocked => {
@@ -152,6 +175,20 @@ where
                     }
                 }
             }
+        }
+    }
+}
+
+impl<S> Drop for GatedStream<S> {
+    /// A consumer that walks away leaves held text behind, and a gate outlives
+    /// the completion it was inspecting — it is the session's, not this
+    /// stream's. Telling it the completion is over is what keeps the abandoned
+    /// text from being carried into the next one. `discard` and not `finish`:
+    /// a disconnect is not an inspection, so the text is dropped rather than
+    /// judged and released to nobody.
+    fn drop(&mut self) {
+        if !self.finished {
+            self.gate.discard();
         }
     }
 }
@@ -367,6 +404,68 @@ mod tests {
         assert_eq!(seen, "an opening and a closing");
     }
 
+    /// A gate that releases in whole windows and holds the remainder until the
+    /// completion ends, which is the shape a classifier-backed gate has: it
+    /// judges a window at a time and cannot judge a partial one.
+    struct Windowed {
+        held: Mutex<String>,
+        window: usize,
+    }
+
+    impl Windowed {
+        fn new(window: usize) -> Arc<Self> {
+            Arc::new(Self {
+                held: Mutex::new(String::new()),
+                window,
+            })
+        }
+    }
+
+    impl ReleaseGate for Windowed {
+        fn admit(&self, chunk: &str) -> GateOutcome {
+            let mut held = self.held.lock().expect("lock");
+            held.push_str(chunk);
+            let split = held.len() - held.len() % self.window;
+            let rest = held.split_off(split);
+            GateOutcome::Release(std::mem::replace(&mut *held, rest))
+        }
+
+        fn finish(&self) -> GateOutcome {
+            GateOutcome::Release(std::mem::take(&mut *self.held.lock().expect("lock")))
+        }
+
+        fn discard(&self) {
+            self.held.lock().expect("lock").clear();
+        }
+    }
+
+    /// A completion that arrives as one done chunk — every non-streaming
+    /// provider, and every `RouteStream::from_response` — reaches the consumer
+    /// whole. The done arm used to read its admit for a block and nothing else,
+    /// so every window the gate cleared there was dropped and the caller got
+    /// only the tail: a silent truncation of any answer longer than one window,
+    /// and only with a gate set.
+    #[tokio::test]
+    async fn a_whole_completion_on_the_done_chunk_is_not_truncated() {
+        // Four full windows and a partial one, so the answer is split across
+        // both halves of the gate's contract.
+        let answer = "abcdefghij".repeat(7);
+        let inner = futures::stream::iter(vec![Ok(StreamResponse {
+            content: answer.clone(),
+            reasoning_content: None,
+            done: true,
+            inference_timing: None,
+        })]);
+        let mut stream = gated(Box::pin(inner), Windowed::new(16));
+
+        let mut seen = String::new();
+        while let Some(item) = stream.next().await {
+            seen.push_str(&item.expect("clean text is not refused").content);
+        }
+
+        assert_eq!(seen, answer);
+    }
+
     /// SENT-007 edge case: the completion ends mid-window and the tail is still
     /// inspected before release.
     #[tokio::test]
@@ -375,6 +474,100 @@ mod tests {
 
         assert!(errored);
         assert!(seen.is_empty(), "the tail must not be flushed uninspected");
+    }
+
+    /// A gate that counts the discards it is told about, so a test can assert
+    /// on a notification rather than on the buffer it clears.
+    struct Counting {
+        discards: Mutex<usize>,
+    }
+
+    impl Counting {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                discards: Mutex::new(0),
+            })
+        }
+
+        fn discards(&self) -> usize {
+            *self.discards.lock().expect("lock")
+        }
+    }
+
+    impl ReleaseGate for Counting {
+        // Releases each chunk whole, so the consumer gets a yield per chunk and
+        // can stop between two of them.
+        fn admit(&self, chunk: &str) -> GateOutcome {
+            GateOutcome::Release(chunk.to_string())
+        }
+
+        fn finish(&self) -> GateOutcome {
+            GateOutcome::Release(String::new())
+        }
+
+        fn discard(&self) {
+            *self.discards.lock().expect("lock") += 1;
+        }
+    }
+
+    /// SENT-007 edge case: the consumer goes away mid-completion. The gate
+    /// outlives the stream, so the text this one was holding has to be dropped
+    /// rather than left for the next completion to inherit.
+    #[tokio::test]
+    async fn dropping_a_partly_consumed_stream_discards_what_it_held() {
+        let gate = Counting::new();
+        {
+            let inner = futures::stream::iter(chunks(&["first ", "second ", "third"]));
+            let mut stream = gated(Box::pin(inner), gate.clone());
+            stream.next().await;
+            assert_eq!(gate.discards(), 0, "not while the stream is alive");
+        }
+
+        assert_eq!(gate.discards(), 1);
+    }
+
+    /// A provider that errors mid-completion ends it as surely as a consumer
+    /// walking away does, and the gate has to be told: text it admitted but has
+    /// not windowed would otherwise be inherited by the next completion.
+    #[tokio::test]
+    async fn a_provider_error_mid_stream_discards_what_the_gate_held() {
+        let gate = Counting::new();
+        {
+            let inner = futures::stream::iter(vec![
+                Ok(StreamResponse {
+                    content: "held".to_string(),
+                    reasoning_content: None,
+                    done: false,
+                    inference_timing: None,
+                }),
+                Err(Error::Provider("the provider gave up".to_string())),
+            ]);
+            let mut stream = gated(Box::pin(inner), gate.clone());
+
+            stream.next().await.expect("a chunk").expect("clean text");
+            let error = stream.next().await.expect("the error");
+            assert!(error.is_err());
+            assert_eq!(gate.discards(), 1, "told as soon as the error is seen");
+        }
+
+        // And dropping the stream afterwards does not discard a second time:
+        // the completion is already over.
+        assert_eq!(gate.discards(), 1);
+    }
+
+    /// And a completion that ran to its end has nothing to discard: finishing
+    /// already inspected the tail, and a discard here would tell a session-wide
+    /// gate to throw away a completion that was properly closed.
+    #[tokio::test]
+    async fn dropping_a_finished_stream_discards_nothing() {
+        let gate = Counting::new();
+        {
+            let inner = futures::stream::iter(chunks(&["all of it"]));
+            let mut stream = gated(Box::pin(inner), gate.clone());
+            while stream.next().await.is_some() {}
+        }
+
+        assert_eq!(gate.discards(), 0);
     }
 
     /// The final chunk keeps the provider's metadata, so gating a stream does

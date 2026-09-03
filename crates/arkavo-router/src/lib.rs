@@ -13,6 +13,7 @@ pub mod judge;
 pub mod learning;
 pub mod metrics;
 pub mod model_discovery;
+pub mod model_spec;
 pub mod optimal_config;
 pub mod orchestrator;
 pub mod planes;
@@ -24,6 +25,7 @@ pub mod provider_info;
 #[cfg(feature = "llama-cpp")]
 pub(crate) mod provider_protected;
 pub(crate) mod quality_gate;
+pub mod release;
 pub mod response;
 pub mod rlm;
 pub mod selector;
@@ -48,6 +50,7 @@ pub use deliberation::{DeliberationConfig, DeliberationResult, Deliberator};
 pub use error::{Error, Result};
 pub use judge::{IssueType, JudgmentResult, ResponseJudge};
 pub use metrics::RoutingMetrics;
+pub use model_spec::ModelSpec;
 pub use orchestrator::{
     ArchitectRoutingResult, CostOrchestrator, CostRecommendation, OrchestratorMetrics,
     ScalingDecision,
@@ -274,6 +277,12 @@ pub struct Router {
     /// after the user approves a `CloudUpgradeOffered`; the loop consumes it
     /// when authorizing spend.
     cloud_confirmation: std::sync::atomic::AtomicBool,
+    /// Inspects generated text before it is returned (SENT-007). `None` is the
+    /// default and the only state the shipped binary reaches on its own: with
+    /// no gate every completion path is byte for byte what it was before this
+    /// field existed. One gate serves one session, so it is shared across that
+    /// session's completions rather than rebuilt per message.
+    release_gate: Option<Arc<dyn arkavo_llm::ReleaseGate>>,
 }
 
 impl Router {
@@ -331,6 +340,7 @@ impl Router {
                 arkavo_budget::provider_costs::ProviderPricing::new(),
             )),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
+            release_gate: None,
         })
     }
 
@@ -388,6 +398,7 @@ impl Router {
                 arkavo_budget::provider_costs::ProviderPricing::new(),
             )),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
+            release_gate: None,
         })
     }
 
@@ -399,6 +410,34 @@ impl Router {
     pub fn with_preflight(mut self, moderator: preflight::PreflightModerator) -> Self {
         self.preflight = Some(Arc::new(moderator));
         self
+    }
+
+    /// Inspect every completion this router produces before returning it
+    /// (SENT-007).
+    ///
+    /// The builder form, for a router that is about to be shared behind an
+    /// `Arc` — which is how every embedder holds one, so there is no later
+    /// moment at which `set_release_gate` could be called.
+    #[must_use]
+    pub fn with_release_gate(mut self, gate: Arc<dyn arkavo_llm::ReleaseGate>) -> Self {
+        self.release_gate = Some(gate);
+        self
+    }
+
+    /// Set the gate on a router the caller still owns exclusively.
+    pub fn set_release_gate(&mut self, gate: Arc<dyn arkavo_llm::ReleaseGate>) {
+        self.release_gate = Some(gate);
+    }
+
+    /// Wrap a stream in the gate, if one is set.
+    ///
+    /// Without a gate the stream is returned by value and untouched, so an
+    /// ungated router's stream path is the one it had before the gate existed.
+    fn gated_stream(&self, stream: RouteStream) -> RouteStream {
+        match &self.release_gate {
+            Some(gate) => release::gate_stream(stream, gate.clone()),
+            None => stream,
+        }
     }
 
     /// Set the spend-plane cloud policy (default `AskBeforeCloud`).
@@ -1130,7 +1169,7 @@ impl Router {
                 architect_savings: Some(arch_result.actual_savings_usd),
             };
 
-            return Ok(RouteStream::from_response(response));
+            return Ok(self.gated_stream(RouteStream::from_response(response)));
         }
 
         // Simple task - use Thompson Sampling routing
@@ -1152,7 +1191,7 @@ impl Router {
             architect_savings: None,
         };
 
-        Ok(RouteStream::from_response(response))
+        Ok(self.gated_stream(RouteStream::from_response(response)))
     }
 
     /// Route using the fastest available local model, skipping classification.
@@ -1252,22 +1291,48 @@ impl Router {
     /// When a tool registry is provided, tools are passed to the LLM so it can
     /// produce structured tool calls (e.g. `get_time`) instead of hallucinating.
     ///
-    /// `model_override` forces a specific model (for testing/benchmarking).
+    /// `model_override` forces a specific catalog model (for testing/benchmarking).
     pub async fn route_chat(
         &self,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
         model_override: Option<&ModelChoice>,
     ) -> Result<arkavo_llm::ProviderResponse> {
-        let model = model_override
-            .cloned()
-            .unwrap_or_else(|| self.selector.fastest_local_model());
-        tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
+        let owned = model_override.cloned().map(ModelSpec::Named);
+        self.route_chat_spec(messages, tool_registry, owned.as_ref())
+            .await
+    }
 
-        let use_spec = self.decide_spec_with_event(model.name());
-        let provider = self
-            .instantiate_provider_with_spec(&model, use_spec)
-            .await?;
+    /// Chat routing with a catalog model or an on-disk GGUF path.
+    pub async fn route_chat_spec(
+        &self,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        spec: Option<&ModelSpec>,
+    ) -> Result<arkavo_llm::ProviderResponse> {
+        let fallback_model;
+        let named: Option<&ModelChoice> = match spec {
+            Some(ModelSpec::GgufPath(_)) => None,
+            Some(ModelSpec::Named(model)) => Some(model),
+            None => {
+                fallback_model = self.selector.fastest_local_model();
+                Some(&fallback_model)
+            }
+        };
+
+        let provider = if let Some(path) = spec.and_then(ModelSpec::as_gguf_path) {
+            let key = format!("gguf:{}", path.display());
+            tracing::debug!(model = %key, "Chat-path routing from GGUF path");
+            let use_spec = self.decide_spec_with_event(&key);
+            self.instantiate_gguf_path(path, use_spec).await?
+        } else {
+            let model = named.ok_or_else(|| {
+                Error::ModelExecution("catalog model required when spec is not a GGUF path".into())
+            })?;
+            tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
+            let use_spec = self.decide_spec_with_event(model.name());
+            self.instantiate_provider_with_spec(model, use_spec).await?
+        };
 
         let _permit = self
             .chat_semaphore
@@ -1278,7 +1343,8 @@ impl Router {
         // Build tool JSON from registry (same pattern as quality_gate.rs)
         let tools_json = match tool_registry {
             Some(registry) => {
-                let detail_level = tool_extraction::detail_level_for_model(&model);
+                let detail_model = named.cloned().unwrap_or(ModelChoice::LocalQwen3);
+                let detail_level = tool_extraction::detail_level_for_model(&detail_model);
                 let last_user_msg = messages
                     .iter()
                     .rev()
@@ -1304,6 +1370,13 @@ impl Router {
             .complete_with_tools(messages, tools_json, None)
             .await
             .map_err(|e| Error::ModelExecution(format!("chat: {e}")))?;
+
+        // SENT-007: inspection happens before anything else touches the text,
+        // and before it is returned. A think block is model output too, and
+        // `ARKAVO_DEBUG` prints it, so it is gated rather than stripped first.
+        if let Some(gate) = &self.release_gate {
+            response.content = release::gate_completion(gate, &response.content)?;
+        }
 
         // Strip <think> blocks that small models may still emit
         response.content = crate::response::strip_think_blocks(&response.content);
@@ -1459,6 +1532,7 @@ impl Router {
             budget_tracker: self.budget_tracker.clone(),
             pricing: Arc::clone(&self.pricing),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
+            release_gate: self.release_gate.clone(),
         })
     }
 
