@@ -8,7 +8,7 @@ call that reaches tools/call is appended to that file as
 "<name> <arguments json>", which lets tests prove a denied or dropped call
 never arrived upstream.
 
-Three tools exist to drive proxy behaviour that a well-behaved server cannot:
+Several tools exist to drive proxy behaviour that a well-behaved server cannot:
 
 - "never_replies" returns nothing at all, so the proxy's per-request timeout
   fires and the call never reaches the tool.
@@ -17,6 +17,14 @@ Three tools exist to drive proxy behaviour that a well-behaved server cannot:
 - "server_request" sends a server-initiated request (the shape of
   sampling/createMessage) and reports whatever the proxy answers, which is how
   a test observes the proxy's reply to traffic in that direction.
+- "id_collision" does the same with the id of the tools/call it is answering,
+  the hostile move a proxy that matched by id before checking the shape would
+  relay to the client as if it were this tool's result.
+- "over_long_line" writes a line past the proxy's 1 MiB frame cap before its
+  real response, so a test can see the cap discard it and the call still work.
+- "refusal_flood" writes many unmatched server-initiated requests before its
+  real response, so a test can see that answering them never stalls the
+  proxy's reading of the response itself.
 """
 
 import json
@@ -51,7 +59,29 @@ TOOLS = [
         "description": "Asks the client something and reports the answer",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "id_collision",
+        "description": "Asks the client something reusing this call's own id",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "over_long_line",
+        "description": "Writes a line past the proxy's frame cap, then answers",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "refusal_flood",
+        "description": "Writes many unmatched requests, then answers",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
+
+# Past the proxy's 1 MiB downstream/upstream line cap.
+OVER_LONG_LINE_BYTES = 1024 * 1024 + 1
+
+# Comfortably more than the proxy's refusal queue, and enough bytes to fill
+# the pipe the refusals are written back through.
+REFUSAL_FLOOD_COUNT = 500
 
 
 def record(tool_name: str) -> None:
@@ -64,17 +94,20 @@ def send(message: dict) -> None:
     print(json.dumps(message), flush=True)
 
 
-def ask_the_client() -> dict:
+def ask_the_client(request_id: object = "server-initiated-1") -> dict:
     """Send a server-initiated request and read whatever comes back.
 
     MCP allows a server to ask the client for something mid-call
     (sampling/createMessage and friends). This proxy does not relay those, so
     the reply read here is the proxy's own.
+
+    `request_id` is the server's to choose, which is exactly why it is a
+    parameter: a hostile server picks the id of a call already in flight.
     """
     send(
         {
             "jsonrpc": "2.0",
-            "id": "server-initiated-1",
+            "id": request_id,
             "method": "sampling/createMessage",
             "params": {"messages": []},
         }
@@ -110,6 +143,11 @@ def main() -> None:
 
         method = request.get("method")
         req_id = request.get("id")
+
+        if method is None:
+            # An answer to something this server asked for, read after the
+            # tool that asked stopped waiting for it. Never a request.
+            continue
 
         if method == "initialize":
             response = {
@@ -147,6 +185,41 @@ def main() -> None:
                         {"tool": name, "server_request_reply": reply},
                         params.get("_meta"),
                     ),
+                }
+            elif name == "id_collision":
+                # The id of the call being answered, so a proxy that decided
+                # by id before shape would hand this to the waiting caller.
+                reply = ask_the_client(req_id)
+                record(f"id_collision reply {json.dumps(reply)}")
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": tool_result(
+                        {"tool": name, "server_request_reply": reply},
+                        params.get("_meta"),
+                    ),
+                }
+            elif name == "over_long_line":
+                print("x" * OVER_LONG_LINE_BYTES, flush=True)
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": tool_result({"tool": name}, params.get("_meta")),
+                }
+            elif name == "refusal_flood":
+                for index in range(REFUSAL_FLOOD_COUNT):
+                    send(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": f"flood-{index}",
+                            "method": "sampling/createMessage",
+                            "params": {"messages": []},
+                        }
+                    )
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": tool_result({"tool": name}, params.get("_meta")),
                 }
             else:
                 response = {

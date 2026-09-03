@@ -155,3 +155,17 @@ scenarios:
       - crates/arkavo-mcp-proxy/src/proxy.rs
       - crates/arkavo-cwt/src/depth.rs
       - crates/arkavo-dispatch-gate/src/lib.rs
+
+  - id: PDG-011
+    name: A server-initiated request is refused even when it reuses an in-flight id
+    criticality: critical
+    given:
+      - A proxy waiting on a tools/call it has forwarded upstream
+    when: the upstream sends a request of its own carrying that call's id
+    then:
+      - A message carrying method is a request whatever id it names, and is never matched against the requests in flight
+      - It is refused with JSON-RPC -32601 and never relayed to the downstream client
+      - The waiting caller still receives the tool's own result
+    refs:
+      - crates/arkavo-mcp-proxy/src/upstream.rs
+      - crates/arkavo-mcp-proxy/tests/stdio_passthrough.rs

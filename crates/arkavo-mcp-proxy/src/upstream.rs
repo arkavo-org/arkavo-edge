@@ -14,6 +14,11 @@
 //! here with JSON-RPC `-32601`, so the upstream learns immediately instead of
 //! blocking until its own timeout. Server notifications, which expect no
 //! answer, are logged and dropped.
+//!
+//! What an upstream message *is* is decided by its shape and never by its
+//! id: anything carrying `method` is the server asking, and is refused or
+//! dropped whatever id it names. Only a message with no `method` is an
+//! answer, and only then is it matched against the requests in flight.
 
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -146,24 +151,7 @@ impl UpstreamConnection {
                 match lines.next_line().await {
                     Ok(Some(line)) => match serde_json::from_str::<Value>(&line) {
                         Ok(message) => {
-                            if let Some(id) = message.get("id").filter(|v| !v.is_null()).cloned() {
-                                let sender = reader_pending.lock().await.remove(&id_key(&id));
-                                match sender {
-                                    Some(sender) => {
-                                        let _ = sender.send(message);
-                                    }
-                                    // An id nothing is waiting on. If it
-                                    // names a method it is a request the
-                                    // server made of us; answering it is what
-                                    // keeps the server from blocking on a
-                                    // reply this slice will never send.
-                                    None => {
-                                        refuse_server_request(&reader_stdin, &id, &message).await;
-                                    }
-                                }
-                            } else {
-                                debug!("upstream notification (dropped): {line}");
-                            }
+                            dispatch(&reader_pending, &reader_stdin, message).await;
                         }
                         Err(e) => warn!("unparseable upstream output: {e}"),
                     },
@@ -256,21 +244,57 @@ impl UpstreamConnection {
     }
 }
 
+/// Route one message from the upstream server by its shape.
+///
+/// The order matters, and it is the whole point of this function. A message
+/// carrying `method` is something the *server* is asking for — a request when
+/// it also carries an id, a notification when it does not — and is never an
+/// answer to anything this side sent, whatever id it names. Matching on the
+/// id first is how a hostile upstream reuses an in-flight id to have a
+/// `sampling/createMessage` handed to the caller waiting on it and relayed to
+/// the downstream client as though it were the tool's own result. Requests
+/// are refused here; only a message with no `method` is looked up in
+/// `pending`.
+async fn dispatch(
+    pending: &Mutex<HashMap<String, oneshot::Sender<Value>>>,
+    stdin: &Mutex<tokio::process::ChildStdin>,
+    message: Value,
+) {
+    let id = message.get("id").filter(|value| !value.is_null()).cloned();
+
+    if let Some(method) = message.get("method").and_then(Value::as_str) {
+        match id {
+            Some(id) => refuse_server_request(stdin, &id, method).await,
+            None => debug!(method, "upstream notification (dropped)"),
+        }
+        return;
+    }
+
+    let Some(id) = id else {
+        warn!("upstream message with neither a method nor an id (dropped)");
+        return;
+    };
+    let sender = pending.lock().await.remove(&id_key(&id));
+    match sender {
+        Some(sender) => {
+            let _ = sender.send(message);
+        }
+        None => warn!("upstream response with an id nothing is waiting on (dropped)"),
+    }
+}
+
 /// Answer a request the upstream server made of us.
 ///
-/// A message with an id that matches no pending request is either a stray
-/// response — nothing to do about that but say so — or a server-initiated
-/// request. The proxy does not relay those to the downstream client, so it
-/// refuses them here rather than letting the server wait out its own timeout.
+/// The proxy does not relay server-initiated requests to the downstream
+/// client, so it refuses them here rather than letting the server wait out
+/// its own timeout. The id is echoed back as the server sent it — including
+/// when the server reused an id this side has a request in flight on, which
+/// is a collision the server made and has to sort out.
 async fn refuse_server_request(
     stdin: &Mutex<tokio::process::ChildStdin>,
     id: &Value,
-    message: &Value,
+    method: &str,
 ) {
-    let Some(method) = message.get("method").and_then(Value::as_str) else {
-        warn!("upstream response with an id nothing is waiting on (dropped)");
-        return;
-    };
     warn!(
         method,
         "refusing a server-initiated request: not relayed to the downstream client"

@@ -89,6 +89,25 @@ fn fixture_config() -> ProxyConfig {
     )
 }
 
+/// A path of its own for the fixture's record of what reached it, so
+/// concurrent tests never read each other's.
+fn record_file() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "arkavo-mcp-proxy-test-{}-{}.log",
+        std::process::id(),
+        NEXT_ID.fetch_add(1, Ordering::SeqCst)
+    ))
+}
+
+/// The fixture config that records every `tools/call` it is handed to
+/// `record`, which is how a test proves what did and did not arrive.
+fn recording_config(record: &Path) -> ProxyConfig {
+    fixture_config().with_env(
+        "MCP_PROXY_TEST_RECORD",
+        record.to_string_lossy().into_owned(),
+    )
+}
+
 struct TestClient {
     writer: tokio::io::WriteHalf<DuplexStream>,
     lines: tokio::io::Lines<BufReader<tokio::io::ReadHalf<DuplexStream>>>,
@@ -212,7 +231,10 @@ async fn pass_through_relays_initialize_tools_and_errors() {
             "blocked_tool",
             "never_replies",
             "failing_tool",
-            "server_request"
+            "server_request",
+            "id_collision",
+            "over_long_line",
+            "refusal_flood",
         ]
     );
 
@@ -250,15 +272,8 @@ async fn pass_through_relays_initialize_tools_and_errors() {
 
 #[tokio::test]
 async fn denied_tool_call_never_reaches_upstream() {
-    let record_file = std::env::temp_dir().join(format!(
-        "arkavo-mcp-proxy-test-{}-{}.log",
-        std::process::id(),
-        NEXT_ID.fetch_add(1, Ordering::SeqCst)
-    ));
-    let config = fixture_config().with_env(
-        "MCP_PROXY_TEST_RECORD",
-        record_file.to_string_lossy().into_owned(),
-    );
+    let record_file = record_file();
+    let config = recording_config(&record_file);
     let policy = Arc::new(DenyListPolicy::new(["blocked_tool"]));
     let (mut client, handle) = start_proxy(config, policy);
 
@@ -306,16 +321,9 @@ async fn denied_tool_call_never_reaches_upstream() {
 #[tokio::test]
 #[spec("PDG-007")]
 async fn tools_call_notification_never_reaches_upstream() {
-    let record_file = std::env::temp_dir().join(format!(
-        "arkavo-mcp-proxy-test-{}-{}.log",
-        std::process::id(),
-        NEXT_ID.fetch_add(1, Ordering::SeqCst)
-    ));
-    let config = fixture_config().with_env(
-        "MCP_PROXY_TEST_RECORD",
-        record_file.to_string_lossy().into_owned(),
-    );
-    let (mut client, handle) = start_proxy(config, Arc::new(AllowAllPolicy));
+    let record_file = record_file();
+    let (mut client, handle) =
+        start_proxy(recording_config(&record_file), Arc::new(AllowAllPolicy));
 
     client.handshake().await;
 
@@ -396,6 +404,59 @@ async fn a_server_initiated_request_is_refused_rather_than_dropped() {
 
     drop(client);
     handle.await.unwrap().unwrap();
+}
+
+/// The id on a server-initiated request is the *server's* to choose, and the
+/// hostile choice is the id of the call it is answering. A proxy that looked
+/// the id up among its in-flight requests before noticing the message carries
+/// `method` would hand this `sampling/createMessage` to the caller waiting on
+/// that id and relay it downstream as though the tool had returned it —
+/// letting an upstream server put a request of its own in front of a client
+/// whose permit authorized nothing of the kind.
+#[tokio::test]
+#[spec("PDG-011")]
+async fn a_server_request_reusing_an_in_flight_id_is_refused_not_relayed() {
+    let record_file = record_file();
+    let (mut client, handle) =
+        start_proxy(recording_config(&record_file), Arc::new(AllowAllPolicy));
+    client.handshake().await;
+
+    let call = client
+        .request(
+            "tools/call",
+            Some(json!({"name": "id_collision", "arguments": {}})),
+        )
+        .await;
+
+    // `request` has already checked that the id matches; what matters here is
+    // that what came back under it is this tool's own result and not the
+    // server's request wearing the same id.
+    assert!(
+        call.get("method").is_none(),
+        "a server-initiated request was relayed as the response: {call}"
+    );
+    let text = call["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("tool result: {call}"));
+    let reported: Value = serde_json::from_str(text).expect("tool payload");
+    assert_eq!(reported["tool"], "id_collision");
+
+    // And the upstream side of it: the colliding request was refused, so the
+    // server learned at once rather than blocking on a reply.
+    let recorded = std::fs::read_to_string(&record_file).expect("record file");
+    let reply = recorded
+        .lines()
+        .find_map(|line| line.strip_prefix("id_collision reply "))
+        .unwrap_or_else(|| panic!("the fixture recorded no reply: {recorded}"));
+    let reply: Value = serde_json::from_str(reply).expect("recorded reply");
+    assert_eq!(
+        reply["error"]["code"], -32601,
+        "the colliding request must be refused, not answered: {reply}"
+    );
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+    let _ = std::fs::remove_file(&record_file);
 }
 
 /// A JSON-RPC batch is a top-level array. Nothing here handles one, and
@@ -671,17 +732,8 @@ async fn a_timed_out_call_keeps_its_invocation_spent() {
     let args = json!({});
     let meta = permit_meta(&issuer, &holder, "never_replies", &args, 1);
 
-    let record_file = std::env::temp_dir().join(format!(
-        "arkavo-mcp-proxy-test-{}-{}.log",
-        std::process::id(),
-        NEXT_ID.fetch_add(1, Ordering::SeqCst)
-    ));
-    let config = fixture_config()
-        .with_env(
-            "MCP_PROXY_TEST_RECORD",
-            record_file.to_string_lossy().into_owned(),
-        )
-        .with_timeout(Duration::from_millis(300));
+    let record_file = record_file();
+    let config = recording_config(&record_file).with_timeout(Duration::from_millis(300));
     let (mut client, handle) =
         start_proxy(config, Arc::new(PermitPolicy::new(permit_gate(&issuer))));
     client.handshake().await;
