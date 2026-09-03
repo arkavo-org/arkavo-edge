@@ -298,6 +298,7 @@ fn walk(bytes: &[u8], start: usize) -> Walk {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     /// `[[[...0...]]]` nested `levels` deep, as definite-length arrays.
     fn nested_arrays(levels: usize) -> Vec<u8> {
@@ -444,6 +445,7 @@ mod tests {
     /// result with a fresh 256-level budget — for the protected header, before
     /// any signature is checked. It is refused on its shape instead.
     #[test]
+    #[spec("PDG-010")]
     fn an_indefinite_length_byte_string_in_a_decoded_slot_is_refused() {
         let deep = nested_arrays(200);
 

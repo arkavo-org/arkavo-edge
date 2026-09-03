@@ -128,6 +128,17 @@ impl KeySet {
 /// A builder that cannot produce a client is a fault of this process, not of
 /// the endpoint, and it is the same fault on every call, so the failure is
 /// remembered rather than retried into.
+///
+/// The client is process-wide, not per-verifier and not per-runtime: every
+/// [`CachedKeySet`] in the process shares this one, and so does every tokio
+/// runtime in it, including the one a `#[tokio::test]` builds and drops
+/// around each test. Sharing a pooled connection across runtimes is the one
+/// thing that would matter — a socket parked in the pool is registered with
+/// the reactor of the runtime that opened it, and a later runtime reusing it
+/// would find that reactor gone. Nothing here can reach that state: every
+/// test serves its key set from a `wiremock` server bound to a fresh
+/// ephemeral port, so no later request ever matches a pooled connection, and
+/// in production the runtime outlives the process's fetches.
 fn client() -> Result<&'static reqwest::Client, CwtError> {
     static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
     CLIENT
