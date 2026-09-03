@@ -417,7 +417,52 @@ impl std::fmt::Debug for UpstreamConnection {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::time::Instant;
+
+    /// The shape rule at the level it is decided: a message carrying `method`
+    /// is the server asking, so it never resolves a request in flight, even
+    /// when it names one. Delivering it would hand the caller — and through
+    /// it the downstream client — a request the server made, dressed as the
+    /// answer to the call the client actually authorized.
+    #[tokio::test]
+    #[spec("PDG-011")]
+    async fn a_server_request_never_resolves_a_pending_id() {
+        let pending: Mutex<HashMap<String, oneshot::Sender<Value>>> = Mutex::new(HashMap::new());
+        let (sender, receiver) = oneshot::channel();
+        let key = id_key(&json!(1));
+        pending.lock().await.insert(key.clone(), sender);
+        let (refusals, mut queued) = mpsc::channel(REFUSAL_QUEUE_DEPTH);
+        let mut dropped = 0u64;
+
+        dispatch(
+            &pending,
+            &refusals,
+            json!({"jsonrpc": "2.0", "id": 1, "method": "sampling/createMessage"}),
+            &mut dropped,
+        )
+        .await;
+
+        assert!(
+            pending.lock().await.contains_key(&key),
+            "the request must still be in flight, waiting for a real answer"
+        );
+        let refusal = queued.try_recv().expect("the request is refused");
+        assert_eq!(refusal["id"], 1);
+        assert_eq!(refusal["error"]["code"], METHOD_NOT_FOUND);
+        assert_eq!(dropped, 0);
+
+        // A message with no `method` is an answer, and does resolve it.
+        dispatch(
+            &pending,
+            &refusals,
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"ok": true}}),
+            &mut dropped,
+        )
+        .await;
+        let response = receiver.await.expect("the response reaches the caller");
+        assert_eq!(response["result"]["ok"], true);
+    }
 
     /// Regression: after the upstream exits, a request must fail fast with
     /// `Closed` — never hang for the full timeout because the reader task
