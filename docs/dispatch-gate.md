@@ -139,6 +139,14 @@ still waiting for a response is failed at that moment with the same "may
 have run" verdict, rather than sitting out a wait on a connection nothing
 will be written to again.
 
+Both writers settle that question under the shared stdin lock rather than
+before queueing for it. A write can pass a check made before the wait and
+reach the pipe only after a concurrent write's timeout retired the
+connection, so the check that binds is the one taken with the lock held: a
+write that finds the connection gone is refused having sent nothing at all.
+That one *is* refunded — unlike the abandoned write it never delivered a
+byte, so the call it carried provably never ran.
+
 The two bounds are consecutive, not shared, so the worst case for one
 `tools/call` is two of them: the per-request timeout for the write, and then
 the per-request timeout again for the response. A client sizing its own

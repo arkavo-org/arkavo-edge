@@ -43,6 +43,15 @@
 //! waiting for a response are failed at that moment, exactly as the reader
 //! task fails them at EOF, rather than each sitting out a receive timeout on
 //! a connection nothing will be written to again.
+//!
+//! It is final for the writers too, and that is decided under the stdin lock
+//! rather than before it. Testing the flag first and taking the lock second
+//! would leave every writer a window to pass the test, wait for the lock,
+//! and reach the pipe only after a concurrent write's timeout retired the
+//! connection. [`write_line`] therefore asks again once it holds the lock,
+//! and a write that finds the connection gone is refused with
+//! [`UpstreamError::Closed`]: it wrote nothing, so its call provably never
+//! ran and whatever was spent admitting it is returned.
 
 // `pub(crate)` is the real, intended visibility here (the module is private,
 // so nothing leaks past the crate either way); `redundant_pub_crate` wants
@@ -256,7 +265,9 @@ impl UpstreamConnection {
     ///
     /// A write abandoned part-way may have left a prefix of the line in the
     /// pipe, and the next write would splice onto it, so the connection is
-    /// marked closed rather than spoken on again.
+    /// marked closed rather than spoken on again — and [`write_line`] re-reads
+    /// that under the lock, so there is no next write, not even one that was
+    /// already waiting its turn when the connection was retired.
     ///
     /// Retiring the connection also fails everything still waiting on it,
     /// the way the reader task does at EOF. Nothing will be written on this
@@ -267,7 +278,14 @@ impl UpstreamConnection {
     /// reach the pipe, so its call may have run — and keeps whatever was
     /// spent admitting it.
     async fn write_bounded(&self, message: &Value) -> Result<(), UpstreamError> {
-        match tokio::time::timeout(self.timeout, write_line(&self.stdin, message)).await {
+        // Pinned to this scope instead of handed to `timeout` by value: on
+        // expiry the abandoned write is still alive here, and still holds the
+        // stdin lock, so `connected` is stored false *before* that lock is
+        // released. Whoever was queued behind it cannot then take the lock,
+        // find the connection still open, and splice onto the partial line
+        // this write left in the pipe.
+        let write = std::pin::pin!(write_line(&self.stdin, &self.connected, message));
+        match tokio::time::timeout(self.timeout, write).await {
             Ok(result) => result,
             Err(_) => {
                 warn!(
@@ -289,6 +307,9 @@ impl UpstreamConnection {
         method: &str,
         params: Option<&Value>,
     ) -> Result<Value, UpstreamError> {
+        // A cheap early-out, not the decision: the connection can be retired
+        // while this request waits for the shared stdin, so the check that
+        // binds is the one `write_line` makes under that lock.
         if !self.connected.load(Ordering::SeqCst) {
             return Err(UpstreamError::Closed);
         }
@@ -348,7 +369,18 @@ impl UpstreamConnection {
     }
 }
 
-/// Write one JSON-RPC message and its newline to `stdin`.
+/// Write one JSON-RPC message and its newline to `stdin`, if the connection
+/// is still open once the shared lock over it is held.
+///
+/// This is where "closed is closed" is actually enforced, for the request
+/// path and the refusal writer alike. Both test `connected` before they get
+/// here, but that test and this write are not one step: a caller can pass it,
+/// block on the lock, and arrive after a concurrent write's timeout retired
+/// the connection and left a partial line in the pipe. Asking again under the
+/// lock closes that window, because the flag is stored false while the
+/// abandoned write still holds the lock. A caller refused here has written
+/// nothing at all, which is what [`UpstreamError::Closed`] means and why it
+/// is safe to refund.
 ///
 /// Generic over the writer so the refusal writer can be exercised against
 /// a stream a test controls; in this crate it is only ever a
@@ -356,11 +388,15 @@ impl UpstreamConnection {
 /// wraps it in a timeout, because the lock it takes is shared.
 pub(crate) async fn write_line<W: tokio::io::AsyncWrite + Unpin>(
     stdin: &Mutex<W>,
+    connected: &AtomicBool,
     message: &Value,
 ) -> Result<(), UpstreamError> {
     let mut bytes = serde_json::to_vec(message).unwrap_or_default();
     bytes.push(b'\n');
     let mut stdin = stdin.lock().await;
+    if !connected.load(Ordering::SeqCst) {
+        return Err(UpstreamError::Closed);
+    }
     stdin
         .write_all(&bytes)
         .await
@@ -507,5 +543,129 @@ mod tests {
             !conn.connected.load(Ordering::SeqCst),
             "the connection is closed once a write of its own is abandoned"
         );
+    }
+
+    /// The same rule end to end, on the ordering it depends on. A second
+    /// request is queued behind the write that stalls, so it is waiting for
+    /// the stdin lock when that write is abandoned. Retirement stores the
+    /// flag while the abandoned write still holds the lock, so the request
+    /// behind it takes the lock, finds the connection gone, and is refused
+    /// having written nothing at all — `Closed`, and so refundable — instead
+    /// of putting its line on the end of the abandoned one.
+    #[tokio::test]
+    async fn a_request_queued_behind_an_abandoned_write_is_refused_before_it_writes() {
+        // `sleep` never reads its stdin, so the pipe fills and stays full.
+        let conn = Arc::new(
+            UpstreamConnection::spawn(
+                "sh",
+                &["-c".to_string(), "sleep 30".to_string()],
+                &HashMap::new(),
+                Some(Duration::from_millis(500)),
+            )
+            .unwrap(),
+        );
+
+        // Past any pipe buffer, so this write cannot finish; it holds the
+        // shared stdin until its own timeout retires the connection.
+        let stalling = tokio::spawn({
+            let conn = Arc::clone(&conn);
+            async move {
+                let padded = json!({"pad": "x".repeat(2 * 1024 * 1024)});
+                conn.request(&json!(1), "tools/call", Some(&padded)).await
+            }
+        });
+
+        // Well inside the stalling write's bound, so this request passes the
+        // check before the lock and is waiting for the lock when the
+        // connection is retired — with 200 ms of its own bound still to run,
+        // which is what tells `Closed` here from a timeout of its own.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let queued = conn
+            .request(&json!(2), "tools/call", None)
+            .await
+            .expect_err("a retired connection answers nobody");
+
+        assert!(
+            matches!(
+                stalling.await.expect("the stalling request finishes"),
+                Err(UpstreamError::WriteTimeout(_))
+            ),
+            "the stalled write must be the one that retires the connection"
+        );
+        assert!(
+            matches!(queued, UpstreamError::Closed),
+            "the request behind it never wrote, so it is Closed, got {queued}"
+        );
+        assert!(
+            !queued.may_have_reached_upstream(),
+            "not one byte of it reached the pipe, so its caller is refunded"
+        );
+    }
+
+    /// The window that a check made *before* the lock leaves open, closed
+    /// where the lock is held. Every writer tests `connected` and then queues
+    /// for the shared stdin, and a concurrent write's timeout can retire the
+    /// connection while it waits — leaving a partial line in the pipe that
+    /// this write would splice onto. So the test that binds is the one under
+    /// the lock. It refuses with `Closed`: not one byte of this message
+    /// reached the pipe, so the call it carries provably never ran and
+    /// whatever was spent admitting it is returned.
+    #[tokio::test]
+    async fn a_write_that_waited_for_the_stdin_finds_a_retired_connection_closed() {
+        use tokio::io::AsyncReadExt;
+
+        // A duplex whose far half *is* read, so the test can tell "nothing
+        // was written" from "nobody looked".
+        let (near, mut far) = tokio::io::duplex(1024);
+        let stdin = Arc::new(Mutex::new(near));
+        let connected = Arc::new(AtomicBool::new(true));
+
+        // Another writer is mid-line and holds the shared stdin.
+        let held = stdin.lock().await;
+        let waiting = tokio::spawn({
+            let stdin = Arc::clone(&stdin);
+            let connected = Arc::clone(&connected);
+            async move {
+                write_line(
+                    &stdin,
+                    &connected,
+                    &json!({"jsonrpc": "2.0", "id": 1, "method": "x"}),
+                )
+                .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // That writer ran out of time: the connection is retired while this
+        // write is still queued for the lock, and only then does the lock
+        // come free — the order `write_bounded` guarantees by holding the
+        // abandoned write until after it stores the flag.
+        connected.store(false, Ordering::SeqCst);
+        drop(held);
+
+        let err = waiting
+            .await
+            .expect("the waiting write finishes")
+            .expect_err("a retired connection is written to by nobody");
+        assert!(
+            matches!(err, UpstreamError::Closed),
+            "a write that finds the connection retired must report Closed, got {err}"
+        );
+        assert!(
+            !err.may_have_reached_upstream(),
+            "nothing was written, so the call it carried is refundable"
+        );
+
+        let mut buffer = [0u8; 64];
+        match tokio::time::timeout(Duration::from_millis(100), far.read(&mut buffer)).await {
+            // Nothing arrived: the abandoned line is still the last thing in
+            // the pipe.
+            Err(_) => {}
+            Ok(Ok(bytes)) => panic!(
+                "the write was spliced onto the abandoned line: {:?}",
+                String::from_utf8_lossy(&buffer[..bytes])
+            ),
+            Ok(Err(e)) => panic!("the test pipe failed: {e}"),
+        }
     }
 }

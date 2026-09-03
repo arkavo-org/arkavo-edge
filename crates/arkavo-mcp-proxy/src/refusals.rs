@@ -20,7 +20,7 @@
 // `pub`, which `unreachable_pub` then rejects.
 #![allow(clippy::redundant_pub_crate)]
 
-use crate::upstream::{id_key, write_line};
+use crate::upstream::{UpstreamError, id_key, write_line};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -191,7 +191,9 @@ fn refuse_server_request(
 /// refusal written after it would splice onto it and hand the upstream a
 /// corrupted line if it ever resumed reading. `connected` is therefore
 /// checked on every refusal taken off the queue, not only after a write of
-/// this task's own has timed out.
+/// this task's own has timed out — and checked again by [`write_line`] once
+/// it holds the shared stdin, because the check here happens before the wait
+/// for that lock and the connection can be retired during that wait.
 pub(crate) fn spawn_writer<W>(
     stdin: Arc<Mutex<W>>,
     mut queued: mpsc::Receiver<Value>,
@@ -209,8 +211,25 @@ pub(crate) fn spawn_writer<W>(
                 );
                 return;
             }
-            match tokio::time::timeout(timeout, write_line(&stdin, &refusal)).await {
+            // Pinned to this iteration rather than handed to `timeout` by
+            // value: on expiry the abandoned write is still alive, and still
+            // holds the stdin lock, so `connected` is stored false before
+            // that lock is released and nothing queued behind it can splice
+            // onto the partial line left in the pipe.
+            let write = std::pin::pin!(write_line(&stdin, &connected, &refusal));
+            match tokio::time::timeout(timeout, write).await {
                 Ok(Ok(())) => {}
+                // The connection was retired while this refusal waited for
+                // the shared stdin. Nothing of it reached the pipe, and
+                // nothing more will: the same end the check before the lock
+                // would have given it a moment earlier.
+                Ok(Err(UpstreamError::Closed)) => {
+                    debug!(
+                        "the upstream connection was retired while this refusal waited for the \
+                         shared stdin; it is not spliced onto the abandoned line"
+                    );
+                    return;
+                }
                 Ok(Err(e)) => warn!("failed to refuse a server-initiated request: {e}"),
                 Err(_) => {
                     warn!(
@@ -432,5 +451,74 @@ mod tests {
             ),
             Ok(Err(e)) => panic!("the test pipe failed: {e}"),
         }
+    }
+
+    /// The refusal writer's own half of the same window. It checks
+    /// `connected` when it takes a refusal off the queue, but the shared
+    /// stdin it then waits for can be held by a request whose write is about
+    /// to be abandoned. The connection is retired during that wait, and the
+    /// check under the lock is what keeps the refusal off the end of the
+    /// partial line.
+    #[tokio::test]
+    async fn a_refusal_that_waited_for_the_stdin_is_never_spliced_onto_the_abandoned_line() {
+        use tokio::io::AsyncReadExt;
+
+        let (near, mut far) = tokio::io::duplex(1024);
+        let stdin = Arc::new(Mutex::new(near));
+        // Open when the refusal is queued and when the writer picks it up:
+        // the pre-lock check passes, as it did for every writer before this
+        // one.
+        let connected = Arc::new(AtomicBool::new(true));
+        let (refusals, queued) = mpsc::channel::<Value>(REFUSAL_QUEUE_DEPTH);
+
+        // A request's write holds the shared stdin, so the refusal can only
+        // queue behind it.
+        let held = stdin.lock().await;
+        spawn_writer(
+            Arc::clone(&stdin),
+            queued,
+            Duration::from_secs(5),
+            Arc::clone(&connected),
+        );
+        refusals
+            .send(json!({"jsonrpc": "2.0", "id": 1, "error": {"code": METHOD_NOT_FOUND}}))
+            .await
+            .expect("the writer is listening");
+
+        // A slot back in the queue means the writer has taken the refusal
+        // and, with no await between, has already passed its pre-lock check:
+        // it is waiting for the stdin this test is holding. Without that,
+        // the early-out could answer the question the lock is meant to.
+        for _ in 0..500 {
+            if refusals.capacity() == REFUSAL_QUEUE_DEPTH {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            refusals.capacity(),
+            REFUSAL_QUEUE_DEPTH,
+            "the writer must be past its pre-lock check and waiting for the stdin"
+        );
+
+        // Now the holder's write times out: the connection is retired, and
+        // only then is the lock released.
+        connected.store(false, Ordering::SeqCst);
+        drop(held);
+
+        // Nothing reaches the pipe: the refusal is dropped under the lock
+        // rather than written after the line the abandoned write left there.
+        let mut buffer = [0u8; 64];
+        match tokio::time::timeout(Duration::from_millis(100), far.read(&mut buffer)).await {
+            Err(_) => {}
+            Ok(Ok(bytes)) => panic!(
+                "a refusal was spliced onto the abandoned line: {:?}",
+                String::from_utf8_lossy(&buffer[..bytes])
+            ),
+            Ok(Err(e)) => panic!("the test pipe failed: {e}"),
+        }
+        tokio::time::timeout(Duration::from_secs(5), refusals.closed())
+            .await
+            .expect("and the writer is done: a retired connection is spoken on by nobody");
     }
 }
