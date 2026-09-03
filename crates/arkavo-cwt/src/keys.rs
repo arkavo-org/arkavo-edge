@@ -17,6 +17,15 @@ use std::time::{Duration, Instant};
 /// denial of service.
 pub const MAX_KEY_SET_BYTES: usize = 64 * 1024;
 
+/// How long a fetch of the key set may take, connection and body together.
+///
+/// [`CachedKeySet`] holds its refresh lock across this call, so every
+/// verification waiting on the refresh waits on this too: without a bound,
+/// an endpoint that accepts a connection and never answers would stall them
+/// all for as long as it cared to. Ten seconds is far above a healthy fetch
+/// of a few hundred bytes and far below anything a caller would sit through.
+pub const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// The ES256 verification keys the issuer currently publishes.
 pub struct KeySet {
     keys: Vec<(Vec<u8>, crate::VerifyingKey)>,
@@ -56,7 +65,8 @@ impl KeySet {
         Ok(Self { keys })
     }
 
-    /// Fetch and parse the key set published at `url`.
+    /// Fetch and parse the key set published at `url`, bounded by
+    /// [`FETCH_TIMEOUT`].
     ///
     /// The body is read chunk by chunk and refused as soon as it passes
     /// [`MAX_KEY_SET_BYTES`], so an endpoint that streams without end — or a
@@ -64,7 +74,23 @@ impl KeySet {
     /// advertised `Content-Length` is not consulted: it is the endpoint's own
     /// claim, and the accumulated length is the bound that actually holds.
     pub async fn fetch(url: &str) -> Result<Self, CwtError> {
-        let mut response = reqwest::get(url)
+        Self::fetch_with_timeout(url, FETCH_TIMEOUT).await
+    }
+
+    /// [`Self::fetch`] with the timeout named explicitly, which is how a test
+    /// reaches it without waiting out the real one.
+    pub async fn fetch_with_timeout(url: &str, timeout: Duration) -> Result<Self, CwtError> {
+        // The timeout covers the connection and the whole exchange, the body
+        // read included: a server that accepts, answers a header and then
+        // trickles is the same denial of service as one that never answers.
+        let client = reqwest::Client::builder()
+            .connect_timeout(timeout)
+            .timeout(timeout)
+            .build()
+            .map_err(|e| CwtError::Fetch(e.to_string()))?;
+        let mut response = client
+            .get(url)
+            .send()
             .await
             .map_err(|e| CwtError::Fetch(e.to_string()))?
             .error_for_status()
@@ -248,6 +274,38 @@ mod tests {
             Err(other) => panic!("expected a size refusal, got {other:?}"),
             Ok(_) => panic!("an oversized body must not be parsed"),
         }
+    }
+
+    /// An endpoint that accepts the connection and then says nothing must not
+    /// hold the fetch open: the refresh lock is held across it, so every
+    /// verification waiting behind it would wait exactly as long.
+    #[tokio::test]
+    async fn fetch_gives_up_on_an_endpoint_that_does_not_answer() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/.well-known/cose-keys"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(vec![0u8; 8])
+                    .set_delay(Duration::from_secs(30)),
+            )
+            .mount(&server)
+            .await;
+
+        let url = format!("{}/.well-known/cose-keys", server.uri());
+        let started = Instant::now();
+        match KeySet::fetch_with_timeout(&url, Duration::from_millis(100)).await {
+            Err(CwtError::Fetch(_)) => {}
+            Err(other) => panic!("expected a fetch failure, got {other:?}"),
+            Ok(_) => panic!("a body that never arrives must not parse"),
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the fetch must give up on its own timeout, not the server's"
+        );
     }
 
     /// The cap refuses what is too large without refusing what is not: a
