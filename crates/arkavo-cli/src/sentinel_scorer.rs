@@ -215,17 +215,12 @@ impl ScoringModel for LlamaScoringModel {
         &self.taxonomy_version
     }
 
-    fn score(&self, text: &str) -> Vec<RawLabel> {
-        match self.score_inner(text) {
-            Ok(labels) => labels,
-            Err(reason) => {
-                // The trait has nowhere to report a failure, and no labels reads
-                // downstream as "nothing found" — a fail-open. It is logged at
-                // error level so the silence is at least visible.
-                tracing::error!(%reason, "sentinel scoring failed; span left unclassified");
-                Vec::new()
-            }
-        }
+    fn score(&self, text: &str) -> Result<Vec<RawLabel>, String> {
+        self.score_inner(text).inspect_err(|reason| {
+            // The tier turns this into an `Unavailable` report, so the error
+            // level here is a duplicate of the reason, not the only record.
+            tracing::error!(%reason, "sentinel scoring failed");
+        })
     }
 }
 
@@ -445,7 +440,7 @@ target list; do not circulate outside the sales leadership group. MNKOI 00022144
             (HOLIDAY_NOTICE, "internal"),
             (RESTRICTED_MEMO, "confidential"),
         ] {
-            let labels = model.score(span);
+            let labels = model.score(span).expect("score");
             assert_eq!(labels.len(), 3);
             let sum: f32 = labels.iter().map(|l| l.score).sum();
             assert!((sum - 1.0).abs() < 1e-4, "scores sum to {sum}");

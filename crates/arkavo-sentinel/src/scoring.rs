@@ -43,7 +43,10 @@ pub struct RawLabel {
 pub trait ScoringModel: Send + Sync {
     fn detector_version(&self) -> &str;
     fn taxonomy_version(&self) -> &str;
-    fn score(&self, text: &str) -> Vec<RawLabel>;
+    /// `Err` means the model could not be consulted for this span (a decode
+    /// or tokenize failure), which `examine` reports as a tier that could not
+    /// be consulted rather than as one that looked and found nothing.
+    fn score(&self, text: &str) -> Result<Vec<RawLabel>, String>;
 }
 
 /// The sentinel as a cascade tier.
@@ -96,7 +99,12 @@ impl SentinelTier {
         if let Some(reason) = &self.mismatch {
             return TierReport::unavailable(SENTINEL_TIER_NAME, self.version(), reason);
         }
-        let raw = self.model.score(text);
+        let raw = match self.model.score(text) {
+            Ok(raw) => raw,
+            Err(reason) => {
+                return TierReport::unavailable(SENTINEL_TIER_NAME, self.version(), &reason);
+            }
+        };
         let uncalibrated = self
             .calibration
             .uncalibrated(raw.iter().map(|label| label.label.as_str()));
@@ -259,8 +267,30 @@ mod tests {
             &self.taxonomy
         }
 
-        fn score(&self, _text: &str) -> Vec<RawLabel> {
-            self.labels.clone()
+        fn score(&self, _text: &str) -> Result<Vec<RawLabel>, String> {
+            Ok(self.labels.clone())
+        }
+    }
+
+    /// A model that cannot be consulted at all, distinct from one that was
+    /// consulted and found nothing (SENT-002 edge case).
+    struct Failing {
+        detector: String,
+        taxonomy: String,
+        reason: String,
+    }
+
+    impl ScoringModel for Failing {
+        fn detector_version(&self) -> &str {
+            &self.detector
+        }
+
+        fn taxonomy_version(&self) -> &str {
+            &self.taxonomy
+        }
+
+        fn score(&self, _text: &str) -> Result<Vec<RawLabel>, String> {
+            Err(self.reason.clone())
         }
     }
 
@@ -384,6 +414,34 @@ mod tests {
         assert!(
             rendered.contains("1.0.0") && rendered.contains("2.0.0"),
             "{rendered}"
+        );
+    }
+
+    /// SENT-002 edge case: a scorer that could not be consulted (a decode or
+    /// tokenize failure) reports the gap rather than reading as a clean span,
+    /// and the containing evidence sees it too.
+    #[spec("SENT-002")]
+    #[test]
+    fn a_scoring_failure_reports_a_gap_rather_than_a_clean_span() {
+        let failing = Arc::new(Failing {
+            detector: "sentinel-0.1".into(),
+            taxonomy: "1.0.0".into(),
+            reason: "decode produced no logits".into(),
+        });
+
+        let tier = SentinelTier::new(failing, calibration());
+
+        let report = tier.examine("some text");
+
+        assert!(report.is_unavailable());
+        assert!(report.findings().is_empty());
+        let rendered = format!("{report:?}");
+        assert!(rendered.contains("decode produced no logits"), "{rendered}");
+
+        let evidence = ClassificationEvidence::new("1.0.0").with_tier(report);
+        assert!(
+            evidence.has_gap(),
+            "a scoring failure must show up as a gap"
         );
     }
 

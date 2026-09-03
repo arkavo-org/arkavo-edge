@@ -501,8 +501,8 @@ mod tests {
             "1.0.0"
         }
 
-        fn score(&self, _text: &str) -> Vec<RawLabel> {
-            self.0.clone()
+        fn score(&self, _text: &str) -> Result<Vec<RawLabel>, String> {
+            Ok(self.0.clone())
         }
     }
 
