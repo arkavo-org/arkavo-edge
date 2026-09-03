@@ -45,8 +45,8 @@ const METHOD_NOT_FOUND: i64 = -32601;
 pub(crate) const REFUSAL_QUEUE_DEPTH: usize = 16;
 
 /// What one reader has made of the upstream's messages: the refusals it
-/// queued, the ones it had no room for, and the messages it could not
-/// deliver to anybody.
+/// queued, the ones it had no room for, the messages it could not deliver
+/// to anybody, and the lines that never became a message at all.
 ///
 /// Every one is counted on each occurrence and logged on the first and at
 /// each doubling after it. What the upstream sends costs the proxy a dozen
@@ -64,6 +64,26 @@ pub(crate) struct RefusalCounts {
     /// Messages that are neither a request nor an answer, carrying no
     /// `method` and no id.
     malformed: u64,
+    /// Lines that did not parse as JSON at all.
+    unparseable: u64,
+    /// Lines discarded for exceeding the frame cap.
+    over_long: u64,
+}
+
+impl RefusalCounts {
+    /// Count one line the reader could not parse as JSON, and say whether
+    /// it is worth a `warn!` rather than a `debug!`: `Some` holding the
+    /// running count on the first occurrence and every doubling after it,
+    /// `None` on everything in between.
+    pub(crate) fn note_unparseable(&mut self) -> Option<u64> {
+        worth_warning(&mut self.unparseable).then_some(self.unparseable)
+    }
+
+    /// Count one line discarded for exceeding the frame cap, on the same
+    /// terms as [`Self::note_unparseable`].
+    pub(crate) fn note_over_long(&mut self) -> Option<u64> {
+        worth_warning(&mut self.over_long).then_some(self.over_long)
+    }
 }
 
 /// Count one occurrence and say whether this one is worth a `warn!`: the
@@ -606,5 +626,42 @@ mod tests {
         assert_eq!(counts.unmatched, 5);
         assert_eq!(counts.queued, 0, "none of this queued a refusal");
         assert_eq!(counts.dropped, 0);
+    }
+
+    /// A line the reader cannot even parse as JSON is the cheapest possible
+    /// thing for a hostile upstream to send, so it is rate-limited on the
+    /// same terms as everything else in this module: counted on every
+    /// occurrence, worth a `warn!` only on the first and each doubling.
+    #[test]
+    fn an_unparseable_line_is_counted_every_time_and_worth_warning_only_on_doublings() {
+        let mut counts = RefusalCounts::default();
+
+        let warned: Vec<u64> = (1..=5u64)
+            .filter_map(|_| counts.note_unparseable())
+            .collect();
+
+        assert_eq!(counts.unparseable, 5, "counted on every occurrence");
+        assert_eq!(
+            warned,
+            vec![1, 2, 4],
+            "only the first and each doubling is worth a warn"
+        );
+    }
+
+    /// The over-long branch discards a line the frame cap refused to
+    /// buffer, and is rate-limited the same way: unbounded input must never
+    /// buy unbounded log lines.
+    #[test]
+    fn an_over_long_line_is_counted_every_time_and_worth_warning_only_on_doublings() {
+        let mut counts = RefusalCounts::default();
+
+        let warned: Vec<u64> = (1..=5u64).filter_map(|_| counts.note_over_long()).collect();
+
+        assert_eq!(counts.over_long, 5, "counted on every occurrence");
+        assert_eq!(
+            warned,
+            vec![1, 2, 4],
+            "only the first and each doubling is worth a warn"
+        );
     }
 }

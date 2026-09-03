@@ -202,10 +202,11 @@ impl UpstreamConnection {
         let reader_connected = Arc::clone(&connected);
         tokio::spawn(async move {
             let mut stdout = BufReader::new(stdout);
-            // What this reader has refused and what it had to drop.
-            // Counted on every occurrence, warned about on the first and then
-            // at each doubling, so a flood of any size costs a dozen log
-            // lines rather than one per refusal.
+            // What this reader has refused and what it had to drop or
+            // discard. Counted on every occurrence, warned about on the
+            // first and then at each doubling, so a flood of any size costs
+            // a dozen log lines rather than one per message — garbage the
+            // upstream never had to construct a refusable message to send.
             let mut refusal_counts = refusals::RefusalCounts::default();
             loop {
                 match framing::read_line(&mut stdout).await {
@@ -224,15 +225,30 @@ impl UpstreamConnection {
                                 )
                                 .await;
                             }
-                            Err(e) => warn!("unparseable upstream output: {e}"),
+                            Err(e) => {
+                                if let Some(unparseable) = refusal_counts.note_unparseable() {
+                                    warn!(unparseable, "unparseable upstream output: {e}");
+                                } else {
+                                    debug!("unparseable upstream output: {e}");
+                                }
+                            }
                         }
                     }
                     // One line the proxy will not buffer is not a reason to
                     // drop the connection: it is discarded and reading goes on.
-                    Ok(Line::TooLong) => warn!(
-                        max_bytes = MAX_LINE_BYTES,
-                        "discarded an over-long upstream line"
-                    ),
+                    Ok(Line::TooLong) => {
+                        if let Some(over_long) = refusal_counts.note_over_long() {
+                            warn!(
+                                max_bytes = MAX_LINE_BYTES,
+                                over_long, "discarded an over-long upstream line"
+                            );
+                        } else {
+                            debug!(
+                                max_bytes = MAX_LINE_BYTES,
+                                "discarded an over-long upstream line"
+                            );
+                        }
+                    }
                     Ok(Line::Eof) => break,
                     Err(e) => {
                         warn!("upstream read failed: {e}");
