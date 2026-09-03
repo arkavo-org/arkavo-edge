@@ -25,6 +25,7 @@ pub mod provider_info;
 #[cfg(feature = "llama-cpp")]
 pub(crate) mod provider_protected;
 pub(crate) mod quality_gate;
+pub mod release;
 pub mod response;
 pub mod rlm;
 pub mod selector;
@@ -276,6 +277,12 @@ pub struct Router {
     /// after the user approves a `CloudUpgradeOffered`; the loop consumes it
     /// when authorizing spend.
     cloud_confirmation: std::sync::atomic::AtomicBool,
+    /// Inspects generated text before it is returned (SENT-007). `None` is the
+    /// default and the only state the shipped binary reaches on its own: with
+    /// no gate every completion path is byte for byte what it was before this
+    /// field existed. One gate serves one session, so it is shared across that
+    /// session's completions rather than rebuilt per message.
+    release_gate: Option<Arc<dyn arkavo_llm::ReleaseGate>>,
 }
 
 impl Router {
@@ -333,6 +340,7 @@ impl Router {
                 arkavo_budget::provider_costs::ProviderPricing::new(),
             )),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
+            release_gate: None,
         })
     }
 
@@ -390,6 +398,7 @@ impl Router {
                 arkavo_budget::provider_costs::ProviderPricing::new(),
             )),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
+            release_gate: None,
         })
     }
 
@@ -401,6 +410,34 @@ impl Router {
     pub fn with_preflight(mut self, moderator: preflight::PreflightModerator) -> Self {
         self.preflight = Some(Arc::new(moderator));
         self
+    }
+
+    /// Inspect every completion this router produces before returning it
+    /// (SENT-007).
+    ///
+    /// The builder form, for a router that is about to be shared behind an
+    /// `Arc` — which is how every embedder holds one, so there is no later
+    /// moment at which `set_release_gate` could be called.
+    #[must_use]
+    pub fn with_release_gate(mut self, gate: Arc<dyn arkavo_llm::ReleaseGate>) -> Self {
+        self.release_gate = Some(gate);
+        self
+    }
+
+    /// Set the gate on a router the caller still owns exclusively.
+    pub fn set_release_gate(&mut self, gate: Arc<dyn arkavo_llm::ReleaseGate>) {
+        self.release_gate = Some(gate);
+    }
+
+    /// Wrap a stream in the gate, if one is set.
+    ///
+    /// Without a gate the stream is returned by value and untouched, so an
+    /// ungated router's stream path is the one it had before the gate existed.
+    fn gated_stream(&self, stream: RouteStream) -> RouteStream {
+        match &self.release_gate {
+            Some(gate) => release::gate_stream(stream, gate.clone()),
+            None => stream,
+        }
     }
 
     /// Set the spend-plane cloud policy (default `AskBeforeCloud`).
@@ -1132,7 +1169,7 @@ impl Router {
                 architect_savings: Some(arch_result.actual_savings_usd),
             };
 
-            return Ok(RouteStream::from_response(response));
+            return Ok(self.gated_stream(RouteStream::from_response(response)));
         }
 
         // Simple task - use Thompson Sampling routing
@@ -1154,7 +1191,7 @@ impl Router {
             architect_savings: None,
         };
 
-        Ok(RouteStream::from_response(response))
+        Ok(self.gated_stream(RouteStream::from_response(response)))
     }
 
     /// Route using the fastest available local model, skipping classification.
@@ -1334,6 +1371,13 @@ impl Router {
             .await
             .map_err(|e| Error::ModelExecution(format!("chat: {e}")))?;
 
+        // SENT-007: inspection happens before anything else touches the text,
+        // and before it is returned. A think block is model output too, and
+        // `ARKAVO_DEBUG` prints it, so it is gated rather than stripped first.
+        if let Some(gate) = &self.release_gate {
+            response.content = release::gate_completion(gate, &response.content)?;
+        }
+
         // Strip <think> blocks that small models may still emit
         response.content = crate::response::strip_think_blocks(&response.content);
 
@@ -1488,6 +1532,7 @@ impl Router {
             budget_tracker: self.budget_tracker.clone(),
             pricing: Arc::clone(&self.pricing),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
+            release_gate: self.release_gate.clone(),
         })
     }
 

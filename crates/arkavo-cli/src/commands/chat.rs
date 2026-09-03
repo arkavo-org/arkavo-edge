@@ -95,12 +95,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let flags = parse_cli_args(args)?;
 
     // Direct A2A chat with a specific mesh agent
-    if let Some(id) = flags.agent_id {
-        return execute_a2a_direct_chat(&id, flags.prompt.as_deref());
+    if let Some(id) = flags.agent_id.as_deref() {
+        return execute_a2a_direct_chat(id, flags.prompt.as_deref());
     }
 
     // Default: route through local in-process Router
-    execute_a2a_chat(flags.prompt.as_deref(), flags.model.as_deref())
+    execute_a2a_chat(&flags)
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -108,6 +108,26 @@ struct ChatCliArgs {
     prompt: Option<String>,
     agent_id: Option<String>,
     model: Option<String>,
+    /// Replaces the session's system prompt, so a model fine-tuned under a
+    /// pack's prompt can be run under that prompt instead of the default.
+    system: Option<String>,
+    /// The distilled detector's GGUF. Its presence is what arms the gate.
+    #[cfg(feature = "sentinel")]
+    sentinel: Option<std::path::PathBuf>,
+    /// The thresholds that detector was calibrated at, as `eval.py` writes them.
+    #[cfg(feature = "sentinel")]
+    calibration: Option<std::path::PathBuf>,
+    #[cfg(feature = "sentinel")]
+    ceiling: Option<arkavo_protocol::data_classification::SensitivityLevel>,
+}
+
+#[cfg(feature = "sentinel")]
+impl ChatCliArgs {
+    /// The classification ceiling the gate enforces, `internal` by default.
+    fn ceiling(&self) -> arkavo_protocol::data_classification::SensitivityLevel {
+        self.ceiling
+            .unwrap_or(arkavo_protocol::data_classification::SensitivityLevel::Internal)
+    }
 }
 
 fn parse_cli_args(args: &[String]) -> Result<ChatCliArgs, Box<dyn std::error::Error>> {
@@ -150,11 +170,70 @@ fn parse_cli_args(args: &[String]) -> Result<ChatCliArgs, Box<dyn std::error::Er
                 flags.model = Some(value);
                 i += 1;
             }
+            "--system" => {
+                if i + 1 >= args.len() {
+                    return Err("--system requires the prompt text".into());
+                }
+                flags.system = Some(args[i + 1].clone());
+                i += 1;
+            }
+            #[cfg(feature = "sentinel")]
+            "--sentinel" => {
+                if i + 1 >= args.len() {
+                    return Err("--sentinel requires a path to the detector .gguf".into());
+                }
+                flags.sentinel = Some(existing_path(&args[i + 1], "sentinel model")?);
+                i += 1;
+            }
+            #[cfg(feature = "sentinel")]
+            "--calibration" => {
+                if i + 1 >= args.len() {
+                    return Err("--calibration requires a path to a calibration .json".into());
+                }
+                flags.calibration = Some(existing_path(&args[i + 1], "calibration")?);
+                i += 1;
+            }
+            #[cfg(feature = "sentinel")]
+            "--ceiling" => {
+                if i + 1 >= args.len() {
+                    return Err("--ceiling requires public, internal or confidential".into());
+                }
+                flags.ceiling = Some(crate::sentinel_wiring::parse_ceiling(&args[i + 1])?);
+                i += 1;
+            }
+            // A binary compiled without the classifier must say so rather than
+            // ignore the flag: a silently unarmed gate is the failure the whole
+            // release path exists to prevent.
+            #[cfg(not(feature = "sentinel"))]
+            "--sentinel" | "--calibration" => {
+                return Err(
+                    "sentinel is not in this build; compile with the sentinel feature".into(),
+                );
+            }
             _ => {}
         }
         i += 1;
     }
+    #[cfg(feature = "sentinel")]
+    if flags.sentinel.is_some() != flags.calibration.is_some() {
+        // Neither half means anything alone: a detector with no thresholds
+        // fires on every label, and thresholds with no detector gate nothing.
+        return Err("--sentinel and --calibration are used together".into());
+    }
     Ok(flags)
+}
+
+/// Resolve a flag's path argument, refusing one that is not there.
+#[cfg(feature = "sentinel")]
+fn existing_path(
+    value: &str,
+    what: &str,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let path = std::path::PathBuf::from(value);
+    if !path.exists() {
+        return Err(format!("{what} not found: {value}").into());
+    }
+    Ok(path)
 }
 
 fn print_usage() {
@@ -179,6 +258,13 @@ fn print_usage() {
     println!("    --gguf <PATH>          Alias of --model for a .gguf / .gguf.tdf file");
     println!("    --agent-id <ID>        Chat directly with a mesh agent via A2A");
     println!("    --prompt <TEXT>         One-shot query (exits after response)");
+    println!("    --system <TEXT>         Replace the session's system prompt");
+    #[cfg(feature = "sentinel")]
+    {
+        println!("    --sentinel <PATH>       Inspect completions with this detector .gguf");
+        println!("    --calibration <PATH>    Thresholds for --sentinel (required with it)");
+        println!("    --ceiling <LEVEL>       public | internal | confidential (default internal)");
+    }
     println!("    --debug                 Show debug output");
     println!("    -h, --help              Show this help\n");
     println!("INTERACTIVE COMMANDS:");
@@ -192,6 +278,31 @@ fn print_usage() {
     println!("    /help             Show all commands");
 }
 
+/// Build the release gate this invocation runs under, if any (SENT-007).
+///
+/// One gate serves the session: the router holds it for as long as it holds the
+/// session, and the gate resets itself between completions.
+#[cfg(feature = "sentinel")]
+fn arm_release_gate(
+    flags: &ChatCliArgs,
+) -> Result<Option<std::sync::Arc<dyn arkavo_llm::ReleaseGate>>, Box<dyn std::error::Error>> {
+    let (Some(detector), Some(calibration)) = (&flags.sentinel, &flags.calibration) else {
+        return Ok(None);
+    };
+    let (gate, armed) = crate::sentinel_wiring::armed_gate(detector, calibration, flags.ceiling())?;
+    // stderr, not stdout: a one-shot's stdout is the answer, and an operator
+    // notice is not part of it.
+    eprintln!("{armed}");
+    Ok(Some(std::sync::Arc::new(gate)))
+}
+
+#[cfg(not(feature = "sentinel"))]
+fn arm_release_gate(
+    _flags: &ChatCliArgs,
+) -> Result<Option<std::sync::Arc<dyn arkavo_llm::ReleaseGate>>, Box<dyn std::error::Error>> {
+    Ok(None)
+}
+
 /// Execute A2A chat mode using ChatSession from arkavo-protocol
 ///
 /// Uses a local runtime (not `'static`) so that all Rust objects — including
@@ -200,22 +311,36 @@ fn print_usage() {
 /// A `'static` runtime would keep `Arc<Router>` alive past `main()`, causing
 /// `ggml_metal_device_free` to assert on non-empty residual sets.
 #[allow(clippy::disallowed_methods)]
-fn execute_a2a_chat(
-    prompt: Option<&str>,
-    model_name: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn execute_a2a_chat(flags: &ChatCliArgs) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = create_runtime()?;
+    let prompt = flags.prompt.as_deref();
+    let model_name = flags.model.as_deref();
+
+    // Before the runtime, and so before anything instantiates the knowledge
+    // provider: loading the detector resets llama.cpp's global log callback,
+    // which would otherwise undo the debug logging `ARKAVO_DEBUG` turns on when
+    // the answering model loads.
+    let gate = arm_release_gate(flags)?;
 
     runtime.block_on(async {
         // Initialize engine with Router + full tool registry (including Claude SDK)
-        let engine = arkavo_server::LocalEngine::new()
+        let engine = arkavo_server::LocalEngine::new_with_release_gate(gate)
             .await
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
-        // Create ChatSession (wraps A2aClient)
-        let mut session =
-            ChatSession::new_with_model(engine.router(), Some(engine.tool_registry()), model_name)
-                .await?;
+        // Create ChatSession (wraps A2aClient). Built a step at a time rather
+        // than through `new_with_model`, because the system prompt is captured
+        // when the session opens and there is no setting it afterwards.
+        let mut client = arkavo_protocol::A2aClient::with_router_and_model(
+            engine.router(),
+            Some(engine.tool_registry()),
+            model_name,
+        );
+        if let Some(system) = flags.system.as_deref() {
+            client.set_system_prompt(system.to_string());
+        }
+        client.open_session().await?;
+        let mut session = ChatSession::from_client(client);
 
         if std::env::var("ARKAVO_DEBUG").is_ok() && session.is_active() {
             eprintln!("{}", debug_session_started_message());
@@ -504,9 +629,22 @@ async fn process_stream(
                 break;
             }
             MessageDeltaContent::Error { message, .. } => {
-                emit_stderr("\n[Error: ");
-                emit_stderr(&message);
-                emit_stderr("]\n");
+                // SENT-011: a blocked completion tells the consumer that it was
+                // blocked and nothing else. The routing layers wrap the refusal
+                // on its way here ("Failed to route message: LLM provider
+                // error: …"), and each wrapper names a stage the caller could
+                // use to work out where generation stopped, so the refusal is
+                // reported on its own. `buf` is left unprinted: whatever the
+                // gate held is not the consumer's.
+                if message.contains(arkavo_llm::GATE_BLOCKED) {
+                    emit_stderr("\n");
+                    emit_stderr(arkavo_llm::GATE_BLOCKED);
+                    emit_stderr("\n");
+                } else {
+                    emit_stderr("\n[Error: ");
+                    emit_stderr(&message);
+                    emit_stderr("]\n");
+                }
                 break;
             }
             MessageDeltaContent::Metadata { key, value } => {
@@ -823,5 +961,96 @@ mod tests {
 
         let result = execute_command(&mut session, "list", Some(".")).await;
         assert!(matches!(result, CommandResult::Output(_)));
+    }
+
+    /// `--system` is not part of the classifier: a model fine-tuned under a
+    /// pack's prompt has to be runnable under that prompt in any build.
+    #[test]
+    fn test_parse_cli_system_prompt_needs_no_feature() {
+        let flags = parse_cli_args(&["--system".into(), "You are the sentinel.".into()]).unwrap();
+        assert_eq!(flags.system.as_deref(), Some("You are the sentinel."));
+
+        let err = parse_cli_args(&["--system".into()]).unwrap_err();
+        assert!(err.to_string().contains("--system requires"));
+    }
+
+    /// A file to point a flag at, since both sentinel flags check that their
+    /// argument is there before anything tries to load it.
+    #[cfg(feature = "sentinel")]
+    fn touch(name: &str) -> String {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, b"placeholder").unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[cfg(feature = "sentinel")]
+    #[test]
+    fn test_parse_cli_sentinel_flags() {
+        use arkavo_protocol::data_classification::SensitivityLevel;
+
+        let detector = touch("arkavo-chat-cli-test-sentinel.gguf");
+        let calibration = touch("arkavo-chat-cli-test-calibration.json");
+
+        let flags = parse_cli_args(&[
+            "--sentinel".into(),
+            detector.clone(),
+            "--calibration".into(),
+            calibration.clone(),
+            "--ceiling".into(),
+            "confidential".into(),
+        ])
+        .unwrap();
+        assert_eq!(flags.sentinel.as_deref(), Some(Path::new(&detector)));
+        assert_eq!(flags.calibration.as_deref(), Some(Path::new(&calibration)));
+        assert_eq!(flags.ceiling(), SensitivityLevel::Confidential);
+
+        // The ceiling defaults rather than dropping to Public, which would let
+        // a partial completion stream from a model nobody classified.
+        let flags = parse_cli_args(&[
+            "--sentinel".into(),
+            detector.clone(),
+            "--calibration".into(),
+            calibration.clone(),
+        ])
+        .unwrap();
+        assert_eq!(flags.ceiling(), SensitivityLevel::Internal);
+
+        // And no flags at all is no gate.
+        let flags = parse_cli_args(&["--prompt".into(), "hello".into()]).unwrap();
+        assert!(flags.sentinel.is_none());
+    }
+
+    #[cfg(feature = "sentinel")]
+    #[test]
+    fn test_parse_cli_sentinel_rejects_half_a_configuration() {
+        let detector = touch("arkavo-chat-cli-test-half.gguf");
+
+        let err = parse_cli_args(&["--sentinel".into(), detector]).unwrap_err();
+        assert!(err.to_string().contains("used together"), "{err}");
+
+        let err = parse_cli_args(&["--sentinel".into(), "/nonexistent/detector.gguf".into()])
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("sentinel model not found"),
+            "{err}"
+        );
+
+        let err = parse_cli_args(&["--ceiling".into(), "restricted".into()]).unwrap_err();
+        assert!(err.to_string().contains("unknown ceiling"), "{err}");
+    }
+
+    /// A build without the classifier says so rather than ignoring the flag: a
+    /// gate that was asked for and silently not armed is the failure the
+    /// release path exists to prevent.
+    #[cfg(not(feature = "sentinel"))]
+    #[test]
+    fn test_parse_cli_sentinel_reports_the_missing_feature() {
+        for flag in ["--sentinel", "--calibration"] {
+            let err = parse_cli_args(&[flag.into(), "anything".into()]).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "sentinel is not in this build; compile with the sentinel feature"
+            );
+        }
     }
 }

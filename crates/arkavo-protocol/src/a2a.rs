@@ -81,6 +81,18 @@ impl A2aClient {
         }
     }
 
+    /// Replace the system prompt every context window in this client's sessions
+    /// is built under.
+    ///
+    /// The prompt is copied into the session handler when a session is opened,
+    /// so it has to be set before [`Self::open_session`] — which is why this
+    /// sits on the client rather than on the session.
+    pub fn set_system_prompt(&mut self, prompt: String) {
+        if let Some(manager) = self.session_manager.as_mut() {
+            manager.set_system_prompt(prompt);
+        }
+    }
+
     /// Open a chat session
     pub async fn open_session(&mut self) -> Result<String, A2aClientError> {
         let manager = self
