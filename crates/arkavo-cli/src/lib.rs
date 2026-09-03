@@ -11,6 +11,8 @@ pub mod mock_provider;
 pub mod prompt_loader;
 pub mod secure_http;
 #[cfg(feature = "sentinel")]
+pub mod sentinel_scorer;
+#[cfg(feature = "sentinel")]
 pub mod sentinel_wiring;
 pub mod tool_integration;
 pub mod welcome;

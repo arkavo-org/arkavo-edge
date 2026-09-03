@@ -815,6 +815,7 @@ dependencies = [
  "arkavo-hrm",
  "arkavo-identity",
  "arkavo-kimi",
+ "arkavo-llama-cpp",
  "arkavo-llm",
  "arkavo-mcp",
  "arkavo-mcp-claude",

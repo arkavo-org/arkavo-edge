@@ -44,7 +44,7 @@ cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 fingerprint = ["dep:arkavo-fingerprint"]
 # The DLP sentinel: the classification cascade wired into the critic
 # pipeline and the streaming release path. Off until the work reaches GA.
-sentinel = ["dep:arkavo-sentinel", "fingerprint", "arkavo-critic/sentinel"]
+sentinel = ["dep:arkavo-sentinel", "dep:arkavo-llama-cpp", "fingerprint", "arkavo-critic/sentinel"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 iroh = ["arkavo-server/iroh", "arkavo-server/swarm-apply"]
 kas = ["arkavo-protocol/kas", "arkavo-server/kas"]
@@ -72,6 +72,8 @@ arkavo-repo = { path = "../arkavo-repo" }
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["persistence"] }
 arkavo-critic = { path = "../arkavo-critic" }
 arkavo-sentinel = { path = "../arkavo-sentinel", optional = true }
+# The sentinel detector runs on the same llama.cpp runtime as the knowledge model.
+arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
 arkavo-ui-core = { path = "../arkavo-ui-core", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
