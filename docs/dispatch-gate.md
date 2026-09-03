@@ -148,7 +148,11 @@ permits would be buying, so when pruning frees nothing the gate fails closed
 instead: a permit the table is not already counting is denied at the budget
 stage with `gate capacity exhausted; retry after permits expire`, while every
 permit already counted goes on being counted normally. Room returns as
-entries expire — those permits are refused at authn from then on anyway.
+entries expire — those permits are refused at authn from then on anyway. At
+capacity, expiry pruning runs at most once per second; untracked permits are
+refused until room frees — the scan is O(capacity), so a table already full
+of live counters must not pay for it again on every call that finds nothing
+to free.
 
 ## Running it
 

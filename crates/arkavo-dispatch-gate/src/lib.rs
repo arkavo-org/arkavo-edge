@@ -94,6 +94,32 @@ struct Usage {
     expires_at: i64,
 }
 
+/// The usage table and the bookkeeping that decides when it is worth
+/// pruning, all behind one lock so the two never drift apart.
+struct UsageTable {
+    entries: HashMap<[u8; 32], Usage>,
+    /// The clock second of the table's most recent expiry scan.
+    /// `i64::MIN` before the first one, so a table that has never pruned
+    /// always prunes the first time it is found full.
+    last_pruned_at: i64,
+    /// Incremented once per expiry scan that actually runs. Nothing outside
+    /// tests reads it; it exists so a test can observe that a scan was
+    /// skipped rather than inferring it from timing.
+    #[cfg(test)]
+    prune_count: u64,
+}
+
+impl UsageTable {
+    fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+            last_pruned_at: i64::MIN,
+            #[cfg(test)]
+            prune_count: 0,
+        }
+    }
+}
+
 /// How many permits the usage table counts at once.
 ///
 /// Counters are keyed by `Permit::id`, and a caller can mint arbitrarily many
@@ -111,7 +137,7 @@ pub struct DispatchGate {
     /// The most counters [`Self::usage`] holds; `MAX_TRACKED_PERMITS` outside
     /// tests, which use a small table to reach the limit cheaply.
     capacity: usize,
-    usage: Mutex<HashMap<[u8; 32], Usage>>,
+    usage: Mutex<UsageTable>,
 }
 
 impl DispatchGate {
@@ -124,7 +150,7 @@ impl DispatchGate {
         Self {
             config,
             capacity,
-            usage: Mutex::new(HashMap::new()),
+            usage: Mutex::new(UsageTable::new()),
         }
     }
 
@@ -175,12 +201,23 @@ impl DispatchGate {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // A full table drops its expired counters, which cost nothing: the
-        // permits they belong to are refused at authn from now on.
-        if usage.len() >= self.capacity {
-            usage.retain(|_, entry| entry.expires_at > now);
+        // permits they belong to are refused at authn from now on. The scan
+        // is O(capacity), so once the table is full it runs at most once per
+        // clock second rather than on every call — most calls that find the
+        // table full find it still full a moment later, and re-scanning for
+        // them buys nothing. Skipping the scan still falls through to the
+        // same capacity decision below, just without paying for a retain
+        // that would have freed no room.
+        if usage.entries.len() >= self.capacity && now > usage.last_pruned_at {
+            usage.entries.retain(|_, entry| entry.expires_at > now);
+            usage.last_pruned_at = now;
+            #[cfg(test)]
+            {
+                usage.prune_count += 1;
+            }
         }
-        let full = usage.len() >= self.capacity;
-        let entry = match usage.entry(permit_id) {
+        let full = usage.entries.len() >= self.capacity;
+        let entry = match usage.entries.entry(permit_id) {
             Entry::Occupied(counted) => counted.into_mut(),
             // Nothing is evicted to make room. A live counter reset to zero
             // would hand its permit a second budget, so a permit this gate is
@@ -240,7 +277,7 @@ impl DispatchGate {
             .usage
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        match usage.get_mut(&permit_id) {
+        match usage.entries.get_mut(&permit_id) {
             Some(entry) if entry.invocations > 0 => {
                 entry.invocations -= 1;
                 true
@@ -268,7 +305,17 @@ impl DispatchGate {
         self.usage
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entries
             .len()
+    }
+
+    /// How many times the usage table has actually run its expiry scan.
+    #[cfg(test)]
+    fn prune_count(&self) -> u64 {
+        self.usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .prune_count
     }
 }
 
@@ -747,6 +794,110 @@ mod tests {
             "expired counters must make room: {admitted:?}"
         );
         assert_eq!(gate.usage_len(), 5, "four expired counters, one new permit");
+    }
+
+    /// The expiry scan is O(capacity), so once the table is full it must
+    /// not re-run on every call that finds no room: it runs at most once
+    /// per clock second, and repeat calls within that second skip straight
+    /// to the capacity decision.
+    #[test]
+    fn a_full_table_prunes_at_most_once_per_clock_second() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        static CLOCK: AtomicI64 = AtomicI64::new(NOW);
+        fn moving_clock() -> i64 {
+            CLOCK.load(Ordering::SeqCst)
+        }
+        CLOCK.store(NOW, Ordering::SeqCst);
+
+        const CAPACITY: usize = 4;
+        let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+        let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+        let gate = DispatchGate::with_capacity(
+            GateConfig {
+                policy_bundle_hash: vec![7; 32],
+                hash: HashAlgorithm::Sha256,
+                clock: moving_clock,
+                trusted_issuers: vec![issuer.public_key()],
+            },
+            CAPACITY,
+        );
+        let mint_one = |n: i64, expires_at: i64| {
+            let args = json!({"n": n});
+            let cwt = permit(&issuer, &holder, "merge", &args, 2, expires_at, 7);
+            let proof = prove_invocation(
+                &holder,
+                &permit_id(&cwt),
+                "merge",
+                &args,
+                HashAlgorithm::Sha256,
+            );
+            (args, cwt, proof)
+        };
+
+        // Every live counter expires at the same instant, so the whole
+        // table becomes prunable in one step once the clock passes it.
+        let capacity = i64::try_from(CAPACITY).expect("a small test capacity fits in an i64");
+        let filling: Vec<_> = (0..capacity).map(|n| mint_one(n, NOW + 30)).collect();
+        for (args, cwt, proof) in &filling {
+            let decision = gate.evaluate(&call("merge", args, cwt, proof));
+            assert!(
+                matches!(decision, GateDecision::Allow { .. }),
+                "{decision:?}"
+            );
+        }
+        assert_eq!(gate.usage_len(), CAPACITY, "the table is full");
+        assert_eq!(gate.prune_count(), 0, "filling the table never scans it");
+
+        let (new_args, new_cwt, new_proof) = mint_one(99, NOW + 3600);
+
+        // At capacity, the first call this second scans for room and finds
+        // none.
+        let first = gate.evaluate(&call("merge", &new_args, &new_cwt, &new_proof));
+        assert!(
+            matches!(
+                &first,
+                GateDecision::Deny {
+                    stage: Stage::Budget,
+                    ..
+                }
+            ),
+            "{first:?}"
+        );
+        assert_eq!(gate.prune_count(), 1, "the first call at capacity scans");
+
+        // A second call at the same clock second must not scan again.
+        let second = gate.evaluate(&call("merge", &new_args, &new_cwt, &new_proof));
+        assert!(
+            matches!(
+                &second,
+                GateDecision::Deny {
+                    stage: Stage::Budget,
+                    ..
+                }
+            ),
+            "{second:?}"
+        );
+        assert_eq!(
+            gate.prune_count(),
+            1,
+            "a repeat call within the same clock second must not re-scan"
+        );
+
+        // Once the clock passes the counters' expiry, the next call scans
+        // again, frees them, and the new permit is admitted.
+        CLOCK.store(NOW + 60, Ordering::SeqCst);
+        let admitted = gate.evaluate(&call("merge", &new_args, &new_cwt, &new_proof));
+        assert!(
+            matches!(admitted, GateDecision::Allow { .. }),
+            "{admitted:?}"
+        );
+        assert_eq!(
+            gate.prune_count(),
+            2,
+            "expiry made the table worth scanning again"
+        );
+        assert_eq!(gate.usage_len(), 1, "every expired counter was freed");
     }
 
     /// A call the upstream never received must not cost its permit an
