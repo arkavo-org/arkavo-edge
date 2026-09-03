@@ -17,7 +17,7 @@ use std::sync::Mutex;
 
 use arkavo_llama_cpp::{
     ChatInputs, ChatTemplates, LlamaContext, LlamaModel, batch_get_one_with_logits, decode_batch,
-    ffi, init_llama_logging, token_to_bytes, tokenize_with_model,
+    ffi, init_llama_logging, tokenize_with_model,
 };
 use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
 use arkavo_sentinel::{RawLabel, ScoringModel};
@@ -64,13 +64,6 @@ const SCORING_CONTEXT_TOKENS: u32 = 1024;
 /// alternative is a per-span error, which reaches the user as a withheld
 /// completion and looks like a false-positive storm.
 const MIN_SPAN_TOKENS: usize = (crate::sentinel_wiring::SENTINEL_WINDOW_BYTES * 5 / 4) / 3;
-
-/// How many times a span is cut before the attempt to fit it is abandoned.
-///
-/// Re-rendering after a cut can move the count by a token or two around the
-/// boundary, so one pass is not a guarantee; a handful is, and a span that
-/// still does not fit is an error rather than a silently mis-scored prompt.
-const FIT_ATTEMPTS: usize = 4;
 
 /// A llama.cpp-backed classifier over a fine-tuned sentinel GGUF.
 pub struct LlamaScoringModel {
@@ -212,50 +205,36 @@ impl LlamaScoringModel {
         Ok(rendered.prompt)
     }
 
-    /// Render one span and tokenize it, cutting the *span* until it fits.
+    /// Render one span and tokenize it, refusing a span that does not fit.
     ///
     /// The whole prompt is tokenized in one call, exactly as `eval.py` does, so
     /// the BPE merges at the joins are the ones the thresholds were measured
-    /// against. When it does not fit, what gets cut is the span's head and
-    /// never the prompt's: the prompt's head is the system prompt the detector
-    /// was fine-tuned under, and scoring without it asks a question no
-    /// calibration answered. The span keeps its tail, which is where the most
-    /// recently generated text is.
+    /// against.
+    ///
+    /// A span past the budget is an error and not a cut. The caller inspects a
+    /// window and then releases that window whole, so a label read from a
+    /// truncated rendering would release the bytes that were cut without any
+    /// tier having seen them — the gate's own invariant, broken quietly. The
+    /// error becomes an unavailable tier report, then a gap, then a block: a
+    /// span the detector cannot see whole is withheld rather than released.
+    /// Scoring a long span in budget-sized chunks and taking the strongest
+    /// reading is the better answer, and it is a design change rather than a
+    /// bound check.
     fn tokens_for(&self, text: &str) -> Result<Vec<i32>, String> {
-        let vocab = self.model.get_vocab();
-        let mut span = neutralize_control_tokens(text);
-        for _ in 0..FIT_ATTEMPTS {
-            let prompt = self.prompt_for(&span);
-            let tokens = tokenize_with_model(vocab, &prompt)?;
-            if tokens.is_empty() {
-                return Err("sentinel prompt tokenized to nothing".to_string());
-            }
-            let overflow = tokens.len().saturating_sub(self.prompt_budget);
-            if overflow == 0 {
-                return Ok(tokens);
-            }
-            let span_tokens = tokenize_with_model(vocab, span.as_bytes())?;
-            let keep = span_tokens.len().saturating_sub(overflow);
-            if keep == 0 {
-                return Err(format!(
-                    "sentinel prompt needs {overflow} tokens more than the {} it has, and the \
-                     span has only {} to give",
-                    self.prompt_budget,
-                    span_tokens.len()
-                ));
-            }
-            tracing::warn!(
-                cut = span_tokens.len() - keep,
-                kept = keep,
-                budget = self.prompt_budget,
-                "sentinel span truncated to fit the scoring context"
-            );
-            span = detokenize(vocab, tail_tokens(&span_tokens, keep))?;
+        let span = neutralize_control_tokens(text);
+        let prompt = self.prompt_for(&span);
+        let tokens = tokenize_with_model(self.model.get_vocab(), &prompt)?;
+        if tokens.is_empty() {
+            return Err("sentinel prompt tokenized to nothing".to_string());
         }
-        Err(format!(
-            "sentinel span will not fit {} tokens after {FIT_ATTEMPTS} attempts",
-            self.prompt_budget
-        ))
+        if tokens.len() > self.prompt_budget {
+            return Err(format!(
+                "span renders to {} tokens and this context can score {}",
+                tokens.len(),
+                self.prompt_budget
+            ));
+        }
+        Ok(tokens)
     }
 
     fn score_inner(&self, text: &str) -> Result<Vec<RawLabel>, String> {
@@ -320,29 +299,6 @@ fn span_budget(prompt_budget: usize, overhead: usize) -> Result<usize, String> {
         ));
     }
     Ok(span)
-}
-
-/// The last `keep` tokens of a span.
-fn tail_tokens(tokens: &[i32], keep: usize) -> &[i32] {
-    &tokens[tokens.len().saturating_sub(keep)..]
-}
-
-/// Text for a run of tokens.
-///
-/// The raw bytes are joined before they are read as UTF-8, because a BPE token
-/// can carry a fragment of a multi-byte character and a tail cut can land
-/// inside one. The incomplete leading character is dropped rather than
-/// replaced: a replacement character is not text the model ever saw.
-fn detokenize(vocab: *const ffi::llama_vocab, tokens: &[i32]) -> Result<String, String> {
-    let mut bytes = Vec::new();
-    for token in tokens {
-        bytes.extend_from_slice(&token_to_bytes(vocab, *token, true)?);
-    }
-    let start = bytes
-        .iter()
-        .position(|b| b & 0xC0 != 0x80)
-        .unwrap_or(bytes.len());
-    Ok(String::from_utf8_lossy(&bytes[start..]).into_owned())
 }
 
 /// Break control-token syntax in the text the detector is about to judge.
@@ -597,16 +553,6 @@ target list; do not circulate outside the sales leadership group. MNKOI 00022144
     }
 
     #[test]
-    fn a_cut_span_keeps_its_tail() {
-        let tokens = [1, 2, 3, 4, 5];
-        assert_eq!(tail_tokens(&tokens, 2), &[4, 5]);
-        assert_eq!(tail_tokens(&tokens, 5), &tokens);
-        // Asking for more than there is yields everything rather than panicking.
-        assert_eq!(tail_tokens(&tokens, 9), &tokens);
-        assert!(tail_tokens(&tokens, 0).is_empty());
-    }
-
-    #[test]
     fn chatml_fallback_matches_the_training_rendering() {
         let prompt = chatml_prompt("hello");
         assert!(prompt.ends_with(GENERATION_PROMPT), "{prompt}");
@@ -753,12 +699,16 @@ target list; do not circulate outside the sales leadership group. MNKOI 00022144
         );
     }
 
-    /// C3 regression: a span past the budget is cut to its tail and the
-    /// rendering keeps both ends — the system prompt the detector was fine
-    /// tuned under and the generation prompt the reading depends on. Scoring it
-    /// at all is the assertion that the decode fit.
+    /// C3 regression: a span the detector cannot see whole is refused, not
+    /// scored on the part of it that fit.
+    ///
+    /// The caller inspects a window and releases that window whole, so a label
+    /// read from a truncated rendering would release the cut bytes with no tier
+    /// having classified them. The error is what the cascade turns into an
+    /// unavailable report, a gap and a block — the fail-closed direction the
+    /// rest of the gate takes.
     #[test]
-    fn a_span_longer_than_the_budget_is_cut_rather_than_the_prompt() {
+    fn a_span_longer_than_the_budget_is_refused_rather_than_scored() {
         let path = gguf_path();
         if !path.is_file() {
             eprintln!("skipping: no sentinel GGUF at {}", path.display());
@@ -769,30 +719,20 @@ target list; do not circulate outside the sales leadership group. MNKOI 00022144
 
         // Comfortably past a 1023-token budget: ~30 KB of prose.
         let long = format!("{}{CONFIDENTIAL_SPAN}", HOLIDAY_NOTICE.repeat(50));
-        let tokens = model.tokens_for(&long).expect("fit the span");
-        assert!(
-            tokens.len() <= model.prompt_budget,
-            "{} tokens against a budget of {}",
-            tokens.len(),
-            model.prompt_budget
-        );
 
-        let rendered = String::from_utf8(
-            tokens
-                .iter()
-                .flat_map(|t| {
-                    arkavo_llama_cpp::token_to_bytes(model.model.get_vocab(), *t, true)
-                        .expect("detokenize")
-                })
-                .collect::<Vec<u8>>(),
-        )
-        .expect("prompt is UTF-8");
-        assert!(rendered.starts_with("<|im_start|>system\n"), "{rendered}");
-        assert!(rendered.contains(SENTINEL_SYSTEM), "{rendered}");
-        assert!(rendered.ends_with(GENERATION_PROMPT), "{rendered}");
+        let refusal = model
+            .tokens_for(&long)
+            .expect_err("an unscorable span is an error, not a truncation");
+        assert!(refusal.contains("this context can score"), "{refusal}");
 
-        // And the tail that survived is the confidential end of the span.
-        let labels = model.score(&long).expect("score");
+        let refusal = model
+            .score(&long)
+            .expect_err("and the error is what the tier sees");
+        assert!(refusal.contains("this context can score"), "{refusal}");
+
+        // A span inside the budget is still scored, so the bound refuses only
+        // what it has to.
+        let labels = model.score(CONFIDENTIAL_SPAN).expect("score");
         assert_eq!(argmax(&labels), "confidential");
     }
 }

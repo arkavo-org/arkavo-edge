@@ -1251,11 +1251,17 @@ impl ChatSessionManager {
                                         }
                                         Err(e) => {
                                             error!(error = %e, "Failed to get final response after tool execution");
-                                            // Keep the original response as final.
-                                            // It was already routed, already sent
-                                            // as a text delta, and a synthesis
-                                            // timeout is not a reason to take a
-                                            // usable answer back.
+                                            // Keep the original response as
+                                            // final. It was routed and, under a
+                                            // gate, already inspected; a
+                                            // synthesis timeout is not a reason
+                                            // to take a usable answer back. It
+                                            // reaches the caller as the turn's
+                                            // return value rather than as a
+                                            // delta — this branch emits a Text
+                                            // delta only for whatever survives
+                                            // stripping the tool markup, which
+                                            // for a pure tool call is nothing.
                                         }
                                     }
                                 } else {
