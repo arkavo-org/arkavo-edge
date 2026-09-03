@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Score the fine-tuned sentinel and write a calibration table.
 
-Does not print a false-positive rate for a buyer. The counts below are this
-example pack only: ten source documents, rewrite vs unseen.
+Picks the confidential threshold at a target false-positive rate over the
+eval set's negatives (rows whose gold label isn't confidential), and prints
+that rate's false-positive count and per-method recall alongside it.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -45,31 +47,67 @@ def classify(model, tok, device, span: str, system: str) -> tuple[str, dict[str,
     return pred, {l: float(probs[i]) for i, l in enumerate(LABELS)}
 
 
-def _confidential_probs(results: list[dict], method: str | None = None) -> list[float]:
-    return [
-        r["probs"]["confidential"]
-        for r in results
-        if r["gold"] == "confidential" and (method is None or r["method"] == method)
-    ]
+def _confidential_probs(results: list[dict]) -> list[float]:
+    return [r["probs"]["confidential"] for r in results if r["gold"] == "confidential"]
 
 
-def threshold_with_source(results: list[dict]) -> tuple[float, str]:
-    """Conservative confidential threshold: min gold-confidential probability.
+def _negative_probs(results: list[dict]) -> list[float]:
+    return [r["probs"]["confidential"] for r in results if r["gold"] != "confidential"]
 
-    Prefers rewrite-eval rows (faithful rewrites, the hardest confidential
-    case); falls back to gold-confidential rows of any method when the
-    corpus has no rewrite rows; falls back to 0.5 when it has no
-    gold-confidential rows at all. Returns the threshold and which branch
-    produced it, computed from one pass per branch so the two values can
-    never disagree with each other.
+
+def threshold_with_source(results: list[dict], target_fpr: float) -> tuple[float, str]:
+    """Confidential threshold calibrated to a target false-positive rate.
+
+    Negatives are rows whose gold label isn't confidential (public and
+    internal alike). Sorted by confidential probability descending, the
+    threshold sits just above the (k+1)-th highest negative, where
+    ``k = floor(target_fpr * len(negatives))`` is the number of negatives
+    allowed to fire. "Just above" uses ``math.nextafter`` so at most k
+    negatives are at or above the threshold, never k+1 -- ties at the
+    boundary can only push the fired count below k, and a negative
+    saturated at exactly 1.0 stays fired since nextafter(1.0, 1.0) is
+    1.0. When the negative set is too small for k+1 to name an entry
+    (target_fpr close to or at 1.0 against a handful of negatives), every
+    negative is allowed to fire and the threshold is 0.0.
+
+    Falls back to the minimum gold-confidential probability when the eval
+    set has no negatives at all, and to 0.5 when it has neither negatives
+    nor gold-confidential rows. Returns the threshold and which branch
+    produced it.
     """
-    rewrite_conf = _confidential_probs(results, "rewrite")
-    if rewrite_conf:
-        return min(rewrite_conf), "rewrite"
+    negatives = sorted(_negative_probs(results), reverse=True)
+    if negatives:
+        n = len(negatives)
+        k = math.floor(target_fpr * n)
+        if k + 1 > n:
+            return 0.0, "fpr-target"
+        return math.nextafter(negatives[k], 1.0), "fpr-target"
     any_conf = _confidential_probs(results)
     if any_conf:
         return min(any_conf), "all-confidential"
     return 0.5, "default"
+
+
+def false_positives_at_threshold(results: list[dict], threshold: float) -> int:
+    """Count of negatives (gold != confidential) at or above the threshold."""
+    return sum(1 for p in _negative_probs(results) if p >= threshold)
+
+
+def recall_at_threshold(results: list[dict], threshold: float) -> dict[str, dict[str, int]]:
+    """Per-method fire counts over gold-confidential rows at the threshold.
+
+    A gold-confidential row fires when its confidential probability is at
+    or above the threshold.
+    """
+    counts: dict[str, dict[str, int]] = {}
+    for r in results:
+        if r["gold"] != "confidential":
+            continue
+        bucket = counts.setdefault(r["method"], {"n": 0, "fired": 0})
+        bucket["n"] += 1
+        if r["probs"]["confidential"] >= threshold:
+            bucket["fired"] += 1
+    return dict(sorted(counts.items()))
 
 
 def main() -> None:
@@ -80,6 +118,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--system", default=TRAIN_SYSTEM)
     parser.add_argument("--detector-version", default="qwen3.5-0.8b-lora")
+    parser.add_argument("--target-fpr", type=float, default=0.01)
     args = parser.parse_args()
 
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -119,12 +158,17 @@ def main() -> None:
         method: {"n": len(v), "correct": sum(v)}
         for method, v in sorted(by_method.items())
     }
-    threshold, source = threshold_with_source(results)
+    threshold, source = threshold_with_source(results, args.target_fpr)
+    false_positives = false_positives_at_threshold(results, threshold)
+    recall = recall_at_threshold(results, threshold)
     calibration = {
         "detector_version": args.detector_version,
         "taxonomy_version": "1.0.0",
         "thresholds": {"confidential": threshold, "internal": 0.5, "public": 0.5},
         "threshold_source": source,
+        "target_fpr": args.target_fpr,
+        "false_positives_at_threshold": false_positives,
+        "recall_at_threshold": recall,
         "example_only": True,
         "eval": summary,
     }
@@ -133,6 +177,9 @@ def main() -> None:
     (args.out / "calibration.json").write_text(json.dumps(calibration, indent=2) + "\n")
     print("summary", json.dumps(summary))
     print(f"confidential threshold ({source}) {threshold:.3f}")
+    print(f"target_fpr {args.target_fpr}")
+    print(f"false_positives_at_threshold {false_positives}")
+    print("recall_at_threshold", json.dumps(recall))
     print(f"wrote {args.out}")
 
 
