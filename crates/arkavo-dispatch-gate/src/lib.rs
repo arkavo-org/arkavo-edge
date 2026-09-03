@@ -29,16 +29,20 @@ use std::collections::hash_map::Entry;
 use std::fmt;
 use std::sync::Mutex;
 
-// The proxy in front of this gate bounds the credentials it decodes by the
-// same cap the permit parser enforces, so it is re-exported here rather than
-// restated there.
+// The proxy in front of this gate bounds the permit it decodes by the same
+// cap the permit parser enforces, so it is re-exported here rather than
+// restated there. The proof is bounded by what a signature can be, which is
+// the proxy's own business and stays there.
 pub use arkavo_permit::MAX_PERMIT_BYTES;
 
 /// The largest serialized `arguments` object the gate will hash.
 ///
 /// Arguments are canonicalized and hashed twice per call — once for the
 /// proof-of-possession digest, once for the permit's binding — so their size
-/// is work an unauthenticated caller can ask for. MCP tool arguments are
+/// is work the call asks for. The check sits after the permit's signature has
+/// verified, so that work is only ever reachable by a caller holding a permit
+/// from a trusted issuer; the bound is what keeps even that caller from
+/// turning one admitted call into an unbounded hash. MCP tool arguments are
 /// small; a quarter of a megabyte is far above any real call.
 pub const MAX_ARGUMENTS_BYTES: usize = 256 * 1024;
 

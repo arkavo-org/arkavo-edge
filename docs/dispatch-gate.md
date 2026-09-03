@@ -39,11 +39,13 @@ The client places two base64url (no padding) strings under
 
 A call without both is refused before any stage runs, and the refusal says
 which of the four things went wrong — both absent, one present without the
-other, a string that is not base64url, or a string longer than any permit can
+other, a string that is not base64url, or a string longer than that field can
 be. All four are `authn:` refusals.
 
-Both strings are bounded before they are decoded, at the encoded size of the
-largest permit the parser accepts (16 KiB, so 21 849 characters).
+Each string is bounded before it is decoded, by what that field can hold: the
+permit by the encoded size of the largest permit the parser accepts (16 KiB,
+so 21 849 characters), and the proof by 88 characters, since a proof is one
+64-byte signature — 86 characters unpadded — from either key type.
 
 An allowed `tools/call` has `_meta.arkavo` removed before the request is
 forwarded upstream, so the permit and proof-of-possession never reach the
@@ -65,10 +67,11 @@ bound answers rather than disconnects:
 | one JSON-RPC line from the upstream | 1 MiB | discarded with a warning, reading continues |
 | a JSON-RPC batch (top-level array) | not supported | `INVALID_REQUEST` (id null) with a warning, never silence |
 | refusals waiting to be written upstream | 16 queued | dropped and counted at `warn`, so the reader never blocks |
-| `_meta.arkavo.permit` / `.pop` | encoded size of a 16 KiB permit | `authn:` denial, without decoding |
+| `_meta.arkavo.permit` | encoded size of a 16 KiB permit (21 849 chars) | `authn:` denial, without decoding |
+| `_meta.arkavo.pop` | 88 chars, a 64-byte signature being 86 | `authn:` denial, without decoding |
 | the permit itself | 16 KiB, nesting depth 16 | `authn:` denial from the parser |
 | the published key set | 64 KiB, nesting depth 16 | `CwtError::KeySet`, the body refused as it arrives |
-| `arguments` | 256 KiB serialized | `policy:` denial, before either hash of them runs |
+| `arguments` | 256 KiB serialized | `policy:` denial, before either hash of them runs, and only reachable once the permit has verified |
 
 The nesting bound is not the only one: ciborium, the decoder under `coset`,
 refuses past 256 levels of its own accord. Sixteen is what this stack

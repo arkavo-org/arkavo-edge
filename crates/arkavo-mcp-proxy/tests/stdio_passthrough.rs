@@ -720,7 +720,11 @@ async fn malformed_credentials_are_refused_by_what_is_actually_wrong() {
         ),
         (
             json!({"arkavo": {"permit": "A".repeat(4 * 16 * 1024 / 3 + 8), "pop": good["arkavo"]["pop"]}}),
-            "longer than any permit can be",
+            "permit is longer than any permit can be",
+        ),
+        (
+            json!({"arkavo": {"permit": permit, "pop": "A".repeat(200)}}),
+            "pop is longer than a proof of possession can be",
         ),
     ] {
         let response = client

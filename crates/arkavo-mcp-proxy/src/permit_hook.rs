@@ -34,9 +34,8 @@ impl PermitPolicy {
 /// happens before the permit is checked.
 fn missing_credentials(permit: &Credential, proof: &Credential) -> String {
     let reason = match (permit, proof) {
-        (Credential::Oversized, _) | (_, Credential::Oversized) => {
-            "permit or pop is longer than any permit can be"
-        }
+        (Credential::Oversized, _) => "permit is longer than any permit can be",
+        (_, Credential::Oversized) => "pop is longer than a proof of possession can be",
         (Credential::Undecodable, _) | (_, Credential::Undecodable) => {
             "permit or pop is not base64url"
         }
@@ -205,7 +204,13 @@ mod tests {
         );
         assert_eq!(
             deny_reason(Credential::Oversized, Credential::Present(vec![1])).await,
-            "authn: permit or pop is longer than any permit can be"
+            "authn: permit is longer than any permit can be"
+        );
+        // The two fields have separate bounds, so they get separate reasons:
+        // a proof is one signature and nothing near a permit's size.
+        assert_eq!(
+            deny_reason(Credential::Present(vec![1]), Credential::Oversized).await,
+            "authn: pop is longer than a proof of possession can be"
         );
         assert_eq!(
             deny_reason(Credential::Present(vec![1]), Credential::Absent).await,

@@ -19,11 +19,20 @@ pub const POLICY_DENIED: i64 = -32000;
 /// Server error: the upstream connection failed.
 pub const UPSTREAM_ERROR: i64 = -32603;
 
-/// The longest base64url string `_meta.arkavo` may carry: the permit size cap
-/// re-expressed in encoded characters (four per three bytes, plus a partial
-/// group). Anything longer cannot decode to a permit this stack would accept,
-/// so it is refused without decoding it.
-const MAX_ENCODED_CREDENTIAL: usize = 4 * arkavo_dispatch_gate::MAX_PERMIT_BYTES / 3 + 4;
+/// The longest base64url string `_meta.arkavo.permit` may carry: the permit
+/// size cap re-expressed in encoded characters (four per three bytes, plus a
+/// partial group). Anything longer cannot decode to a permit this stack would
+/// accept, so it is refused without decoding it.
+const MAX_ENCODED_PERMIT: usize = 4 * arkavo_dispatch_gate::MAX_PERMIT_BYTES / 3 + 4;
+
+/// The longest base64url string `_meta.arkavo.pop` may carry.
+///
+/// A proof of possession is one signature — 64 bytes from both key types
+/// this stack signs with, Ed25519 and P-256 in P1363 form — which is 86
+/// characters unpadded. Bounding it by the permit's cap instead would let a
+/// caller send 21 849 characters of base64 for something that can only ever
+/// be 86, and hold the difference in memory while it was decoded.
+const MAX_ENCODED_PROOF: usize = 88;
 
 /// Configuration for connecting to the upstream MCP server.
 #[derive(Debug, Clone)]
@@ -267,8 +276,8 @@ impl McpProxy {
         let meta = params
             .and_then(|p| p.get("_meta"))
             .and_then(|m| m.get("arkavo"));
-        let permit = credential(meta, "permit");
-        let proof = credential(meta, "pop");
+        let permit = credential(meta, "permit", MAX_ENCODED_PERMIT);
+        let proof = credential(meta, "pop", MAX_ENCODED_PROOF);
         let ctx = CallContext {
             tool_name,
             arguments,
@@ -352,14 +361,18 @@ impl std::fmt::Debug for McpProxy {
 }
 
 /// Read one `_meta.arkavo` credential, keeping *why* it is unusable.
-fn credential(meta: Option<&Value>, key: &str) -> Credential {
+///
+/// `max_encoded` is this field's own bound: a permit and a proof of
+/// possession differ by three orders of magnitude in what they can
+/// legitimately be, so one cap for both is barely a cap on the proof.
+fn credential(meta: Option<&Value>, key: &str, max_encoded: usize) -> Credential {
     match meta.and_then(|m| m.get(key)) {
         None => Credential::Absent,
         Some(value) => match value.as_str() {
             // A non-string is as unusable as a malformed string, and saying
             // so is more use to the client than calling it absent.
             None => Credential::Undecodable,
-            Some(text) if text.len() > MAX_ENCODED_CREDENTIAL => Credential::Oversized,
+            Some(text) if text.len() > max_encoded => Credential::Oversized,
             Some(text) => decode_b64url(text).map_or(Credential::Undecodable, Credential::Present),
         },
     }
@@ -425,27 +438,42 @@ mod tests {
 
     /// The ways a credential can be unusable have to stay distinguishable: a
     /// client that sent nothing, one whose encoding is wrong, and one whose
-    /// field is too long to be a permit at all.
+    /// field is too long to be what it claims to be.
     #[test]
     #[spec("PDG-009")]
     fn credential_distinguishes_absent_undecodable_and_oversized() {
         let meta = json!({
             "permit": "aGk",
             "pop": "!!! not base64",
-            "huge": "A".repeat(MAX_ENCODED_CREDENTIAL + 1),
+            "huge": "A".repeat(MAX_ENCODED_PERMIT + 1),
             "number": 7,
         });
         let meta = Some(&meta);
 
         assert_eq!(
-            credential(meta, "permit"),
+            credential(meta, "permit", MAX_ENCODED_PERMIT),
             Credential::Present(b"hi".to_vec())
         );
-        assert_eq!(credential(meta, "pop"), Credential::Undecodable);
-        assert_eq!(credential(meta, "huge"), Credential::Oversized);
-        assert_eq!(credential(meta, "number"), Credential::Undecodable);
-        assert_eq!(credential(meta, "missing"), Credential::Absent);
-        assert_eq!(credential(None, "permit"), Credential::Absent);
+        assert_eq!(
+            credential(meta, "pop", MAX_ENCODED_PROOF),
+            Credential::Undecodable
+        );
+        assert_eq!(
+            credential(meta, "huge", MAX_ENCODED_PERMIT),
+            Credential::Oversized
+        );
+        assert_eq!(
+            credential(meta, "number", MAX_ENCODED_PERMIT),
+            Credential::Undecodable
+        );
+        assert_eq!(
+            credential(meta, "missing", MAX_ENCODED_PERMIT),
+            Credential::Absent
+        );
+        assert_eq!(
+            credential(None, "permit", MAX_ENCODED_PERMIT),
+            Credential::Absent
+        );
     }
 
     /// The permit and proof are the proxy's own credentials and must not
@@ -511,11 +539,47 @@ mod tests {
     }
 
     /// A string at the cap is still decoded: the bound refuses what cannot be
-    /// a permit, not what merely approaches the size of one.
+    /// the credential it claims to be, not what merely approaches its size.
     #[test]
     fn a_credential_at_the_encoded_cap_is_not_oversized() {
-        let at_cap = "A".repeat(MAX_ENCODED_CREDENTIAL);
-        let meta = json!({ "permit": at_cap });
-        assert_ne!(credential(Some(&meta), "permit"), Credential::Oversized);
+        let meta = json!({
+            "permit": "A".repeat(MAX_ENCODED_PERMIT),
+            "pop": "A".repeat(MAX_ENCODED_PROOF),
+        });
+        let meta = Some(&meta);
+        assert_ne!(
+            credential(meta, "permit", MAX_ENCODED_PERMIT),
+            Credential::Oversized
+        );
+        assert_ne!(
+            credential(meta, "pop", MAX_ENCODED_PROOF),
+            Credential::Oversized
+        );
+    }
+
+    /// The proof's own bound is what makes it a bound at all: a 64-byte
+    /// signature is 86 characters, and everything from there to the permit's
+    /// 21 849 was accepted while the two shared one cap.
+    #[test]
+    #[spec("PDG-009")]
+    fn a_proof_longer_than_a_signature_is_oversized() {
+        let real_proof = "A".repeat(86);
+        assert!(real_proof.len() <= MAX_ENCODED_PROOF);
+
+        let meta = json!({
+            "pop": "A".repeat(MAX_ENCODED_PROOF + 1),
+            "permit": "A".repeat(MAX_ENCODED_PROOF + 1),
+        });
+        let meta = Some(&meta);
+        assert_eq!(
+            credential(meta, "pop", MAX_ENCODED_PROOF),
+            Credential::Oversized
+        );
+        // The same string is nowhere near the permit's cap, which is the
+        // point: one cap for both fields left the proof unbounded in practice.
+        assert_ne!(
+            credential(meta, "permit", MAX_ENCODED_PERMIT),
+            Credential::Oversized
+        );
     }
 }
