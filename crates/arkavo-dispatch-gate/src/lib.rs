@@ -220,7 +220,12 @@ impl DispatchGate {
         // them buys nothing. Skipping the scan still falls through to the
         // same capacity decision below, just without paying for a retain
         // that would have freed no room.
-        if usage.entries.len() >= self.capacity && now > usage.last_pruned_at {
+        //
+        // Any *different* second is worth a scan, not only a later one: a
+        // clock stepped backwards would otherwise suppress pruning until it
+        // caught up again, and the entries it would free expire against that
+        // same clock.
+        if usage.entries.len() >= self.capacity && now != usage.last_pruned_at {
             usage.entries.retain(|_, entry| entry.expires_at > now);
             usage.last_pruned_at = now;
             #[cfg(test)]
