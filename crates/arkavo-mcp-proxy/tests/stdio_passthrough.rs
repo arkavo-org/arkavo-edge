@@ -459,6 +459,62 @@ async fn a_server_request_reusing_an_in_flight_id_is_refused_not_relayed() {
     let _ = std::fs::remove_file(&record_file);
 }
 
+/// The upstream server decides how much the proxy buffers if its output is
+/// read to the newline whatever the length. It is read against the same 1 MiB
+/// frame cap the client's input is: the over-long line is discarded and the
+/// response behind it still arrives.
+#[tokio::test]
+#[spec("PDG-010")]
+async fn an_over_long_upstream_line_is_discarded_and_the_call_still_answers() {
+    let (mut client, handle) = start_proxy(fixture_config(), Arc::new(AllowAllPolicy));
+    client.handshake().await;
+
+    let call = client
+        .request(
+            "tools/call",
+            Some(json!({"name": "over_long_line", "arguments": {}})),
+        )
+        .await;
+    let text = call["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("tool result: {call}"));
+    let reported: Value = serde_json::from_str(text).expect("tool payload");
+    assert_eq!(reported["tool"], "over_long_line");
+
+    // And the connection is unharmed: the discarded line cost it nothing.
+    let list = client.request("tools/list", None).await;
+    assert!(list["result"]["tools"].is_array(), "list: {list}");
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}
+
+/// Refusing server-initiated requests must not become a way to stall the
+/// proxy. The fixture floods hundreds of them without reading a single
+/// refusal, so writing them back blocks; the response the client is waiting
+/// for is behind that flood and has to arrive anyway.
+#[tokio::test]
+#[spec("PDG-010")]
+async fn a_flood_of_server_requests_does_not_stall_the_response() {
+    let (mut client, handle) = start_proxy(fixture_config(), Arc::new(AllowAllPolicy));
+    client.handshake().await;
+
+    let call = client
+        .request(
+            "tools/call",
+            Some(json!({"name": "refusal_flood", "arguments": {}})),
+        )
+        .await;
+    let text = call["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("tool result: {call}"));
+    let reported: Value = serde_json::from_str(text).expect("tool payload");
+    assert_eq!(reported["tool"], "refusal_flood");
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}
+
 /// A JSON-RPC batch is a top-level array. Nothing here handles one, and
 /// dropping it left the client waiting for a response that never came.
 #[tokio::test]
@@ -520,6 +576,26 @@ async fn an_over_long_message_is_refused_and_the_connection_survives() {
 
     drop(client);
     handle.await.unwrap().unwrap();
+}
+
+/// A client owes the proxy no goodbye. One that sends an over-long line —
+/// which is answered rather than ignored — and hangs up before reading the
+/// answer left `run` returning an I/O error, reporting someone else's
+/// disconnect as a failure of the proxy.
+#[tokio::test]
+async fn a_client_that_hangs_up_before_its_answer_ends_the_session_cleanly() {
+    let (mut client, handle) = start_proxy(fixture_config(), Arc::new(AllowAllPolicy));
+    client.handshake().await;
+
+    // Unterminated as well as over-long, so the line ends at the disconnect:
+    // the proxy discards it, answers INVALID_REQUEST, and finds nobody there.
+    client.send_raw(&vec![b'x'; MAX_LINE_BYTES + 1]).await;
+    drop(client);
+
+    handle
+        .await
+        .expect("proxy task panicked")
+        .expect("a client hanging up is not a failure of the proxy");
 }
 
 #[tokio::test]

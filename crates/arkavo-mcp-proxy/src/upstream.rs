@@ -19,16 +19,24 @@
 //! id: anything carrying `method` is the server asking, and is refused or
 //! dropped whatever id it names. Only a message with no `method` is an
 //! answer, and only then is it matched against the requests in flight.
+//!
+//! The upstream is untrusted in the same way the downstream client is, so
+//! what it can make the proxy hold is bounded the same way: its output is
+//! read one [`MAX_LINE_BYTES`] line at a time, and the refusals it can
+//! provoke queue up to [`REFUSAL_QUEUE_DEPTH`] and are written by a task of
+//! their own, so a server that floods requests and stops reading its own
+//! stdin cannot stall the reading of the response a caller is waiting for.
 
+use crate::framing::{self, Line, MAX_LINE_BYTES};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::{debug, warn};
 
 /// Errors from the upstream connection.
@@ -94,6 +102,17 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 /// slice does not relay to the downstream client.
 const METHOD_NOT_FOUND: i64 = -32601;
 
+/// How many refusals of server-initiated requests wait to be written before
+/// further ones are dropped.
+///
+/// A well-behaved server has at most one question outstanding at a time. A
+/// flood is a broken or hostile server, and the queue is what keeps answering
+/// it from mattering: the reader hands refusals over without waiting, and if
+/// the writer cannot keep up — an upstream that asks without ever reading its
+/// own stdin — the refusals are dropped and counted rather than allowed to
+/// block the response the proxy is actually waiting for.
+const REFUSAL_QUEUE_DEPTH: usize = 16;
+
 /// Key used to correlate responses with pending requests. JSON-RPC allows
 /// string or numeric ids; the serialized form is a stable key for both.
 fn id_key(id: &Value) -> String {
@@ -103,7 +122,8 @@ fn id_key(id: &Value) -> String {
 /// A spawned upstream MCP server reached over stdio.
 pub struct UpstreamConnection {
     child: Mutex<Child>,
-    /// Shared with the reader task, which answers server-initiated requests.
+    /// Shared with the task that writes refusals of server-initiated
+    /// requests.
     stdin: Arc<Mutex<tokio::process::ChildStdin>>,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
     connected: Arc<AtomicBool>,
@@ -140,22 +160,56 @@ impl UpstreamConnection {
             Arc::new(Mutex::new(HashMap::new()));
         let connected = Arc::new(AtomicBool::new(true));
 
+        // Writer task: the only place refusals are written, so the reader
+        // never waits on an upstream that has stopped reading its own stdin.
+        // It ends when the reader task drops the sender at EOF.
+        let (refusals, mut queued) = mpsc::channel::<Value>(REFUSAL_QUEUE_DEPTH);
+        let writer_stdin = Arc::clone(&stdin);
+        tokio::spawn(async move {
+            while let Some(refusal) = queued.recv().await {
+                if let Err(e) = write_line(&writer_stdin, &refusal).await {
+                    warn!("failed to refuse a server-initiated request: {e}");
+                }
+            }
+        });
+
         // Reader task: correlate responses by id, fail all pending requests
         // when the upstream closes its stdout.
         let reader_pending = Arc::clone(&pending);
         let reader_connected = Arc::clone(&connected);
-        let reader_stdin = Arc::clone(&stdin);
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
+            let mut stdout = BufReader::new(stdout);
+            // Refusals the queue had no room for. Counted rather than
+            // repeated so one flood is one warning per refusal, with the
+            // total attached.
+            let mut dropped_refusals = 0u64;
             loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => match serde_json::from_str::<Value>(&line) {
-                        Ok(message) => {
-                            dispatch(&reader_pending, &reader_stdin, message).await;
+                match framing::read_line(&mut stdout).await {
+                    Ok(Line::Message(line)) => {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() {
+                            continue;
                         }
-                        Err(e) => warn!("unparseable upstream output: {e}"),
-                    },
-                    Ok(None) => break,
+                        match serde_json::from_str::<Value>(trimmed) {
+                            Ok(message) => {
+                                dispatch(
+                                    &reader_pending,
+                                    &refusals,
+                                    message,
+                                    &mut dropped_refusals,
+                                )
+                                .await;
+                            }
+                            Err(e) => warn!("unparseable upstream output: {e}"),
+                        }
+                    }
+                    // One line the proxy will not buffer is not a reason to
+                    // drop the connection: it is discarded and reading goes on.
+                    Ok(Line::TooLong) => warn!(
+                        max_bytes = MAX_LINE_BYTES,
+                        "discarded an over-long upstream line"
+                    ),
+                    Ok(Line::Eof) => break,
                     Err(e) => {
                         warn!("upstream read failed: {e}");
                         break;
@@ -257,14 +311,15 @@ impl UpstreamConnection {
 /// `pending`.
 async fn dispatch(
     pending: &Mutex<HashMap<String, oneshot::Sender<Value>>>,
-    stdin: &Mutex<tokio::process::ChildStdin>,
+    refusals: &mpsc::Sender<Value>,
     message: Value,
+    dropped_refusals: &mut u64,
 ) {
     let id = message.get("id").filter(|value| !value.is_null()).cloned();
 
     if let Some(method) = message.get("method").and_then(Value::as_str) {
         match id {
-            Some(id) => refuse_server_request(stdin, &id, method).await,
+            Some(id) => refuse_server_request(refusals, &id, method, dropped_refusals),
             None => debug!(method, "upstream notification (dropped)"),
         }
         return;
@@ -290,15 +345,18 @@ async fn dispatch(
 /// its own timeout. The id is echoed back as the server sent it — including
 /// when the server reused an id this side has a request in flight on, which
 /// is a collision the server made and has to sort out.
-async fn refuse_server_request(
-    stdin: &Mutex<tokio::process::ChildStdin>,
+///
+/// The refusal is queued, never written here: the reader task's job is to
+/// keep reading, and a server that asks faster than it reads its own stdin
+/// must not be able to stop it. When the queue is full — or the writer task
+/// has gone with the connection — the refusal is dropped and counted, which
+/// costs that server nothing but its own timeout.
+fn refuse_server_request(
+    refusals: &mpsc::Sender<Value>,
     id: &Value,
     method: &str,
+    dropped: &mut u64,
 ) {
-    warn!(
-        method,
-        "refusing a server-initiated request: not relayed to the downstream client"
-    );
     let refusal = json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -309,8 +367,19 @@ async fn refuse_server_request(
             ),
         },
     });
-    if let Err(e) = write_line(stdin, &refusal).await {
-        warn!("failed to refuse server-initiated request '{method}': {e}");
+    if refusals.try_send(refusal).is_ok() {
+        warn!(
+            method,
+            "refusing a server-initiated request: not relayed to the downstream client"
+        );
+    } else {
+        *dropped += 1;
+        warn!(
+            method,
+            dropped = *dropped,
+            queue_depth = REFUSAL_QUEUE_DEPTH,
+            "dropped the refusal of a server-initiated request: the refusal queue is full"
+        );
     }
 }
 

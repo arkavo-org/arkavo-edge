@@ -78,6 +78,30 @@ pub enum ProxyError {
     Json(#[from] serde_json::Error),
 }
 
+/// Write one framed response to the downstream client.
+async fn write_response<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    writer.write_all(bytes).await?;
+    writer.flush().await
+}
+
+/// Whether a downstream write failed because the client is no longer there.
+///
+/// A client is free to stop listening at any point, and it does not owe the
+/// proxy a clean shutdown: the case that reaches here is a client that sends
+/// an over-long line — which is answered, not ignored — and closes the
+/// connection before the answer can be written.
+fn client_is_gone(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+    )
+}
+
 /// Build a JSON-RPC error response object.
 fn error_response(id: Value, code: i64, message: String) -> Value {
     json!({
@@ -142,8 +166,18 @@ impl McpProxy {
             if let Some(response) = response {
                 let mut bytes = serde_json::to_vec(&response)?;
                 bytes.push(b'\n');
-                writer.write_all(&bytes).await?;
-                writer.flush().await?;
+                if let Err(error) = write_response(&mut writer, &bytes).await {
+                    if !client_is_gone(&error) {
+                        return Err(error.into());
+                    }
+                    // The client left before its answer could be written.
+                    // That is how a session ends — a client that sends an
+                    // over-long line and disconnects reaches exactly here —
+                    // and reporting it as a failure of the proxy would be
+                    // reporting someone else's hang-up.
+                    debug!("downstream client disconnected before the response was written");
+                    break;
+                }
             }
         }
         self.upstream.shutdown().await;

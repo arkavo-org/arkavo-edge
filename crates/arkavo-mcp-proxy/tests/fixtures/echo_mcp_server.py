@@ -79,9 +79,11 @@ TOOLS = [
 # Past the proxy's 1 MiB downstream/upstream line cap.
 OVER_LONG_LINE_BYTES = 1024 * 1024 + 1
 
-# Comfortably more than the proxy's refusal queue, and enough bytes to fill
-# the pipe the refusals are written back through.
-REFUSAL_FLOOD_COUNT = 500
+# Comfortably more than the proxy's refusal queue, and enough traffic that a
+# proxy writing the refusals inline would fill the pipe it writes them to,
+# stop reading, and so block this fixture's own stdout before it ever gets
+# back to reading them: a deadlock the queue is what avoids.
+REFUSAL_FLOOD_COUNT = 2000
 
 
 def record(tool_name: str) -> None:

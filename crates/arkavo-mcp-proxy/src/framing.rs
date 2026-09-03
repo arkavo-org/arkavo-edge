@@ -1,16 +1,20 @@
-//! Line framing for the downstream stdio connection.
+//! Line framing for the proxy's stdio connections.
 //!
 //! JSON-RPC over stdio is newline-delimited, and a reader that simply waits
-//! for the newline lets one client decide how much the proxy buffers. This
-//! reads a line at a time against [`MAX_LINE_BYTES`], discarding — rather
-//! than accumulating — anything past it, so an over-long message costs
-//! bounded memory and the connection survives to answer the next one.
+//! for the newline lets whoever is on the other end decide how much the proxy
+//! buffers. This reads a line at a time against [`MAX_LINE_BYTES`],
+//! discarding — rather than accumulating — anything past it, so an over-long
+//! message costs bounded memory and the connection survives to handle the
+//! next one. Both directions are read through it: the downstream client's
+//! requests and the upstream server's output are equally untrusted.
 
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
-/// The longest single JSON-RPC line the proxy accepts from the downstream
-/// client. MCP messages are small; a megabyte is far above any real call and
-/// far below what would let a client exhaust memory.
+/// The longest single JSON-RPC line the proxy accepts from either side.
+///
+/// Both the downstream client's requests and the upstream server's output
+/// are read against it. MCP messages are small; a megabyte is far above any
+/// real call and far below what would let either end exhaust memory.
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 
 /// What one read of the downstream connection produced.
