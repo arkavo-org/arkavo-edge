@@ -35,6 +35,10 @@ pub enum TaxonomyError {
     UnknownSensitivity(String, String),
     #[error("taxonomy map declares category '{0}' more than once")]
     DuplicateCategory(String),
+    #[error("derived definition '{0}' uses the prescribed attribute namespace")]
+    DerivedInPrescribedNamespace(String),
+    #[error("derived definition '{0}' must be ALL_OF")]
+    DerivedMustBeAllOf(String),
 }
 
 /// One attribute a subject must hold, as an OpenTDF fully-qualified name and
@@ -48,10 +52,42 @@ pub struct AttributeRequirement {
 impl AttributeRequirement {
     pub fn new(fqn: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
-            fqn: fqn.into(),
+            fqn: canonical_definition_fqn(&fqn.into()),
             value: value.into(),
         }
     }
+
+    /// Platform value FQN: `https://<ns>/attr/<def>/value/<val>`.
+    ///
+    /// Everything on a TDF and in entitlements is this form. Definition FQNs
+    /// (`…/attr/<def>`) never go on the payload.
+    pub fn as_attribute_uri(&self) -> String {
+        canonical_value_fqn(&self.fqn, &self.value)
+    }
+}
+
+/// Definition FQN: `https://<namespace>/attr/<name>` (or `/obl/<name>`).
+///
+/// Shorthand `https://attr.arkavo.com/clearance` is rewritten so a map or a
+/// caller that dropped `/attr/` still emits what `opentdf-rs` parses.
+pub fn canonical_definition_fqn(fqn: &str) -> String {
+    let trimmed = fqn.trim().trim_end_matches('/');
+    if trimmed.contains("/attr/") || trimmed.contains("/obl/") {
+        return trimmed.to_string();
+    }
+    match trimmed.rsplit_once('/') {
+        Some((base, name)) if !name.is_empty() => format!("{base}/attr/{name}"),
+        _ => trimmed.to_string(),
+    }
+}
+
+/// Value FQN: `https://<namespace>/attr/<name>/value/<value>`.
+pub fn canonical_value_fqn(definition_fqn: &str, value: &str) -> String {
+    let def = canonical_definition_fqn(definition_fqn);
+    if def.contains("/value/") {
+        return def;
+    }
+    format!("{def}/value/{value}")
 }
 
 /// What to do for a subject that does not hold a label's requirements.
@@ -85,6 +121,16 @@ pub struct TaxonomyMap {
     labels: BTreeMap<DataCategory, LabelPolicy>,
     /// The hierarchical clearance definition, if the map declares one.
     clearance: Option<ClearanceDefinition>,
+    /// Conjunctive (allOf / anyOf) definition FQNs. Joined by union at wrap.
+    conjunctive_fqns: BTreeSet<String>,
+    /// FQNs that may only be stamped from asserted provenance, never inferred.
+    provenance_fqns: BTreeSet<String>,
+    /// When true, a missing provenance facet stamps `unknown` rather than omitting.
+    missing_provenance_unknown: bool,
+    /// Data-derived definitions. Keyed by canonical definition FQN.
+    derived: BTreeMap<String, crate::derived_stamp::DerivedDefinition>,
+    /// Definitions that organize the corpus and must not appear on a TDF.
+    off_tdf_fqns: BTreeSet<String>,
 }
 
 /// The hierarchical clearance attribute.
@@ -103,14 +149,21 @@ pub struct ClearanceDefinition {
 
 impl ClearanceDefinition {
     /// The clearance value a subject needs to receive data at `level`.
+    ///
+    /// Lookup is by value name, not by index: the platform creates hierarchy
+    /// values highest-to-lowest, and an older map may have listed them the
+    /// other way. Indexing would silently swap public and restricted.
     pub fn value_for(&self, level: SensitivityLevel) -> Option<&str> {
-        let index = match level {
-            SensitivityLevel::Public => 0,
-            SensitivityLevel::Internal => 1,
-            SensitivityLevel::Confidential => 2,
-            SensitivityLevel::Restricted => 3,
+        let slug = match level {
+            SensitivityLevel::Public => "public",
+            SensitivityLevel::Internal => "internal",
+            SensitivityLevel::Confidential => "confidential",
+            SensitivityLevel::Restricted => "restricted",
         };
-        self.order.get(index).map(String::as_str)
+        self.order
+            .iter()
+            .find(|v| v.as_str() == slug)
+            .map(String::as_str)
     }
 }
 
@@ -147,28 +200,64 @@ impl TaxonomyMap {
                     label: label.name,
                     category,
                     sensitivity,
-                    requires: label.requires,
-                    wrap_attributes: label.wrap_attributes,
+                    requires: label
+                        .requires
+                        .into_iter()
+                        .map(|r| AttributeRequirement::new(r.fqn, r.value))
+                        .collect(),
+                    wrap_attributes: label
+                        .wrap_attributes
+                        .into_iter()
+                        .map(|r| AttributeRequirement::new(r.fqn, r.value))
+                        .collect(),
                     unentitled: label.unentitled,
                     never_release: label.never_release,
                 },
             );
         }
 
-        let clearance = doc
-            .attribute_definitions
+        let mut clearance = None;
+        let mut conjunctive_fqns = BTreeSet::new();
+        let mut off_tdf_fqns = BTreeSet::new();
+        for def in &doc.attribute_definitions {
+            let fqn = canonical_definition_fqn(&def.fqn);
+            if !def.on_tdf {
+                off_tdf_fqns.insert(fqn.clone());
+            }
+            match def.rule.as_str() {
+                "hierarchy" if !def.order.is_empty() && clearance.is_none() => {
+                    clearance = Some(ClearanceDefinition {
+                        fqn,
+                        order: def.order.clone(),
+                    });
+                }
+                "allOf" | "anyOf" => {
+                    conjunctive_fqns.insert(fqn);
+                }
+                _ => {}
+            }
+        }
+        let provenance_fqns: BTreeSet<String> = doc
+            .derived_artifact_join
+            .provenance_attributes
             .into_iter()
-            .find(|d| d.rule == "hierarchy" && !d.order.is_empty())
-            .map(|d| ClearanceDefinition {
-                fqn: d.fqn,
-                order: d.order,
-            });
+            .filter(|fqn| !fqn.is_empty())
+            .map(|fqn| canonical_definition_fqn(&fqn))
+            .collect();
+        let missing_provenance_unknown = doc.derived_artifact_join.missing_provenance == "unknown"
+            && !provenance_fqns.is_empty();
+        let derived = crate::derived_stamp::parse_derived_table(&doc.derived)?;
 
         Ok(Self {
             version: doc.version,
             namespace: doc.namespace,
             labels,
             clearance,
+            conjunctive_fqns,
+            provenance_fqns,
+            missing_provenance_unknown,
+            derived,
+            off_tdf_fqns,
         })
     }
 
@@ -186,6 +275,39 @@ impl TaxonomyMap {
 
     pub fn clearance(&self) -> Option<&ClearanceDefinition> {
         self.clearance.as_ref()
+    }
+
+    /// Conjunctive attribute definitions. A derived artifact unions these.
+    pub fn conjunctive_fqns(&self) -> &BTreeSet<String> {
+        &self.conjunctive_fqns
+    }
+
+    /// Provenance-only FQNs. The sentinel never writes these.
+    pub fn provenance_fqns(&self) -> &BTreeSet<String> {
+        &self.provenance_fqns
+    }
+
+    /// Whether a missed provenance join stamps `unknown` (fail closed).
+    pub fn missing_provenance_is_unknown(&self) -> bool {
+        self.missing_provenance_unknown
+    }
+
+    pub fn derived_definition(
+        &self,
+        fqn: &str,
+    ) -> Option<&crate::derived_stamp::DerivedDefinition> {
+        self.derived.get(&canonical_definition_fqn(fqn))
+    }
+
+    pub fn derived_definitions(
+        &self,
+    ) -> &BTreeMap<String, crate::derived_stamp::DerivedDefinition> {
+        &self.derived
+    }
+
+    /// Corpus-organization definitions. Used to slice adapters, never wrap.
+    pub fn off_tdf_fqns(&self) -> &BTreeSet<String> {
+        &self.off_tdf_fqns
     }
 
     /// The clearance a subject needs for data at `sensitivity`, independent of
@@ -289,6 +411,18 @@ mod raw {
         #[serde(default, rename = "attributeDefinitions")]
         pub(super) attribute_definitions: Vec<AttributeDefinition>,
         pub(super) labels: Vec<Label>,
+        #[serde(default, rename = "derivedArtifactJoin")]
+        pub(super) derived_artifact_join: DerivedArtifactJoin,
+        #[serde(default)]
+        pub(super) derived: serde_json::Value,
+    }
+
+    #[derive(Default, Deserialize)]
+    pub(super) struct DerivedArtifactJoin {
+        #[serde(default, rename = "provenanceAttributes")]
+        pub(super) provenance_attributes: Vec<String>,
+        #[serde(default, rename = "missingProvenance")]
+        pub(super) missing_provenance: String,
     }
 
     #[derive(Deserialize)]
@@ -297,6 +431,12 @@ mod raw {
         pub(super) rule: String,
         #[serde(default)]
         pub(super) order: Vec<String>,
+        #[serde(default = "default_on_tdf", rename = "onTdf")]
+        pub(super) on_tdf: bool,
+    }
+
+    fn default_on_tdf() -> bool {
+        true
     }
 
     #[derive(Deserialize)]
@@ -328,6 +468,21 @@ mod tests {
     }
 
     #[test]
+    fn wrap_emits_platform_value_fqns() {
+        // Shorthand inside our PDP is rewritten; opentdf-rs parses the value form.
+        let req = AttributeRequirement::new("https://attr.arkavo.com/clearance", "secret");
+        assert_eq!(req.fqn, "https://attr.arkavo.com/attr/clearance");
+        assert_eq!(
+            req.as_attribute_uri(),
+            "https://attr.arkavo.com/attr/clearance/value/secret"
+        );
+        assert_eq!(
+            canonical_value_fqn("https://attr.arkavo.com/attr/project", "teva-allergan"),
+            "https://attr.arkavo.com/attr/project/value/teva-allergan"
+        );
+    }
+
+    #[test]
     fn credentials_never_release() {
         let map = TaxonomyMap::v1();
 
@@ -355,11 +510,11 @@ mod tests {
         let reqs = map.requirements_for([DataCategory::Financial]);
 
         assert!(reqs.contains(&AttributeRequirement::new(
-            "https://attr.arkavo.com/clearance",
+            "https://attr.arkavo.com/attr/clearance",
             "confidential"
         )));
         assert!(reqs.contains(&AttributeRequirement::new(
-            "https://attr.arkavo.com/department",
+            "https://attr.arkavo.com/attr/department",
             "finance"
         )));
     }
@@ -373,11 +528,11 @@ mod tests {
         let reqs = map.requirements_for([DataCategory::Healthcare, DataCategory::Financial]);
 
         assert!(reqs.contains(&AttributeRequirement::new(
-            "https://attr.arkavo.com/clearance",
+            "https://attr.arkavo.com/attr/clearance",
             "restricted"
         )));
         assert!(reqs.contains(&AttributeRequirement::new(
-            "https://attr.arkavo.com/department",
+            "https://attr.arkavo.com/attr/department",
             "finance"
         )));
     }
@@ -440,8 +595,12 @@ mod tests {
             .clearance_requirement(SensitivityLevel::Internal)
             .expect("internal needs clearance");
 
-        assert_eq!(internal.fqn, "https://attr.arkavo.com/clearance");
+        assert_eq!(internal.fqn, "https://attr.arkavo.com/attr/clearance");
         assert_eq!(internal.value, "internal");
+        assert_eq!(
+            internal.as_attribute_uri(),
+            "https://attr.arkavo.com/attr/clearance/value/internal"
+        );
         assert_eq!(
             map.clearance_requirement(SensitivityLevel::Restricted)
                 .map(|r| r.value),
@@ -462,5 +621,38 @@ mod tests {
             TaxonomyMap::from_json(json).unwrap_err(),
             TaxonomyError::UnknownCategory(_, _)
         ));
+    }
+
+    #[test]
+    fn embedded_v1_does_not_bind_project_as_provenance() {
+        let map = TaxonomyMap::v1();
+
+        assert!(map.provenance_fqns().is_empty());
+        assert!(!map.missing_provenance_is_unknown());
+        assert!(
+            map.conjunctive_fqns()
+                .contains("https://attr.arkavo.com/attr/project")
+        );
+    }
+
+    #[test]
+    fn oida_map_binds_project_as_fail_closed_provenance() {
+        let map =
+            TaxonomyMap::from_json(include_str!("../../../schemas/taxonomy-map.oida.v1.json"))
+                .expect("oida map");
+
+        assert_eq!(map.version(), "1.1.0");
+        assert!(
+            map.provenance_fqns()
+                .contains("https://attr.arkavo.com/attr/project")
+        );
+        assert!(map.missing_provenance_is_unknown());
+        assert_eq!(map.labels.len(), 6);
+        let topic = map
+            .derived_definition("https://derived.arkavo.com/attr/topic")
+            .expect("topic table");
+        assert!(topic.stamp);
+        assert!(topic.values.contains("sales"));
+        assert_eq!(topic.threshold_millis, 850);
     }
 }

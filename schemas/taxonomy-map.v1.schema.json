@@ -37,12 +37,27 @@
           "order": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "Lowest to highest. Required for and only valid on hierarchy definitions."
+            "description": "For hierarchy definitions, platform creation order is highest privilege to lowest. Runtime lookup is by value name, not by index. Reordering is unsafe: it changes access on existing TDFs."
           },
           "values": {
             "type": "array",
-            "items": { "type": "string" },
-            "description": "Known values. An empty array means the definition is populated per tenant."
+            "items": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+            "description": "Known values as single-segment lowercase slugs. An empty array means the definition is populated per tenant or via dynamic value mappings."
+          },
+          "dynamicValueMapping": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Pulls values from the entity representation so a definition can scale without registering every value. ANY_OF and ALL_OF only; cannot combine with value-level subject mappings. Comparison is case-sensitive.",
+            "required": ["entityPath", "operator"],
+            "properties": {
+              "entityPath": { "type": "string" },
+              "operator": { "type": "string", "enum": ["IN", "IN_CONTAINS"] }
+            }
+          },
+          "onTdf": {
+            "type": "boolean",
+            "default": true,
+            "description": "When false, this definition organizes the corpus (which knowledge adapter to train) and is never written to TDF dataAttributes."
           },
           "description": { "type": "string" }
         }
@@ -92,9 +107,106 @@
         }
       }
     },
+    "derived": {
+      "type": "object",
+      "description": "Second table: data-derived definitions in a separate namespace. The sentinel still only labels; this table is the only place a derived label becomes a data attribute. Open-ended tags never appear here. At wrap, every derived tag is asserted; a tag is stamped as a data attribute only when stamp is true, the value is declared, and its score meets threshold. ALL_OF only — ANY_OF would let an unpromoted tag bypass a promoted conjunct. Promotion tightens subject mapping on an already-stamped value; it does not add the value at wrap.",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^https://derived\\.[^/]+/attr/[a-z][a-z0-9-]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rule", "values", "source", "threshold", "stamp"],
+          "properties": {
+            "rule": {
+              "type": "string",
+              "enum": ["ALL_OF", "allOf"],
+              "description": "Derived definitions are ALL_OF. A document tagged {sales, pricing} stays conjunctive so promoting pricing restricts even a holder of still-universal sales."
+            },
+            "values": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" }
+            },
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["tagger", "version"],
+              "properties": {
+                "tagger": { "type": "string" },
+                "version": { "type": "string" }
+              }
+            },
+            "threshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Scores below this stay in the assertion only. After promotion a false positive is a denial; a false negative leaves the prescribed baseline."
+            },
+            "stamp": {
+              "type": "boolean",
+              "description": "When false, tags for this definition are asserted but never become dataAttributes."
+            },
+            "promoted": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [],
+              "description": "Values whose subject mapping is no longer universal. Wrap still stamps them; promotion is a KAS mapping change and a rewrap of already-tagged TDFs."
+            }
+          }
+        }
+      }
+    },
+    "derivedArtifactJoin": {
+      "type": "object",
+      "description": "How a derived artifact (adapter, sentinel, index) inherits the policies of its training inputs at wrap. This is a property of what an adapter is — a lossy copy of its corpus — not of any one tenant. Hierarchical attributes take the maximum (existing high-water mark). Conjunctive attributes take the union. Provenance attributes are stamped only from asserted facets; a miss is fail-closed.",
+      "additionalProperties": false,
+      "properties": {
+        "hierarchy": {
+          "type": "string",
+          "const": "max",
+          "description": "Clearance and any other hierarchy definition: the derived artifact carries the maximum of its inputs."
+        },
+        "allOf": {
+          "type": "string",
+          "const": "union",
+          "description": "Conjunctive definitions (project, department): the derived artifact carries every value any input carried. An archive-wide adapter therefore demands allOf every collection it saw."
+        },
+        "provenanceAttributes": {
+          "type": "array",
+          "items": { "type": "string", "format": "uri" },
+          "description": "Attribute FQNs that may only be stamped from asserted provenance (a connector join), never from the sentinel. Empty means the tenant has not bound the facet and opt-out is omit, not a second code path."
+        },
+        "missingProvenance": {
+          "type": "string",
+          "enum": ["unknown", "omit"],
+          "description": "unknown: stamp the definition's unknown value, entitled to nobody, and exclude the item from partitioned adapters. omit: do not stamp the attribute (tenant has not bound the facet)."
+        }
+      }
+    },
+    "obligationTriggers": {
+      "type": "array",
+      "description": "PDP-to-PEP directives that accompany a permit. An obligation is not stamped on the TDF; it fires off a resource attribute value. A PEP that cannot enforce the obligation must refuse.",
+      "items": {
+        "type": "object",
+        "required": ["action", "resourceAttribute", "obligation"],
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string" },
+          "resourceAttribute": {
+            "type": "string",
+            "format": "uri",
+            "description": "Value FQN on the resource that arms the trigger, e.g. https://attr.arkavo.com/attr/project/value/mallinckrodt"
+          },
+          "obligation": {
+            "type": "string",
+            "format": "uri",
+            "description": "Obligation value FQN, e.g. https://attr.arkavo.com/obl/handling/value/legal-hold"
+          }
+        }
+      }
+    },
     "obligations": {
       "type": "array",
-      "description": "Handling obligations carried as assertions. An obligation constrains what a holder may do with released content; it never grants decryption.",
+      "description": "Obligation definitions. Grammar is <namespace>/obl/<name> for the definition and <namespace>/obl/<name>/value/<value> for the value. An obligation never grants decryption.",
       "items": {
         "type": "object",
         "required": ["name", "fqn", "assertionType", "grantsDecryption"],
@@ -102,6 +214,7 @@
         "properties": {
           "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
           "fqn": { "type": "string", "format": "uri" },
+          "value": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
           "assertionType": { "type": "string", "enum": ["handling"] },
           "grantsDecryption": {
             "type": "boolean",

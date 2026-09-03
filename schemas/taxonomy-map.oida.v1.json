@@ -1,0 +1,205 @@
+{
+  "$schema": "./taxonomy-map.v1.schema.json",
+  "version": "1.1.0",
+  "namespace": "https://attr.arkavo.com/",
+  "attributeDefinitions": [
+    {
+      "name": "clearance",
+      "fqn": "https://attr.arkavo.com/attr/clearance",
+      "rule": "hierarchy",
+      "order": ["restricted", "confidential", "internal", "public"],
+      "description": "Hierarchical clearance. Platform creates values highest to lowest privilege. A TDF carries https://attr.arkavo.com/attr/clearance/value/<level>. Derived artifacts take the maximum of their inputs. Reordering is unsafe."
+    },
+    {
+      "name": "department",
+      "fqn": "https://attr.arkavo.com/attr/department",
+      "rule": "allOf",
+      "values": ["sales", "medical-affairs", "regulatory", "legal", "finance", "executive"],
+      "description": "Function compartment. Value FQN https://attr.arkavo.com/attr/department/value/<fn>. Conjunctive with clearance and project. Derived artifacts take the union."
+    },
+    {
+      "name": "project",
+      "fqn": "https://attr.arkavo.com/attr/project",
+      "rule": "allOf",
+      "onTdf": false,
+      "values": [
+        "unknown",
+        "mallinckrodt",
+        "mnk",
+        "teva",
+        "endo",
+        "insys",
+        "mckinsey",
+        "mckesson",
+        "walgreens",
+        "wapo",
+        "doud",
+        "deafoia"
+      ],
+      "dynamicValueMapping": {
+        "entityPath": ".projectAssignments[]",
+        "operator": "IN"
+      },
+      "description": "Corpus organization for this tenant (IDL collection). It selects which knowledge adapter to train — Mallinckrodt vs Teva vs a deal room — and does not go on the TDF. onTdf is false. A real company binds this to folder, matter, subsidiary, or deal room the same way."
+    }
+  ],
+  "derived": {
+    "https://derived.arkavo.com/attr/topic": {
+      "rule": "ALL_OF",
+      "values": ["sales", "pricing", "regulatory", "speaker-programs"],
+      "source": { "tagger": "sentinel-topic", "version": "0.1.0" },
+      "threshold": 0.85,
+      "stamp": true,
+      "promoted": []
+    }
+  },
+  "derivedArtifactJoin": {
+    "hierarchy": "max",
+    "allOf": "union",
+    "provenanceAttributes": ["https://attr.arkavo.com/attr/project"],
+    "missingProvenance": "unknown"
+  },
+  "labels": [
+    {
+      "label": "public",
+      "category": "Public",
+      "sensitivity": "Public",
+      "requires": [],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "public" }
+      ],
+      "unentitled": "redact",
+      "description": "Content cleared for release. The sentinel emits this label; it does not emit collection. Data-derived tags (doctype, topic, embed-cluster) never appear here."
+    },
+    {
+      "label": "internal",
+      "category": "Internal",
+      "sensitivity": "Internal",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "internal" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "internal" }
+      ],
+      "unentitled": "block",
+      "description": "Organization-internal content."
+    },
+    {
+      "label": "pii",
+      "category": "Pii",
+      "sensitivity": "Internal",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "internal" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "internal" }
+      ],
+      "unentitled": "block",
+      "description": "Personal data. Floor matches DatumType::default_sensitivity."
+    },
+    {
+      "label": "financial",
+      "category": "Financial",
+      "sensitivity": "Confidential",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "confidential" },
+        { "fqn": "https://attr.arkavo.com/attr/department", "value": "finance" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "confidential" },
+        { "fqn": "https://attr.arkavo.com/attr/department", "value": "finance" }
+      ],
+      "unentitled": "block",
+      "description": "Payment instruments and financial records. Conjunctive."
+    },
+    {
+      "label": "healthcare",
+      "category": "Healthcare",
+      "sensitivity": "Restricted",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "restricted" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "restricted" }
+      ],
+      "unentitled": "block",
+      "description": "Health information."
+    },
+    {
+      "label": "credentials",
+      "category": "Credentials",
+      "sensitivity": "Restricted",
+      "requires": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "restricted" }
+      ],
+      "wrapAttributes": [
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "restricted" }
+      ],
+      "unentitled": "block",
+      "neverRelease": true,
+      "description": "API keys, passwords, tokens. Blocked unconditionally."
+    }
+  ],
+  "obligationTriggers": [
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/mallinckrodt",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    },
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/teva",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    },
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/endo",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    },
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/insys",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    },
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/mckinsey",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    },
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/mckesson",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    },
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/walgreens",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    },
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/wapo",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    },
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/doud",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    },
+    {
+      "action": "read",
+      "resourceAttribute": "https://attr.arkavo.com/attr/project/value/deafoia",
+      "obligation": "https://attr.arkavo.com/obl/handling/value/legal-hold"
+    }
+  ],
+  "obligations": [
+    {
+      "name": "legal-hold",
+      "fqn": "https://attr.arkavo.com/obl/handling",
+      "value": "legal-hold",
+      "assertionType": "handling",
+      "grantsDecryption": false,
+      "description": "Fires on read of each concrete project value in this sample. Not a TDF dataAttribute. Tenants that use only dynamic project values have no concrete trigger to hang on — they either keep this as a signed TDF assertion or introduce a universally-entitled https://attr.arkavo.com/attr/handling/value/legal-hold marker. unknown is not a trigger: it is entitled to nobody."
+    }
+  ]
+}
