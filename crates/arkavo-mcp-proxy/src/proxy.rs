@@ -320,13 +320,12 @@ impl McpProxy {
                         response
                     }
                     Err(error) => {
-                        // No response came back. Whether whatever the policy
-                        // spent admitting the call can be handed back turns
-                        // on how far the call got: a request that was written
-                        // upstream may be running there still, a timeout
-                        // being the ordinary way to see that. An error
-                        // returned *by the tool* is a completed call and does
-                        // not come through here at all.
+                        // No response came back. Timeouts and post-write
+                        // failures never refund: the call may have executed.
+                        // Only a request that was never written upstream is
+                        // refunded. (An error returned *by the tool* is a
+                        // completed call and does not come through here at
+                        // all.)
                         let outcome = ForwardOutcome::from(&error);
                         self.policy.on_forward_failed(&ctx, outcome).await;
                         warn!(
