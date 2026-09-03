@@ -98,12 +98,15 @@ async fn write_response<W: AsyncWrite + Unpin>(
     writer.flush().await
 }
 
-/// Whether a downstream write failed because the client is no longer there.
+/// Whether a downstream read or write failed because the client is no longer
+/// there.
 ///
 /// A client is free to stop listening at any point, and it does not owe the
-/// proxy a clean shutdown: the case that reaches here is a client that sends
-/// an over-long line — which is answered, not ignored — and closes the
-/// connection before the answer can be written.
+/// proxy a clean shutdown. Writing finds this when a client sends an
+/// over-long line — which is answered, not ignored — and closes before the
+/// answer can be written; reading finds it when the connection is reset
+/// rather than closed, which is a hang-up too and not something the proxy
+/// did. Neither is a failure of this session, so both end it with `Ok`.
 fn client_is_gone(error: &std::io::Error) -> bool {
     matches!(
         error.kind(),
@@ -152,7 +155,18 @@ impl McpProxy {
         W: AsyncWrite + Unpin,
     {
         loop {
-            let response = match framing::read_line(&mut reader).await? {
+            let line = match framing::read_line(&mut reader).await {
+                Ok(line) => line,
+                // A reset connection is a hang-up, not a fault: the client
+                // stopped talking without saying so, which is the same end of
+                // session an EOF is and is reported the same way.
+                Err(error) if client_is_gone(&error) => {
+                    debug!("downstream client disconnected mid-message");
+                    break;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let response = match line {
                 Line::Eof => break,
                 Line::TooLong => {
                     warn!(
@@ -537,6 +551,67 @@ mod tests {
             .await
             .expect("a request is answered");
         assert_eq!(response["error"]["code"], UPSTREAM_ERROR);
+    }
+
+    /// A downstream connection that fails on every read, with the error kind
+    /// a test wants: a reset, or something the proxy really should report.
+    struct FailingReader(std::io::ErrorKind);
+
+    impl tokio::io::AsyncRead for FailingReader {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Err(std::io::Error::from(self.0)))
+        }
+    }
+
+    /// A client that hangs up is a client that hangs up, whichever side of
+    /// the connection notices it. A write that finds nobody there already
+    /// ended the session with `Ok`; a *read* that finds the connection reset
+    /// - the ordinary way a vanished client is noticed first - reported
+    /// someone else's disconnect as a failure of the proxy.
+    #[tokio::test]
+    async fn a_client_whose_connection_is_reset_ends_the_session_cleanly() {
+        use crate::policy::AllowAllPolicy;
+        use std::sync::Arc;
+
+        let proxy = McpProxy::spawn(
+            ProxyConfig::new("true", Vec::new()),
+            Arc::new(AllowAllPolicy),
+        )
+        .expect("spawn");
+
+        for kind in [
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::ConnectionAborted,
+        ] {
+            let result = proxy
+                .run(
+                    tokio::io::BufReader::new(FailingReader(kind)),
+                    tokio::io::sink(),
+                )
+                .await;
+            assert!(
+                result.is_ok(),
+                "{kind:?} is the client hanging up, not a failure of the proxy: {result:?}"
+            );
+        }
+
+        // Every other read failure is still the proxy's to report: a session
+        // that ends because the stream itself is unusable is not a hang-up.
+        let result = proxy
+            .run(
+                tokio::io::BufReader::new(FailingReader(std::io::ErrorKind::InvalidData)),
+                tokio::io::sink(),
+            )
+            .await;
+        assert!(
+            matches!(result, Err(ProxyError::Io(_))),
+            "a read that is not a disconnect must still surface: {result:?}"
+        );
     }
 
     /// A string at the cap is still decoded: the bound refuses what cannot be
