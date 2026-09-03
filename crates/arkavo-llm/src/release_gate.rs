@@ -123,19 +123,34 @@ where
                         // would otherwise have that text bypass the gate
                         // entirely, which is the one span most likely to hold
                         // the end of a completion.
-                        if !chunk.content.is_empty()
-                            && this.gate.admit(&chunk.content) == GateOutcome::Blocked
-                        {
-                            this.blocked = true;
-                            return Poll::Ready(Some(Err(Error::Provider(
-                                GATE_BLOCKED.to_string(),
-                            ))));
+                        //
+                        // What the admit clears is kept, not just tested for a
+                        // block. A gate releases by the window, so a whole
+                        // completion arriving as one done chunk — which is
+                        // every non-streaming provider — clears its full
+                        // windows here and only its tail at `finish`. Reading
+                        // the admit for `Blocked` alone dropped everything but
+                        // that tail, and truncated any answer longer than one
+                        // window rather than withholding it.
+                        let mut released = String::new();
+                        if !chunk.content.is_empty() {
+                            match this.gate.admit(&chunk.content) {
+                                GateOutcome::Blocked => {
+                                    this.blocked = true;
+                                    return Poll::Ready(Some(Err(Error::Provider(
+                                        GATE_BLOCKED.to_string(),
+                                    ))));
+                                }
+                                GateOutcome::Release(text) => released = text,
+                            }
                         }
-                        return Poll::Ready(Some(finish(
-                            &this.gate,
-                            &mut this.blocked,
-                            Some(chunk),
-                        )));
+                        return Poll::Ready(Some(
+                            finish(&this.gate, &mut this.blocked, Some(chunk)).map(|mut last| {
+                                released.push_str(&last.content);
+                                last.content = released;
+                                last
+                            }),
+                        ));
                     }
                     match this.gate.admit(&chunk.content) {
                         GateOutcome::Blocked => {
@@ -387,6 +402,68 @@ mod tests {
         }
 
         assert_eq!(seen, "an opening and a closing");
+    }
+
+    /// A gate that releases in whole windows and holds the remainder until the
+    /// completion ends, which is the shape a classifier-backed gate has: it
+    /// judges a window at a time and cannot judge a partial one.
+    struct Windowed {
+        held: Mutex<String>,
+        window: usize,
+    }
+
+    impl Windowed {
+        fn new(window: usize) -> Arc<Self> {
+            Arc::new(Self {
+                held: Mutex::new(String::new()),
+                window,
+            })
+        }
+    }
+
+    impl ReleaseGate for Windowed {
+        fn admit(&self, chunk: &str) -> GateOutcome {
+            let mut held = self.held.lock().expect("lock");
+            held.push_str(chunk);
+            let split = held.len() - held.len() % self.window;
+            let rest = held.split_off(split);
+            GateOutcome::Release(std::mem::replace(&mut *held, rest))
+        }
+
+        fn finish(&self) -> GateOutcome {
+            GateOutcome::Release(std::mem::take(&mut *self.held.lock().expect("lock")))
+        }
+
+        fn discard(&self) {
+            self.held.lock().expect("lock").clear();
+        }
+    }
+
+    /// A completion that arrives as one done chunk — every non-streaming
+    /// provider, and every `RouteStream::from_response` — reaches the consumer
+    /// whole. The done arm used to read its admit for a block and nothing else,
+    /// so every window the gate cleared there was dropped and the caller got
+    /// only the tail: a silent truncation of any answer longer than one window,
+    /// and only with a gate set.
+    #[tokio::test]
+    async fn a_whole_completion_on_the_done_chunk_is_not_truncated() {
+        // Four full windows and a partial one, so the answer is split across
+        // both halves of the gate's contract.
+        let answer = "abcdefghij".repeat(7);
+        let inner = futures::stream::iter(vec![Ok(StreamResponse {
+            content: answer.clone(),
+            reasoning_content: None,
+            done: true,
+            inference_timing: None,
+        })]);
+        let mut stream = gated(Box::pin(inner), Windowed::new(16));
+
+        let mut seen = String::new();
+        while let Some(item) = stream.next().await {
+            seen.push_str(&item.expect("clean text is not refused").content);
+        }
+
+        assert_eq!(seen, answer);
     }
 
     /// SENT-007 edge case: the completion ends mid-window and the tail is still

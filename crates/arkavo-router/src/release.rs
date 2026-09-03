@@ -264,9 +264,9 @@ mod tests {
 
         let response = stream.complete().await.expect("clean text completes");
 
-        // What the gate releases from a chunk is `gated`'s business and is
-        // asserted in `arkavo-llm`; what is asserted here is that the wrapper
-        // carries the tool calls a `RouteStream` was built with.
+        // The whole one-chunk response survives the gate, and so do the tool
+        // calls the wrapper was given.
+        assert_eq!(response.content, "reading it now");
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].tool_name, call.tool_name);
         assert_eq!(response.tool_calls[0].arguments, call.arguments);
