@@ -125,6 +125,7 @@ scenarios:
       - Every other _meta key arrives unchanged
       - _meta itself is dropped only if removing arkavo leaves it empty
     refs:
+      - crates/arkavo-mcp-proxy/src/meta.rs
       - crates/arkavo-mcp-proxy/src/proxy.rs
 
   - id: PDG-009
@@ -138,7 +139,7 @@ scenarios:
       - An absent credential is never reported as a malformed one, or the reverse
     refs:
       - crates/arkavo-mcp-proxy/src/permit_hook.rs
-      - crates/arkavo-mcp-proxy/src/proxy.rs
+      - crates/arkavo-mcp-proxy/src/meta.rs
 
   - id: PDG-010
     name: Untrusted input is bounded before it is parsed, hashed, or buffered
@@ -155,6 +156,7 @@ scenarios:
     refs:
       - crates/arkavo-mcp-proxy/src/framing.rs
       - crates/arkavo-mcp-proxy/src/proxy.rs
+      - crates/arkavo-mcp-proxy/src/refusals.rs
       - crates/arkavo-cwt/src/depth.rs
       - crates/arkavo-dispatch-gate/src/lib.rs
 
@@ -169,5 +171,5 @@ scenarios:
       - It is refused with JSON-RPC -32601 and never relayed to the downstream client
       - The waiting caller still receives the tool's own result
     refs:
-      - crates/arkavo-mcp-proxy/src/upstream.rs
+      - crates/arkavo-mcp-proxy/src/refusals.rs
       - crates/arkavo-mcp-proxy/tests/stdio_passthrough.rs

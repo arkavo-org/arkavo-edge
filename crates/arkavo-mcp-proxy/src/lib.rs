@@ -27,19 +27,28 @@
 //! authorization story.
 //!
 //! Downstream input is bounded: one message may be at most 1 MiB, a
-//! `_meta.arkavo` credential at most the encoded size of the largest permit,
-//! and the dispatch gate caps the arguments it will hash. A JSON-RPC batch
-//! (a top-level array) is refused with `INVALID_REQUEST` rather than
-//! silently dropped.
+//! `_meta.arkavo` credential at most the encoded size of what that field can
+//! hold, and the dispatch gate caps the arguments it will hash. A JSON-RPC
+//! batch (a top-level array) is refused with `INVALID_REQUEST` rather than
+//! silently dropped. Upstream output is bounded the same way, and the time a
+//! write to the upstream may take is bounded too, so a server that stops
+//! reading its own stdin cannot hold the session open.
+//!
+//! The work is split so each file answers one question: `proxy` runs the
+//! session, `upstream` holds the request/response conversation with the
+//! server, `refusals` handles the traffic coming the other way, `meta` reads
+//! and strips the client's credentials, and `framing` bounds a line.
 //!
 //! Calling identity is deliberately out of scope for this slice; the
 //! [`CallContext`] struct is the extension point where a principal will be
 //! attached without changing the [`PolicyHook`] trait.
 
 pub mod framing;
+mod meta;
 mod permit_hook;
 pub mod policy;
 mod proxy;
+mod refusals;
 mod upstream;
 
 pub use framing::MAX_LINE_BYTES;
