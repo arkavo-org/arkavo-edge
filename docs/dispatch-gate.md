@@ -108,7 +108,17 @@ handed to the caller waiting on that id and relayed downstream as the tool's
 result — gets the same `-32601` as any other. Only a message with no `method`
 is matched against the requests in flight. The refusals themselves are queued
 rather than written by the reader, so a server that asks faster than it reads
-its own stdin stalls nothing but itself.
+its own stdin cannot stop the proxy reading the response a caller is waiting
+for.
+
+It cannot stop the proxy writing, either. The refusal writer and every
+forwarded request share one stdin behind one mutex, so a server that stops
+reading its stdin blocks whoever holds that lock and everyone queued behind
+it. Every write is bounded by the same per-request timeout: on expiry the
+write is abandoned, the connection is marked closed — a partial line is
+already in the pipe, and the next write would splice onto it — and the call
+is answered with `-32603`. That failure keeps its invocation, because the
+bytes the pipe did accept may have been a whole line the upstream ran.
 
 ## Stages
 
@@ -132,7 +142,7 @@ call actually got, and only one of the two is refundable:
 | `ForwardOutcome` | Upstream failures | Budget |
 |---|---|---|
 | `NotDelivered` | the connection was already closed, spawning failed, the write was cut short | returned via `DispatchGate::refund` |
-| `MaybeExecuted` | the request timed out, the flush failed, the upstream closed after the request was sent | stays spent, logged at `warn` |
+| `MaybeExecuted` | the request timed out, the write timed out against a server that stopped reading, the flush failed, the upstream closed after the request was sent | stays spent, logged at `warn` |
 
 The line is drawn at the write, not at the response. A timeout means the
 request *was* delivered and a tool slower than the request timeout is still

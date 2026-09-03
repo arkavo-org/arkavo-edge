@@ -240,6 +240,9 @@ mod tests {
         }
         for error in [
             UpstreamError::Timeout(std::time::Duration::from_millis(1)),
+            // A write abandoned part-way still put bytes in the pipe, and
+            // they may have been a whole line the upstream ran.
+            UpstreamError::WriteTimeout(std::time::Duration::from_millis(1)),
             UpstreamError::ClosedAfterSend,
             UpstreamError::Flush("broken pipe".into()),
         ] {

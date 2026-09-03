@@ -27,6 +27,15 @@
 //! provoke queue up to [`REFUSAL_QUEUE_DEPTH`] and are written by a task of
 //! their own, so a server that floods requests and stops reading its own
 //! stdin cannot stall the reading of the response a caller is waiting for.
+//!
+//! Writing is bounded in time as well. The writer task and every request
+//! share one stdin behind one mutex, so a server that stops reading blocks
+//! whoever holds that lock and everyone waiting for it — including a
+//! `request` that has not started its receive timeout yet. Each write is
+//! therefore wrapped in the connection's timeout: on expiry it is abandoned,
+//! the connection is marked closed (a partial line is already in the pipe,
+//! and the next write would splice onto it), and a request reports
+//! [`UpstreamError::WriteTimeout`], which counts as "may have run".
 
 use crate::framing::{self, Line, MAX_LINE_BYTES};
 use serde_json::{Value, json};
@@ -73,6 +82,15 @@ pub enum UpstreamError {
     #[error("upstream flush failed: {0}")]
     Flush(String),
 
+    /// Writing the request to the upstream server's stdin did not finish in
+    /// time, because the server stopped reading it.
+    ///
+    /// Whatever the pipe accepted before it filled *was* delivered, so the
+    /// upstream may have read a whole line and run it; the write is abandoned
+    /// pessimistically rather than held open.
+    #[error("upstream write timed out after {0:?}")]
+    WriteTimeout(Duration),
+
     /// The upstream server did not respond in time. The request was
     /// dispatched; a slow tool goes on running after the wait is abandoned.
     #[error("upstream request timed out after {0:?}")]
@@ -91,7 +109,9 @@ impl UpstreamError {
     pub fn may_have_reached_upstream(&self) -> bool {
         match self {
             Self::Spawn { .. } | Self::Closed | Self::Write(_) => false,
-            Self::ClosedAfterSend | Self::Flush(_) | Self::Timeout(_) => true,
+            Self::ClosedAfterSend | Self::Flush(_) | Self::WriteTimeout(_) | Self::Timeout(_) => {
+                true
+            }
         }
     }
 }
@@ -149,6 +169,7 @@ impl UpstreamConnection {
             cmd.env(key, value);
         }
 
+        let timeout = timeout.unwrap_or(DEFAULT_TIMEOUT);
         let mut child = cmd.spawn().map_err(|source| UpstreamError::Spawn {
             command: command.to_string(),
             source,
@@ -163,16 +184,10 @@ impl UpstreamConnection {
 
         // Writer task: the only place refusals are written, so the reader
         // never waits on an upstream that has stopped reading its own stdin.
-        // It ends when the reader task drops the sender at EOF.
-        let (refusals, mut queued) = mpsc::channel::<Value>(REFUSAL_QUEUE_DEPTH);
-        let writer_stdin = Arc::clone(&stdin);
-        tokio::spawn(async move {
-            while let Some(refusal) = queued.recv().await {
-                if let Err(e) = write_line(&writer_stdin, &refusal).await {
-                    warn!("failed to refuse a server-initiated request: {e}");
-                }
-            }
-        });
+        // It ends when the reader task drops the sender at EOF, or when a
+        // write of its own runs out of time.
+        let (refusals, queued) = mpsc::channel::<Value>(REFUSAL_QUEUE_DEPTH);
+        spawn_refusal_writer(Arc::clone(&stdin), queued, timeout, Arc::clone(&connected));
 
         // Reader task: correlate responses by id, fail all pending requests
         // when the upstream closes its stdout.
@@ -180,9 +195,10 @@ impl UpstreamConnection {
         let reader_connected = Arc::clone(&connected);
         tokio::spawn(async move {
             let mut stdout = BufReader::new(stdout);
-            // Refusals the queue had no room for. Counted rather than
-            // repeated so one flood is one warning per refusal, with the
-            // total attached.
+            // Refusals the queue had no room for. Counted on every drop
+            // but warned about on the first and then at each doubling, so a
+            // flood of any size costs a dozen log lines rather than one per
+            // refusal.
             let mut dropped_refusals = 0u64;
             loop {
                 match framing::read_line(&mut stdout).await {
@@ -228,8 +244,33 @@ impl UpstreamConnection {
             stdin,
             pending,
             connected,
-            timeout: timeout.unwrap_or(DEFAULT_TIMEOUT),
+            timeout,
         })
+    }
+
+    /// Write one message to the upstream's stdin, bounded by this
+    /// connection's timeout.
+    ///
+    /// The bound covers waiting for the shared stdin lock as well as the
+    /// write itself, because `write_line` takes that lock: an upstream that
+    /// has stopped reading blocks whoever holds it, and everyone behind them
+    /// would otherwise wait with no timeout of their own.
+    ///
+    /// A write abandoned part-way may have left a prefix of the line in the
+    /// pipe, and the next write would splice onto it, so the connection is
+    /// marked closed rather than spoken on again.
+    async fn write_bounded(&self, message: &Value) -> Result<(), UpstreamError> {
+        match tokio::time::timeout(self.timeout, write_line(&self.stdin, message)).await {
+            Ok(result) => result,
+            Err(_) => {
+                warn!(
+                    timeout = ?self.timeout,
+                    "upstream stopped reading its stdin; the write was abandoned"
+                );
+                self.connected.store(false, Ordering::SeqCst);
+                Err(UpstreamError::WriteTimeout(self.timeout))
+            }
+        }
     }
 
     /// Send a request and return the full JSON-RPC response object,
@@ -262,7 +303,7 @@ impl UpstreamConnection {
             self.pending.lock().await.remove(&key);
             return Err(UpstreamError::Closed);
         }
-        if let Err(e) = write_line(&self.stdin, &request).await {
+        if let Err(e) = self.write_bounded(&request).await {
             self.pending.lock().await.remove(&key);
             return Err(e);
         }
@@ -287,7 +328,7 @@ impl UpstreamConnection {
             "method": method,
             "params": params.cloned().unwrap_or_else(|| json!({})),
         });
-        write_line(&self.stdin, &notification).await
+        self.write_bounded(&notification).await
     }
 
     /// Terminate the upstream server process.
@@ -360,7 +401,9 @@ async fn dispatch(
 /// keep reading, and a server that asks faster than it reads its own stdin
 /// must not be able to stop it. When the queue is full — or the writer task
 /// has gone with the connection — the refusal is dropped and counted, which
-/// costs that server nothing but its own timeout.
+/// costs that server nothing but its own timeout. Every drop is counted;
+/// only the first and each doubling after it is logged, so a flood cannot
+/// turn the log into the flood.
 fn refuse_server_request(
     refusals: &mpsc::Sender<Value>,
     id: &Value,
@@ -384,17 +427,59 @@ fn refuse_server_request(
         );
     } else {
         *dropped += 1;
-        warn!(
-            method,
-            dropped = *dropped,
-            queue_depth = REFUSAL_QUEUE_DEPTH,
-            "dropped the refusal of a server-initiated request: the refusal queue is full"
-        );
+        // A flood is thousands of refusals, and one warning each would make
+        // the log the denial of service the queue is there to prevent. The
+        // first drop is reported, and then every doubling: enough to see one
+        // is happening and roughly how big it got, at a dozen lines for a
+        // flood of any size.
+        if dropped.is_power_of_two() {
+            warn!(
+                method,
+                dropped = *dropped,
+                queue_depth = REFUSAL_QUEUE_DEPTH,
+                "dropped the refusal of a server-initiated request: the refusal queue is full"
+            );
+        }
     }
 }
 
-async fn write_line(
-    stdin: &Mutex<tokio::process::ChildStdin>,
+/// The task that writes refusals, and the only place they are written.
+///
+/// Each write is bounded by `timeout`, because the shared stdin lock is
+/// taken inside it: against an upstream that has stopped reading, an
+/// unbounded `write_all` here would hold that lock forever and every request
+/// behind it would block on the lock rather than on its own timeout. When a
+/// write does run out of time the connection is marked closed and the task
+/// stops — nothing more can be said on a pipe nobody is reading, and a
+/// partial line is already in it.
+fn spawn_refusal_writer<W>(
+    stdin: Arc<Mutex<W>>,
+    mut queued: mpsc::Receiver<Value>,
+    timeout: Duration,
+    connected: Arc<AtomicBool>,
+) where
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        while let Some(refusal) = queued.recv().await {
+            match tokio::time::timeout(timeout, write_line(&stdin, &refusal)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => warn!("failed to refuse a server-initiated request: {e}"),
+                Err(_) => {
+                    warn!(
+                        ?timeout,
+                        "upstream stopped reading its stdin; no further refusals are written"
+                    );
+                    connected.store(false, Ordering::SeqCst);
+                    return;
+                }
+            }
+        }
+    });
+}
+
+async fn write_line<W: tokio::io::AsyncWrite + Unpin>(
+    stdin: &Mutex<W>,
     message: &Value,
 ) -> Result<(), UpstreamError> {
     let mut bytes = serde_json::to_vec(message).unwrap_or_default();
@@ -499,6 +584,85 @@ mod tests {
         .await;
         let response = receiver.await.expect("the response reaches the caller");
         assert_eq!(response["result"]["ok"], true);
+    }
+
+    /// The refusal queue is what keeps one flood from mattering, and the
+    /// counter is what says how much of it was thrown away. With no room
+    /// left, a refusal is dropped rather than waited on, and counted.
+    #[tokio::test]
+    async fn a_refusal_the_queue_has_no_room_for_is_dropped_and_counted() {
+        let pending: Mutex<HashMap<String, oneshot::Sender<Value>>> = Mutex::new(HashMap::new());
+        // Depth one: the first refusal takes the only slot, and nothing
+        // drains it, so every refusal after that has nowhere to go.
+        let (refusals, mut queued) = mpsc::channel(1);
+        let mut dropped = 0u64;
+
+        let ask = |n: u64| json!({"jsonrpc": "2.0", "id": n, "method": "sampling/createMessage"});
+
+        dispatch(&pending, &refusals, ask(1), &mut dropped).await;
+        assert_eq!(dropped, 0, "the first refusal fits");
+
+        for expected in 1..=3u64 {
+            dispatch(&pending, &refusals, ask(expected + 1), &mut dropped).await;
+            assert_eq!(
+                dropped, expected,
+                "a refusal with nowhere to go is counted, not waited on"
+            );
+        }
+
+        // Only the one that fit is there, and the drops cost the reader
+        // nothing but the count.
+        assert_eq!(queued.try_recv().expect("the queued refusal")["id"], 1);
+        assert!(
+            queued.try_recv().is_err(),
+            "nothing else was queued behind it"
+        );
+    }
+
+    /// The writer task shares the upstream's stdin with every request, so a
+    /// write of its own that cannot finish would hold that lock for as long
+    /// as the upstream cared to ignore it — and every request would then
+    /// block on the lock rather than on a timeout of its own. It gives up on
+    /// the connection's timeout instead, and says the connection is gone.
+    #[tokio::test]
+    async fn a_refusal_write_that_cannot_finish_gives_up_and_closes_the_connection() {
+        // A duplex whose far half is alive but never read: a write past its
+        // buffer blocks exactly as a pipe to a server that stopped reading
+        // its stdin does.
+        let (blocked, _never_read) = tokio::io::duplex(8);
+        let stdin = Arc::new(Mutex::new(blocked));
+        let connected = Arc::new(AtomicBool::new(true));
+        let (refusals, queued) = mpsc::channel::<Value>(REFUSAL_QUEUE_DEPTH);
+        spawn_refusal_writer(
+            Arc::clone(&stdin),
+            queued,
+            Duration::from_millis(50),
+            Arc::clone(&connected),
+        );
+
+        refusals
+            .send(json!({"jsonrpc": "2.0", "id": 1, "error": {"code": METHOD_NOT_FOUND}}))
+            .await
+            .expect("the writer is listening");
+
+        for _ in 0..200 {
+            if !connected.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !connected.load(Ordering::SeqCst),
+            "a write that cannot finish must mark the connection closed"
+        );
+        assert!(
+            stdin.try_lock().is_ok(),
+            "the abandoned write must not still hold the shared stdin"
+        );
+        assert!(
+            refusals.send(json!({"id": 2})).await.is_err(),
+            "the writer stops: nothing more can be said on a pipe nobody reads"
+        );
     }
 
     /// Regression: after the upstream exits, a request must fail fast with

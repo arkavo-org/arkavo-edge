@@ -25,13 +25,24 @@ Several tools exist to drive proxy behaviour that a well-behaved server cannot:
 - "refusal_flood" writes many unmatched server-initiated requests before its
   real response, so a test can see that answering them never stalls the
   proxy's reading of the response itself.
+
+Setting MCP_PROXY_TEST_STALL_STDIN makes the server stop reading its stdin
+once the handshake is done: it answers "initialize" and then sleeps forever
+without reading another byte. A message large enough to fill the pipe then
+blocks the proxy's write, which is the case its write timeout exists for.
 """
 
 import json
 import os
 import sys
+import time
 
 RECORD_FILE = os.environ.get("MCP_PROXY_TEST_RECORD")
+STALL_STDIN = os.environ.get("MCP_PROXY_TEST_STALL_STDIN")
+
+# Long enough that any write timeout a test sets fires first, short enough
+# that a fixture left behind by a failed test does not linger.
+STALL_SECONDS = 300
 
 TOOLS = [
     {
@@ -162,6 +173,12 @@ def main() -> None:
                 },
             }
         elif method == "notifications/initialized":
+            if STALL_STDIN:
+                # Read nothing more, ever. The pipe the proxy writes to fills
+                # and its write blocks, which is what the write timeout is
+                # there to bound.
+                time.sleep(STALL_SECONDS)
+                return
             continue
         elif method == "tools/list":
             response = {"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}}

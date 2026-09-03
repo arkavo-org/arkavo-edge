@@ -858,6 +858,68 @@ async fn a_timed_out_call_keeps_its_invocation_spent() {
     let _ = std::fs::remove_file(&record_file);
 }
 
+/// An upstream that stops reading its stdin must not be able to hold the
+/// proxy open. A request large enough to fill the pipe blocks in `write_all`
+/// while holding the shared stdin lock, and the request's own timeout has not
+/// started yet — it covers only the wait for a response — so without a bound
+/// on the write the session hangs for as long as that server cares to sleep.
+/// The write timeout ends it, and the invocation stays spent: the bytes the
+/// pipe did accept may have been a whole line the upstream ran.
+#[tokio::test]
+#[spec("PDG-006")]
+async fn a_write_to_an_upstream_that_stopped_reading_gives_up_and_keeps_its_budget() {
+    let issuer = PermitSigner::Ed25519(AgentKeypair::generate());
+    let holder = PermitSigner::Ed25519(AgentKeypair::generate());
+    // Past any pipe buffer, so the write cannot finish into a stdin nobody is
+    // reading; still inside the 1 MiB frame cap and the gate's 256 KiB
+    // argument cap, so nothing else refuses it first.
+    let args = json!({"pad": "x".repeat(200 * 1024)});
+    let meta = permit_meta(&issuer, &holder, "echo", &args, 1);
+
+    let config = fixture_config()
+        .with_env("MCP_PROXY_TEST_STALL_STDIN", "1")
+        .with_timeout(Duration::from_millis(500));
+    let (mut client, handle) =
+        start_proxy(config, Arc::new(PermitPolicy::new(permit_gate(&issuer))));
+    client.handshake().await;
+
+    let params = json!({"name": "echo", "arguments": args, "_meta": meta});
+    let started = std::time::Instant::now();
+    let first = client.request("tools/call", Some(params.clone())).await;
+    assert_eq!(
+        first["error"]["code"], UPSTREAM_ERROR,
+        "a write that cannot finish is answered, not waited out: {first}"
+    );
+    assert!(
+        first["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("write timed out"),
+        "the failure must name the write, not the response wait: {first}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "the write must give up on its own timeout, not the fixture's sleep: {:?}",
+        started.elapsed()
+    );
+
+    let second = client.request("tools/call", Some(params)).await;
+    assert_eq!(
+        second["error"]["code"], POLICY_DENIED,
+        "a partially written request may have run upstream, so nothing is refunded: {second}"
+    );
+    assert!(
+        second["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("budget"),
+        "the second call must be refused for budget: {second}"
+    );
+
+    drop(client);
+    handle.await.unwrap().unwrap();
+}
+
 /// The other half of the rule: a tool that ran and returned an error is a
 /// completed call. It keeps the invocation it spent, so a budget of one
 /// covers exactly one failed tool call and no more.
