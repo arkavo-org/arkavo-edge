@@ -67,6 +67,15 @@ pub enum Stage {
     Authn,
     Policy,
     Budget,
+    /// The gate had no room to count this permit at all.
+    ///
+    /// Not a budget refusal, and kept apart from one because the two ask
+    /// different things of the caller: a permit out of budget is finished,
+    /// and one refused here has spent nothing and becomes usable again as
+    /// soon as the gate has room. Reported as `budget:` they were
+    /// indistinguishable, so a holder could not tell "your permit is used
+    /// up" from "come back in a moment".
+    Capacity,
 }
 
 impl fmt::Display for Stage {
@@ -75,6 +84,7 @@ impl fmt::Display for Stage {
             Self::Authn => "authn",
             Self::Policy => "policy",
             Self::Budget => "budget",
+            Self::Capacity => "capacity",
         })
     }
 }
@@ -130,8 +140,8 @@ impl UsageTable {
 /// invocation count at zero, which is exactly the budget a flood of fresh
 /// permits would be trying to buy. When pruning frees nothing, the gate fails
 /// closed instead — a permit the table is not already counting is denied at
-/// [`Stage::Budget`] until entries expire, while every permit already counted
-/// keeps being counted normally.
+/// [`Stage::Capacity`] until entries expire, while every permit already
+/// counted keeps being counted normally.
 const MAX_TRACKED_PERMITS: usize = 65_536;
 
 pub struct DispatchGate {
@@ -226,7 +236,7 @@ impl DispatchGate {
             // not already counting waits instead.
             Entry::Vacant(_) if full => {
                 return deny(
-                    Stage::Budget,
+                    Stage::Capacity,
                     "gate capacity exhausted; retry after permits expire".into(),
                 );
             }
@@ -699,7 +709,12 @@ mod tests {
     /// stage rather than evicting a live counter — a counter reset to zero is
     /// a second budget for a permit that has already spent its first — and
     /// the room comes back as entries expire.
+    /// The gate's own state is bounded, and running out of it is not the
+    /// same refusal as a permit running out of budget: one is the holder's
+    /// fault and final, the other is the gate's and passes. They are
+    /// reported at different stages so a holder can tell them apart.
     #[test]
+    #[spec("PDG-006")]
     fn a_full_usage_table_denies_new_permits_rather_than_evicting_live_ones() {
         use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -761,11 +776,12 @@ mod tests {
             matches!(
                 &denied,
                 GateDecision::Deny {
-                    stage: Stage::Budget,
+                    stage: Stage::Capacity,
                     reason,
                 } if reason.contains("capacity")
             ),
-            "{denied:?}"
+            "a permit the table has no room for is refused at the capacity \
+             stage, not the budget one: {denied:?}"
         );
         assert_eq!(gate.usage_len(), CAPACITY, "nothing was evicted");
 
@@ -786,6 +802,10 @@ mod tests {
             ),
             "a full table must not reset a live counter: {third:?}"
         );
+        // Both reach a client as "<stage>: <reason>", and the half that says
+        // what to do about it is the half that now differs.
+        assert_eq!(Stage::Capacity.to_string(), "capacity");
+        assert_eq!(Stage::Budget.to_string(), "budget");
 
         // Past the first four permits' expiry, pruning frees their counters —
         // they are refused at authn from here on — and the new permit fits.
@@ -860,7 +880,7 @@ mod tests {
             matches!(
                 &first,
                 GateDecision::Deny {
-                    stage: Stage::Budget,
+                    stage: Stage::Capacity,
                     ..
                 }
             ),
@@ -874,7 +894,7 @@ mod tests {
             matches!(
                 &second,
                 GateDecision::Deny {
-                    stage: Stage::Budget,
+                    stage: Stage::Capacity,
                     ..
                 }
             ),

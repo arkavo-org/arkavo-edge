@@ -139,7 +139,14 @@ bytes the pipe did accept may have been a whole line the upstream ran.
 |---|---|---|
 | authn | permit signature against the trusted-issuer list (by `kid`), `nbf`/`exp`/`iat` at now, proof-of-possession over the permit's identity, tool, and arguments against the `cnf` key | `authn:` |
 | policy | permit's `policy_bundle_hash` equals the proxy's configured bundle; tool name and argument hash match the permit | `policy:` |
-| budget | invocations of this permit (keyed on `Permit::id`, the digest of the permit's signed content, so re-encoding one permit cannot buy a second budget) stay below `budget.max_invocations`, and the bounded usage table has room to count it | `budget:` |
+| budget | invocations of this permit (keyed on `Permit::id`, the digest of the permit's signed content, so re-encoding one permit cannot buy a second budget) stay below `budget.max_invocations` | `budget:` |
+| capacity | the bounded usage table has room to count this permit at all | `capacity:` |
+
+The last of those is not a fourth check so much as the budget stage having
+nowhere to keep its count. It is named separately because the two say
+opposite things to the holder: `budget:` means this permit is used up and
+will not work again, `capacity:` means it has spent nothing and will work as
+soon as the gate has room. Reported as one stage they were indistinguishable.
 
 The proof-of-possession names the permit by that same `Permit::id`, so one
 proof covers every valid encoding of one issuance — the same notion of "the
@@ -180,7 +187,7 @@ state: it counts at most 65 536 permits at once. Only *expired* counters are
 ever dropped. Evicting a live one would restart a still-valid permit's count
 at zero, which is precisely the second budget a flood of freshly minted
 permits would be buying, so when pruning frees nothing the gate fails closed
-instead: a permit the table is not already counting is denied at the budget
+instead: a permit the table is not already counting is denied at the capacity
 stage with `gate capacity exhausted; retry after permits expire`, while every
 permit already counted goes on being counted normally. Room returns as
 entries expire — those permits are refused at authn from then on anyway. At

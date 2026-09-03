@@ -93,6 +93,7 @@ scenarios:
     when: the call is admitted and then fails — the upstream never took it, or took it and never answered
     then:
       - The second call on an exhausted budget is denied at the budget stage
+      - A permit the bounded usage table has no room to count is denied at the capacity stage instead, since it has spent nothing and works again as soon as room frees
       - A dispatch that never reached the upstream returns the invocation, so the permit is usable again
       - A call that was written upstream and then timed out keeps its invocation, because a slow tool goes on running after the wait is abandoned
       - A call the upstream ran and answered with an error keeps its invocation
