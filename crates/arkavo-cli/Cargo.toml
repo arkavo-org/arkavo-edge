@@ -28,12 +28,12 @@ memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns", "arkavo-orchestrator/mdns"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote", "arkavo-router/llm-remote"]
-kimi = ["arkavo-llm/kimi"]
-deepseek = ["arkavo-llm/deepseek"]
-glm = ["arkavo-llm/llm-remote", "arkavo-router/glm", "arkavo-ui-core/glm"]
-xai = ["arkavo-llm/llm-remote", "arkavo-router/xai", "arkavo-ui-core/xai"]
+kimi = ["arkavo-llm/kimi", "arkavo-orchestrator/kimi"]
+deepseek = ["arkavo-llm/deepseek", "arkavo-orchestrator/deepseek"]
+glm = ["arkavo-llm/llm-remote", "arkavo-router/glm", "arkavo-ui-core/glm", "arkavo-orchestrator/glm"]
+xai = ["arkavo-llm/llm-remote", "arkavo-router/xai", "arkavo-ui-core/xai", "arkavo-orchestrator/xai"]
 gemini = ["arkavo-llm/gemini", "arkavo-router/gemini"]
-llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp", "arkavo-context/llama-cpp", "arkavo-server/llama-cpp"]
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp", "arkavo-context/llama-cpp", "arkavo-server/llama-cpp", "arkavo-orchestrator/llama-cpp"]
 snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 # Keyed reference index and `arkavo pack index`. Off until the DLP pack
@@ -67,9 +67,11 @@ opentdf = { version = "0.15.0", default-features = false, features = ["rustls-tl
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-proxy = { path = "../arkavo-mcp-proxy" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-fingerprint = { path = "../arkavo-fingerprint", optional = true }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
+arkavo-permit = { path = "../arkavo-permit" }
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-session = { path = "../arkavo-session" }
 arkavo-server = { path = "../arkavo-server" }
@@ -81,13 +83,14 @@ arkavo-knowledge-pack = { path = "../arkavo-knowledge-pack", optional = true }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
 arkavo-ui-core = { path = "../arkavo-ui-core", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
-arkavo-orchestrator = { path = "../arkavo-orchestrator" }
+arkavo-orchestrator = { path = "../arkavo-orchestrator", default-features = false }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-hrm = { path = "../arkavo-hrm" }
 arkavo-ucp = { path = "../arkavo-ucp" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
+arkavo-dispatch-gate = { path = "../arkavo-dispatch-gate" }
 arkavo-identity = { path = "../arkavo-identity" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-gossip = { path = "../arkavo-gossip" }
@@ -96,6 +99,7 @@ arkavo-agent-auth = { path = "../arkavo-agent-auth" }
 arkavo-config-encryption = { path = "../arkavo-config-encryption" }
 arkavo-config-bundle = { path = "../arkavo-config-bundle" }
 base64 = { workspace = true }
+hex = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }

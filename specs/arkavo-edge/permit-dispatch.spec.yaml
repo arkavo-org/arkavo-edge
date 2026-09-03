@@ -1,0 +1,175 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Permit-bound tool dispatch
+module: arkavo_dispatch_gate
+version: 0.92.0
+
+invariants:
+  - A tools/call reaches the upstream server only with a permit from a trusted issuer and a proof of possession of that permit's cnf key
+  - The permit is verified before its claims are parsed; decode never drives an authorization decision
+  - Every per-permit record — budget counter, proof-of-possession digest — is keyed on Permit::id, the digest of the signed content, never on the token bytes
+  - The permit and proof never reach the upstream server
+  - Untrusted input is bounded before it is parsed, hashed, or buffered
+
+scenarios:
+  - id: PDG-001
+    name: Verification runs in order, and an untrusted permit is refused before its claims are read
+    criticality: critical
+    given:
+      - A verifier holding a list of trusted issuer public keys
+      - A permit whose protected header names an issuer by kid
+    when: verify() is called on the permit
+    then:
+      - The size cap, CWT tag, COSE parse and empty-unprotected-header check run before any key is looked up
+      - A kid naming no trusted issuer is refused as UntrustedIssuer before the claims are parsed
+      - A signature that does not verify is refused as InvalidSignature, not as a claim decoding error
+      - Only then are the claims parsed and the nbf/exp/iat window checked
+    refs:
+      - crates/arkavo-permit/src/permit.rs
+      - crates/arkavo-dispatch-gate/src/lib.rs
+
+  - id: PDG-002
+    name: A self-minted permit carries no authority
+    criticality: critical
+    given:
+      - A keypair that is not on the gate's trusted issuer list
+    when: that keypair mints a permit naming itself as both issuer and cnf holder, and presents it with a valid proof
+    then:
+      - The gate denies at the authn stage
+      - Trusting the presenter's cnf key instead of the issuer does not make the permit verify
+      - No budget counter is created for the refused permit
+    refs:
+      - crates/arkavo-dispatch-gate/src/lib.rs
+      - crates/arkavo-permit/src/permit.rs
+
+  - id: PDG-003
+    name: A proof of possession covers one invocation of one permit
+    criticality: critical
+    given:
+      - A permit bound to a tool name and an argument hash
+      - The presenter's cnf keypair
+    when: the proof is presented with different arguments, or made by a different key
+    then:
+      - A proof over other arguments does not verify
+      - A proof from any key other than the cnf key does not verify
+      - The digest is domain-separated and independent of JSON key order
+    refs:
+      - crates/arkavo-permit/src/pop.rs
+      - crates/arkavo-dispatch-gate/src/lib.rs
+
+  - id: PDG-004
+    name: The proof names the permit by its signed identity, not by its bytes
+    criticality: high
+    given:
+      - One issued permit and a re-encoding of it that still verifies (the COSE_Sign1 serialized without tag 18)
+    when: the proof made for the original is presented with the re-encoding
+    then:
+      - Both encodings yield the same Permit::id
+      - The one proof verifies against both
+      - Both share one budget counter, so a re-encoding cannot buy a second budget
+    refs:
+      - crates/arkavo-permit/src/pop.rs
+      - crates/arkavo-permit/src/permit.rs
+      - crates/arkavo-dispatch-gate/src/lib.rs
+
+  - id: PDG-005
+    name: An expired permit is refused at the authn stage
+    criticality: critical
+    given:
+      - A permit whose exp precedes now
+    when: the gate evaluates a call carrying it
+    then:
+      - The call is denied at the authn stage
+      - The denial names the expiry rather than a policy or budget rule
+    refs:
+      - crates/arkavo-dispatch-gate/src/lib.rs
+      - crates/arkavo-permit/src/permit.rs
+
+  - id: PDG-006
+    name: Budget is counted per signed identity, spent at admission, and returned only when the call never reached the upstream
+    criticality: critical
+    given:
+      - A permit with budget.max_invocations of 1
+    when: the call is admitted and then fails — the upstream never took it, or took it and never answered
+    then:
+      - The second call on an exhausted budget is denied at the budget stage
+      - A permit the bounded usage table has no room to count is denied at the capacity stage instead, since it has spent nothing and works again as soon as room frees
+      - A dispatch that never reached the upstream returns the invocation, so the permit is usable again
+      - A call that was written upstream and then timed out keeps its invocation, because a slow tool goes on running after the wait is abandoned
+      - A call the upstream ran and answered with an error keeps its invocation
+      - The counter is keyed on Permit::id and never goes below zero
+    refs:
+      - crates/arkavo-dispatch-gate/src/lib.rs
+      - crates/arkavo-mcp-proxy/src/permit_hook.rs
+
+  - id: PDG-007
+    name: A tools/call sent as a notification is dropped, never forwarded
+    criticality: critical
+    given:
+      - A proxy in front of an upstream MCP server
+    when: a tools/call arrives with no id, so no response could carry a denial back
+    then:
+      - The call is dropped with a warning and never forwarded upstream
+      - The upstream records no such call
+    refs:
+      - crates/arkavo-mcp-proxy/src/proxy.rs
+
+  - id: PDG-008
+    name: The permit and proof are stripped before the call is forwarded
+    criticality: critical
+    given:
+      - An allowed tools/call carrying params._meta.arkavo alongside other _meta keys
+    when: the proxy forwards it upstream
+    then:
+      - The upstream sees no arkavo key under _meta
+      - Every other _meta key arrives unchanged
+      - _meta itself is dropped only if removing arkavo leaves it empty
+    refs:
+      - crates/arkavo-mcp-proxy/src/meta.rs
+      - crates/arkavo-mcp-proxy/src/proxy.rs
+
+  - id: PDG-009
+    name: A call without usable credentials is refused by what is actually wrong
+    criticality: high
+    given:
+      - A permit-gated proxy
+    when: a tools/call arrives with no _meta.arkavo, with one of the two fields, or with a field that is not base64url or is longer than any permit
+    then:
+      - Each case is denied at the authn stage with a reason naming that case
+      - An absent credential is never reported as a malformed one, or the reverse
+    refs:
+      - crates/arkavo-mcp-proxy/src/permit_hook.rs
+      - crates/arkavo-mcp-proxy/src/meta.rs
+
+  - id: PDG-010
+    name: Untrusted input is bounded before it is parsed, hashed, or buffered
+    criticality: high
+    given:
+      - A permit-gated proxy reading newline-delimited JSON-RPC
+    when: a client sends an over-long line, a JSON-RPC batch, a deeply nested token, or oversized arguments
+    then:
+      - A line over 1 MiB is answered with INVALID_REQUEST, skipped, and the connection survives
+      - A top-level array is answered with INVALID_REQUEST rather than dropped
+      - CBOR nesting past 16 levels is refused before a decoder sees it, in the token itself and in the only two byte strings a COSE_Sign1 decoder parses in their own right - the protected header and the payload
+      - An indefinite-length byte string in either of those two slots is refused outright, since no single span covers its content while a decoder still concatenates the chunks and decodes the result
+      - Arguments over 256 KiB are denied at the policy stage before either hash of them runs
+    refs:
+      - crates/arkavo-mcp-proxy/src/framing.rs
+      - crates/arkavo-mcp-proxy/src/proxy.rs
+      - crates/arkavo-mcp-proxy/src/refusals.rs
+      - crates/arkavo-cwt/src/depth.rs
+      - crates/arkavo-dispatch-gate/src/lib.rs
+
+  - id: PDG-011
+    name: A server-initiated request is refused even when it reuses an in-flight id
+    criticality: critical
+    given:
+      - A proxy waiting on a tools/call it has forwarded upstream
+    when: the upstream sends a request of its own carrying that call's id
+    then:
+      - A message carrying method is a request whatever id it names, and is never matched against the requests in flight
+      - It is refused with JSON-RPC -32601 and never relayed to the downstream client
+      - The waiting caller still receives the tool's own result
+    refs:
+      - crates/arkavo-mcp-proxy/src/refusals.rs
+      - crates/arkavo-mcp-proxy/tests/stdio_passthrough.rs

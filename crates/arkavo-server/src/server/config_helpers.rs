@@ -226,6 +226,52 @@ pub(super) async fn reload_configuration_for_watcher(
     Ok(())
 }
 
+/// Build delegation-JWT verification config from the environment.
+///
+/// - `ARKAVO_DELEGATION_PUBLIC_KEY_PEM`: trusted authnz-rs ES256 public key,
+///   either inline PEM (literal `\n` sequences are expanded) or a path to a
+///   PEM file.
+/// - `ARKAVO_ALLOW_UNVERIFIED_DELEGATION=1|true`: INSECURE escape hatch that
+///   accepts delegation JWT claims without signature verification. Dev/test
+///   only — any forged token can grant entitlements. Never set in production.
+///
+/// With neither set the registration service fails closed: delegation
+/// entitlements are never granted.
+///
+/// Returns an error when the env var names a key file that cannot be read —
+/// a configured-but-unreadable key must fail startup, not silently run with
+/// no trusted key (which hides the operator's misconfiguration).
+pub(super) fn delegation_config_from_env()
+-> arkavo_protocol::Result<arkavo_protocol::DelegationConfig> {
+    let mut config = arkavo_protocol::DelegationConfig::default();
+
+    if let Ok(raw) = std::env::var("ARKAVO_DELEGATION_PUBLIC_KEY_PEM") {
+        let pem = if raw.contains("-----BEGIN") {
+            raw.replace("\\n", "\n")
+        } else {
+            std::fs::read_to_string(&raw).map_err(|e| {
+                arkavo_protocol::A2aError::Configuration(format!(
+                    "Failed to read delegation public key from '{raw}': {e}"
+                ))
+            })?
+        };
+        config.trusted_public_keys_pem.push(pem);
+    }
+
+    let allow_unverified = std::env::var("ARKAVO_ALLOW_UNVERIFIED_DELEGATION")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if allow_unverified {
+        warn!(
+            "INSECURE: ARKAVO_ALLOW_UNVERIFIED_DELEGATION is set; delegation JWTs are \
+             accepted without signature verification"
+        );
+        config.allow_unverified = true;
+    }
+
+    Ok(config)
+}
+
 /// Clean up old configuration backups
 pub(super) async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count: usize) {
     if let Ok(mut entries) = tokio::fs::read_dir(backup_dir).await {

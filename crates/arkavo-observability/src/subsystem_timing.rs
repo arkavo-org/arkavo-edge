@@ -18,6 +18,12 @@ pub struct SubsystemTiming {
     pub mcp_tool_p95_ms: f64,
     #[serde(rename = "inferenceAvgMs")]
     pub inference_avg_ms: f64,
+    /// Combined overhead of dispatch-gate stages (preflight moderation,
+    /// budget check, critic verification), tracked for the 25ms gate budget.
+    #[serde(rename = "dispatchGateAvgMs")]
+    pub dispatch_gate_avg_ms: f64,
+    #[serde(rename = "dispatchGateP95Ms")]
+    pub dispatch_gate_p95_ms: f64,
 }
 
 impl SubsystemTiming {
@@ -26,6 +32,7 @@ impl SubsystemTiming {
             && self.conductor_orchestration_avg_ms == 0.0
             && self.mcp_tool_avg_ms == 0.0
             && self.inference_avg_ms == 0.0
+            && self.dispatch_gate_avg_ms == 0.0
     }
 }
 
@@ -99,6 +106,12 @@ pub struct SubsystemTimingRegistry {
     pub conductor_orchestration: LatencyTracker,
     pub mcp_tools: LatencyTracker,
     pub inference: LatencyTracker,
+    /// Rolling window over dispatch-gate stage latencies. Four writers share
+    /// it: preflight, budget, critic, and the permit gate the MCP proxy runs
+    /// on every `tools/call` (`arkavo_mcp_proxy::permit_hook`). Samples are
+    /// recorded in milliseconds; sub-millisecond stages read as 0 — use the
+    /// gate_latency bench for sub-ms precision.
+    pub dispatch_gate: LatencyTracker,
 }
 
 impl SubsystemTimingRegistry {
@@ -108,6 +121,7 @@ impl SubsystemTimingRegistry {
             conductor_orchestration: LatencyTracker::new(50),
             mcp_tools: LatencyTracker::new(100),
             inference: LatencyTracker::new(50),
+            dispatch_gate: LatencyTracker::new(100),
         }
     }
 
@@ -118,6 +132,8 @@ impl SubsystemTimingRegistry {
             mcp_tool_avg_ms: self.mcp_tools.avg(),
             mcp_tool_p95_ms: self.mcp_tools.p95(),
             inference_avg_ms: self.inference.avg(),
+            dispatch_gate_avg_ms: self.dispatch_gate.avg(),
+            dispatch_gate_p95_ms: self.dispatch_gate.p95(),
         }
     }
 }
@@ -180,9 +196,12 @@ mod tests {
         let registry = SubsystemTimingRegistry::new();
         registry.router_decisions.record(15);
         registry.mcp_tools.record(50);
+        registry.dispatch_gate.record(3);
         let snap = registry.snapshot();
         assert!((snap.router_decision_avg_ms - 15.0).abs() < 0.01);
         assert!((snap.mcp_tool_avg_ms - 50.0).abs() < 0.01);
+        assert!((snap.dispatch_gate_avg_ms - 3.0).abs() < 0.01);
+        assert!((snap.dispatch_gate_p95_ms - 3.0).abs() < 0.01);
     }
 
     #[test]

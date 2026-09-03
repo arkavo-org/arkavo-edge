@@ -60,8 +60,8 @@ pub use planes::{
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use preflight::{
-    AgentConfig, BudgetYamlConfig, KasYamlConfig, ModerationResult, PolicyId, PreflightFeature,
-    PreflightModerator, build_moderator_from_config, load_agent_config,
+    AgentConfig, BudgetYamlConfig, KasTrustedRootYaml, KasYamlConfig, ModerationResult, PolicyId,
+    PreflightFeature, PreflightModerator, build_moderator_from_config, load_agent_config,
 };
 pub use prompt_advisor::{AdvisorIssue, DynamicSnapshot, PromptAdvice, PromptAdvisor};
 pub use provider_info::LlmInfo;
@@ -1094,7 +1094,12 @@ impl Router {
 
         // Pre-flight moderation check (before any LLM inference)
         if let Some(preflight) = &self.preflight {
-            match preflight.check(task_description) {
+            let gate_start = std::time::Instant::now();
+            let moderation = preflight.check(task_description);
+            arkavo_observability::subsystem_timing::global_timing()
+                .dispatch_gate
+                .record(gate_start.elapsed().as_millis() as u64);
+            match moderation {
                 preflight::ModerationResult::Allow => {}
                 preflight::ModerationResult::Block {
                     policy_id, reason, ..

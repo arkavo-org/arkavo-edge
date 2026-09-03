@@ -2278,6 +2278,27 @@ This agent serves as Arkavo's side of the A2A protocol bridge.
         assert_eq!(agents[0].model, "ministral-3b");
         assert!(agents[0].a2a_enabled);
         assert!(agents[0].purpose.contains("A2A protocol bridge"));
+
+        // The runtime loads KAS config from AGENTS.md via arkavo-router, not
+        // through the CLI AgentConfig above. Verify the trusted_roots block in
+        // this fixture is no longer parsed-then-discarded on that path.
+        let mut file = tempfile::NamedTempFile::with_suffix(".md").unwrap();
+        use std::io::Write as _;
+        write!(file, "{content}").unwrap();
+        let runtime_config =
+            arkavo_router::preflight::load_agent_config_from_agents_md(file.path()).unwrap();
+        let kas = runtime_config.kas.expect("kas config should parse");
+        assert!(kas.enabled);
+        assert_eq!(kas.key_id.as_deref(), Some("bridge-demo-key-1"));
+        assert_eq!(kas.trusted_roots.len(), 1);
+        assert_eq!(
+            kas.trusted_roots[0].did,
+            "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+        );
+        assert_eq!(
+            kas.trusted_roots[0].name.as_deref(),
+            Some("Demo Root Authority")
+        );
     }
 
     #[test]

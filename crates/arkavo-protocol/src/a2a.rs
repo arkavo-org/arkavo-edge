@@ -143,11 +143,6 @@ impl A2aClient {
         self.session_id.is_some()
     }
 
-    // Existing methods unchanged
-    pub fn send(&self, _message: &str) -> Result<String, Box<dyn std::error::Error>> {
-        Ok("A2A response".to_string())
-    }
-
     pub async fn call_mcp_tool(
         &self,
         tool_name: &str,
