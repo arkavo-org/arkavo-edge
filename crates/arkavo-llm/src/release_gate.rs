@@ -94,6 +94,14 @@ where
                     return Poll::Ready(Some(finish(&this.gate, &mut this.blocked, None)));
                 }
                 Poll::Ready(Some(Err(e))) => {
+                    // The provider stopped mid-completion. The gate outlives
+                    // this stream, so text it admitted but has not yet windowed
+                    // would otherwise sit in its buffer and be prefixed onto
+                    // the next completion — the same cross-completion
+                    // contamination the abandoned-consumer path discards for.
+                    // `discard` and not `finish`: an error is not an
+                    // inspection, and there is no consumer left to release to.
+                    this.gate.discard();
                     this.finished = true;
                     return Poll::Ready(Some(Err(e)));
                 }
@@ -438,6 +446,35 @@ mod tests {
             assert_eq!(gate.discards(), 0, "not while the stream is alive");
         }
 
+        assert_eq!(gate.discards(), 1);
+    }
+
+    /// A provider that errors mid-completion ends it as surely as a consumer
+    /// walking away does, and the gate has to be told: text it admitted but has
+    /// not windowed would otherwise be inherited by the next completion.
+    #[tokio::test]
+    async fn a_provider_error_mid_stream_discards_what_the_gate_held() {
+        let gate = Counting::new();
+        {
+            let inner = futures::stream::iter(vec![
+                Ok(StreamResponse {
+                    content: "held".to_string(),
+                    reasoning_content: None,
+                    done: false,
+                    inference_timing: None,
+                }),
+                Err(Error::Provider("the provider gave up".to_string())),
+            ]);
+            let mut stream = gated(Box::pin(inner), gate.clone());
+
+            stream.next().await.expect("a chunk").expect("clean text");
+            let error = stream.next().await.expect("the error");
+            assert!(error.is_err());
+            assert_eq!(gate.discards(), 1, "told as soon as the error is seen");
+        }
+
+        // And dropping the stream afterwards does not discard a second time:
+        // the completion is already over.
         assert_eq!(gate.discards(), 1);
     }
 

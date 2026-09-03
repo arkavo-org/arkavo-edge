@@ -60,6 +60,11 @@ pub fn gate_completion(gate: &Arc<dyn ReleaseGate>, content: &str) -> Result<Str
 /// also carries has no counterpart on a `StreamChunk` and is not invented.
 pub fn gate_stream(stream: RouteStream, gate: Arc<dyn ReleaseGate>) -> RouteStream {
     let metadata = stream.metadata().clone();
+    // Read before the stream is consumed, and carried onto the rebuilt one:
+    // gating a completion is not a decision about its tool calls, and dropping
+    // them would change what the caller gets only when a gate is set, which is
+    // the one shape of behaviour change nobody would look for.
+    let tool_calls = stream.tool_calls().to_vec();
     let inbound = stream.map(|item| match item {
         Ok(chunk) => Ok(StreamResponse {
             content: chunk.content,
@@ -81,7 +86,7 @@ pub fn gate_stream(stream: RouteStream, gate: Arc<dyn ReleaseGate>) -> RouteStre
         }),
         Err(e) => Err(Error::Provider(e)),
     });
-    RouteStream::new(Box::pin(outbound), metadata)
+    RouteStream::new(Box::pin(outbound), metadata).with_tool_calls(tool_calls)
 }
 
 #[cfg(test)]
@@ -232,6 +237,39 @@ mod tests {
 
         assert!(error.to_string().contains(GATE_BLOCKED), "{error}");
         assert!(!error.to_string().contains("CANARY"), "{error}");
+    }
+
+    /// Gating a completion says nothing about its tool calls, and the wrapper
+    /// has to carry them: `RouteStream::new` starts with none, so a
+    /// `gate_stream` that used it alone made every tool call vanish — but only
+    /// when a gate was set.
+    #[tokio::test]
+    async fn a_gated_stream_still_reports_its_tool_calls() {
+        let call = arkavo_llm::ParsedToolCall {
+            tool_name: "read_file".to_string(),
+            arguments: serde_json::json!({"path": "notes.md"}),
+            call_id: Some("call_1".to_string()),
+        };
+        let stream = gate_stream(
+            RouteStream::from_response(RouteResponse {
+                content: "reading it now".to_string(),
+                tool_calls: vec![call.clone()],
+                model: ModelChoice::LocalGemma270M,
+                cost_usd: 0.0,
+                used_architect_mode: false,
+                architect_savings: None,
+            }),
+            Recorder::new(None),
+        );
+
+        let response = stream.complete().await.expect("clean text completes");
+
+        // What the gate releases from a chunk is `gated`'s business and is
+        // asserted in `arkavo-llm`; what is asserted here is that the wrapper
+        // carries the tool calls a `RouteStream` was built with.
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].tool_name, call.tool_name);
+        assert_eq!(response.tool_calls[0].arguments, call.arguments);
     }
 
     /// The default is no gate, and a router without one hands the stream back

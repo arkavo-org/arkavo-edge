@@ -25,10 +25,27 @@ from train import SYSTEM as TRAIN_SYSTEM  # noqa: E402
 LABELS = ("public", "internal", "confidential")
 
 
+def neutralize_control_tokens(text: str) -> str:
+    """Break control-token syntax in the text the detector is about to judge.
+
+    The tokenizer parses special tokens inside ordinary text, so a
+    ``<|im_start|>`` in a span becomes the real control token: the span closes
+    the turn it is being read in and opens turns of its own, and the detector
+    answers about whatever the span appended last. Splitting the ``<|`` opener
+    is enough, since these tokens are matched literally, and it keeps every
+    character of the span.
+
+    ``neutralize_control_tokens`` in ``crates/arkavo-cli/src/sentinel_scorer.rs``
+    is the identical replacement: the thresholds this script writes have to be
+    measured against the rendering that runs in production.
+    """
+    return text.replace("<|", "< |")
+
+
 def classify(model, tok, device, span: str, system: str) -> tuple[str, dict[str, float]]:
     messages = [
         {"role": "system", "content": system},
-        {"role": "user", "content": span},
+        {"role": "user", "content": neutralize_control_tokens(span)},
     ]
     prompt = tok.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True

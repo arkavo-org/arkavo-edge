@@ -1251,19 +1251,11 @@ impl ChatSessionManager {
                                         }
                                         Err(e) => {
                                             error!(error = %e, "Failed to get final response after tool execution");
-                                            // The consumer is told, not only the
-                                            // log. This inference is gated like
-                                            // any other, and a block here left
-                                            // the stream with tool deltas and no
-                                            // answer — which reads as an empty
-                                            // response rather than a refusal.
-                                            final_response = String::new();
-                                            let _ = delta_tx.send(router_error_delta(
-                                                &session_id,
-                                                &message_id,
-                                                (response.tool_calls.len() + tool_results.len() + 4) as u64,
-                                                &e,
-                                            ));
+                                            // Keep the original response as final.
+                                            // It was already routed, already sent
+                                            // as a text delta, and a synthesis
+                                            // timeout is not a reason to take a
+                                            // usable answer back.
                                         }
                                     }
                                 } else {
@@ -1604,11 +1596,11 @@ mod tests {
     // Mock-provider support
     use async_trait::async_trait;
 
-    /// A gate block on the tool-result synthesis is a routing failure like any
-    /// other, and the consumer has to be told. That branch used to log and send
-    /// nothing, so a blocked second inference left the stream carrying tool
-    /// deltas and no answer — indistinguishable from a model that replied with
-    /// nothing.
+    /// A gate block arrives at the routing-failure branches as an ordinary
+    /// router error, and every one of them answers the consumer with this
+    /// delta rather than only the log. The refusal has to survive the wrapping
+    /// intact, because that string is what the CLI matches on to print it on
+    /// its own instead of as a routing diagnostic.
     #[spec("SENT-011")]
     #[test]
     fn a_blocked_completion_becomes_an_error_delta_the_consumer_can_see() {

@@ -303,6 +303,20 @@ fn arm_release_gate(
     Ok(None)
 }
 
+/// Whether this invocation may execute tools.
+///
+/// Only the completion's text passes the gate. A tool call's arguments are
+/// provider output too, and they reach both the consumer and the tool executor
+/// without being inspected — so a model asked to put a confidential page into a
+/// `write_file` argument carries it straight past a gate that is watching the
+/// wrong field. Gating the arguments as well is the proper fix and a larger
+/// one: it means a second completion boundary inside a turn, on a holdback
+/// buffer that is already mid-completion. Until then an armed gate means no
+/// tools, which is the honest claim about what this covers.
+fn tools_are_available(gate_is_armed: bool) -> bool {
+    !gate_is_armed
+}
+
 /// Execute A2A chat mode using ChatSession from arkavo-protocol
 ///
 /// Uses a local runtime (not `'static`) so that all Rust objects — including
@@ -321,6 +335,12 @@ fn execute_a2a_chat(flags: &ChatCliArgs) -> Result<(), Box<dyn std::error::Error
     // which would otherwise undo the debug logging `ARKAVO_DEBUG` turns on when
     // the answering model loads.
     let gate = arm_release_gate(flags)?;
+    let tools = tools_are_available(gate.is_some());
+    if !tools {
+        eprintln!(
+            "[sentinel] tools disabled: the gate inspects completion text, not tool arguments"
+        );
+    }
 
     runtime.block_on(async {
         // Initialize engine with Router + full tool registry (including Claude SDK)
@@ -333,7 +353,7 @@ fn execute_a2a_chat(flags: &ChatCliArgs) -> Result<(), Box<dyn std::error::Error
         // when the session opens and there is no setting it afterwards.
         let mut client = arkavo_protocol::A2aClient::with_router_and_model(
             engine.router(),
-            Some(engine.tool_registry()),
+            tools.then(|| engine.tool_registry()),
             model_name,
         );
         if let Some(system) = flags.system.as_deref() {
@@ -1169,6 +1189,17 @@ mod tests {
 
         let err = parse_cli_args(&["--ceiling".into(), "restricted".into()]).unwrap_err();
         assert!(err.to_string().contains("unknown ceiling"), "{err}");
+    }
+
+    /// Tool-call arguments never pass the gate, so an armed gate means no
+    /// tools. Without this the gated command still has an ungated way out: a
+    /// model that puts what it was told not to say into a tool argument
+    /// reaches the executor and the consumer with it.
+    #[test]
+    fn a_session_under_an_armed_gate_gets_no_tools() {
+        assert!(!tools_are_available(true));
+        // And an ordinary run is unchanged.
+        assert!(tools_are_available(false));
     }
 
     /// A build without the classifier says so rather than ignoring the flag: a

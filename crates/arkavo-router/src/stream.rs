@@ -101,6 +101,22 @@ impl RouteStream {
         &self.metadata
     }
 
+    /// Tool calls this stream will report from `complete()`.
+    pub fn tool_calls(&self) -> &[ParsedToolCall] {
+        &self.tool_calls
+    }
+
+    /// Carry tool calls onto a stream rebuilt from another one.
+    ///
+    /// `new` starts with none, which is right for a stream being built from
+    /// chunks and wrong for one that wraps a stream that already had them: a
+    /// wrapper that forgets to carry them makes the tool calls disappear for
+    /// the caller and only when the wrapper is in place.
+    pub fn with_tool_calls(mut self, tool_calls: Vec<ParsedToolCall>) -> Self {
+        self.tool_calls = tool_calls;
+        self
+    }
+
     /// Await the complete response, consuming the stream.
     ///
     /// This collects all chunks and returns the final `RouteResponse`.

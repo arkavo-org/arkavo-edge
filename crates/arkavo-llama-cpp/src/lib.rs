@@ -688,6 +688,26 @@ impl LlamaContext {
         unsafe { ffi::llama_get_logits_ith(self.ptr, i) }
     }
 
+    /// Positions this context can hold.
+    ///
+    /// `new` chooses this from the model's metadata *and* the environment
+    /// (`ARKAVO_N_CTX`, low-power detection), so a caller that needs to size a
+    /// prompt has to ask the context it will decode into, not the model.
+    pub fn n_ctx(&self) -> u32 {
+        // SAFETY: self.ptr is a live context for the lifetime of self
+        unsafe { ffi::llama_n_ctx(self.ptr) }
+    }
+
+    /// Tokens one `llama_decode` call may carry.
+    ///
+    /// `decode_batch` submits a whole prompt as a single batch and
+    /// `llama_decode` rejects a batch wider than this, so for a one-shot
+    /// prompt this is often the real ceiling rather than `n_ctx`.
+    pub fn n_batch(&self) -> u32 {
+        // SAFETY: self.ptr is a live context for the lifetime of self
+        unsafe { ffi::llama_n_batch(self.ptr) }
+    }
+
     /// Clear the KV cache - no-op, managed automatically
     pub fn clear_kv_cache(&self) {
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
