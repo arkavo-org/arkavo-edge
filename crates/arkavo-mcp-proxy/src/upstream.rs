@@ -16,9 +16,10 @@
 //! answer, are logged and dropped.
 //!
 //! What an upstream message *is* is decided by its shape and never by its
-//! id: anything carrying `method` is the server asking, and is refused or
-//! dropped whatever id it names. Only a message with no `method` is an
-//! answer, and only then is it matched against the requests in flight.
+//! id: anything carrying `method` — whatever type that field has — is the
+//! server asking, and is refused or dropped whatever id it names. Only a
+//! message with no `method` at all is an answer, and only then is it matched
+//! against the requests in flight.
 //!
 //! The upstream is untrusted in the same way the downstream client is, so
 //! what it can make the proxy hold is bounded the same way: its output is
@@ -317,7 +318,16 @@ async fn dispatch(
 ) {
     let id = message.get("id").filter(|value| !value.is_null()).cloned();
 
-    if let Some(method) = message.get("method").and_then(Value::as_str) {
+    // Presence decides, not type. `"method": 123` or `"method": ["x"]` is
+    // still the server naming a method — badly — and reading the name with
+    // `as_str` first would let either fall through to the response branch and
+    // be relayed to the client as an answer. The name is only for the
+    // refusal's text, so a non-string one is described rather than parsed.
+    if message.get("method").is_some() {
+        let method = message
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("<non-string method>");
         match id {
             Some(id) => refuse_server_request(refusals, &id, method, dropped_refusals),
             None => debug!(method, "upstream notification (dropped)"),
@@ -450,6 +460,33 @@ mod tests {
         let refusal = queued.try_recv().expect("the request is refused");
         assert_eq!(refusal["id"], 1);
         assert_eq!(refusal["error"]["code"], METHOD_NOT_FOUND);
+        assert_eq!(dropped, 0);
+
+        // A `method` that is not a string is still the server asking. Reading
+        // the name before deciding made both of these fall through to the
+        // response branch, where they resolved the pending id and were
+        // relayed to the client as the tool's own answer.
+        for method in [json!(1), json!(["sampling/createMessage"])] {
+            dispatch(
+                &pending,
+                &refusals,
+                json!({"jsonrpc": "2.0", "id": 1, "method": method}),
+                &mut dropped,
+            )
+            .await;
+            assert!(
+                pending.lock().await.contains_key(&key),
+                "a non-string method must not resolve a request in flight: {method}"
+            );
+            let refusal = queued.try_recv().expect("it is refused like any other");
+            assert_eq!(refusal["id"], 1);
+            assert_eq!(refusal["error"]["code"], METHOD_NOT_FOUND);
+            let message = refusal["error"]["message"].as_str().expect("a message");
+            assert!(
+                message.contains("<non-string method>"),
+                "the refusal names what it could not read: {message}"
+            );
+        }
         assert_eq!(dropped, 0);
 
         // A message with no `method` is an answer, and does resolve it.
