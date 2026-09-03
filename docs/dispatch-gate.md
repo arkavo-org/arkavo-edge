@@ -61,17 +61,39 @@ bound answers rather than disconnects:
 
 | Input | Bound | On breach |
 |---|---|---|
-| one JSON-RPC line | 1 MiB | `INVALID_REQUEST` (id null), the line is skipped, the connection continues |
+| one JSON-RPC line from the client | 1 MiB | `INVALID_REQUEST` (id null), the line is skipped, the connection continues |
+| one JSON-RPC line from the upstream | 1 MiB | discarded with a warning, reading continues |
 | a JSON-RPC batch (top-level array) | not supported | `INVALID_REQUEST` (id null) with a warning, never silence |
+| refusals waiting to be written upstream | 16 queued | dropped and counted at `warn`, so the reader never blocks |
 | `_meta.arkavo.permit` / `.pop` | encoded size of a 16 KiB permit | `authn:` denial, without decoding |
 | the permit itself | 16 KiB, nesting depth 16 | `authn:` denial from the parser |
+| the published key set | 64 KiB, nesting depth 16 | `CwtError::KeySet`, the body refused as it arrives |
 | `arguments` | 256 KiB serialized | `policy:` denial, before either hash of them runs |
+
+The nesting bound is not the only one: ciborium, the decoder under `coset`,
+refuses past 256 levels of its own accord. Sixteen is what this stack
+tightens that to — a CWT is a shallow structure, 256 frames of recursion is
+stack it has no use for, and the check is one iterative pass over the bytes
+instead of the recursive descent it pre-empts. It is applied to the token's
+outer structure and to the two byte strings a COSE_Sign1 decoder parses in
+their own right, the protected header and the payload. Every other byte
+string — a signature, a `kid`, an EC coordinate — reaches no decoder, so its
+contents are never walked and ciborium's 256 is the floor there.
 
 Server-initiated requests travel the other way and are not relayed to the
 client in this slice: a `sampling/createMessage`, `elicitation/create` or
 `roots/list` from the upstream is answered with JSON-RPC `-32601` so the
 server learns at once, rather than blocking until the proxy's own per-request
 timeout fires and takes the whole `tools/call` down with it.
+
+Which of the two an upstream message is comes from its shape and never from
+its id. Anything carrying `method` is the server asking, so a server that
+reuses the id of a call in flight — the way to have a request of its own
+handed to the caller waiting on that id and relayed downstream as the tool's
+result — gets the same `-32601` as any other. Only a message with no `method`
+is matched against the requests in flight. The refusals themselves are queued
+rather than written by the reader, so a server that asks faster than it reads
+its own stdin stalls nothing but itself.
 
 ## Stages
 

@@ -1,20 +1,22 @@
 //! A bound on CBOR nesting, applied before any decoder sees the bytes.
 //!
-//! `coset` hands untrusted input to ciborium, which decodes recursively and
-//! imposes no depth limit of its own, so a token that packs thousands of
-//! nested arrays or maps into its headers can exhaust a worker thread's
-//! stack before its signature is ever checked. The size cap does not help:
-//! one byte is enough for one level. This module walks the encoding
-//! iteratively — no recursion, one pass, no allocation beyond a stack of
-//! container counters — and refuses anything nested deeper than
-//! [`MAX_NESTING_DEPTH`].
+//! `coset` hands untrusted input to ciborium, which does impose a limit of
+//! its own: `from_reader` decodes with `recurse: 256` and fails with
+//! `Error::RecursionLimitExceeded` beyond it. This module tightens that to
+//! [`MAX_NESTING_DEPTH`], which is 16, and does so for two reasons. A CWT is
+//! a shallow structure — nothing the schema needs comes near 16 levels — so
+//! 256 frames of somebody else's recursion is stack this crate has no use
+//! for; and the refusal here costs one iterative pass over the bytes, with
+//! no recursion and no allocation beyond a stack of container counters,
+//! rather than the recursive descent it replaces. The size cap does not help
+//! with either: one byte buys one level.
 //!
-//! COSE also carries CBOR *inside* byte strings: the protected header and
-//! the CWT payload are both `bstr` items that a decoder parses separately.
-//! Those are followed too, each against its own depth budget, because each
-//! is its own recursive decode. A byte string that is not itself exactly one
-//! well-formed CBOR item — a signature, a key coordinate — is left alone:
-//! its bytes are never decoded, so its accidental resemblance to CBOR must
+//! COSE also carries CBOR *inside* byte strings, and each of those is its
+//! own decode with a fresh recursion budget. Exactly two are decoded — the
+//! COSE_Sign1 protected header (element 0 of the array) and the payload
+//! (element 2) — so the walk follows those two and nothing else. A
+//! signature, a `kid`, an EC coordinate is opaque to every decoder in this
+//! crate, so 32 random bytes that happen to begin like nested arrays must
 //! not refuse a valid token.
 
 use crate::CwtError;
@@ -25,38 +27,21 @@ use std::ops::Range;
 /// decoder can survive.
 pub const MAX_NESTING_DEPTH: usize = 16;
 
-/// How many levels of CBOR-inside-a-byte-string the scan follows. COSE nests
-/// it twice (the protected header, and claims inside the payload); four
-/// leaves room and bounds the scan's own work.
-const MAX_EMBEDDING_LEVELS: usize = 4;
-
-/// Refuse `bytes` if its CBOR — or the CBOR embedded in its byte strings —
-/// nests deeper than [`MAX_NESTING_DEPTH`].
+/// Refuse `bytes` if its CBOR — or the CBOR in the two byte strings a
+/// COSE_Sign1 decoder parses in their own right — nests deeper than
+/// [`MAX_NESTING_DEPTH`].
 pub fn check(bytes: &[u8]) -> Result<(), CwtError> {
-    let outer = scan(bytes);
-    if outer.depth > MAX_NESTING_DEPTH {
+    if walk(bytes, 0).depth > MAX_NESTING_DEPTH {
         return Err(too_deep());
     }
-    let mut frontier: Vec<&[u8]> = outer.embedded.into_iter().map(|r| &bytes[r]).collect();
-    for _ in 0..MAX_EMBEDDING_LEVELS {
-        if frontier.is_empty() {
-            break;
+    for range in decoded_byte_strings(bytes) {
+        // Whatever prefix the walk covered is judged on its own. An
+        // over-deep prefix is over-deep however the byte string ends, and
+        // ciborium does not require its input to stop where the item does:
+        // trailing bytes make the content no less recursive to decode.
+        if walk(&bytes[range], 0).depth > MAX_NESTING_DEPTH {
+            return Err(too_deep());
         }
-        let mut next: Vec<&[u8]> = Vec::new();
-        for slice in frontier {
-            let inner = scan(slice);
-            // Only a byte string that is exactly one complete CBOR item is
-            // embedded CBOR. Anything else is opaque bytes no decoder will
-            // walk, so its shape cannot be a reason to refuse the token.
-            if !inner.complete {
-                continue;
-            }
-            if inner.depth > MAX_NESTING_DEPTH {
-                return Err(too_deep());
-            }
-            next.extend(inner.embedded.into_iter().map(|r| &slice[r]));
-        }
-        frontier = next;
     }
     Ok(())
 }
@@ -65,29 +50,140 @@ fn too_deep() -> CwtError {
     CwtError::Cose(format!("nesting depth exceeds {MAX_NESTING_DEPTH}"))
 }
 
-/// What one pass over a CBOR byte stream found.
-struct Scan {
-    /// The deepest container nesting seen.
+/// The byte strings a COSE_Sign1 decoder parses as CBOR in their own right:
+/// the protected header (element 0) and the payload (element 2).
+///
+/// Anything that is not shaped like a COSE_Sign1 — a key set, a bare byte
+/// string — carries none, and neither do the other slots of one. Those
+/// bytes reach no decoder, so their shape is not the token's to answer for.
+fn decoded_byte_strings(bytes: &[u8]) -> Vec<Range<usize>> {
+    let mut pos = 0usize;
+    // Tag 61 (CWT) and tag 18 (COSE_Sign1) may each wrap the array, and
+    // neither changes which of its elements are decoded.
+    let mut head = read_head(bytes, pos);
+    while let Some(Head {
+        major: 6,
+        argument: Some(_),
+        content,
+    }) = head
+    {
+        pos = content;
+        head = read_head(bytes, pos);
+    }
+
+    let Some(head) = head.filter(|head| head.major == 4) else {
+        return Vec::new();
+    };
+    // A COSE_Sign1 is four elements; anything shorter has no payload slot.
+    if head.argument.is_some_and(|elements| elements < 3) {
+        return Vec::new();
+    }
+
+    let mut ranges = Vec::new();
+    pos = head.content;
+    for index in 0..3usize {
+        // The break byte ends an indefinite-length array before element 2.
+        if bytes.get(pos) == Some(&0xff) {
+            break;
+        }
+        let Some(item) = read_head(bytes, pos) else {
+            break;
+        };
+        if matches!(index, 0 | 2)
+            && item.major == 2
+            && let Some(range) = byte_string_range(bytes, &item)
+        {
+            ranges.push(range);
+        }
+        let Some(next) = skip_item(bytes, pos) else {
+            break;
+        };
+        pos = next;
+    }
+    ranges
+}
+
+/// Where the content of a definite-length byte string lies, if the encoding
+/// actually holds as many bytes as it claims.
+fn byte_string_range(bytes: &[u8], head: &Head) -> Option<Range<usize>> {
+    let length = usize::try_from(head.argument?).ok()?;
+    let end = head
+        .content
+        .checked_add(length)
+        .filter(|end| *end <= bytes.len())?;
+    Some(head.content..end)
+}
+
+/// One CBOR head: its major type, its argument (`None` for an
+/// indefinite-length item) and where the item's content begins.
+#[derive(Clone, Copy)]
+struct Head {
+    major: u8,
+    argument: Option<u64>,
+    content: usize,
+}
+
+/// Read the head of the item at `pos`, or `None` if the encoding is
+/// truncated or malformed. This is a scan, not a decoder: it stops rather
+/// than diagnosing, and leaves the real error to the parser that follows.
+fn read_head(bytes: &[u8], pos: usize) -> Option<Head> {
+    let initial = *bytes.get(pos)?;
+    let major = initial >> 5;
+    let additional = initial & 0x1f;
+    let mut content = pos + 1;
+    let argument = match additional {
+        0..=23 => Some(u64::from(additional)),
+        24..=27 => {
+            let width = 1usize << (additional - 24);
+            let slice = bytes.get(content..content.checked_add(width)?)?;
+            content += width;
+            Some(
+                slice
+                    .iter()
+                    .fold(0u64, |value, byte| (value << 8) | u64::from(*byte)),
+            )
+        }
+        31 => None,
+        // 28..=30 are reserved: the encoding is malformed.
+        _ => return None,
+    };
+    Some(Head {
+        major,
+        argument,
+        content,
+    })
+}
+
+/// What one pass over the CBOR item at `start` found.
+struct Walk {
+    /// The deepest container nesting seen, whether or not the item ended.
     depth: usize,
-    /// Byte ranges of the definite-length byte strings encountered, the
-    /// places CBOR can hide inside CBOR.
-    embedded: Vec<Range<usize>>,
-    /// The slice held exactly one well-formed CBOR item and nothing else.
+    /// Where the item ended; meaningful only when `complete`.
+    end: usize,
+    /// The walk covered one whole, well-formed item.
     complete: bool,
 }
 
-/// Walk `bytes` as CBOR without decoding any of it.
+/// Where the item at `start` ends, or `None` if it is not well-formed.
+fn skip_item(bytes: &[u8], start: usize) -> Option<usize> {
+    let walk = walk(bytes, start);
+    walk.complete.then_some(walk.end)
+}
+
+/// Walk the CBOR item at `start` without decoding any of it.
 ///
-/// Malformed input is not an error here: the scan stops and reports what it
-/// saw, leaving the real diagnosis to the decoder that follows.
-fn scan(bytes: &[u8]) -> Scan {
+/// Malformed input is not an error here: the walk stops and reports what it
+/// saw, leaving the real diagnosis to the decoder that follows. Byte strings
+/// are skipped whole — whether their content is itself CBOR is a question
+/// only the position of the string can answer, and [`decoded_byte_strings`]
+/// is what answers it.
+fn walk(bytes: &[u8], start: usize) -> Walk {
     // One entry per open container: `Some(n)` counts the items still owed by
     // a definite-length container, `None` marks an indefinite-length one that
     // ends at a break byte.
     let mut stack: Vec<Option<u64>> = Vec::new();
-    let mut embedded: Vec<Range<usize>> = Vec::new();
     let mut depth = 0usize;
-    let mut pos = 0usize;
+    let mut pos = start;
     let mut started = false;
 
     loop {
@@ -95,109 +191,74 @@ fn scan(bytes: &[u8]) -> Scan {
             stack.pop();
         }
         if started && stack.is_empty() {
-            return Scan {
+            return Walk {
                 depth,
-                embedded,
-                complete: pos == bytes.len(),
+                end: pos,
+                complete: true,
             };
         }
-        let Some(&initial) = bytes.get(pos) else {
-            return Scan {
-                depth,
-                embedded,
-                complete: false,
-            };
+        let incomplete = Walk {
+            depth,
+            end: pos,
+            complete: false,
         };
-        pos += 1;
-        started = true;
+        let Some(&initial) = bytes.get(pos) else {
+            return incomplete;
+        };
 
         // A break byte closes the innermost indefinite-length container and
         // is not itself an item of that container.
         if initial == 0xff {
             if matches!(stack.last(), Some(None)) {
+                pos += 1;
+                started = true;
                 stack.pop();
                 continue;
             }
-            return Scan {
-                depth,
-                embedded,
-                complete: false,
-            };
+            return incomplete;
         }
 
-        let major = initial >> 5;
-        let additional = initial & 0x1f;
-        let argument = match additional {
-            0..=23 => Some(u64::from(additional)),
-            24..=27 => {
-                let width = 1usize << (additional - 24);
-                let Some(slice) = bytes.get(pos..pos + width) else {
-                    return Scan {
-                        depth,
-                        embedded,
-                        complete: false,
-                    };
-                };
-                pos += width;
-                Some(
-                    slice
-                        .iter()
-                        .fold(0u64, |value, byte| (value << 8) | u64::from(*byte)),
-                )
-            }
-            31 => None,
-            // 28..=30 are reserved: the encoding is malformed.
-            _ => {
-                return Scan {
-                    depth,
-                    embedded,
-                    complete: false,
-                };
-            }
+        let Some(head) = read_head(bytes, pos) else {
+            return incomplete;
         };
+        pos = head.content;
+        started = true;
 
         // Every item fills one slot of the container holding it.
         if let Some(Some(remaining)) = stack.last_mut() {
             *remaining = remaining.saturating_sub(1);
         }
 
-        let opened = match major {
+        let opened = match head.major {
             // Byte and text strings: definite ones are skipped whole,
             // indefinite ones are containers of chunks.
-            2 | 3 => match argument {
+            2 | 3 => match head.argument {
                 Some(length) => {
-                    let Ok(length) = usize::try_from(length) else {
-                        return Scan {
-                            depth,
-                            embedded,
-                            complete: false,
-                        };
-                    };
-                    let Some(end) = pos.checked_add(length).filter(|end| *end <= bytes.len())
+                    let Some(end) = usize::try_from(length)
+                        .ok()
+                        .and_then(|length| pos.checked_add(length))
+                        .filter(|end| *end <= bytes.len())
                     else {
-                        return Scan {
+                        return Walk {
                             depth,
-                            embedded,
+                            end: pos,
                             complete: false,
                         };
                     };
-                    if major == 2 && length >= 2 {
-                        embedded.push(pos..end);
-                    }
                     pos = end;
                     None
                 }
                 None => Some(None),
             },
-            4 => Some(argument),
+            4 => Some(head.argument),
             // A map owes two items — a key and a value — per pair.
-            5 => Some(argument.map(|pairs| pairs.saturating_mul(2))),
+            5 => Some(head.argument.map(|pairs| pairs.saturating_mul(2))),
             // A tag wraps exactly one item; `31` is not a legal tag argument.
             6 => {
-                if argument.is_none() {
-                    return Scan {
+                if head.argument.is_none() {
+                    return Walk {
                         depth,
-                        embedded,
+                        end: pos,
                         complete: false,
                     };
                 }
@@ -225,12 +286,40 @@ mod tests {
         bytes
     }
 
+    /// A definite-length byte string holding `content`.
+    fn byte_string(content: &[u8]) -> Vec<u8> {
+        let length = u16::try_from(content.len()).expect("test byte strings stay under 64 KiB");
+        let mut bytes = Vec::new();
+        if length < 24 {
+            bytes.push(0x40 | u8::try_from(length).unwrap());
+        } else if length < 256 {
+            bytes.extend([0x58, u8::try_from(length).unwrap()]);
+        } else {
+            bytes.push(0x59);
+            bytes.extend(length.to_be_bytes());
+        }
+        bytes.extend_from_slice(content);
+        bytes
+    }
+
+    /// The COSE_Sign1 array — `[protected, {}, payload, signature]` — built
+    /// by hand, so a test can put arbitrary bytes in any one slot.
+    fn sign1(protected: &[u8], payload: &[u8], signature: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0x84];
+        bytes.extend(byte_string(protected));
+        bytes.push(0xa0);
+        bytes.extend(byte_string(payload));
+        bytes.extend(byte_string(signature));
+        bytes
+    }
+
     #[test]
     fn shallow_cbor_passes() {
         // {1: -8, 4: h'6b31'} — the shape of a COSE protected header.
         let header = [0xa2, 0x01, 0x27, 0x04, 0x42, 0x6b, 0x31];
         assert!(check(&header).is_ok());
         assert!(check(&nested_arrays(MAX_NESTING_DEPTH)).is_ok());
+        assert!(check(&sign1(&header, &[0xa0], &[0u8; 64])).is_ok());
     }
 
     #[test]
@@ -262,28 +351,62 @@ mod tests {
         assert!(check(&siblings).is_ok());
     }
 
+    /// The two byte strings a COSE_Sign1 decoder parses in their own right
+    /// are walked: a decoder recurses through their content exactly as if it
+    /// were inline, so the bound has to hold there too.
     #[test]
-    fn cbor_hidden_in_a_byte_string_is_followed() {
-        // h'<200 nested arrays>' — a decoder that parses the byte string's
-        // contents recurses just as deeply as if they were inline.
-        let inner = nested_arrays(200);
-        let mut outer = vec![0x59];
-        outer.extend_from_slice(&u16::try_from(inner.len()).unwrap().to_be_bytes());
-        outer.extend_from_slice(&inner);
-        assert!(check(&outer).is_err());
+    fn cbor_in_the_header_and_the_payload_is_followed() {
+        let deep = nested_arrays(200);
+        assert!(check(&sign1(&[0xa0], &deep, &[0u8; 64])).is_err());
+        assert!(check(&sign1(&deep, &[0xa0], &[0u8; 64])).is_err());
+
+        // Tagged the way authnz-rs and `arkavo-permit` emit them: tag 18
+        // around the array, optionally under the CWT tag. Neither changes
+        // which elements a decoder parses.
+        let mut tagged = vec![0xd2];
+        tagged.extend(sign1(&[0xa0], &deep, &[0u8; 64]));
+        assert!(check(&tagged).is_err());
+        let mut cwt = vec![0xd8, 0x3d];
+        cwt.extend(tagged);
+        assert!(check(&cwt).is_err());
     }
 
+    /// The bound holds on whatever prefix the walk covered. A byte string
+    /// that is 200 arrays deep and then two bytes more is not one clean CBOR
+    /// item, but `ciborium::from_reader` does not require the input to end
+    /// where the item does: it recurses through the nesting all the same.
+    #[test]
+    fn an_over_deep_prefix_is_over_deep_however_it_ends() {
+        let mut trailing = nested_arrays(200);
+        trailing.extend_from_slice(&[0x00, 0x00]);
+        assert!(matches!(
+            check(&sign1(&[0xa0], &trailing, &[0u8; 64])),
+            Err(CwtError::Cose(message)) if message.contains("nesting depth")
+        ));
+
+        // Truncated the other way — the nesting never closes — is refused on
+        // the same grounds rather than passed to the decoder.
+        assert!(check(&sign1(&[0xa0], &[0x81; 200], &[0u8; 64])).is_err());
+    }
+
+    /// Byte strings nothing decodes are left alone whatever they contain.
+    /// The signature and the `kid` are the two a valid token could plausibly
+    /// carry deep-looking bytes in: 64 or 32 bytes of a hash or a signature
+    /// begin however they begin, and refusing the token for it would be
+    /// refusing it for the shape of its own randomness.
     #[test]
     fn opaque_byte_strings_are_left_alone() {
-        // A byte string that is not one complete CBOR item is never decoded,
-        // so bytes that merely look like nesting must not refuse the token.
-        let mut signature = vec![0x81; 200];
-        // Trailing bytes leave the content incomplete as a CBOR item.
-        signature.extend_from_slice(&[0x00, 0x00]);
-        let mut outer = vec![0x59];
-        outer.extend_from_slice(&u16::try_from(signature.len()).unwrap().to_be_bytes());
-        outer.extend_from_slice(&signature);
-        assert!(check(&outer).is_ok());
+        let deep = nested_arrays(200);
+        assert!(check(&sign1(&[0xa0], &[0xa0], &deep)).is_ok());
+
+        // A `kid` inside the protected header — which *is* walked — holding
+        // bytes that look like 32 levels of nested array.
+        let mut protected = vec![0xa2, 0x01, 0x27, 0x04];
+        protected.extend(byte_string(&[0x81u8; 32]));
+        assert!(check(&sign1(&protected, &[0xa0], &[0u8; 64])).is_ok());
+
+        // And a byte string that is not part of a COSE_Sign1 at all.
+        assert!(check(&byte_string(&deep)).is_ok());
     }
 
     #[test]
@@ -294,5 +417,8 @@ mod tests {
         assert!(check(&[0x9f]).is_ok());
         assert!(check(&[0x5a, 0xff]).is_ok());
         assert!(check(&[0x1c]).is_ok());
+        // A truncated COSE_Sign1 array: the elements that are there are
+        // still walked, and the ones that are not simply end the scan.
+        assert!(check(&[0x84, 0x41, 0xa0]).is_ok());
     }
 }

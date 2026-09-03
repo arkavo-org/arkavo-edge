@@ -9,8 +9,11 @@
 //!
 //! Untrusted input over [`sign1::MAX_TOKEN_BYTES`] (16 KiB) is refused before
 //! any CBOR work, as is input nesting deeper than
-//! [`depth::MAX_NESTING_DEPTH`] (16) — including the CBOR carried inside the
-//! COSE byte strings, which a decoder walks just as recursively.
+//! [`depth::MAX_NESTING_DEPTH`] (16). That bound covers the token's outer
+//! structure and the two byte strings a COSE_Sign1 decoder parses in their
+//! own right — the protected header and the payload — which is everything
+//! this crate decodes; for any other byte string, whose bytes reach no
+//! decoder, ciborium's own limit of 256 levels is the floor.
 
 pub mod claims;
 pub mod depth;

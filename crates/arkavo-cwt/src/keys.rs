@@ -29,7 +29,17 @@ impl KeySet {
     /// rather than rejected: the issuer may publish keys for algorithms this
     /// verifier does not handle, and one such entry must not blind it to the
     /// ES256 keys alongside it.
+    ///
+    /// The body is as untrusted as a token is — it arrives over the network
+    /// from an endpoint this crate does not control — and reaches the same
+    /// recursive decoder, so the same nesting bound is applied to it first.
     pub fn from_cbor(bytes: &[u8]) -> Result<Self, CwtError> {
+        if crate::depth::check(bytes).is_err() {
+            return Err(CwtError::KeySet(format!(
+                "nesting depth exceeds {}",
+                crate::depth::MAX_NESTING_DEPTH
+            )));
+        }
         let set = CoseKeySet::from_slice(bytes).map_err(|e| CwtError::KeySet(e.to_string()))?;
         let mut keys = Vec::with_capacity(set.0.len());
         for key in &set.0 {
@@ -261,6 +271,29 @@ mod tests {
         let url = format!("{}/.well-known/cose-keys", server.uri());
         let keys = KeySet::fetch(&url).await.expect("key set under the cap");
         assert!(keys.get(&[0xAA; 32]).is_some());
+    }
+
+    /// A key set is decoded by the same recursive decoder a token is, and it
+    /// comes from the same place: the network. Nesting that would exhaust a
+    /// worker's stack has to be refused before `CoseKeySet::from_slice` walks
+    /// it, not after.
+    #[test]
+    fn from_cbor_refuses_a_deeply_nested_key_set() {
+        let mut deep = vec![0x81u8; 200];
+        deep.push(0x00);
+        assert!(deep.len() < MAX_KEY_SET_BYTES);
+
+        match KeySet::from_cbor(&deep) {
+            Err(CwtError::KeySet(message)) => {
+                assert!(message.contains("nesting depth"), "message: {message}");
+            }
+            Err(other) => panic!("expected a depth refusal, got {other:?}"),
+            Ok(_) => panic!("a deeply nested key set must not be parsed"),
+        }
+
+        // A real key set is unaffected: it is two levels deep and parses.
+        let (x, y) = valid_coordinates();
+        assert!(KeySet::from_cbor(&cose_key_with(x, y)).is_ok());
     }
 
     #[test]
