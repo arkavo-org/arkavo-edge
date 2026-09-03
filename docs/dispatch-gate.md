@@ -70,7 +70,7 @@ bound answers rather than disconnects:
 | one JSON-RPC line from the upstream | 1 MiB | discarded with a warning, reading continues |
 | a JSON-RPC batch (top-level array) | not supported | `INVALID_REQUEST` (id null) with a warning, never silence |
 | refusals waiting to be written upstream | 16 queued | dropped and counted at `warn` — the first drop, then each doubling — so the reader never blocks |
-| one write to the upstream's stdin | the per-request timeout | the write is abandoned, the connection is marked closed, `-32603`, and the invocation stays spent |
+| one write to the upstream's stdin | the per-request timeout, in addition to the wait for the response | the write is abandoned, the connection is marked closed, `-32603`, and the invocation stays spent |
 | `_meta.arkavo.permit` | encoded size of a 16 KiB permit (21 849 chars) | `authn:` denial, without decoding |
 | `_meta.arkavo.pop` | encoded size of a 64-byte signature (89 chars, of which a real proof uses 86) | `authn:` denial, without decoding |
 | the permit itself | 16 KiB, nesting depth 16 | `authn:` denial from the parser |
@@ -116,13 +116,13 @@ timeout fires and takes the whole `tools/call` down with it.
 Which of the two an upstream message is comes from its shape and never from
 its id. Anything carrying `method` — whatever type that field has, since a
 non-string one is a badly named method and not an answer — is the server
-asking, so a server that reuses the id of a call in flight, the way to have a
-request of its own handed to the caller waiting on that id and relayed
+asking, so a server that reuses the id of a call in flight, the way to have
+a request of its own handed to the caller waiting on that id and relayed
 downstream as the tool's result, gets the same `-32601` as any other. Only a
-message with no `method` at all is matched against the requests in flight. The refusals themselves are queued
-rather than written by the reader, so a server that asks faster than it reads
-its own stdin cannot stop the proxy reading the response a caller is waiting
-for.
+message with no `method` at all is matched against the requests in flight.
+The refusals themselves are queued rather than written by the reader, so a
+server that asks faster than it reads its own stdin cannot stop the proxy
+reading the response a caller is waiting for.
 
 It cannot stop the proxy writing, either. The refusal writer and every
 forwarded request share one stdin behind one mutex, so a server that stops
@@ -132,6 +132,18 @@ write is abandoned, the connection is marked closed — a partial line is
 already in the pipe, and the next write would splice onto it — and the call
 is answered with `-32603`. That failure keeps its invocation, because the
 bytes the pipe did accept may have been a whole line the upstream ran.
+
+Closing is final and it is final for both writers: a refusal already queued
+is dropped rather than spliced onto the abandoned line, and every request
+still waiting for a response is failed at that moment with the same "may
+have run" verdict, rather than sitting out a wait on a connection nothing
+will be written to again.
+
+The two bounds are consecutive, not shared, so the worst case for one
+`tools/call` is two of them: the per-request timeout for the write, and then
+the per-request timeout again for the response. A client sizing its own
+timeout against the proxy should size it against twice the value the proxy
+is configured with.
 
 ## Stages
 
