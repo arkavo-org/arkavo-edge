@@ -7,7 +7,7 @@
 
 use crate::{Claims, CwtError, VerifyOptions, verify::verify};
 use coset::{CborSerializable, CoseKeySet};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 /// The largest `/.well-known/cose-keys` body this crate will read.
@@ -85,13 +85,11 @@ impl KeySet {
         // The timeout covers the connection and the whole exchange, the body
         // read included: a server that accepts, answers a header and then
         // trickles is the same denial of service as one that never answers.
-        let client = reqwest::Client::builder()
-            .connect_timeout(timeout)
-            .timeout(timeout)
-            .build()
-            .map_err(|e| CwtError::Fetch(e.to_string()))?;
-        let mut response = client
+        // It is set per request rather than on the client, because the client
+        // outlives any one fetch.
+        let mut response = client()?
             .get(url)
+            .timeout(timeout)
             .send()
             .await
             .map_err(|e| CwtError::Fetch(e.to_string()))?
@@ -117,6 +115,29 @@ impl KeySet {
             .find(|(candidate, _)| candidate == kid)
             .map(|(_, key)| key)
     }
+}
+
+/// The HTTP client every key-set fetch goes through, built once.
+///
+/// A `reqwest::Client` owns a connection pool and a resolver; building one
+/// per fetch throws both away, so a verifier that refreshes on a schedule
+/// paid for a fresh TLS handshake every time and kept nothing warm. It
+/// carries no timeout of its own — [`KeySet::fetch_with_timeout`] sets that
+/// per request, since the bound is the caller's and the client is shared.
+///
+/// A builder that cannot produce a client is a fault of this process, not of
+/// the endpoint, and it is the same fault on every call, so the failure is
+/// remembered rather than retried into.
+fn client() -> Result<&'static reqwest::Client, CwtError> {
+    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .build()
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(|e| CwtError::Fetch(e.clone()))
 }
 
 struct Cached {
