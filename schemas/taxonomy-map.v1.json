@@ -5,22 +5,23 @@
   "attributeDefinitions": [
     {
       "name": "clearance",
-      "fqn": "https://attr.arkavo.com/clearance",
+      "fqn": "https://attr.arkavo.com/attr/clearance",
       "rule": "hierarchy",
-      "order": ["public", "internal", "confidential", "restricted"],
-      "description": "Hierarchical clearance already used by swarmkit role policies. Holding a level grants every lower level."
+      "order": ["restricted", "confidential", "internal", "public"],
+      "description": "Hierarchical clearance. Platform creation order is highest to lowest privilege. Holding a level grants every lower level. Values on a TDF are https://attr.arkavo.com/attr/clearance/value/<level>."
     },
     {
       "name": "department",
-      "fqn": "https://attr.arkavo.com/department",
+      "fqn": "https://attr.arkavo.com/attr/department",
       "rule": "allOf",
       "values": [],
       "description": "Compartment orthogonal to clearance, populated per tenant. Conjunctive with clearance: a restricted clearance does not confer department access."
     },
     {
       "name": "project",
-      "fqn": "https://attr.arkavo.com/project",
+      "fqn": "https://attr.arkavo.com/attr/project",
       "rule": "allOf",
+      "onTdf": false,
       "values": [],
       "description": "Second orthogonal compartment, populated per tenant. Kept separate from department so a project grant does not widen a department grant."
     }
@@ -32,7 +33,7 @@
       "sensitivity": "Public",
       "requires": [],
       "wrapAttributes": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "public" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "public" }
       ],
       "unentitled": "redact",
       "description": "Content cleared for release. Wrapping is still available when a transport needs integrity, but is not required."
@@ -42,10 +43,10 @@
       "category": "Internal",
       "sensitivity": "Internal",
       "requires": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "internal" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "internal" }
       ],
       "wrapAttributes": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "internal" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "internal" }
       ],
       "unentitled": "block",
       "description": "Organization-internal content, including internal addresses and hostnames."
@@ -55,10 +56,10 @@
       "category": "Pii",
       "sensitivity": "Internal",
       "requires": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "internal" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "internal" }
       ],
       "wrapAttributes": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "internal" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "internal" }
       ],
       "unentitled": "block",
       "description": "Personal data. The floor matches DatumType::default_sensitivity so loading this map does not silently reclassify existing detections; a detector that reports a higher sensitivity for a specific datum, such as a national identity number at Restricted, wins by monotonic union. Release to an external destination requires explicit entitlement, per SEQ-003."
@@ -68,12 +69,12 @@
       "category": "Financial",
       "sensitivity": "Confidential",
       "requires": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "confidential" },
-        { "fqn": "https://attr.arkavo.com/department", "value": "finance" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "confidential" },
+        { "fqn": "https://attr.arkavo.com/attr/department", "value": "finance" }
       ],
       "wrapAttributes": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "confidential" },
-        { "fqn": "https://attr.arkavo.com/department", "value": "finance" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "confidential" },
+        { "fqn": "https://attr.arkavo.com/attr/department", "value": "finance" }
       ],
       "unentitled": "block",
       "description": "Payment instruments and financial records. Conjunctive: clearance alone does not entitle."
@@ -83,10 +84,10 @@
       "category": "Healthcare",
       "sensitivity": "Restricted",
       "requires": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "restricted" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "restricted" }
       ],
       "wrapAttributes": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "restricted" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "restricted" }
       ],
       "unentitled": "block",
       "description": "Health information. Held at restricted because re-identification survives most redaction."
@@ -96,10 +97,10 @@
       "category": "Credentials",
       "sensitivity": "Restricted",
       "requires": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "restricted" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "restricted" }
       ],
       "wrapAttributes": [
-        { "fqn": "https://attr.arkavo.com/clearance", "value": "restricted" }
+        { "fqn": "https://attr.arkavo.com/attr/clearance", "value": "restricted" }
       ],
       "unentitled": "block",
       "neverRelease": true,
@@ -109,10 +110,11 @@
   "obligations": [
     {
       "name": "legal-hold",
-      "fqn": "https://attr.arkavo.com/obligation/legal-hold",
+      "fqn": "https://attr.arkavo.com/obl/handling",
+      "value": "legal-hold",
       "assertionType": "handling",
       "grantsDecryption": false,
-      "description": "Content is under legal hold: it may not be deleted, redacted, or expired by retention. Modeled as a handling assertion because a hold is a duty on whoever already has the content, not a reason to give it to anyone."
+      "description": "PDP-to-PEP directive: permit, provided the PEP enforces hold (no delete, redact, or expire). Not stamped on the TDF. The value FQN is https://attr.arkavo.com/obl/handling/value/legal-hold. A PEP that cannot enforce it must refuse."
     }
   ]
 }
