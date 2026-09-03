@@ -44,8 +44,10 @@ be. All four are `authn:` refusals.
 
 Each string is bounded before it is decoded, by what that field can hold: the
 permit by the encoded size of the largest permit the parser accepts (16 KiB,
-so 21 849 characters), and the proof by 88 characters, since a proof is one
-64-byte signature — 86 characters unpadded — from either key type.
+so 21 849 characters), and the proof by the encoded size of one signature (64
+bytes, so 89 characters, of which a real proof uses 86). Both bounds are
+derived from `arkavo-permit`'s own constants — `MAX_PERMIT_BYTES` and
+`SIGNATURE_BYTES` — rather than written out here or in the proxy.
 
 An allowed `tools/call` has `_meta.arkavo` removed before the request is
 forwarded upstream, so the permit and proof-of-possession never reach the
@@ -58,7 +60,8 @@ carry a denial back) cannot be policy-evaluated. The proxy drops it outright
 
 ## Bounds on untrusted input
 
-Everything a client can make the proxy allocate or hash is bounded, and each
+Neither side of the proxy's session — the client below it, the upstream
+server above it — decides how much it allocates, hashes, or waits, and each
 bound answers rather than disconnects:
 
 | Input | Bound | On breach |
@@ -66,12 +69,21 @@ bound answers rather than disconnects:
 | one JSON-RPC line from the client | 1 MiB | `INVALID_REQUEST` (id null), the line is skipped, the connection continues |
 | one JSON-RPC line from the upstream | 1 MiB | discarded with a warning, reading continues |
 | a JSON-RPC batch (top-level array) | not supported | `INVALID_REQUEST` (id null) with a warning, never silence |
-| refusals waiting to be written upstream | 16 queued | dropped and counted at `warn`, so the reader never blocks |
+| refusals waiting to be written upstream | 16 queued | dropped and counted at `warn` — the first drop, then each doubling — so the reader never blocks |
+| one write to the upstream's stdin | the per-request timeout | the write is abandoned, the connection is marked closed, `-32603`, and the invocation stays spent |
 | `_meta.arkavo.permit` | encoded size of a 16 KiB permit (21 849 chars) | `authn:` denial, without decoding |
-| `_meta.arkavo.pop` | 88 chars, a 64-byte signature being 86 | `authn:` denial, without decoding |
+| `_meta.arkavo.pop` | encoded size of a 64-byte signature (89 chars, of which a real proof uses 86) | `authn:` denial, without decoding |
 | the permit itself | 16 KiB, nesting depth 16 | `authn:` denial from the parser |
-| the published key set | 64 KiB, nesting depth 16 | `CwtError::KeySet`, the body refused as it arrives |
 | `arguments` | 256 KiB serialized | `policy:` denial, before either hash of them runs, and only reachable once the permit has verified |
+
+The issuer's key endpoint is on neither side of that session. Its two bounds
+belong to `arkavo-cwt` and hold wherever a key set is fetched, not only under
+this proxy:
+
+| Input | Bound | On breach |
+|---|---|---|
+| the published key set | 64 KiB, nesting depth 16 | `CwtError::KeySet`, the body refused as it arrives |
+| one fetch of the key set | 10 s, connection and body together | `CwtError::Fetch`; the refresh lock is held across the fetch, so every verification queued behind it waits no longer either |
 
 The nesting bound is not the only one: ciborium, the decoder under `coset`,
 refuses past 256 levels of its own accord. Sixteen is what this stack
@@ -102,11 +114,12 @@ server learns at once, rather than blocking until the proxy's own per-request
 timeout fires and takes the whole `tools/call` down with it.
 
 Which of the two an upstream message is comes from its shape and never from
-its id. Anything carrying `method` is the server asking, so a server that
-reuses the id of a call in flight — the way to have a request of its own
-handed to the caller waiting on that id and relayed downstream as the tool's
-result — gets the same `-32601` as any other. Only a message with no `method`
-is matched against the requests in flight. The refusals themselves are queued
+its id. Anything carrying `method` — whatever type that field has, since a
+non-string one is a badly named method and not an answer — is the server
+asking, so a server that reuses the id of a call in flight, the way to have a
+request of its own handed to the caller waiting on that id and relayed
+downstream as the tool's result, gets the same `-32601` as any other. Only a
+message with no `method` at all is matched against the requests in flight. The refusals themselves are queued
 rather than written by the reader, so a server that asks faster than it reads
 its own stdin cannot stop the proxy reading the response a caller is waiting
 for.

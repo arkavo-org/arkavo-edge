@@ -29,11 +29,13 @@ use std::collections::hash_map::Entry;
 use std::fmt;
 use std::sync::Mutex;
 
-// The proxy in front of this gate bounds the permit it decodes by the same
-// cap the permit parser enforces, so it is re-exported here rather than
-// restated there. The proof is bounded by what a signature can be, which is
-// the proxy's own business and stays there.
-pub use arkavo_permit::MAX_PERMIT_BYTES;
+// The proxy in front of this gate bounds each credential it decodes by what
+// that credential can be: a permit by the cap the permit parser enforces, a
+// proof by the length of the one signature it holds. Both facts belong to
+// `arkavo-permit`, so both are re-exported here rather than restated in a
+// proxy that would otherwise need its own dependency on that crate to say
+// something it does not own.
+pub use arkavo_permit::{MAX_PERMIT_BYTES, SIGNATURE_BYTES};
 
 /// The largest serialized `arguments` object the gate will hash.
 ///

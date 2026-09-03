@@ -7,6 +7,15 @@ use arkavo_crypto::{AgentKeypair, P256SigningKeypair};
 use coset::CoseKey;
 use coset::iana::Algorithm;
 
+/// The length of every signature this stack makes or checks.
+///
+/// Ed25519 signatures are 64 bytes, and COSE ES256 requires the IEEE P1363
+/// `r || s` form, which for P-256 is 64 bytes as well. A proof of possession
+/// is exactly one such signature, so a verifier bounding the encoded proof it
+/// will accept derives that bound from this rather than from a permit's size,
+/// which is three orders of magnitude larger.
+pub const SIGNATURE_BYTES: usize = 64;
+
 /// An issuer's permit signing key.
 ///
 /// It fixes the COSE algorithm and the `kid` of the protected header, and
@@ -191,7 +200,7 @@ mod tests {
         let verifier = signer.public_key();
         let data = b"sig structure bytes";
         let signature = signer.sign(data);
-        assert_eq!(signature.len(), 64);
+        assert_eq!(signature.len(), SIGNATURE_BYTES);
         assert!(verifier.verify(Algorithm::EdDSA, data, &signature).is_ok());
         assert!(
             verifier
@@ -206,8 +215,31 @@ mod tests {
         let verifier = signer.public_key();
         let data = b"sig structure bytes";
         let signature = signer.sign(data);
-        assert_eq!(signature.len(), 64, "COSE ES256 requires raw r||s");
+        assert_eq!(
+            signature.len(),
+            SIGNATURE_BYTES,
+            "COSE ES256 requires raw r||s"
+        );
         assert!(verifier.verify(Algorithm::ES256, data, &signature).is_ok());
+    }
+
+    /// A proof of possession is one signature, and the bound a verifier puts
+    /// on an encoded proof is derived from that length. Both key types have
+    /// to actually produce it, or the bound is a guess about one of them.
+    #[test]
+    fn both_signers_produce_exactly_signature_bytes() {
+        for signer in [
+            PermitSigner::Ed25519(AgentKeypair::generate()),
+            PermitSigner::P256(P256SigningKeypair::generate()),
+        ] {
+            let signature = signer.sign(b"sig structure bytes");
+            assert_eq!(
+                signature.len(),
+                SIGNATURE_BYTES,
+                "{:?} must sign in exactly SIGNATURE_BYTES",
+                signer.algorithm()
+            );
+        }
     }
 
     #[test]

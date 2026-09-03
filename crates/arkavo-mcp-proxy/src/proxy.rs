@@ -25,14 +25,16 @@ pub const UPSTREAM_ERROR: i64 = -32603;
 /// accept, so it is refused without decoding it.
 const MAX_ENCODED_PERMIT: usize = 4 * arkavo_dispatch_gate::MAX_PERMIT_BYTES / 3 + 4;
 
-/// The longest base64url string `_meta.arkavo.pop` may carry.
+/// The longest base64url string `_meta.arkavo.pop` may carry: the length of
+/// one signature re-expressed in encoded characters, by the same formula.
 ///
-/// A proof of possession is one signature — 64 bytes from both key types
-/// this stack signs with, Ed25519 and P-256 in P1363 form — which is 86
-/// characters unpadded. Bounding it by the permit's cap instead would let a
-/// caller send 21 849 characters of base64 for something that can only ever
-/// be 86, and hold the difference in memory while it was decoded.
-const MAX_ENCODED_PROOF: usize = 88;
+/// A proof of possession is exactly one signature —
+/// `arkavo_permit::SIGNATURE_BYTES` from both key types this stack signs
+/// with, Ed25519 and P-256 in P1363 form — which is 86 characters unpadded.
+/// Bounding it by the permit's cap instead would let a caller send 21 849
+/// characters of base64 for something that can only ever be 86, and hold the
+/// difference in memory while it was decoded.
+const MAX_ENCODED_PROOF: usize = 4 * arkavo_dispatch_gate::SIGNATURE_BYTES / 3 + 4;
 
 /// Configuration for connecting to the upstream MCP server.
 #[derive(Debug, Clone)]

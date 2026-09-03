@@ -36,6 +36,6 @@ pub use claims::{
 };
 pub use error::PermitError;
 pub use hash::HashAlgorithm;
-pub use keys::{PermitSigner, PermitVerifier};
+pub use keys::{PermitSigner, PermitVerifier, SIGNATURE_BYTES};
 pub use permit::{MAX_PERMIT_BYTES, Permit, decode, issuer_kid, mint, verify};
 pub use pop::{invocation_digest, prove_invocation, verify_invocation_proof};
