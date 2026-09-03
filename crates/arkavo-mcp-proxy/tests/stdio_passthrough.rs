@@ -897,8 +897,11 @@ async fn a_write_to_an_upstream_that_stopped_reading_gives_up_and_keeps_its_budg
             .contains("write timed out"),
         "the failure must name the write, not the response wait: {first}"
     );
+    // Ten times the configured 500 ms bound, which the write timeout and the
+    // response wait share: a session that instead waits out the fixture's own
+    // sleep takes far longer than this and is what the assertion catches.
     assert!(
-        started.elapsed() < Duration::from_secs(30),
+        started.elapsed() < Duration::from_secs(5),
         "the write must give up on its own timeout, not the fixture's sleep: {:?}",
         started.elapsed()
     );
