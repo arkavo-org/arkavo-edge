@@ -23,7 +23,8 @@ pub struct ParsedSign1 {
 /// it: [`MAX_TOKEN_BYTES`] on the length, and
 /// [`crate::depth::MAX_NESTING_DEPTH`] on the nesting — of the token and of
 /// the CBOR inside the two byte strings a decoder walks in their own right,
-/// the protected header and the payload.
+/// the protected header and the payload. Either of those two encoded with an
+/// indefinite length is refused rather than walked.
 pub fn parse(bytes: &[u8]) -> Result<ParsedSign1, CwtError> {
     if bytes.len() > MAX_TOKEN_BYTES {
         return Err(CwtError::Cose("token exceeds maximum size".into()));

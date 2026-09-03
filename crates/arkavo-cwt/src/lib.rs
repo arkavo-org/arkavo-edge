@@ -13,7 +13,9 @@
 //! structure and the two byte strings a COSE_Sign1 decoder parses in their
 //! own right — the protected header and the payload — which is everything
 //! this crate decodes; for any other byte string, whose bytes reach no
-//! decoder, ciborium's own limit of 256 levels is the floor.
+//! decoder, ciborium's own limit of 256 levels is the floor. Those two must
+//! be definite-length: an indefinite-length one leaves no span to bound while
+//! a decoder still concatenates its chunks, so it is refused outright.
 
 pub mod claims;
 pub mod depth;

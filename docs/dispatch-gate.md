@@ -77,11 +77,23 @@ The nesting bound is not the only one: ciborium, the decoder under `coset`,
 refuses past 256 levels of its own accord. Sixteen is what this stack
 tightens that to — a CWT is a shallow structure, 256 frames of recursion is
 stack it has no use for, and the check is one iterative pass over the bytes
-instead of the recursive descent it pre-empts. It is applied to the token's
-outer structure and to the two byte strings a COSE_Sign1 decoder parses in
-their own right, the protected header and the payload. Every other byte
-string — a signature, a `kid`, an EC coordinate — reaches no decoder, so its
-contents are never walked and ciborium's 256 is the floor there.
+instead of the recursive descent it pre-empts.
+
+Exactly two spans are walked besides the token's own outer structure: the
+protected header (element 0 of the COSE_Sign1 array) and the payload (element
+2), which are the only byte strings a decoder in this stack parses as CBOR in
+their own right. Every other byte string — a signature, a `kid`, an EC
+coordinate — reaches no decoder, so its contents are never walked and
+ciborium's 256 is the floor there.
+
+Those two slots must hold a *definite-length* byte string, and a token whose
+header or payload is indefinite-length is refused outright. Its content is
+spread over chunks, so there is no single span for the bound to hold on,
+while ciborium concatenates the chunks and hands coset the result to decode
+with a fresh 256-level budget — for the protected header, before any
+signature is checked. RFC 8949 deterministic encoding forbids indefinite
+lengths and nothing in this stack emits one, so the refusal costs no real
+token.
 
 Server-initiated requests travel the other way and are not relayed to the
 client in this slice: a `sampling/createMessage`, `elicitation/create` or

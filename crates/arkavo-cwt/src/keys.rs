@@ -43,12 +43,14 @@ impl KeySet {
     /// from an endpoint this crate does not control — and reaches the same
     /// recursive decoder, so the same nesting bound is applied to it first.
     pub fn from_cbor(bytes: &[u8]) -> Result<Self, CwtError> {
-        if crate::depth::check(bytes).is_err() {
-            return Err(CwtError::KeySet(format!(
-                "nesting depth exceeds {}",
-                crate::depth::MAX_NESTING_DEPTH
-            )));
-        }
+        // The depth check speaks about COSE_Sign1s, so its reason is
+        // re-labelled rather than restated: there is now more than one way it
+        // can refuse, and reporting them all as a depth breach would be
+        // telling the operator the wrong thing about their endpoint.
+        crate::depth::check(bytes).map_err(|error| match error {
+            CwtError::Cose(reason) => CwtError::KeySet(reason),
+            other => CwtError::KeySet(other.to_string()),
+        })?;
         let set = CoseKeySet::from_slice(bytes).map_err(|e| CwtError::KeySet(e.to_string()))?;
         let mut keys = Vec::with_capacity(set.0.len());
         for key in &set.0 {

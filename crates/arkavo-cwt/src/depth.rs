@@ -18,6 +18,14 @@
 //! signature, a `kid`, an EC coordinate is opaque to every decoder in this
 //! crate, so 32 random bytes that happen to begin like nested arrays must
 //! not refuse a valid token.
+//!
+//! Those two slots must also hold a *definite-length* byte string. An
+//! indefinite-length one has no single span to walk — its content is spread
+//! over chunks — while ciborium concatenates the chunks and hands the result
+//! to coset with a recursion budget of its own, which for the protected
+//! header happens before any signature is checked. RFC 8949 deterministic
+//! encoding forbids indefinite lengths and nothing in this stack emits one,
+//! so such a token is refused outright rather than walked.
 
 use crate::CwtError;
 use std::ops::Range;
@@ -34,7 +42,7 @@ pub fn check(bytes: &[u8]) -> Result<(), CwtError> {
     if walk(bytes, 0).depth > MAX_NESTING_DEPTH {
         return Err(too_deep());
     }
-    for range in decoded_byte_strings(bytes) {
+    for range in decoded_byte_strings(bytes)? {
         // Whatever prefix the walk covered is judged on its own. An
         // over-deep prefix is over-deep however the byte string ends, and
         // ciborium does not require its input to stop where the item does:
@@ -56,7 +64,15 @@ fn too_deep() -> CwtError {
 /// Anything that is not shaped like a COSE_Sign1 — a key set, a bare byte
 /// string — carries none, and neither do the other slots of one. Those
 /// bytes reach no decoder, so their shape is not the token's to answer for.
-fn decoded_byte_strings(bytes: &[u8]) -> Vec<Range<usize>> {
+///
+/// An *indefinite-length* byte string in either decoded position is refused
+/// rather than described. Its content is spread over chunks with a range of
+/// its own each, so there is no single span to walk, while ciborium
+/// concatenates them and hands coset the result to decode with a fresh
+/// 256-level budget — for the protected header, before any signature is
+/// checked. RFC 8949 deterministic encoding forbids indefinite lengths and
+/// nothing in this stack emits one, so refusing costs no real token.
+fn decoded_byte_strings(bytes: &[u8]) -> Result<Vec<Range<usize>>, CwtError> {
     let mut pos = 0usize;
     // Tag 61 (CWT) and tag 18 (COSE_Sign1) may each wrap the array, and
     // neither changes which of its elements are decoded.
@@ -72,11 +88,11 @@ fn decoded_byte_strings(bytes: &[u8]) -> Vec<Range<usize>> {
     }
 
     let Some(head) = head.filter(|head| head.major == 4) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     // A COSE_Sign1 is four elements; anything shorter has no payload slot.
     if head.argument.is_some_and(|elements| elements < 3) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let mut ranges = Vec::new();
@@ -89,18 +105,22 @@ fn decoded_byte_strings(bytes: &[u8]) -> Vec<Range<usize>> {
         let Some(item) = read_head(bytes, pos) else {
             break;
         };
-        if matches!(index, 0 | 2)
-            && item.major == 2
-            && let Some(range) = byte_string_range(bytes, &item)
-        {
-            ranges.push(range);
+        if matches!(index, 0 | 2) && item.major == 2 {
+            if item.argument.is_none() {
+                return Err(CwtError::Cose(
+                    "indefinite-length byte string in a decoded position".into(),
+                ));
+            }
+            if let Some(range) = byte_string_range(bytes, &item) {
+                ranges.push(range);
+            }
         }
         let Some(next) = skip_item(bytes, pos) else {
             break;
         };
         pos = next;
     }
-    ranges
+    Ok(ranges)
 }
 
 /// Where the content of a definite-length byte string lies, if the encoding
@@ -313,6 +333,35 @@ mod tests {
         bytes
     }
 
+    /// An indefinite-length byte string carrying `content` as one chunk:
+    /// `5F <definite chunk> FF`.
+    fn indefinite_byte_string(content: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0x5f];
+        bytes.extend(byte_string(content));
+        bytes.push(0xff);
+        bytes
+    }
+
+    /// The COSE_Sign1 array with `slot` — 0 (protected header) or 2
+    /// (payload) — holding an indefinite-length byte string over `content`,
+    /// and every other slot ordinary.
+    fn sign1_with_indefinite(slot: usize, content: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0x84];
+        if slot == 0 {
+            bytes.extend(indefinite_byte_string(content));
+        } else {
+            bytes.extend(byte_string(&[0xa0]));
+        }
+        bytes.push(0xa0);
+        if slot == 2 {
+            bytes.extend(indefinite_byte_string(content));
+        } else {
+            bytes.extend(byte_string(&[0xa0]));
+        }
+        bytes.extend(byte_string(&[]));
+        bytes
+    }
+
     #[test]
     fn shallow_cbor_passes() {
         // {1: -8, 4: h'6b31'} — the shape of a COSE protected header.
@@ -387,6 +436,44 @@ mod tests {
         // Truncated the other way — the nesting never closes — is refused on
         // the same grounds rather than passed to the decoder.
         assert!(check(&sign1(&[0xa0], &[0x81; 200], &[0u8; 64])).is_err());
+    }
+
+    /// An indefinite-length byte string in a slot a decoder parses is the one
+    /// way past the bound: no single range covers its content, so nothing was
+    /// walked, while ciborium concatenates the chunks and hands coset the
+    /// result with a fresh 256-level budget — for the protected header, before
+    /// any signature is checked. It is refused on its shape instead.
+    #[test]
+    fn an_indefinite_length_byte_string_in_a_decoded_slot_is_refused() {
+        let deep = nested_arrays(200);
+
+        // `84 5F 58C9 <200x 81, 00> FF A0 41A0 40`: the deep nesting hides in
+        // an indefinite-length protected header.
+        let header = sign1_with_indefinite(0, &deep);
+        assert_eq!(
+            &header[..4],
+            &[0x84, 0x5f, 0x58, 0xc9],
+            "the vector under test: {header:02x?}"
+        );
+        for token in [header, sign1_with_indefinite(2, &deep)] {
+            assert!(
+                matches!(
+                    check(&token),
+                    Err(CwtError::Cose(ref message)) if message.contains("indefinite-length byte string")
+                ),
+                "not refused: {:02x?}",
+                &token[..8.min(token.len())]
+            );
+        }
+
+        // The refusal is about the encoding, not about what it holds: an
+        // indefinite-length slot carrying nothing deep at all is refused too,
+        // because there is no span for the bound to hold on.
+        assert!(check(&sign1_with_indefinite(0, &[0xa0])).is_err());
+        assert!(check(&sign1_with_indefinite(2, &[0xa0])).is_err());
+
+        // And an ordinary token, whose slots are definite-length, still parses.
+        assert!(check(&sign1(&[0xa0], &[0xa0], &[0u8; 64])).is_ok());
     }
 
     /// Byte strings nothing decodes are left alone whatever they contain.

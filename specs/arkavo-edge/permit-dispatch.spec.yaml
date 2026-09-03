@@ -148,7 +148,8 @@ scenarios:
     then:
       - A line over 1 MiB is answered with INVALID_REQUEST, skipped, and the connection survives
       - A top-level array is answered with INVALID_REQUEST rather than dropped
-      - CBOR nesting past 16 levels is refused before a decoder sees it, inside embedded byte strings as well
+      - CBOR nesting past 16 levels is refused before a decoder sees it, in the token itself and in the only two byte strings a COSE_Sign1 decoder parses in their own right - the protected header and the payload
+      - An indefinite-length byte string in either of those two slots is refused outright, since no single span covers its content while a decoder still concatenates the chunks and decodes the result
       - Arguments over 256 KiB are denied at the policy stage before either hash of them runs
     refs:
       - crates/arkavo-mcp-proxy/src/framing.rs
