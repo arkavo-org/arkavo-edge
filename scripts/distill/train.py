@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import torch
@@ -17,15 +18,15 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 SYSTEM = (
-    "You are the Arkavo sentinel for the Northwind example pack. "
+    "You are the Arkavo sentinel for this knowledge pack. "
     "Classify the user's text. Reply with exactly one word: public, internal, or confidential."
 )
 LABELS = ("public", "internal", "confidential")
 
 
-def prompt_and_full(tok, span: str, label: str) -> tuple[str, str]:
+def prompt_and_full(tok, span: str, label: str, system: str = SYSTEM) -> tuple[str, str]:
     messages = [
-        {"role": "system", "content": SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content": span},
     ]
     prompt = tok.apply_chat_template(
@@ -35,17 +36,20 @@ def prompt_and_full(tok, span: str, label: str) -> tuple[str, str]:
 
 
 class LabelSet(Dataset):
-    def __init__(self, rows: list[dict], tok, max_len: int) -> None:
+    def __init__(self, rows: list[dict], tok, max_len: int, system: str = SYSTEM) -> None:
         self.rows = rows
         self.tok = tok
         self.max_len = max_len
+        self.system = system
 
     def __len__(self) -> int:
         return len(self.rows)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         row = self.rows[idx]
-        prompt, full = prompt_and_full(self.tok, row["text"], row["sensitivity"])
+        prompt, full = prompt_and_full(
+            self.tok, row["text"], row["sensitivity"], self.system
+        )
         prompt_ids = self.tok(prompt, add_special_tokens=False)["input_ids"]
         full_ids = self.tok(full, add_special_tokens=False)["input_ids"]
         if len(full_ids) > self.max_len:
@@ -92,6 +96,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--max-len", type=int, default=384)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--system", default=SYSTEM)
     args = parser.parse_args()
     _ = repo
 
@@ -100,7 +105,10 @@ def main() -> None:
     tok = AutoTokenizer.from_pretrained(args.base, trust_remote_code=True)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
-    rows = json.loads((args.data / "train.json").read_text())
+    train_path = args.data / "train.json"
+    if not train_path.is_file():
+        raise SystemExit(f"missing {train_path}")
+    rows = json.loads(train_path.read_text())
     for row in rows:
         if row["sensitivity"] not in LABELS:
             raise SystemExit(f"unknown sensitivity {row['sensitivity']}")
@@ -120,7 +128,7 @@ def main() -> None:
     model.to(device)
     model.print_trainable_parameters()
 
-    data = LabelSet(rows, tok, args.max_len)
+    data = LabelSet(rows, tok, args.max_len, args.system)
     loader = DataLoader(
         data,
         batch_size=args.batch_size,
@@ -129,7 +137,16 @@ def main() -> None:
     )
     opt = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=args.lr)
 
+    steps_per_epoch = max(len(loader), 1)
+    total_steps = steps_per_epoch * args.epochs
+    print(
+        f"device {device} rows {len(rows)} batch {args.batch_size} "
+        f"epochs {args.epochs} steps {total_steps}",
+        flush=True,
+    )
+
     step = 0
+    started = time.time()
     model.train()
     for epoch in range(args.epochs):
         running = 0.0
@@ -144,7 +161,19 @@ def main() -> None:
             running += float(loss.item())
             n += 1
             step += 1
-        print(f"epoch {epoch + 1}/{args.epochs} loss {running / max(n, 1):.4f}")
+            if step == 20 or step % 50 == 0 or step == total_steps:
+                elapsed = time.time() - started
+                rate = step / max(elapsed, 1e-6)
+                remain = (total_steps - step) / max(rate, 1e-6)
+                print(
+                    f"step {step}/{total_steps} loss {float(loss.item()):.4f} "
+                    f"{rate:.2f} it/s eta {remain / 60:.1f} min",
+                    flush=True,
+                )
+        print(
+            f"epoch {epoch + 1}/{args.epochs} loss {running / max(n, 1):.4f}",
+            flush=True,
+        )
 
     args.out.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(args.out)
