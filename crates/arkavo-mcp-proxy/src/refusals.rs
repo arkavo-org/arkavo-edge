@@ -44,6 +44,22 @@ const METHOD_NOT_FOUND: i64 = -32601;
 /// block the response the proxy is actually waiting for.
 pub(crate) const REFUSAL_QUEUE_DEPTH: usize = 16;
 
+/// What one reader has done with the refusals it produced: the ones the
+/// queue took, and the ones it had no room for.
+///
+/// Both are counted on every occurrence and logged on the first and at each
+/// doubling after it. A flood of server-initiated requests is answered at
+/// the cost of a dozen log lines whatever its size, rather than one line per
+/// request — which would make the log the denial of service the queue is
+/// there to prevent.
+#[derive(Debug, Default)]
+pub(crate) struct RefusalCounts {
+    /// Refusals handed to the writer task.
+    queued: u64,
+    /// Refusals dropped because the queue was full.
+    dropped: u64,
+}
+
 /// Route one message from the upstream server by its shape.
 ///
 /// The order matters, and it is the whole point of this function. A message
@@ -59,7 +75,7 @@ pub(crate) async fn dispatch(
     pending: &Mutex<HashMap<String, oneshot::Sender<Value>>>,
     refusals: &mpsc::Sender<Value>,
     message: Value,
-    dropped_refusals: &mut u64,
+    counts: &mut RefusalCounts,
 ) {
     let id = message.get("id").filter(|value| !value.is_null()).cloned();
 
@@ -74,7 +90,7 @@ pub(crate) async fn dispatch(
             .and_then(Value::as_str)
             .unwrap_or("<non-string method>");
         match id {
-            Some(id) => refuse_server_request(refusals, &id, method, dropped_refusals),
+            Some(id) => refuse_server_request(refusals, &id, method, counts),
             None => debug!(method, "upstream notification (dropped)"),
         }
         return;
@@ -105,14 +121,19 @@ pub(crate) async fn dispatch(
 /// keep reading, and a server that asks faster than it reads its own stdin
 /// must not be able to stop it. When the queue is full — or the writer task
 /// has gone with the connection — the refusal is dropped and counted, which
-/// costs that server nothing but its own timeout. Every drop is counted;
-/// only the first and each doubling after it is logged, so a flood cannot
-/// turn the log into the flood.
+/// costs that server nothing but its own timeout.
+///
+/// Both outcomes are counted every time and logged the same way: the first
+/// and each doubling after it at `warn`, the rest at `debug`. A refusal that
+/// *fits* is as easy to flood with as one that does not — the queue drains,
+/// so a server asking a little slower than the writer writes is refused
+/// indefinitely without ever filling it — so rate-limiting one and not the
+/// other would leave the log open to exactly the flood the queue closes.
 fn refuse_server_request(
     refusals: &mpsc::Sender<Value>,
     id: &Value,
     method: &str,
-    dropped: &mut u64,
+    counts: &mut RefusalCounts,
 ) {
     let refusal = json!({
         "jsonrpc": "2.0",
@@ -124,22 +145,30 @@ fn refuse_server_request(
             ),
         },
     });
+    // A flood is thousands of requests, and one warning each would make the
+    // log the denial of service the queue is there to prevent. The first is
+    // reported, and then every doubling: enough to see one is happening and
+    // roughly how big it got, at a dozen lines for a flood of any size.
     if refusals.try_send(refusal).is_ok() {
-        warn!(
-            method,
-            "refusing a server-initiated request: not relayed to the downstream client"
-        );
-    } else {
-        *dropped += 1;
-        // A flood is thousands of refusals, and one warning each would make
-        // the log the denial of service the queue is there to prevent. The
-        // first drop is reported, and then every doubling: enough to see one
-        // is happening and roughly how big it got, at a dozen lines for a
-        // flood of any size.
-        if dropped.is_power_of_two() {
+        counts.queued += 1;
+        if counts.queued.is_power_of_two() {
             warn!(
                 method,
-                dropped = *dropped,
+                refused = counts.queued,
+                "refusing a server-initiated request: not relayed to the downstream client"
+            );
+        } else {
+            debug!(
+                method,
+                "refusing a server-initiated request: not relayed to the downstream client"
+            );
+        }
+    } else {
+        counts.dropped += 1;
+        if counts.dropped.is_power_of_two() {
+            warn!(
+                method,
+                dropped = counts.dropped,
                 queue_depth = REFUSAL_QUEUE_DEPTH,
                 "dropped the refusal of a server-initiated request: the refusal queue is full"
             );
@@ -156,6 +185,13 @@ fn refuse_server_request(
 /// write does run out of time the connection is marked closed and the task
 /// stops — nothing more can be said on a pipe nobody is reading, and a
 /// partial line is already in it.
+///
+/// A closed connection stops this task whoever closed it. The partial line
+/// a request's abandoned write leaves behind is in the same pipe, so a
+/// refusal written after it would splice onto it and hand the upstream a
+/// corrupted line if it ever resumed reading. `connected` is therefore
+/// checked on every refusal taken off the queue, not only after a write of
+/// this task's own has timed out.
 pub(crate) fn spawn_writer<W>(
     stdin: Arc<Mutex<W>>,
     mut queued: mpsc::Receiver<Value>,
@@ -166,6 +202,13 @@ pub(crate) fn spawn_writer<W>(
 {
     tokio::spawn(async move {
         while let Some(refusal) = queued.recv().await {
+            if !connected.load(Ordering::SeqCst) {
+                debug!(
+                    "the upstream connection is closed; the queued refusal is not written into a \
+                     pipe that already holds an abandoned line"
+                );
+                return;
+            }
             match tokio::time::timeout(timeout, write_line(&stdin, &refusal)).await {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => warn!("failed to refuse a server-initiated request: {e}"),
@@ -203,13 +246,13 @@ mod tests {
         let key = id_key(&json!(1));
         pending.lock().await.insert(key.clone(), sender);
         let (refusals, mut queued) = mpsc::channel(REFUSAL_QUEUE_DEPTH);
-        let mut dropped = 0u64;
+        let mut counts = RefusalCounts::default();
 
         dispatch(
             &pending,
             &refusals,
             json!({"jsonrpc": "2.0", "id": 1, "method": "sampling/createMessage"}),
-            &mut dropped,
+            &mut counts,
         )
         .await;
 
@@ -220,7 +263,7 @@ mod tests {
         let refusal = queued.try_recv().expect("the request is refused");
         assert_eq!(refusal["id"], 1);
         assert_eq!(refusal["error"]["code"], METHOD_NOT_FOUND);
-        assert_eq!(dropped, 0);
+        assert_eq!(counts.dropped, 0);
 
         // A `method` that is not a string is still the server asking. Reading
         // the name before deciding made both of these fall through to the
@@ -231,7 +274,7 @@ mod tests {
                 &pending,
                 &refusals,
                 json!({"jsonrpc": "2.0", "id": 1, "method": method}),
-                &mut dropped,
+                &mut counts,
             )
             .await;
             assert!(
@@ -247,14 +290,14 @@ mod tests {
                 "the refusal names what it could not read: {message}"
             );
         }
-        assert_eq!(dropped, 0);
+        assert_eq!(counts.dropped, 0);
 
         // A message with no `method` is an answer, and does resolve it.
         dispatch(
             &pending,
             &refusals,
             json!({"jsonrpc": "2.0", "id": 1, "result": {"ok": true}}),
-            &mut dropped,
+            &mut counts,
         )
         .await;
         let response = receiver.await.expect("the response reaches the caller");
@@ -270,17 +313,18 @@ mod tests {
         // Depth one: the first refusal takes the only slot, and nothing
         // drains it, so every refusal after that has nowhere to go.
         let (refusals, mut queued) = mpsc::channel(1);
-        let mut dropped = 0u64;
+        let mut counts = RefusalCounts::default();
 
         let ask = |n: u64| json!({"jsonrpc": "2.0", "id": n, "method": "sampling/createMessage"});
 
-        dispatch(&pending, &refusals, ask(1), &mut dropped).await;
-        assert_eq!(dropped, 0, "the first refusal fits");
+        dispatch(&pending, &refusals, ask(1), &mut counts).await;
+        assert_eq!(counts.dropped, 0, "the first refusal fits");
+        assert_eq!(counts.queued, 1, "and is counted as queued");
 
         for expected in 1..=3u64 {
-            dispatch(&pending, &refusals, ask(expected + 1), &mut dropped).await;
+            dispatch(&pending, &refusals, ask(expected + 1), &mut counts).await;
             assert_eq!(
-                dropped, expected,
+                counts.dropped, expected,
                 "a refusal with nowhere to go is counted, not waited on"
             );
         }
@@ -338,5 +382,55 @@ mod tests {
             refusals.send(json!({"id": 2})).await.is_err(),
             "the writer stops: nothing more can be said on a pipe nobody reads"
         );
+    }
+
+    /// The other way the connection closes: a *request's* write ran out of
+    /// time and left a partial line in the upstream's stdin. The pipe is
+    /// shared, so a refusal written after that would splice onto that line —
+    /// exactly the spliced message the closed-connection rule exists to
+    /// prevent. The writer observes the flag it does not set, and writes
+    /// nothing.
+    #[tokio::test]
+    async fn a_refusal_queued_after_the_connection_is_retired_is_never_written() {
+        use tokio::io::AsyncReadExt;
+
+        // A duplex whose far half *is* read, so anything written would
+        // arrive: the test can tell "nothing was written" from "nobody
+        // looked".
+        let (near, mut far) = tokio::io::duplex(1024);
+        let stdin = Arc::new(Mutex::new(near));
+        // Retired before the writer ever runs, as a request's abandoned
+        // write leaves it.
+        let connected = Arc::new(AtomicBool::new(false));
+        let (refusals, queued) = mpsc::channel::<Value>(REFUSAL_QUEUE_DEPTH);
+        spawn_writer(
+            Arc::clone(&stdin),
+            queued,
+            Duration::from_millis(50),
+            Arc::clone(&connected),
+        );
+
+        // The queue still accepts it — the reader must never block on this —
+        // and the writer is the one that declines to write it.
+        refusals
+            .send(json!({"jsonrpc": "2.0", "id": 1, "error": {"code": METHOD_NOT_FOUND}}))
+            .await
+            .expect("the queue takes the refusal whatever becomes of it");
+
+        tokio::time::timeout(Duration::from_secs(5), refusals.closed())
+            .await
+            .expect("the writer gives up on a closed connection instead of writing");
+
+        let mut buffer = [0u8; 64];
+        match tokio::time::timeout(Duration::from_millis(100), far.read(&mut buffer)).await {
+            // Nothing arrived, and the writer has already stopped: the
+            // abandoned line in the pipe is the last thing in it.
+            Err(_) => {}
+            Ok(Ok(bytes)) => panic!(
+                "a refusal was spliced onto the abandoned line: {:?}",
+                String::from_utf8_lossy(&buffer[..bytes])
+            ),
+            Ok(Err(e)) => panic!("the test pipe failed: {e}"),
+        }
     }
 }

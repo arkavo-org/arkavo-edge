@@ -38,6 +38,11 @@
 //! the connection is marked closed (a partial line is already in the pipe,
 //! and the next write would splice onto it), and a request reports
 //! [`UpstreamError::WriteTimeout`], which counts as "may have run".
+//!
+//! Closing is final, and it is final for everyone: the requests still
+//! waiting for a response are failed at that moment, exactly as the reader
+//! task fails them at EOF, rather than each sitting out a receive timeout on
+//! a connection nothing will be written to again.
 
 // `pub(crate)` is the real, intended visibility here (the module is private,
 // so nothing leaks past the crate either way); `redundant_pub_crate` wants
@@ -188,11 +193,11 @@ impl UpstreamConnection {
         let reader_connected = Arc::clone(&connected);
         tokio::spawn(async move {
             let mut stdout = BufReader::new(stdout);
-            // Refusals the queue had no room for. Counted on every drop
-            // but warned about on the first and then at each doubling, so a
-            // flood of any size costs a dozen log lines rather than one per
-            // refusal.
-            let mut dropped_refusals = 0u64;
+            // What this reader has refused and what it had to drop.
+            // Counted on every occurrence, warned about on the first and then
+            // at each doubling, so a flood of any size costs a dozen log
+            // lines rather than one per refusal.
+            let mut refusal_counts = refusals::RefusalCounts::default();
             loop {
                 match framing::read_line(&mut stdout).await {
                     Ok(Line::Message(line)) => {
@@ -206,7 +211,7 @@ impl UpstreamConnection {
                                     &reader_pending,
                                     &refusals,
                                     message,
-                                    &mut dropped_refusals,
+                                    &mut refusal_counts,
                                 )
                                 .await;
                             }
@@ -252,6 +257,15 @@ impl UpstreamConnection {
     /// A write abandoned part-way may have left a prefix of the line in the
     /// pipe, and the next write would splice onto it, so the connection is
     /// marked closed rather than spoken on again.
+    ///
+    /// Retiring the connection also fails everything still waiting on it,
+    /// the way the reader task does at EOF. Nothing will be written on this
+    /// pipe again, so a request already past its own write is waiting for an
+    /// answer on a connection that is over; dropping its sender tells it now
+    /// rather than leaving it to sit out its receive timeout. Each such
+    /// waiter sees [`UpstreamError::ClosedAfterSend`] — its own bytes did
+    /// reach the pipe, so its call may have run — and keeps whatever was
+    /// spent admitting it.
     async fn write_bounded(&self, message: &Value) -> Result<(), UpstreamError> {
         match tokio::time::timeout(self.timeout, write_line(&self.stdin, message)).await {
             Ok(result) => result,
@@ -261,6 +275,7 @@ impl UpstreamConnection {
                     "upstream stopped reading its stdin; the write was abandoned"
                 );
                 self.connected.store(false, Ordering::SeqCst);
+                self.pending.lock().await.clear();
                 Err(UpstreamError::WriteTimeout(self.timeout))
             }
         }
@@ -439,5 +454,58 @@ mod tests {
             "a request that was sent must not report as never sent, got {err}"
         );
         assert!(err.may_have_reached_upstream());
+    }
+
+    /// Retirement is the end of the connection for everyone on it, not only
+    /// for the write that could not finish. A request already past its own
+    /// write is waiting for an answer on a pipe that will never be written
+    /// to again, so it is failed when the connection is retired — the same
+    /// end the reader task gives every waiter at EOF — instead of sitting
+    /// out a receive timeout of its own on top of the write's.
+    ///
+    /// The waiter is planted rather than issued as a second request, because
+    /// one shared timeout leaves nothing to observe: writes serialize on the
+    /// stdin lock, so a stalling write can only begin after an earlier
+    /// request's write finished, and its deadline therefore never falls
+    /// before that request's own. A sender in `pending` is precisely what a
+    /// request past its write leaves behind, so that is what is left there.
+    #[tokio::test]
+    async fn a_write_timeout_fails_the_requests_already_waiting_on_the_connection() {
+        // `sleep` never reads its stdin, so the pipe fills and stays full.
+        let conn = UpstreamConnection::spawn(
+            "sh",
+            &["-c".to_string(), "sleep 30".to_string()],
+            &HashMap::new(),
+            Some(Duration::from_millis(200)),
+        )
+        .unwrap();
+        let waiting = {
+            let (tx, rx) = oneshot::channel();
+            conn.pending.lock().await.insert(id_key(&json!(1)), tx);
+            rx
+        };
+
+        // Past any pipe buffer, so this write cannot finish and the
+        // connection is retired on its timeout.
+        let padded = json!({"pad": "x".repeat(2 * 1024 * 1024)});
+        let err = conn
+            .request(&json!(2), "tools/call", Some(&padded))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, UpstreamError::WriteTimeout(_)),
+            "the stalled write must report as a write timeout, got {err}"
+        );
+
+        // Already resolved: the waiter was failed with the connection, not
+        // left to discover it a receive timeout later.
+        let waited = tokio::time::timeout(Duration::from_millis(100), waiting)
+            .await
+            .expect("the retirement itself must fail the waiter, not a timeout of its own");
+        assert!(waited.is_err(), "a retired connection answers nobody");
+        assert!(
+            !conn.connected.load(Ordering::SeqCst),
+            "the connection is closed once a write of its own is abandoned"
+        );
     }
 }
