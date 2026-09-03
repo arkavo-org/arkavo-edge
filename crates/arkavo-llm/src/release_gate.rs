@@ -156,6 +156,20 @@ where
     }
 }
 
+impl<S> Drop for GatedStream<S> {
+    /// A consumer that walks away leaves held text behind, and a gate outlives
+    /// the completion it was inspecting — it is the session's, not this
+    /// stream's. Telling it the completion is over is what keeps the abandoned
+    /// text from being carried into the next one. `discard` and not `finish`:
+    /// a disconnect is not an inspection, so the text is dropped rather than
+    /// judged and released to nobody.
+    fn drop(&mut self) {
+        if !self.finished {
+            self.gate.discard();
+        }
+    }
+}
+
 /// Inspect and emit the tail. `done` carries the final chunk's metadata when
 /// the provider sent one, so timing information is not lost to the gate.
 fn finish(
@@ -375,6 +389,71 @@ mod tests {
 
         assert!(errored);
         assert!(seen.is_empty(), "the tail must not be flushed uninspected");
+    }
+
+    /// A gate that counts the discards it is told about, so a test can assert
+    /// on a notification rather than on the buffer it clears.
+    struct Counting {
+        discards: Mutex<usize>,
+    }
+
+    impl Counting {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                discards: Mutex::new(0),
+            })
+        }
+
+        fn discards(&self) -> usize {
+            *self.discards.lock().expect("lock")
+        }
+    }
+
+    impl ReleaseGate for Counting {
+        // Releases each chunk whole, so the consumer gets a yield per chunk and
+        // can stop between two of them.
+        fn admit(&self, chunk: &str) -> GateOutcome {
+            GateOutcome::Release(chunk.to_string())
+        }
+
+        fn finish(&self) -> GateOutcome {
+            GateOutcome::Release(String::new())
+        }
+
+        fn discard(&self) {
+            *self.discards.lock().expect("lock") += 1;
+        }
+    }
+
+    /// SENT-007 edge case: the consumer goes away mid-completion. The gate
+    /// outlives the stream, so the text this one was holding has to be dropped
+    /// rather than left for the next completion to inherit.
+    #[tokio::test]
+    async fn dropping_a_partly_consumed_stream_discards_what_it_held() {
+        let gate = Counting::new();
+        {
+            let inner = futures::stream::iter(chunks(&["first ", "second ", "third"]));
+            let mut stream = gated(Box::pin(inner), gate.clone());
+            stream.next().await;
+            assert_eq!(gate.discards(), 0, "not while the stream is alive");
+        }
+
+        assert_eq!(gate.discards(), 1);
+    }
+
+    /// And a completion that ran to its end has nothing to discard: finishing
+    /// already inspected the tail, and a discard here would tell a session-wide
+    /// gate to throw away a completion that was properly closed.
+    #[tokio::test]
+    async fn dropping_a_finished_stream_discards_nothing() {
+        let gate = Counting::new();
+        {
+            let inner = futures::stream::iter(chunks(&["all of it"]));
+            let mut stream = gated(Box::pin(inner), gate.clone());
+            while stream.next().await.is_some() {}
+        }
+
+        assert_eq!(gate.discards(), 0);
     }
 
     /// The final chunk keeps the provider's metadata, so gating a stream does

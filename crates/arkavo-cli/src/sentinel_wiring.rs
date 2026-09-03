@@ -282,7 +282,14 @@ impl ReleaseGate for CascadeGate {
     }
 
     fn discard(&self) {
-        self.buffer().discard();
+        // The consumer went away, so the held text is dropped uninspected
+        // (SENT-007 edge case) — and the buffer that held it goes with it. One
+        // gate serves a session, and `Holdback::discard` leaves a buffer in a
+        // state that offers no window ever again; keeping it would make the
+        // next completion look like an empty release, exactly as a blocked one
+        // did. Replacing it drops the text just as thoroughly and leaves the
+        // session able to answer.
+        *self.buffer() = Self::fresh_buffer(self.ceiling, self.window_bytes, self.overlap_bytes);
     }
 }
 
@@ -616,6 +623,33 @@ mod tests {
         assert_eq!(gate.finish(), GateOutcome::Blocked);
         assert_eq!(gate.admit("still entirely clean"), GateOutcome::Blocked);
         assert_eq!(gate.finish(), GateOutcome::Blocked);
+    }
+
+    /// Regression: a discarded buffer offers no window either, so the session
+    /// that survives a dropped consumer must not inherit one. Discarding drops
+    /// the held text and leaves the gate able to judge the next completion,
+    /// rather than swallowing it and resetting underneath it.
+    #[spec("SENT-007")]
+    #[test]
+    fn a_discarded_completion_does_not_swallow_the_next_one() {
+        let tier = Recording::new();
+        let gate = gate_with(tier.clone(), SensitivityLevel::Internal);
+
+        // A completion the consumer walks away from mid-flight.
+        gate.admit("half an answer that nobody is listening to");
+        gate.discard();
+
+        // The next one is inspected and released, and the abandoned text is
+        // neither released nor carried into its window.
+        assert_eq!(
+            gate.admit("a fresh answer"),
+            GateOutcome::Release(String::new())
+        );
+        assert_eq!(
+            gate.finish(),
+            GateOutcome::Release("a fresh answer".to_string())
+        );
+        assert_eq!(tier.windows(), vec!["a fresh answer"]);
     }
 
     #[test]

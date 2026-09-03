@@ -963,6 +963,138 @@ mod tests {
         assert!(matches!(result, CommandResult::Output(_)));
     }
 
+    /// Serializes the tests that redirect the process's own descriptors.
+    /// Two of them swapping fd 2 at once would each restore the other's
+    /// redirect and read a truncated capture.
+    #[cfg(unix)]
+    static TTY_CAPTURE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Redirect a file descriptor to a temp file for the duration of a call,
+    /// so a function that writes straight to the terminal can be observed.
+    #[cfg(unix)]
+    struct Captured {
+        fd: i32,
+        saved: i32,
+        path: std::path::PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl Captured {
+        fn of(fd: i32, name: &str) -> Self {
+            let path = std::env::temp_dir().join(name);
+            let file = std::fs::File::create(&path).expect("capture file");
+            // SAFETY: `fd` is 1 or 2; `saved` is closed in `finish`.
+            let saved = unsafe { libc::dup(fd) };
+            assert!(saved >= 0, "dup");
+            // SAFETY: both descriptors are open; this replaces `fd` until restored.
+            assert!(unsafe { libc::dup2(std::os::fd::AsRawFd::as_raw_fd(&file), fd) } >= 0);
+            Self { fd, saved, path }
+        }
+
+        fn finish(self) -> String {
+            // SAFETY: `saved` came from `dup` on `fd` and is still open.
+            unsafe {
+                libc::dup2(self.saved, self.fd);
+                libc::close(self.saved);
+            }
+            std::fs::read_to_string(&self.path).expect("captured output")
+        }
+    }
+
+    /// SENT-011: a blocked completion tells the consumer that it was blocked and
+    /// nothing else. The routing layers wrap the refusal on the way here, and
+    /// each wrapper names a stage; and whatever the gate was holding when it
+    /// fired is not the consumer's either.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_blocked_completion_prints_only_the_refusal() {
+        use arkavo_protocol::types::{MessageDelta, MessageDeltaContent};
+
+        if std::env::var("ARKAVO_DEBUG").is_ok() {
+            eprintln!("skipping: ARKAVO_DEBUG streams text unbuffered");
+            return;
+        }
+        let _serialized = TTY_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let delta = |sequence, content| MessageDelta {
+            session_id: "s".to_string(),
+            message_id: "m".to_string(),
+            sequence,
+            delta: content,
+            timestamp: chrono::Utc::now(),
+        };
+        // Short enough to stay inside the think-tag lookahead, so it is still
+        // held when the refusal arrives.
+        tx.send(delta(
+            0,
+            MessageDeltaContent::Text {
+                text: "SECRET".to_string(),
+            },
+        ))
+        .await
+        .expect("send");
+        tx.send(delta(
+            1,
+            MessageDeltaContent::Error {
+                code: "ROUTER_ERROR".to_string(),
+                message: format!(
+                    "Failed to route message: LLM provider error: Provider error: {}",
+                    arkavo_llm::GATE_BLOCKED
+                ),
+            },
+        ))
+        .await
+        .expect("send");
+        drop(tx);
+
+        let out = Captured::of(1, "arkavo-chat-gate-stdout.txt");
+        let err = Captured::of(2, "arkavo-chat-gate-stderr.txt");
+        process_stream(&mut rx).await;
+        let err = err.finish();
+        let out = out.finish();
+
+        assert!(err.contains(arkavo_llm::GATE_BLOCKED), "{err:?}");
+        assert!(!err.contains("Failed to route message"), "{err:?}");
+        assert!(!err.contains("[Error:"), "{err:?}");
+        assert!(!err.contains("SECRET"), "{err:?}");
+        assert!(!out.contains("SECRET"), "held text reached stdout: {out:?}");
+    }
+
+    /// And an ordinary failure still says what went wrong, so the quiet refusal
+    /// is the exception rather than the rule.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_ordinary_error_is_still_reported_in_full() {
+        use arkavo_protocol::types::{MessageDelta, MessageDeltaContent};
+
+        let _serialized = TTY_CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        tx.send(MessageDelta {
+            session_id: "s".to_string(),
+            message_id: "m".to_string(),
+            sequence: 0,
+            delta: MessageDeltaContent::Error {
+                code: "ROUTER_ERROR".to_string(),
+                message: "Chat inference timed out after 60s".to_string(),
+            },
+            timestamp: chrono::Utc::now(),
+        })
+        .await
+        .expect("send");
+        drop(tx);
+
+        let err = Captured::of(2, "arkavo-chat-plain-stderr.txt");
+        process_stream(&mut rx).await;
+        let err = err.finish();
+
+        assert!(
+            err.contains("[Error: Chat inference timed out after 60s]"),
+            "{err:?}"
+        );
+    }
+
     /// `--system` is not part of the classifier: a model fine-tuned under a
     /// pack's prompt has to be runnable under that prompt in any build.
     #[test]

@@ -1251,7 +1251,19 @@ impl ChatSessionManager {
                                         }
                                         Err(e) => {
                                             error!(error = %e, "Failed to get final response after tool execution");
-                                            // Keep the original response as final
+                                            // The consumer is told, not only the
+                                            // log. This inference is gated like
+                                            // any other, and a block here left
+                                            // the stream with tool deltas and no
+                                            // answer — which reads as an empty
+                                            // response rather than a refusal.
+                                            final_response = String::new();
+                                            let _ = delta_tx.send(router_error_delta(
+                                                &session_id,
+                                                &message_id,
+                                                (response.tool_calls.len() + tool_results.len() + 4) as u64,
+                                                &e,
+                                            ));
                                         }
                                     }
                                 } else {
@@ -1398,17 +1410,12 @@ impl ChatSessionManager {
                                     final_response = String::new();
                                     error!(error = %e, "Missing tool use but no registry available");
 
-                                    let error_delta = MessageDelta {
-                                        session_id: session_id.clone(),
-                                        message_id: message_id.clone(),
-                                        sequence: 0,
-                                        delta: MessageDeltaContent::Error {
-                                            code: "ROUTER_ERROR".to_string(),
-                                            message: format!("Failed to route message: {e}"),
-                                        },
-                                        timestamp: chrono::Utc::now(),
-                                    };
-                                    let _ = delta_tx.send(error_delta);
+                                    let _ = delta_tx.send(router_error_delta(
+                                        &session_id,
+                                        &message_id,
+                                        0,
+                                        &e,
+                                    ));
                                 }
                             } else {
                                 final_response = String::new();
@@ -1422,17 +1429,12 @@ impl ChatSessionManager {
                                 session_observability::log_session_error(&session_id, &e.to_string(), Some("ROUTER_ERROR"));
 
                                 // Send error delta
-                                let error_delta = MessageDelta {
-                                    session_id: session_id.clone(),
-                                    message_id: message_id.clone(),
-                                    sequence: 0,
-                                    delta: MessageDeltaContent::Error {
-                                        code: "ROUTER_ERROR".to_string(),
-                                        message: format!("Failed to route message: {e}"),
-                                    },
-                                    timestamp: chrono::Utc::now(),
-                                };
-                                let _ = delta_tx.send(error_delta);
+                                let _ = delta_tx.send(router_error_delta(
+                                    &session_id,
+                                    &message_id,
+                                    0,
+                                    &e,
+                                ));
                             }
                         }
                     }
@@ -1525,6 +1527,31 @@ impl ChatSessionManager {
     }
 }
 
+/// The delta a routing failure becomes.
+///
+/// One constructor for every such failure, because the consumer's only signal
+/// that a turn produced no answer is this delta: a branch that logs and sends
+/// nothing leaves the stream ending on whatever came before it, which reads as
+/// an empty answer rather than as a failure. A release gate's refusal arrives
+/// here like any other routing error and must not be the one that goes unsaid.
+fn router_error_delta(
+    session_id: &str,
+    message_id: &str,
+    sequence: u64,
+    error: &arkavo_router::Error,
+) -> MessageDelta {
+    MessageDelta {
+        session_id: session_id.to_string(),
+        message_id: message_id.to_string(),
+        sequence,
+        delta: MessageDeltaContent::Error {
+            code: "ROUTER_ERROR".to_string(),
+            message: format!("Failed to route message: {error}"),
+        },
+        timestamp: chrono::Utc::now(),
+    }
+}
+
 /// Maximum characters per tool result to prevent exceeding LLM token limits
 const MAX_TOOL_RESULT_CHARS: usize = 200_000;
 
@@ -1576,6 +1603,33 @@ mod tests {
 
     // Mock-provider support
     use async_trait::async_trait;
+
+    /// A gate block on the tool-result synthesis is a routing failure like any
+    /// other, and the consumer has to be told. That branch used to log and send
+    /// nothing, so a blocked second inference left the stream carrying tool
+    /// deltas and no answer — indistinguishable from a model that replied with
+    /// nothing.
+    #[spec("SENT-011")]
+    #[test]
+    fn a_blocked_completion_becomes_an_error_delta_the_consumer_can_see() {
+        let blocked = arkavo_router::Error::Provider(arkavo_llm::Error::Provider(
+            arkavo_llm::GATE_BLOCKED.to_string(),
+        ));
+
+        let delta = router_error_delta("session-1", "message-1", 7, &blocked);
+
+        assert_eq!(delta.session_id, "session-1");
+        assert_eq!(delta.sequence, 7);
+        match delta.delta {
+            MessageDeltaContent::Error { code, message } => {
+                assert_eq!(code, "ROUTER_ERROR");
+                // The refusal survives the wrapping, which is what the CLI
+                // matches on to print it alone.
+                assert!(message.contains(arkavo_llm::GATE_BLOCKED), "{message}");
+            }
+            other => panic!("expected an error delta, got {other:?}"),
+        }
+    }
 
     #[tokio::test]
     async fn test_session_creation() {
