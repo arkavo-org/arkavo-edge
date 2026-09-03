@@ -44,20 +44,38 @@ const METHOD_NOT_FOUND: i64 = -32601;
 /// block the response the proxy is actually waiting for.
 pub(crate) const REFUSAL_QUEUE_DEPTH: usize = 16;
 
-/// What one reader has done with the refusals it produced: the ones the
-/// queue took, and the ones it had no room for.
+/// What one reader has made of the upstream's messages: the refusals it
+/// queued, the ones it had no room for, and the messages it could not
+/// deliver to anybody.
 ///
-/// Both are counted on every occurrence and logged on the first and at each
-/// doubling after it. A flood of server-initiated requests is answered at
-/// the cost of a dozen log lines whatever its size, rather than one line per
-/// request — which would make the log the denial of service the queue is
-/// there to prevent.
+/// Every one is counted on each occurrence and logged on the first and at
+/// each doubling after it. What the upstream sends costs the proxy a dozen
+/// log lines whatever its volume, rather than one line per message — which
+/// would let a server that says nothing useful, cheaply and forever, make
+/// the log the denial of service the refusal queue is there to prevent.
 #[derive(Debug, Default)]
 pub(crate) struct RefusalCounts {
     /// Refusals handed to the writer task.
     queued: u64,
     /// Refusals dropped because the queue was full.
     dropped: u64,
+    /// Answers naming an id no request is waiting on.
+    unmatched: u64,
+    /// Messages that are neither a request nor an answer, carrying no
+    /// `method` and no id.
+    malformed: u64,
+}
+
+/// Count one occurrence and say whether this one is worth a `warn!`: the
+/// first, and each doubling after it.
+///
+/// A dozen lines describe a flood of any size — that it is happening, and
+/// roughly how far it got — while every occurrence in between is left to
+/// `debug`, where it costs nothing to a log nobody sized for an upstream
+/// that misbehaves on purpose.
+fn worth_warning(count: &mut u64) -> bool {
+    *count += 1;
+    count.is_power_of_two()
 }
 
 /// Route one message from the upstream server by its shape.
@@ -97,7 +115,14 @@ pub(crate) async fn dispatch(
     }
 
     let Some(id) = id else {
-        warn!("upstream message with neither a method nor an id (dropped)");
+        if worth_warning(&mut counts.malformed) {
+            warn!(
+                malformed = counts.malformed,
+                "upstream message with neither a method nor an id (dropped)"
+            );
+        } else {
+            debug!("upstream message with neither a method nor an id (dropped)");
+        }
         return;
     };
     let sender = pending.lock().await.remove(&id_key(&id));
@@ -105,7 +130,21 @@ pub(crate) async fn dispatch(
         Some(sender) => {
             let _ = sender.send(message);
         }
-        None => warn!("upstream response with an id nothing is waiting on (dropped)"),
+        // Nothing is waiting on this id, and answering an id nobody asked
+        // about costs the upstream one short line. Both undeliverable
+        // branches are therefore rate-limited exactly as the refusals are:
+        // a server can send either without limit, and one warning each would
+        // make the log the flood.
+        None => {
+            if worth_warning(&mut counts.unmatched) {
+                warn!(
+                    unmatched = counts.unmatched,
+                    "upstream response with an id nothing is waiting on (dropped)"
+                );
+            } else {
+                debug!("upstream response with an id nothing is waiting on (dropped)");
+            }
+        }
     }
 }
 
@@ -150,8 +189,7 @@ fn refuse_server_request(
     // reported, and then every doubling: enough to see one is happening and
     // roughly how big it got, at a dozen lines for a flood of any size.
     if refusals.try_send(refusal).is_ok() {
-        counts.queued += 1;
-        if counts.queued.is_power_of_two() {
+        if worth_warning(&mut counts.queued) {
             warn!(
                 method,
                 refused = counts.queued,
@@ -163,16 +201,13 @@ fn refuse_server_request(
                 "refusing a server-initiated request: not relayed to the downstream client"
             );
         }
-    } else {
-        counts.dropped += 1;
-        if counts.dropped.is_power_of_two() {
-            warn!(
-                method,
-                dropped = counts.dropped,
-                queue_depth = REFUSAL_QUEUE_DEPTH,
-                "dropped the refusal of a server-initiated request: the refusal queue is full"
-            );
-        }
+    } else if worth_warning(&mut counts.dropped) {
+        warn!(
+            method,
+            dropped = counts.dropped,
+            queue_depth = REFUSAL_QUEUE_DEPTH,
+            "dropped the refusal of a server-initiated request: the refusal queue is full"
+        );
     }
 }
 
@@ -520,5 +555,56 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), refusals.closed())
             .await
             .expect("and the writer is done: a retired connection is spoken on by nobody");
+    }
+
+    /// An answer to nobody costs the upstream one short line, so a server
+    /// that sends nothing else can be made to cost the proxy one log line
+    /// each — the flood the refusal counters exist to stop, on the branch
+    /// that carries no refusal. Both undeliverable shapes are counted every
+    /// time and warned about only on the doublings.
+    #[tokio::test]
+    async fn a_message_the_reader_cannot_deliver_is_counted_rather_than_logged_each_time() {
+        let pending: Mutex<HashMap<String, oneshot::Sender<Value>>> = Mutex::new(HashMap::new());
+        let (refusals, _queued) = mpsc::channel(REFUSAL_QUEUE_DEPTH);
+        let mut counts = RefusalCounts::default();
+
+        for expected in 1..=5u64 {
+            dispatch(
+                &pending,
+                &refusals,
+                json!({"jsonrpc": "2.0", "id": expected, "result": {}}),
+                &mut counts,
+            )
+            .await;
+            assert_eq!(
+                counts.unmatched, expected,
+                "an answer nothing is waiting on is counted on every occurrence"
+            );
+        }
+
+        for expected in 1..=5u64 {
+            dispatch(
+                &pending,
+                &refusals,
+                json!({"jsonrpc": "2.0", "result": {}}),
+                &mut counts,
+            )
+            .await;
+            assert_eq!(
+                counts.malformed, expected,
+                "a message that is neither a request nor an answer is counted too"
+            );
+        }
+
+        // The rule those counts are kept for: the first occurrence and each
+        // doubling after it are worth a line, so five of anything cost three
+        // warnings rather than five, and a million cost twenty.
+        let mut count = 0u64;
+        let warned = (1..=5).filter(|_| worth_warning(&mut count)).count();
+        assert_eq!(warned, 3, "the first, the second and the fourth");
+
+        assert_eq!(counts.unmatched, 5);
+        assert_eq!(counts.queued, 0, "none of this queued a refusal");
+        assert_eq!(counts.dropped, 0);
     }
 }
