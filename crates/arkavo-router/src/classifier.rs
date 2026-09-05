@@ -325,7 +325,7 @@ pub fn classify_task_keywords(description: &str) -> TaskCategory {
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub struct TaskClassifier {
-    provider: Arc<Mutex<LlamaCppProvider>>,
+    provider: Option<Arc<Mutex<LlamaCppProvider>>>,
 }
 
 #[cfg(all(
@@ -346,16 +346,9 @@ pub struct TaskClassifier {
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
         // Use model discovery to find any available model (prefers Qwen3/Ministral)
-        let model_path = crate::model_discovery::find_any_gguf()
-            .await
-            .ok_or_else(|| {
-                Error::Classification(format!(
-                    "No local GGUF models found. Download with: {}",
-                    crate::decision::ModelChoice::LocalQwen3
-                        .download_hint()
-                        .unwrap_or_default()
-                ))
-            })?;
+        let Some(model_path) = crate::model_discovery::find_any_gguf().await else {
+            return Ok(Self { provider: None });
+        };
 
         let model_name = model_path
             .file_stem()
@@ -367,15 +360,13 @@ impl TaskClassifier {
             .map_err(Error::Provider)?;
 
         Ok(Self {
-            provider: Arc::new(Mutex::new(provider)),
+            provider: Some(Arc::new(Mutex::new(provider))),
         })
     }
 
     /// Create a classifier that uses only rule-based classification (no local model required)
     pub async fn new_fallback() -> Result<Self> {
-        // Try to create with a model, but if none available, return error
-        // The caller should use classify_rule_based() directly for fallback mode
-        Self::new().await
+        Ok(Self { provider: None })
     }
 
     /// Rule-based classification without LLM (for fallback/first-run mode)
@@ -416,7 +407,12 @@ impl TaskClassifier {
         messages: Vec<Message>,
         max_tokens: Option<usize>,
     ) -> Result<String> {
-        let provider = self.provider.lock().await;
+        let provider = self
+            .provider
+            .as_ref()
+            .ok_or_else(|| Error::Classification("No local model available".into()))?
+            .lock()
+            .await;
         provider
             .complete_with_options(messages, max_tokens)
             .await
@@ -551,7 +547,12 @@ impl TaskClassifier {
 
         let messages = vec![Message::user(prompt)];
 
-        let provider = self.provider.lock().await;
+        let provider = self
+            .provider
+            .as_ref()
+            .ok_or_else(|| Error::Classification("No local model available".into()))?
+            .lock()
+            .await;
         let response = provider
             .complete(messages)
             .await
@@ -800,14 +801,17 @@ impl TaskClassifier {
 )))]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
-        Err(Error::Classification(
-            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
-        ))
+        Ok(Self {
+            _phantom: std::marker::PhantomData,
+        })
     }
 
-    pub async fn classify(&self, _task_description: &str) -> Result<Classification> {
-        Err(Error::Classification(
-            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
+    pub async fn classify(&self, task_description: &str) -> Result<Classification> {
+        Ok(Classification::with_complexity(
+            classify_task_keywords(task_description),
+            0.75,
+            "Keyword classification without a local backend".into(),
+            task_description,
         ))
     }
 
@@ -832,6 +836,30 @@ impl TaskClassifier {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    #[cfg(not(feature = "llama-cpp"))]
+    #[tokio::test]
+    async fn cloud_only_classifier_needs_no_local_backend() {
+        let classifier = TaskClassifier::new().await.unwrap();
+        let classification = classifier
+            .classify("Find the authentication endpoint")
+            .await
+            .unwrap();
+        assert_eq!(classification.category, TaskCategory::BackendAPI);
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[tokio::test]
+    async fn cloud_only_classifier_can_skip_local_loading() {
+        let classifier = TaskClassifier::new_fallback().await.unwrap();
+        assert!(classifier.provider.is_none());
+        assert!(
+            classifier
+                .classify("Find the authentication endpoint")
+                .await
+                .is_ok()
+        );
+    }
 
     #[test]
     fn test_task_category_from_str() {

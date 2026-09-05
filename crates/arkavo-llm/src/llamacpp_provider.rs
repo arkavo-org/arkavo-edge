@@ -1299,9 +1299,8 @@ impl Provider for LlamaCppProvider {
             content: display_content,
             reasoning_content,
             tool_calls,
-            finish_reason: None,
             inference_timing,
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 }

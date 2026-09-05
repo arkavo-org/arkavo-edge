@@ -33,7 +33,11 @@ impl GuardedProvider {
     }
 
     async fn inspect(&self, response: ProviderResponse) -> Result<ProviderResponse> {
-        self.factory.verify(&response).await?;
+        let timing = response.inference_timing.clone();
+        self.factory
+            .verify(&response)
+            .await
+            .map_err(|e| e.with_inference_timing(timing.clone()))?;
         let gate = self.factory.create(self.inner.name());
         tokio::task::spawn_blocking(move || {
             let mut text = response.content.clone();
@@ -50,7 +54,8 @@ impl GuardedProvider {
             result.map(|()| response)
         })
         .await
-        .map_err(|_| withheld())?
+        .map_err(|_| withheld().with_inference_timing(timing.clone()))?
+        .map_err(|e| e.with_inference_timing(timing))
     }
 }
 
@@ -73,17 +78,11 @@ impl Provider for GuardedProvider {
         messages: Vec<Message>,
         max_tokens: Option<usize>,
     ) -> Result<String> {
-        let content = self
+        let response = self
             .inner
-            .complete_with_options(messages, max_tokens)
+            .complete_with_tools(messages, None, max_tokens)
             .await?;
-        Ok(self
-            .inspect(ProviderResponse {
-                content,
-                ..Default::default()
-            })
-            .await?
-            .content)
+        Ok(self.inspect(response).await?.content)
     }
 
     async fn complete_with_tools(
@@ -105,17 +104,24 @@ impl Provider for GuardedProvider {
         schema: Option<Value>,
         max_tokens: Option<usize>,
     ) -> Result<String> {
-        let content = self
+        let response = self
             .inner
-            .complete_with_schema(messages, schema, max_tokens)
+            .complete_with_schema_response(messages, schema, max_tokens)
             .await?;
-        Ok(self
-            .inspect(ProviderResponse {
-                content,
-                ..Default::default()
-            })
-            .await?
-            .content)
+        Ok(self.inspect(response).await?.content)
+    }
+
+    async fn complete_with_schema_response(
+        &self,
+        messages: Vec<Message>,
+        schema: Option<Value>,
+        max_tokens: Option<usize>,
+    ) -> Result<ProviderResponse> {
+        let response = self
+            .inner
+            .complete_with_schema_response(messages, schema, max_tokens)
+            .await?;
+        self.inspect(response).await
     }
 
     #[allow(clippy::disallowed_methods)] // Dedicated blocking worker, never a Tokio executor thread.
@@ -135,8 +141,16 @@ impl Provider for GuardedProvider {
             runtime.block_on(async move {
                 let reasoning = Arc::new(std::sync::Mutex::new(String::new()));
                 let captured = reasoning.clone();
+                let timing = Arc::new(std::sync::Mutex::new(None));
+                let captured_timing = timing.clone();
                 let inner = inner.map(move |item| {
                     item.map(|mut chunk| {
+                        if chunk.inference_timing.is_some() {
+                            captured_timing
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .clone_from(&chunk.inference_timing);
+                        }
                         if let Some(text) = chunk.reasoning_content.take() {
                             captured
                                 .lock()
@@ -177,6 +191,11 @@ impl Provider for GuardedProvider {
                             chunk.reasoning_content = Some(text);
                         }
                     }
+                    item = item.map_err(|e| {
+                        e.with_inference_timing(
+                            timing.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+                        )
+                    });
                     let failed = item.is_err();
                     if tx.send(item).await.is_err() || failed {
                         break;

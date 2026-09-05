@@ -4,6 +4,16 @@ use crate::model_discovery;
 use arkavo_llm::Provider;
 use std::path::Path;
 
+/// Substitutes live provider construction.
+///
+/// Install one with [`crate::Router::with_provider_factory`] to drive routing,
+/// cloud policy and spend accounting deterministically: the router resolves
+/// every dispatch through the factory instead of reading credentials, the model
+/// cache or the network. Returning an error models an unavailable arm.
+pub trait ProviderFactory: Send + Sync {
+    fn build(&self, model: &ModelChoice) -> Result<Box<dyn Provider>>;
+}
+
 #[cfg(feature = "llama-cpp")]
 fn sampling_config_for(
     model: &ModelChoice,
@@ -35,6 +45,12 @@ fn sampling_config_for(
 }
 
 impl super::Router {
+    #[cfg(any(
+        feature = "llm-remote",
+        feature = "llama-cpp",
+        feature = "gemini",
+        feature = "deepseek"
+    ))]
     fn protect_provider(&self, provider: Box<dyn Provider>) -> Box<dyn Provider> {
         #[cfg(feature = "sentinel")]
         {
@@ -46,9 +62,37 @@ impl super::Router {
         }
     }
 
+    /// Substituted provider for `model`, when a factory is installed.
+    fn substituted_provider(&self, model: &ModelChoice) -> Option<Result<Box<dyn Provider>>> {
+        self.provider_factory
+            .as_ref()
+            .map(|factory| factory.build(model))
+    }
+
     /// Get a provider for the given model choice (local or cloud)
     pub async fn get_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
         self.instantiate_provider(model).await
+    }
+
+    /// Construct the requested arm without hidden fallback so billing keeps its identity.
+    pub async fn get_provider_attributed(
+        &self,
+        model: &ModelChoice,
+    ) -> Result<(Box<dyn Provider>, ModelChoice)> {
+        Ok((
+            self.instantiate_provider_exact_with_spec(model, true)
+                .await?,
+            model.clone(),
+        ))
+    }
+
+    pub(crate) async fn instantiate_provider_exact_with_spec(
+        &self,
+        model: &ModelChoice,
+        use_spec_decoding: bool,
+    ) -> Result<Box<dyn Provider>> {
+        self.instantiate_provider_inner(model, use_spec_decoding, false)
+            .await
     }
 
     /// Get a reference to the local provider for simple classification tasks
@@ -74,11 +118,11 @@ impl super::Router {
     }
 
     pub fn is_anthropic_available(&self) -> bool {
-        std::env::var("ANTHROPIC_API_KEY").is_ok()
+        cfg!(feature = "llm-remote") && std::env::var("ANTHROPIC_API_KEY").is_ok()
     }
 
     pub fn is_kimi_available(&self) -> bool {
-        std::env::var("MOONSHOT_API_KEY").is_ok()
+        cfg!(feature = "kimi") && std::env::var("MOONSHOT_API_KEY").is_ok()
     }
 
     pub fn is_glm_available(&self) -> bool {
@@ -93,10 +137,21 @@ impl super::Router {
         cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok()
     }
 
+    #[cfg(feature = "llm-remote")]
     pub fn get_anthropic_provider(&self) -> Option<Box<dyn Provider>> {
         arkavo_llm::providers::anthropic::AnthropicProvider::from_env()
             .ok()
             .map(|provider| self.protect_provider(Box::new(provider)))
+    }
+
+    #[cfg(not(feature = "llm-remote"))]
+    pub fn get_anthropic_provider(&self) -> Option<Box<dyn Provider>> {
+        None
+    }
+
+    pub fn is_openai_available(&self) -> bool {
+        cfg!(feature = "openai")
+            && std::env::var("OPENAI_API_KEY").is_ok_and(|key| !key.trim().is_empty())
     }
 
     pub(crate) fn get_local_fallback(
@@ -125,17 +180,20 @@ impl super::Router {
             | ModelChoice::Gemini35FlashHigh
             | ModelChoice::GeminiPro => self.is_gemini_available(),
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
-                std::env::var("DEEPSEEK_API_KEY").is_ok()
+                cfg!(feature = "deepseek") && std::env::var("DEEPSEEK_API_KEY").is_ok()
             }
-            ModelChoice::KimiK2 => std::env::var("MOONSHOT_API_KEY").is_ok(),
+            ModelChoice::KimiK2 => self.is_kimi_available(),
+            ModelChoice::Gpt6Astra => self.is_openai_available(),
             ModelChoice::Glm52 => cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
             ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
                 cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok()
             }
-            m if m.is_local() => match (m.repo_id(), m.gguf_filename()) {
-                (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
-                _ => false,
-            },
+            m if m.is_local() && cfg!(feature = "llama-cpp") => {
+                match (m.repo_id(), m.gguf_filename()) {
+                    (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
+                    _ => false,
+                }
+            }
             _ => false,
         }
     }
@@ -227,6 +285,9 @@ impl super::Router {
         path: &Path,
         use_spec_decoding: bool,
     ) -> Result<Box<dyn Provider>> {
+        if let Some(substituted) = self.substituted_provider(&ModelChoice::LocalQwen3) {
+            return substituted;
+        }
         let resolved = model_discovery::resolve_gguf_path(path);
         if !resolved.exists() {
             return Err(Error::ModelExecution(format!(
@@ -294,8 +355,11 @@ impl super::Router {
         &self,
         model: &ModelChoice,
     ) -> Result<Box<dyn Provider>> {
+        if let Some(substituted) = self.substituted_provider(model) {
+            return substituted;
+        }
         if !model.is_local() {
-            return self.instantiate_provider(model).await;
+            return self.instantiate_provider_exact_with_spec(model, true).await;
         }
         let repo = model
             .repo_id()
@@ -332,7 +396,7 @@ impl super::Router {
         &self,
         model: &ModelChoice,
     ) -> Result<Box<dyn Provider>> {
-        self.instantiate_provider(model).await
+        self.instantiate_provider_exact_with_spec(model, true).await
     }
 
     pub(crate) async fn instantiate_provider(
@@ -355,8 +419,23 @@ impl super::Router {
         model: &ModelChoice,
         use_spec_decoding: bool,
     ) -> Result<Box<dyn Provider>> {
+        self.instantiate_provider_inner(model, use_spec_decoding, true)
+            .await
+    }
+
+    async fn instantiate_provider_inner(
+        &self,
+        model: &ModelChoice,
+        use_spec_decoding: bool,
+        allow_fallback: bool,
+    ) -> Result<Box<dyn Provider>> {
+        if let Some(substituted) = self.substituted_provider(model) {
+            return substituted;
+        }
+        let _ = (use_spec_decoding, allow_fallback);
         tracing::debug!(model = %model.name(), use_spec_decoding, "Instantiating provider");
         match model {
+            #[cfg(feature = "llm-remote")]
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
                 use arkavo_llm::providers::anthropic::AnthropicProvider;
                 // Pass the routed model id so distinct arms reach distinct
@@ -364,6 +443,11 @@ impl super::Router {
                 if let Ok(provider) = AnthropicProvider::from_env_with_model(model.name()) {
                     Ok(self.protect_provider(Box::new(provider)))
                 } else {
+                    if !allow_fallback {
+                        return Err(Error::ModelExecution(
+                            "Requested Anthropic provider unavailable".into(),
+                        ));
+                    }
                     #[cfg(feature = "gemini")]
                     if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
                         return Ok(self.protect_provider(Box::new(provider)));
@@ -387,11 +471,20 @@ impl super::Router {
                 let api_model = model.gemini_api_model().unwrap_or("gemini-3.5-flash");
                 let thinking = model.gemini_thinking_budget();
                 let built =
-                    arkavo_llm::GeminiProvider::for_model_with_thinking(api_model, thinking)
-                        .or_else(|_| arkavo_llm::GeminiProvider::new());
+                    arkavo_llm::GeminiProvider::for_model_with_thinking(api_model, thinking);
+                let built = if allow_fallback {
+                    built.or_else(|_| arkavo_llm::GeminiProvider::new())
+                } else {
+                    built
+                };
                 if let Ok(provider) = built {
                     Ok(self.protect_provider(Box::new(provider)))
                 } else {
+                    if !allow_fallback {
+                        return Err(Error::ModelExecution(
+                            "Requested Gemini provider unavailable".into(),
+                        ));
+                    }
                     #[cfg(feature = "llama-cpp")]
                     {
                         let hint = ModelChoice::LocalQwen3.download_hint().unwrap_or_default();
@@ -440,6 +533,31 @@ impl super::Router {
                     .ok_or_else(|| Error::ModelExecution(format!("No gguf_filename for {m:?}")))?;
                 self.load_local_model(m, repo, file, use_spec_decoding)
                     .await
+            }
+            #[cfg(feature = "deepseek")]
+            ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
+                let provider = if matches!(model, ModelChoice::DeepSeekV32Speciale) {
+                    arkavo_llm::DeepSeekProvider::v32_speciale()
+                } else {
+                    arkavo_llm::DeepSeekProvider::from_env()
+                }
+                .map_err(|e| Error::ModelExecution(e.to_string()))?;
+                Ok(self.protect_provider(Box::new(provider)))
+            }
+            #[cfg(feature = "openai")]
+            ModelChoice::Gpt6Astra => {
+                use arkavo_llm::providers::{OpenAIResponsesConfig, OpenAIResponsesProvider};
+                let config = OpenAIResponsesConfig {
+                    api_key: Some(
+                        std::env::var("OPENAI_API_KEY")
+                            .map_err(|_| Error::ModelExecution("OPENAI_API_KEY not set".into()))?,
+                    ),
+                    model: model.name().into(),
+                    ..OpenAIResponsesConfig::default()
+                };
+                let provider = OpenAIResponsesProvider::new(config)
+                    .map_err(|e| Error::ModelExecution(e.to_string()))?;
+                Ok(self.protect_provider(Box::new(provider)))
             }
             #[cfg(feature = "kimi")]
             ModelChoice::KimiK2 => {

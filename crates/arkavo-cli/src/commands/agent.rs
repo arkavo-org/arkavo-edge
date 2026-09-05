@@ -1,4 +1,5 @@
 use arkavo_config_encryption::AgentCredential;
+#[cfg(feature = "mdns")]
 use arkavo_protocol::get_service_ip;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -1286,6 +1287,16 @@ pub async fn start_agent_server(
     // Set API keys in the server
     server.set_api_keys(config.api_keys.clone()).await;
 
+    // The router is live now that metadata is set, so the resolved execution arm
+    // is known before any task runs, and a session approval given here covers
+    // every routing call the conductor makes afterwards.
+    // Cloned out of the guard first: the prompt below blocks on stdin, and the
+    // read lock must not be held while it waits.
+    let startup_router = learning_bus.router().read().await.clone();
+    if let Some(router) = startup_router {
+        confirm_cloud_startup(&router);
+    }
+
     // Initialize MCP connections from agent config only.
     // Built-in tools are not registered - agents use only their configured MCP servers.
     // This enables small models (ministral-3b) to work with focused tool sets.
@@ -2149,6 +2160,7 @@ impl arkavo_mcp::McpClient for McpConnectionWrapper {
 }
 
 /// Determine agent capabilities based on name and purpose
+#[cfg(feature = "mdns")]
 fn get_agent_capabilities(name: &str, purpose: &str) -> Vec<String> {
     let mut capabilities = Vec::new();
 
@@ -2205,9 +2217,132 @@ fn get_agent_capabilities(name: &str, purpose: &str) -> Vec<String> {
     capabilities
 }
 
+/// Whether startup should ask the operator to authorize cloud inference.
+///
+/// A cloud-only install has no local weights, so automatic selection resolves to
+/// a paid arm; under the default `AskBeforeCloud` policy the router then refuses
+/// every routing call with `CloudConfirmationRequired`. Asking once at startup
+/// turns that dead end into a decision. A non-interactive run keeps the error
+/// path — an unattended agent must not spend against a prompt nobody answered —
+/// and a local arm never needs consent.
+fn cloud_startup_confirmation_needed(
+    policy: arkavo_budget::CloudPolicy,
+    model_is_local: bool,
+    interactive: bool,
+    already_confirmed: bool,
+) -> bool {
+    matches!(policy, arkavo_budget::CloudPolicy::AskBeforeCloud)
+        && !model_is_local
+        && interactive
+        && !already_confirmed
+}
+
+/// Prompt once, before the server accepts work, and record the answer for the
+/// session on a yes. Blocking stdin is deliberate: nothing else is running yet,
+/// and the answer decides whether the agent can work at all.
+///
+/// The approval is session-scoped, not one-shot. `arkavo agent` issues no
+/// routing calls itself — the conductor does, many per task, starting with
+/// intent decomposition — so a flag consumed by the first of them would leave
+/// every later call re-asking a question this command has no second chance to
+/// put to the user.
+fn confirm_cloud_startup(router: &arkavo_router::Router) {
+    use std::io::{IsTerminal, Write};
+
+    let model = router.default_chat_model();
+    if !cloud_startup_confirmation_needed(
+        router.cloud_policy(),
+        model.is_local(),
+        std::io::stdin().is_terminal(),
+        router.cloud_session_confirmed(),
+    ) {
+        return;
+    }
+
+    println!(
+        "No local model is available, so this agent would run on {} (paid cloud inference).",
+        model.name()
+    );
+    print!("Cloud policy is ask-before-cloud. Allow cloud inference for this session? [y/N] ");
+    let _ = std::io::stdout().flush();
+
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_ok()
+        && matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+    {
+        router.confirm_cloud_for_session();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_budget::CloudPolicy;
+    use arkavo_test_macros::spec;
+
+    #[test]
+    #[spec("ASTRA-004")]
+    fn cloud_only_interactive_startup_asks_once() {
+        assert!(cloud_startup_confirmation_needed(
+            CloudPolicy::AskBeforeCloud,
+            false,
+            true,
+            false
+        ));
+    }
+
+    /// A session approval already on the router answers the question, so a
+    /// resumed or re-entered startup path does not ask again.
+    #[test]
+    #[spec("ASTRA-004")]
+    fn a_standing_session_approval_suppresses_the_prompt() {
+        assert!(!cloud_startup_confirmation_needed(
+            CloudPolicy::AskBeforeCloud,
+            false,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    #[spec("ASTRA-004")]
+    fn local_arm_and_prior_confirmation_never_prompt() {
+        assert!(!cloud_startup_confirmation_needed(
+            CloudPolicy::AskBeforeCloud,
+            true,
+            true,
+            false
+        ));
+        assert!(!cloud_startup_confirmation_needed(
+            CloudPolicy::AskBeforeCloud,
+            false,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    #[spec("ASTRA-004")]
+    fn non_tty_keeps_the_error_path() {
+        assert!(!cloud_startup_confirmation_needed(
+            CloudPolicy::AskBeforeCloud,
+            false,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    #[spec("ASTRA-004")]
+    fn other_policies_do_not_prompt() {
+        // LocalOnly refuses cloud outright and CloudWithinCap already authorizes
+        // it; neither is a question for the operator.
+        for policy in [CloudPolicy::LocalOnly, CloudPolicy::CloudWithinCap] {
+            assert!(!cloud_startup_confirmation_needed(
+                policy, false, true, false
+            ));
+        }
+    }
 
     // An unrecognized option must error, not silently boot an agent (regression: the bare
     // `arkavo <flag>` route dispatches here, and unknown dash args were previously ignored).

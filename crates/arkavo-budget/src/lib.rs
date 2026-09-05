@@ -5,6 +5,7 @@ pub mod config;
 pub mod cost;
 pub mod middleware;
 pub mod policy;
+pub mod precise_spending;
 pub mod provider_costs;
 pub mod tracker;
 

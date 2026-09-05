@@ -12,8 +12,10 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
+openai = ["arkavo-llm/llm-remote", "arkavo-router/openai", "arkavo-ui-core/openai", "arkavo-server/openai", "arkavo-orchestrator/openai"]
+cloud = ["llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
 # Full defaults with all providers (cross-platform)
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "web-ui", "claude-agent", "kas", "iroh"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "kas", "iroh"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
@@ -27,13 +29,13 @@ claude-agent = ["dep:arkavo-mcp-claude", "arkavo-server/claude-agent"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns", "arkavo-orchestrator/mdns"]
-llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote", "arkavo-router/llm-remote"]
-kimi = ["arkavo-llm/kimi"]
-deepseek = ["arkavo-llm/deepseek"]
-glm = ["arkavo-llm/llm-remote", "arkavo-router/glm", "arkavo-ui-core/glm"]
-xai = ["arkavo-llm/llm-remote", "arkavo-router/xai", "arkavo-ui-core/xai"]
-gemini = ["arkavo-llm/gemini", "arkavo-router/gemini"]
-llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp", "arkavo-context/llama-cpp", "arkavo-server/llama-cpp"]
+llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote", "arkavo-router/llm-remote", "arkavo-server/llm-remote", "arkavo-orchestrator/llm-remote"]
+kimi = ["arkavo-llm/kimi", "arkavo-router/kimi", "arkavo-ui-core/kimi", "arkavo-server/kimi", "arkavo-orchestrator/kimi"]
+deepseek = ["arkavo-llm/deepseek", "arkavo-router/deepseek", "arkavo-ui-core/deepseek", "arkavo-server/deepseek", "arkavo-orchestrator/deepseek"]
+glm = ["arkavo-llm/llm-remote", "arkavo-router/glm", "arkavo-ui-core/glm", "arkavo-server/glm", "arkavo-orchestrator/glm"]
+xai = ["arkavo-llm/llm-remote", "arkavo-router/xai", "arkavo-ui-core/xai", "arkavo-server/xai", "arkavo-orchestrator/xai"]
+gemini = ["arkavo-llm/gemini", "arkavo-router/gemini", "arkavo-server/gemini", "arkavo-orchestrator/gemini"]
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp", "arkavo-context/llama-cpp", "arkavo-server/llama-cpp", "arkavo-orchestrator/llama-cpp"]
 snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 # Keyed reference index and `arkavo pack index`. Off until the DLP pack

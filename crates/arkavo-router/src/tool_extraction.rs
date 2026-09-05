@@ -57,7 +57,8 @@ pub(crate) fn detail_level_for_model(
         | ModelChoice::KimiK2
         | ModelChoice::Glm52
         | ModelChoice::Grok46
-        | ModelChoice::Grok46Xhigh => arkavo_mcp_tools::DetailLevel::FullSchema,
+        | ModelChoice::Grok46Xhigh
+        | ModelChoice::Gpt6Astra => arkavo_mcp_tools::DetailLevel::FullSchema,
     }
 }
 

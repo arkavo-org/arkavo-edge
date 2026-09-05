@@ -246,7 +246,7 @@ pub async fn run() -> Result<()> {
                 messages_clone.push(user_message.clone());
 
                 // Create a channel to receive the assistant's response
-                let (response_tx, mut response_rx) = tokio::sync::mpsc::channel::<String>(1);
+                let (response_tx, mut response_rx) = tokio::sync::mpsc::channel::<Message>(1);
 
                 // Parse the model name to extract server and actual model
                 let (server_url, actual_model) = if let Some((server_prefix, model)) =
@@ -365,10 +365,14 @@ pub async fn run() -> Result<()> {
                                 .await;
 
                             let mut full_response = String::new();
+                            let mut provider_state = arkavo_llm::ProviderState::default();
 
                             while let Some(chunk_result) = stream.next().await {
                                 match chunk_result {
                                     Ok(chunk) => {
+                                        if chunk.done {
+                                            provider_state = chunk.provider_state;
+                                        }
                                         if !chunk.content.is_empty() {
                                             full_response.push_str(&chunk.content);
                                             // Send each chunk as it arrives
@@ -480,7 +484,9 @@ pub async fn run() -> Result<()> {
                                 .await;
 
                             // Send the full response back to be added to conversation history
-                            let _ = response_tx.send(full_response).await;
+                            let mut assistant = Message::assistant(full_response);
+                            assistant.provider_state = provider_state;
+                            let _ = response_tx.send(assistant).await;
                         }
                         Err(e) => {
                             // Provide more informative error messages
@@ -514,7 +520,7 @@ pub async fn run() -> Result<()> {
 
                 // Wait for assistant response and add to context
                 if let Some(assistant_response) = response_rx.recv().await {
-                    messages.push(Message::assistant(&assistant_response));
+                    messages.push(assistant_response);
                 }
             }
         });

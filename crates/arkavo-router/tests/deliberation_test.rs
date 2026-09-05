@@ -83,6 +83,7 @@ async fn test_deliberation_with_ministral_3b() {
         tool_call_id: None,
         tool_name: None,
         tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     println!("\nTask: {task}");
@@ -150,6 +151,7 @@ async fn test_deliberation_tool_error_scenario() {
         tool_call_id: None,
         tool_name: None,
         tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     println!("\nTask: {task}");
@@ -211,6 +213,7 @@ async fn test_qwen3_math() {
         tool_call_id: None,
         tool_name: None,
         tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     println!("\nTask: {task}");
@@ -266,6 +269,7 @@ async fn test_qwen3_coding() {
         tool_call_id: None,
         tool_name: None,
         tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     println!("\nTask: {task}");

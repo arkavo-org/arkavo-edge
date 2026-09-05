@@ -722,8 +722,13 @@ async fn handle_architect_prompt(
     );
     renderer.render(&planning_html, "", "").await?;
 
+    // One router clone bills planning and every subtask attempt against the
+    // same tracker. Without `with_router` the planner builds its own client and
+    // the decomposition call is spent but never recorded.
+    let router = Arc::new(Router::new().await?);
+
     // Create planner and generate task graph
-    let planner = ArchitectPlanner::new();
+    let planner = ArchitectPlanner::new().with_router(router.clone());
     let plan = match planner.create_plan(prompt, complexity.clone()).await {
         Ok(p) => p,
         Err(e) => {
@@ -834,9 +839,8 @@ async fn handle_architect_prompt(
     );
     renderer.render(&plan_html, "", "").await?;
 
-    // Execute the plan
-    let router = Router::new().await?;
-    let executor = ArchitectExecutor::new(Arc::new(router));
+    // Execute the plan on the same router that planned it.
+    let executor = ArchitectExecutor::new(router);
     let messages = vec![Message::user(prompt)];
 
     let result = match executor.execute(&plan, messages, None).await {
@@ -1114,6 +1118,22 @@ async fn create_client_from_routing(
             #[cfg(not(feature = "xai"))]
             {
                 Err("xAI/Grok support requires xai feature".into())
+            }
+        }
+        ModelChoice::Gpt6Astra => {
+            #[cfg(feature = "openai")]
+            {
+                use arkavo_llm::providers::{OpenAIResponsesConfig, OpenAIResponsesProvider};
+                let provider = Box::new(OpenAIResponsesProvider::new(OpenAIResponsesConfig {
+                    api_key: Some(std::env::var("OPENAI_API_KEY")?),
+                    model: decision.recommended_model.name().to_string(),
+                    ..OpenAIResponsesConfig::default()
+                })?);
+                Ok(LlmClient::new(provider))
+            }
+            #[cfg(not(feature = "openai"))]
+            {
+                Err("OpenAI/Astra support requires openai feature".into())
             }
         }
     }

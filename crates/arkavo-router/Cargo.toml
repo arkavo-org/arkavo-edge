@@ -50,24 +50,26 @@ opentdf = { version = "0.15.0", default-features = false, features = ["rustls-tl
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
-default = ["llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai"]
+openai = ["llm-remote"]
+cloud = ["llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
+default = ["llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
 critic = []
 sentinel = []
 advisor-persistence = ["dep:arkavo-memory"]
 llama-cpp = ["arkavo-llm/llama-cpp", "dep:arkavo-gguf-tdf", "dep:opentdf", "dep:arkavo-identity"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 deepseek = ["arkavo-llm/deepseek"]
-kimi = ["arkavo-llm/kimi"]
+kimi = ["arkavo-llm/kimi", "llm-remote"]
 # GLM-5.2 routes through the generic OpenAI-compatible provider, which lives
 # behind arkavo-llm's `llm-remote` feature.
-glm = ["arkavo-llm/llm-remote"]
+glm = ["llm-remote"]
 # Grok 4.6 (xAI) uses the Responses API client in arkavo-llm (llm-remote).
-xai = ["arkavo-llm/llm-remote"]
+xai = ["llm-remote"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
 tdf-encrypt = ["dep:arkavo-tdf", "dep:arkavo-memory"]
 persistence = ["sqlx"]
 # Windows compatible features (no C++ dependencies)
-windows = ["gemini", "llm-remote", "deepseek", "kimi", "glm", "xai"]
+windows = ["gemini", "llm-remote", "deepseek", "kimi", "glm", "xai", "openai"]
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }

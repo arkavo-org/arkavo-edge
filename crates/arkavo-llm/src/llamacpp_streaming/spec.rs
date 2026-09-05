@@ -67,9 +67,7 @@ pub(super) fn emit_token(
     if special_text == "<think>" || special_text == "</think>" {
         let _ = tx.send(Ok(StreamResponse {
             content: special_text,
-            reasoning_content: None,
-            done: false,
-            inference_timing: None,
+            ..Default::default()
         }));
     }
 
@@ -79,9 +77,7 @@ pub(super) fn emit_token(
             if !piece.is_empty() {
                 let _ = tx.send(Ok(StreamResponse {
                     content: piece,
-                    reasoning_content: None,
-                    done: false,
-                    inference_timing: None,
+                    ..Default::default()
                 }));
             }
         }
@@ -100,9 +96,7 @@ pub(super) fn emit_token(
     if !piece.is_empty() {
         let _ = tx.send(Ok(StreamResponse {
             content: piece,
-            reasoning_content: None,
-            done: false,
-            inference_timing: None,
+            ..Default::default()
         }));
     }
 
@@ -227,9 +221,7 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -383,9 +375,7 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -395,6 +385,8 @@ pub(super) async fn generate_tokens_pooled_with_spec(
         let perf = perf_context(&ctx);
         drop(ctx);
         let timing = InferenceTiming {
+            n_cached_prompt_eval: None,
+            n_cache_write_prompt_eval: None,
             prompt_eval_ms: perf.t_p_eval_ms,
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
@@ -418,10 +410,9 @@ pub(super) async fn generate_tokens_pooled_with_spec(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
                 inference_timing: Some(timing),
+                ..Default::default()
             }));
         }
         Err(e) => {
@@ -575,9 +566,7 @@ pub(super) async fn generate_tokens_with_spec(
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -730,9 +719,7 @@ pub(super) async fn generate_tokens_with_spec(
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -741,6 +728,8 @@ pub(super) async fn generate_tokens_with_spec(
 
         let perf = perf_context(&ctx);
         let timing = InferenceTiming {
+            n_cached_prompt_eval: None,
+            n_cache_write_prompt_eval: None,
             prompt_eval_ms: perf.t_p_eval_ms,
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
@@ -764,10 +753,9 @@ pub(super) async fn generate_tokens_with_spec(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
                 inference_timing: Some(timing),
+                ..Default::default()
             }));
         }
         Err(e) => {

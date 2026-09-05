@@ -7,10 +7,6 @@ use arkavo_router::Router;
 #[cfg(all(unix, feature = "mcp-tools"))]
 use std::collections::HashSet;
 #[cfg(all(unix, feature = "mcp-tools"))]
-use std::collections::hash_map::DefaultHasher;
-#[cfg(all(unix, feature = "mcp-tools"))]
-use std::hash::{Hash, Hasher};
-#[cfg(all(unix, feature = "mcp-tools"))]
 use std::sync::Arc;
 
 #[cfg(not(all(unix, feature = "mcp-tools")))]
@@ -325,11 +321,12 @@ pub async fn process_with_tools(
             // Not architect mode - convert RouteResponse to ProviderResponse
             let result = stream.complete().await?;
             ProviderResponse {
+                provider_state: result.provider_state,
                 content: result.content,
-                reasoning_content: None,
+                reasoning_content: result.reasoning_content,
                 tool_calls: result.tool_calls,
                 finish_reason: None,
-                inference_timing: None,
+                inference_timing: result.inference_timing,
                 quality_gate_retries: 0,
             }
         } else {
@@ -436,9 +433,7 @@ pub async fn process_with_tools(
         }
 
         // Check for repeated content (model output loop detection)
-        let mut hasher = DefaultHasher::new();
-        response.content.hash(&mut hasher);
-        let content_hash = hasher.finish();
+        let content_hash = response_fingerprint(&response);
 
         if Some(content_hash) == last_content_hash {
             same_content_count += 1;
@@ -461,7 +456,7 @@ pub async fn process_with_tools(
         // Check if LLM is requesting tools via REQUEST_TOOL protocol
         let requested_keywords =
             arkavo_router::tool_request_parser::parse_tool_requests(&response.content);
-        if !requested_keywords.is_empty() {
+        if !requested_keywords.is_empty() && response.tool_calls.is_empty() {
             // Tool metadata requests don't count as iterations
             tracing::info!("LLM requested tools via keywords: {:?}", requested_keywords);
 
@@ -517,7 +512,7 @@ pub async fn process_with_tools(
                 )
             };
 
-            messages.push(Message::assistant(&response.content));
+            messages.push(response.as_assistant_message());
             messages.push(Message::user(&tool_response));
 
             // Safeguard against infinite discovery loops
@@ -580,7 +575,12 @@ pub async fn process_with_tools(
         println!("→ {current_tools}");
 
         // Check for repeated same-tool calls (model stuck in loop)
-        if Some(&current_tools) == last_tool_call.as_ref() {
+        let tool_signature = tool_calls
+            .iter()
+            .map(|call| (&call.tool_name, &call.arguments))
+            .collect::<Vec<_>>();
+        let tool_signature = serde_json::to_string(&tool_signature)?;
+        if Some(&tool_signature) == last_tool_call.as_ref() {
             same_tool_count += 1;
             if same_tool_count >= MAX_SAME_TOOL_CALLS {
                 tracing::warn!(
@@ -597,7 +597,7 @@ pub async fn process_with_tools(
             }
         } else {
             same_tool_count = 1;
-            last_tool_call = Some(current_tools);
+            last_tool_call = Some(tool_signature);
         }
 
         if config.show_tool_execution {
@@ -650,10 +650,8 @@ pub async fn process_with_tools(
             all_tool_executions.push(result);
         }
 
-        messages.push(Message::assistant(&response.content));
-
-        let tool_results_message = format_tool_results(&tool_results);
-        messages.push(Message::user(&tool_results_message));
+        messages.push(response.as_assistant_message());
+        messages.extend(tool_result_messages(&response, &tool_results));
 
         if config.show_tool_execution {
             println!("\n=== Feeding results back to LLM ===\n");
@@ -719,8 +717,43 @@ fn parse_markdown_tool_calls(
     }
 }
 
+/// Replay one turn's tool results in the role the provider's next request needs.
+///
+/// Providers that issued native calls reject a continuation that answers them
+/// with anything but a paired tool-role message, so every result becomes its own
+/// `Role::Tool` message keyed by the call id. Calls that never reached the
+/// provider stay a user summary: a Responses turn whose items hold no
+/// `function_call`, and a turn whose calls this loop recovered from a markdown
+/// fence in prose — its assistant message carries no `tool_calls`, so a tool-role
+/// result would arrive with nothing to pair against and the API would reject it.
+#[cfg(all(unix, feature = "mcp-tools"))]
+fn tool_result_messages(
+    response: &ProviderResponse,
+    results: &[ToolExecutionResult],
+) -> Vec<Message> {
+    if response.tool_calls.is_empty() || !response.tool_results_use_tool_role() {
+        return vec![Message::user(format_tool_results(results))];
+    }
+    results
+        .iter()
+        .enumerate()
+        .map(|(idx, result)| {
+            Message::tool_result(
+                serde_json::json!({"result": result.result, "success": result.success, "error": result.error})
+                    .to_string(),
+                result
+                    .call_id
+                    .clone()
+                    .unwrap_or_else(|| format!("call_{idx}")),
+                result.tool_name.clone(),
+            )
+        })
+        .collect()
+}
+
 /// Maximum characters per tool result to prevent exceeding LLM token limits
 /// Gemini has 1M token limit (~4 chars/token), so 200K chars is ~50K tokens per result
+#[cfg(all(unix, feature = "mcp-tools"))]
 const MAX_TOOL_RESULT_CHARS: usize = 200_000;
 
 #[cfg(all(unix, feature = "mcp-tools"))]
@@ -879,9 +912,147 @@ pub async fn process_with_tools_interactive(
     Err("Tool integration requires Unix platform with mcp-tools feature".into())
 }
 
+#[cfg(all(unix, feature = "mcp-tools"))]
+fn response_fingerprint(response: &ProviderResponse) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    response.content.hash(&mut hasher);
+    for call in &response.tool_calls {
+        call.tool_name.hash(&mut hasher);
+        call.arguments.to_string().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 #[cfg(all(unix, feature = "mcp-tools", test))]
 mod tests {
     use super::*;
+    use arkavo_llm::Role;
+    use arkavo_test_macros::spec;
+
+    fn executed(name: &str, call_id: Option<&str>) -> ToolExecutionResult {
+        ToolExecutionResult {
+            tool_name: name.to_string(),
+            call_id: call_id.map(str::to_string),
+            result: serde_json::json!({"ok": true}),
+            success: true,
+            error: None,
+            schema_hint: None,
+        }
+    }
+
+    fn function_call_item(call_id: &str, name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "function_call", "call_id": call_id, "name": name, "arguments": "{}"
+        })
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn chat_completions_results_replay_as_tool_role_with_call_ids() {
+        let response = ProviderResponse {
+            tool_calls: vec![ParsedToolCall {
+                tool_name: "read_file".into(),
+                arguments: serde_json::json!({}),
+                call_id: Some("call_a".into()),
+            }],
+            ..Default::default()
+        };
+        let messages = tool_result_messages(&response, &[executed("read_file", Some("call_a"))]);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, Role::Tool);
+        assert_eq!(messages[0].tool_call_id.as_deref(), Some("call_a"));
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn every_native_function_call_gets_a_paired_result() {
+        // A Responses turn always parses one call per function_call item.
+        let response = ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                function_call_item("fc_1", "read_file"),
+                function_call_item("fc_2", "list_dir"),
+            ]),
+            tool_calls: vec![
+                ParsedToolCall {
+                    tool_name: "read_file".into(),
+                    arguments: serde_json::json!({}),
+                    call_id: Some("fc_1".into()),
+                },
+                ParsedToolCall {
+                    tool_name: "list_dir".into(),
+                    arguments: serde_json::json!({}),
+                    call_id: Some("fc_2".into()),
+                },
+            ],
+            ..Default::default()
+        };
+        let messages = tool_result_messages(
+            &response,
+            &[
+                executed("read_file", Some("fc_1")),
+                executed("list_dir", Some("fc_2")),
+            ],
+        );
+        for call_id in response.provider_state.native_call_ids() {
+            assert!(
+                messages
+                    .iter()
+                    .any(|m| m.role == Role::Tool && m.tool_call_id.as_deref() == Some(call_id)),
+                "no paired result for {call_id}"
+            );
+        }
+    }
+
+    /// The loop substitutes `parse_markdown_tool_calls` output when the provider
+    /// returned no calls of its own; the assistant message it pushes therefore
+    /// carries no `tool_calls`, and a `Role::Tool` result would be orphaned.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn markdown_parsed_calls_stay_a_user_message() {
+        let response = ProviderResponse {
+            content: "```get_time```".to_string(),
+            ..Default::default()
+        };
+        assert!(response.as_assistant_message().tool_calls.is_empty());
+        let messages = tool_result_messages(&response, &[executed("get_time", None)]);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, Role::User);
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn prose_extracted_results_stay_a_user_message() {
+        let response = ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                serde_json::json!({"type": "reasoning", "id": "rs_1"}),
+            ]),
+            tool_calls: vec![ParsedToolCall {
+                tool_name: "read_file".into(),
+                arguments: serde_json::json!({}),
+                call_id: None,
+            }],
+            ..Default::default()
+        };
+        let messages = tool_result_messages(&response, &[executed("read_file", None)]);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, Role::User);
+    }
+
+    #[test]
+    fn native_tool_only_turns_are_not_mistaken_for_repeated_empty_text() {
+        let mut response = ProviderResponse::default();
+        response.tool_calls.push(ParsedToolCall {
+            tool_name: "read_file".into(),
+            arguments: serde_json::json!({"path": "a"}),
+            call_id: Some("call_a".into()),
+        });
+        let first = response_fingerprint(&response);
+        response.tool_calls[0].call_id = Some("call_b".into());
+        assert_eq!(first, response_fingerprint(&response));
+        response.tool_calls[0].arguments = serde_json::json!({"path": "b"});
+        assert_ne!(first, response_fingerprint(&response));
+    }
 
     #[tokio::test]
     async fn critic_blocks_unsafe_content_before_execution() {
@@ -893,6 +1064,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result =
@@ -910,6 +1082,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
         let tool_calls = vec![ParsedToolCall {
             tool_name: "unknown_tool".to_string(),

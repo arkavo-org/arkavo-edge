@@ -241,7 +241,7 @@ impl Provider for ResponsesProvider {
             tool_calls: result.tool_calls,
             finish_reason: result.finish_reason,
             inference_timing: result.inference_timing,
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 

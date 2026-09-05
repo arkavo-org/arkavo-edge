@@ -8,12 +8,12 @@ pub struct LlmIntegration {
 
 impl LlmIntegration {
     pub async fn new() -> Result<Self> {
-        let gemini_available = std::env::var("GEMINI_API_KEY").is_ok();
+        let cloud_available = arkavo_router::ProviderAvailability::from_env().has_cloud();
 
-        let router = if gemini_available {
+        let router = if cloud_available {
             Router::new().await?
         } else {
-            tracing::info!("No GEMINI_API_KEY found - using local models only");
+            tracing::info!("No cloud provider available - using local models only");
             Router::new_offline().await?
         };
 
@@ -38,117 +38,8 @@ impl LlmIntegration {
         decision: &RoutingDecision,
     ) -> Result<LlmClient> {
         match decision.recommended_model {
-            ModelChoice::GeminiFlash
-            | ModelChoice::Gemini35Flash
-            | ModelChoice::Gemini35FlashMinimal
-            | ModelChoice::Gemini35FlashMedium
-            | ModelChoice::Gemini35FlashHigh
-            | ModelChoice::GeminiPro => {
-                #[cfg(feature = "gemini")]
-                {
-                    use arkavo_llm::GeminiProvider;
-                    let provider = Box::new(GeminiProvider::new()?);
-                    Ok(LlmClient::new(provider))
-                }
-                #[cfg(not(feature = "gemini"))]
-                {
-                    anyhow::bail!("Gemini feature not enabled")
-                }
-            }
-            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
-                use arkavo_llm::providers::anthropic::AnthropicProvider;
-                if let Ok(provider) =
-                    AnthropicProvider::from_env_with_model(decision.recommended_model.name())
-                {
-                    Ok(LlmClient::new(Box::new(provider)))
-                } else {
-                    anyhow::bail!("ANTHROPIC_API_KEY not set")
-                }
-            }
-            ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
-                #[cfg(feature = "deepseek")]
-                {
-                    use arkavo_llm::DeepSeekProvider;
-                    if let Ok(provider) = DeepSeekProvider::from_env() {
-                        Ok(LlmClient::new(Box::new(provider)))
-                    } else {
-                        anyhow::bail!("DEEPSEEK_API_KEY not set")
-                    }
-                }
-                #[cfg(not(feature = "deepseek"))]
-                {
-                    anyhow::bail!("DeepSeek feature not enabled")
-                }
-            }
-            ModelChoice::KimiK2 => {
-                #[cfg(feature = "kimi")]
-                {
-                    use arkavo_llm::KimiProvider;
-                    if let Ok(provider) = KimiProvider::from_env() {
-                        Ok(LlmClient::new(Box::new(provider)))
-                    } else {
-                        anyhow::bail!("MOONSHOT_API_KEY not set")
-                    }
-                }
-                #[cfg(not(feature = "kimi"))]
-                {
-                    anyhow::bail!("Kimi feature not enabled")
-                }
-            }
-            ModelChoice::Glm52 => {
-                #[cfg(feature = "glm")]
-                {
-                    use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
-                    let Ok(api_key) = std::env::var("GLM_API_KEY") else {
-                        anyhow::bail!("GLM_API_KEY not set")
-                    };
-                    let base_url = std::env::var("GLM_BASE_URL")
-                        .unwrap_or_else(|_| "https://api.z.ai/api/paas/v4".to_string());
-                    let provider = OpenAIProvider::new(OpenAIConfig {
-                        api_key,
-                        base_url,
-                        model: decision.recommended_model.name().to_string(),
-                        organization_id: None,
-                        api_version: None,
-                        is_azure: false,
-                    })?;
-                    Ok(LlmClient::new(Box::new(provider)))
-                }
-                #[cfg(not(feature = "glm"))]
-                {
-                    anyhow::bail!("GLM feature not enabled")
-                }
-            }
-            ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
-                #[cfg(feature = "xai")]
-                {
-                    use arkavo_llm::providers::xai_responses::{
-                        ReasoningEffort, ResponsesConfig, ResponsesProvider,
-                    };
-                    let Ok(api_key) = std::env::var("XAI_API_KEY") else {
-                        anyhow::bail!("XAI_API_KEY not set")
-                    };
-                    let base_url = std::env::var("XAI_BASE_URL")
-                        .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-                    let api_model = decision
-                        .recommended_model
-                        .grok_api_model()
-                        .unwrap_or("grok-4.6")
-                        .to_string();
-                    let effort = if matches!(decision.recommended_model, ModelChoice::Grok46Xhigh) {
-                        ReasoningEffort::Xhigh
-                    } else {
-                        ReasoningEffort::Low
-                    };
-                    let config =
-                        ResponsesConfig::for_routed_arm(api_key, base_url, api_model, effort);
-                    let provider = ResponsesProvider::new(config)?;
-                    Ok(LlmClient::new(Box::new(provider)))
-                }
-                #[cfg(not(feature = "xai"))]
-                {
-                    anyhow::bail!("xAI/Grok feature not enabled")
-                }
+            ref model if model.is_cloud() => {
+                Ok(LlmClient::new(self.router.get_provider(model).await?))
             }
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
@@ -188,10 +79,16 @@ impl LlmIntegration {
                     )
                 }
             }
+            ref model => Ok(LlmClient::new(self.router.get_provider(model).await?)),
         }
     }
 
     pub async fn create_client_from_model(&self, model_name: &str) -> Result<LlmClient> {
+        if let Some(model) = ModelChoice::from_name(model_name)
+            && model.is_cloud()
+        {
+            return Ok(LlmClient::new(self.router.get_provider(&model).await?));
+        }
         if model_name.contains("gemini") {
             #[cfg(feature = "gemini")]
             {

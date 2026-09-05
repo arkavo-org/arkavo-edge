@@ -7,6 +7,12 @@ license.workspace = true
 repository.workspace = true
 description = "AI-driven UI code generation for Arkavo Edge"
 
+[features]
+# Local inference is forwarded, never enabled here: this crate is a
+# non-optional dependency of arkavo-agui, so hard-wiring `arkavo-llm/llama-cpp`
+# linked llama.cpp into every cloud-only binary through feature unification.
+llama-cpp = ["arkavo-llm/llama-cpp"]
+
 [dependencies]
 # Core dependencies
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }
@@ -16,7 +22,7 @@ anyhow = { workspace = true }
 
 # Arkavo dependencies
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["gemini", "llm-remote"] }
-arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["llama-cpp"] }
+arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-gemini = { path = "../arkavo-gemini" }
 arkavo-observability = { path = "../arkavo-observability" }
 base64 = { workspace = true }
@@ -31,6 +37,12 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 tempfile = { workspace = true }
+
+# Drives a GGUF through `LlamaCppProvider` directly, so it only builds when
+# local inference is compiled in.
+[[example]]
+name = "vision_test"
+required-features = ["llama-cpp"]
 
 [dev-dependencies]
 arkavo-browser = { path = "../arkavo-browser" }

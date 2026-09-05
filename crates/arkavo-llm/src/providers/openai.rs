@@ -523,11 +523,10 @@ impl Provider for OpenAIProvider {
 
         Ok(ProviderResponse {
             content,
-            reasoning_content: None,
             tool_calls,
             finish_reason,
             inference_timing,
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 
@@ -609,10 +608,8 @@ impl Provider for OpenAIProvider {
                                 if data == "[DONE]" {
                                     if tx
                                         .send(Ok(StreamResponse {
-                                            content: String::new(),
-                                            reasoning_content: None,
                                             done: true,
-                                            inference_timing: None,
+                                            ..Default::default()
                                         }))
                                         .await
                                         .is_err()
@@ -625,9 +622,8 @@ impl Provider for OpenAIProvider {
                                     && tx
                                         .send(Ok(StreamResponse {
                                             content: content.clone(),
-                                            reasoning_content: None,
                                             done: choice.finish_reason.is_some(),
-                                            inference_timing: None,
+                                            ..Default::default()
                                         }))
                                         .await
                                         .is_err()

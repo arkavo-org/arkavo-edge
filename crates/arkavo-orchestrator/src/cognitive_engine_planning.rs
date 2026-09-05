@@ -5,11 +5,11 @@ use crate::cognitive_engine_planning_parser::{parse_plan_from_response, parse_pl
 use crate::cognitive_engine_schema::JsonExecutionPlan;
 use crate::error::{Error, Result};
 use crate::planner_config::get_planner_config;
-use crate::token_estimator;
-use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
-use arkavo_llm::{Message as LlmMessage, Provider};
+use arkavo_budget::BudgetTracker;
+use arkavo_llm::Message as LlmMessage;
 use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
 use arkavo_router::Router;
+use arkavo_router::usage::{CallBudget, estimate_request};
 use chrono::Utc;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -89,24 +89,11 @@ impl Planner {
             "Planning with selected model"
         );
 
-        // Get provider - supports both local and cloud models
-        let planning_provider: Arc<dyn Provider> = if decision.recommended_model.is_local() {
-            let provider = self
-                .router
-                .get_provider(&decision.recommended_model)
-                .await
-                .map_err(|e| {
-                    Error::Other(anyhow::anyhow!("Failed to create local provider: {e}"))
-                })?;
-            Arc::from(provider)
-        } else if let Some(gemini) = self.router.get_planning_provider() {
-            Arc::from(gemini)
-        } else {
-            return Err(Error::Other(anyhow::anyhow!(
-                "Planning model not available. Set GEMINI_API_KEY for remote planning."
-            )));
-        };
-
+        let (planning_provider, actual_model) = self
+            .router
+            .get_provider_attributed(&decision.recommended_model)
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("Planning provider unavailable: {e}")))?;
         let messages = vec![LlmMessage::user(planning_prompt.clone())];
 
         // Use structured output with JSON schema if provider supports it
@@ -116,37 +103,36 @@ impl Planner {
             None
         };
 
+        let estimated = estimate_request(
+            &messages,
+            schema.as_ref(),
+            planner_config.max_tokens().unwrap_or(4096) as u32,
+        );
+        let budget = CallBudget {
+            tracker: &self.budget_tracker,
+            agent_id: "github-orchestrator",
+        };
+        budget
+            .check(self.router.usage_cost(&actual_model, &estimated))
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
         let response = planning_provider
-            .complete_with_schema(messages, schema, planner_config.max_tokens())
+            .complete_with_schema_response(messages, schema, planner_config.max_tokens())
+            .await;
+        let response = self
+            .account_failure(response, &actual_model, &estimated, budget)
+            .await?;
+
+        // Record the paid call before parsing: malformed plans still consumed tokens.
+        let usage = self
+            .router
+            .attribute_response(actual_model, &estimated, &response);
+        budget
+            .record(&usage)
             .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("Planning LLM call failed: {e}")))?;
-
-        let steps = parse_plan_json_or_text(&response)?;
-
-        // P4: Accurate token estimation. `complete_with_schema` returns a
-        // raw String with no provider-reported counts, so we use an
-        // improved character/word heuristic rather than the legacy
-        // len()/4 approximation.
-        let (estimated_input_tokens, estimated_output_tokens) =
-            token_estimator::tokens_from_texts(&planning_prompt, &response);
-        let total_tokens = estimated_input_tokens + estimated_output_tokens;
-
-        let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
-        let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
-
-        if let Err(e) = self
-            .budget_tracker
-            .record_spending(
-                "github-orchestrator".to_string(),
-                decision.recommended_model.provider().to_string(),
-                decision.recommended_model.name().to_string(),
-                usage,
-                cost,
-            )
-            .await
-        {
-            warn!(error = %e, "Failed to record budget usage for planning");
-        }
+            .map_err(|e| Error::Other(e.into()))?;
+        let total_tokens = usage.usage.total_tokens();
+        let steps = parse_plan_json_or_text(&response.content)?;
 
         let plan_id = Uuid::new_v4();
         let plan = ExecutionPlan {
@@ -235,55 +221,38 @@ impl Planner {
             decision.recommended_model
         );
 
-        // Get provider - supports both local and cloud models
-        let provider: Arc<dyn Provider> = if decision.recommended_model.is_local() {
-            let p = self
-                .router
-                .get_provider(&decision.recommended_model)
-                .await
-                .map_err(|e| {
-                    Error::Other(anyhow::anyhow!(
-                        "Failed to create local provider for adjustment: {e}"
-                    ))
-                })?;
-            Arc::from(p)
-        } else if let Some(gemini) = self.router.get_planning_provider() {
-            Arc::from(gemini)
-        } else {
-            return Err(Error::Other(anyhow::anyhow!(
-                "Adjustment requires a model. Set GEMINI_API_KEY for remote planning."
-            )));
-        };
+        let (provider, actual_model) = self
+            .router
+            .get_provider_attributed(&decision.recommended_model)
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("Adjustment provider unavailable: {e}")))?;
 
         let messages = vec![LlmMessage::user(adjustment_prompt.clone())];
 
+        let estimated = estimate_request(&messages, None, 4096);
+        let budget = CallBudget {
+            tracker: &self.budget_tracker,
+            agent_id: "github-orchestrator",
+        };
+        budget
+            .check(self.router.usage_cost(&actual_model, &estimated))
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
         let response = provider
-            .complete(messages)
+            .complete_with_schema_response(messages, None, None)
+            .await;
+        let response = self
+            .account_failure(response, &actual_model, &estimated, budget)
+            .await?;
+
+        let usage = self
+            .router
+            .attribute_response(actual_model, &estimated, &response);
+        budget
+            .record(&usage)
             .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("Adjustment LLM call failed: {e}")))?;
-
-        // P4: accurate token estimation.
-        let (estimated_input_tokens, estimated_output_tokens) =
-            token_estimator::tokens_from_texts(&adjustment_prompt, &response);
-
-        let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
-        let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
-
-        if let Err(e) = self
-            .budget_tracker
-            .record_spending(
-                "github-orchestrator".to_string(),
-                decision.recommended_model.provider().to_string(),
-                decision.recommended_model.name().to_string(),
-                usage,
-                cost,
-            )
-            .await
-        {
-            warn!(error = %e, "Failed to record budget usage for adjustment");
-        }
-
-        let adjusted_steps = parse_plan_from_response(&response)?;
+            .map_err(|e| Error::Other(e.into()))?;
+        let adjusted_steps = parse_plan_from_response(&response.content)?;
 
         if let Some(adjusted_step) = adjusted_steps.first() {
             info!(
@@ -295,6 +264,35 @@ impl Planner {
         } else {
             warn!(step = step.step_number, "Failed to parse adjustment");
             Ok(None)
+        }
+    }
+    async fn account_failure(
+        &self,
+        result: arkavo_llm::Result<arkavo_llm::ProviderResponse>,
+        model: &arkavo_router::ModelChoice,
+        estimated: &arkavo_budget::cost::TokenUsage,
+        budget: CallBudget<'_>,
+    ) -> Result<arkavo_llm::ProviderResponse> {
+        match result {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                if let Some(timing) = error.inference_timing() {
+                    let response = arkavo_llm::ProviderResponse {
+                        inference_timing: Some(timing.clone()),
+                        ..Default::default()
+                    };
+                    let usage = self
+                        .router
+                        .attribute_response(model.clone(), estimated, &response);
+                    budget
+                        .record(&usage)
+                        .await
+                        .map_err(|e| Error::Other(e.into()))?;
+                }
+                Err(Error::Other(anyhow::anyhow!(
+                    "Planning LLM call failed: {error}"
+                )))
+            }
         }
     }
 }

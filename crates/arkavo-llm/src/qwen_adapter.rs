@@ -57,6 +57,7 @@ fn convert_stream_response(resp: arkavo_qwen::StreamResponse) -> crate::StreamRe
         // Keep this as None until arkavo-qwen exposes a reasoning channel.
         reasoning_content: None,
         done: resp.done,
+        ..Default::default()
     }
 }
 

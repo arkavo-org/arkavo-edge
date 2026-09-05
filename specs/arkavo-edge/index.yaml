@@ -1,9 +1,19 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.91.0
-last_updated: 2026-08-30
+version: 0.93.0
+last_updated: 2026-09-05
 
 components:
+  - name: astra
+    file: astra.spec.yaml
+    module: arkavo_llm::providers::openai_responses
+    description: Responses tool execution and attributed cloud inference
+    criticality: critical
+    scenario_count: 6
+    invariants:
+      - Exact provider conversation state and call IDs
+      - Existing output policy and shared spending limits
+
   - name: trusted-agent
     file: trusted-agent.spec.yaml
     module: cross_cutting

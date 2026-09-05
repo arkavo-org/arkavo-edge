@@ -886,6 +886,11 @@ impl ChatSessionManager {
         task_context: Option<Arc<RwLock<String>>>,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
+        // An approval is held by the router for the whole session, so the answer
+        // itself needs no mirror here. `cloud_asked` records only that the
+        // question was put at all, which makes a decline as final as an approval
+        // and keeps the user from being asked again on the next turn.
+        let mut cloud_asked = false;
         info!("Router-based session handler started");
 
         loop {
@@ -911,11 +916,9 @@ impl ChatSessionManager {
                     // Chat path: fastest local model on separate semaphore
                     // Sliding window prevents unbounded context growth
                     const CHAT_WINDOW_SIZE: usize = 8;
-                    let mut windowed_context: Vec<Message> = if conversation_context.len() > CHAT_WINDOW_SIZE {
-                        conversation_context[conversation_context.len() - CHAT_WINDOW_SIZE..].to_vec()
-                    } else {
-                        conversation_context.clone()
-                    };
+                    let mut windowed_context = super::chat_history::recent_turns(
+                        &conversation_context, CHAT_WINDOW_SIZE,
+                    );
 
                     // Prepend task context as system message (recent tasks + last observed state)
                     if let Some(ref tc) = task_context {
@@ -965,12 +968,19 @@ impl ChatSessionManager {
 
                     // Classify human teaching intent before routing
                     let last_trace = router.last_decision_trace().map(|t| t.trace_id);
-                    let intent = arkavo_router::learning::human_teaching::classify_intent_llm(
-                        &user_message.content,
-                        last_trace,
-                        &router,
-                    )
-                    .await;
+                    let selected_model = model_override.as_ref()
+                        .and_then(arkavo_router::ModelSpec::as_named)
+                        .cloned()
+                        .unwrap_or_else(|| router.default_chat_model());
+                    let intent = if selected_model.is_local() && model_override.as_ref().is_none_or(|s| s.as_gguf_path().is_none()) {
+                        arkavo_router::learning::human_teaching::classify_intent_llm(
+                            &user_message.content, last_trace, &router,
+                        ).await
+                    } else {
+                        arkavo_router::learning::human_teaching::classify_intent(
+                            &user_message.content, last_trace,
+                        )
+                    };
 
                     if intent != arkavo_router::learning::TeachingIntent::Question {
                         // Emit intent metadata delta so the UI can display it
@@ -1035,14 +1045,14 @@ impl ChatSessionManager {
                         );
                     }
 
-                    let spec = model_override.clone().unwrap_or_else(|| {
-                        arkavo_router::ModelSpec::Named(router.fastest_local_model())
-                    });
+                    let spec = model_override
+                        .clone()
+                        .unwrap_or(arkavo_router::ModelSpec::Named(selected_model));
                     let model_label = spec.display_name();
                     let reasoning = if model_override.is_some() {
                         format!("--model override: {model_label}")
                     } else {
-                        "Chat path: fastest local model, separate semaphore".to_string()
+                        "Chat path: available model, separate semaphore".to_string()
                     };
                     let metadata_delta = MessageDelta {
                         session_id: session_id.clone(),
@@ -1065,10 +1075,13 @@ impl ChatSessionManager {
                     // can exceed the 60s named-model budget.
                     let chat_timeout_secs = if spec.as_gguf_path().is_some() {
                         180
+                    } else if spec.as_named().is_some_and(|m| !m.is_local()) {
+                        3600
                     } else {
                         60
                     };
-                    let route_result = match tokio::time::timeout(
+                    let mut continuation_context = windowed_context.clone();
+                    let mut route_result = match tokio::time::timeout(
                         std::time::Duration::from_secs(chat_timeout_secs),
                         router.route_chat_spec(windowed_context, tool_registry.as_deref(), model_override.as_ref()),
                     )
@@ -1082,6 +1095,44 @@ impl ChatSessionManager {
                             ))
                         }
                     };
+
+                    // A cloud-only install would otherwise stop here; ask the
+                    // user once and re-dispatch the identical request.
+                    if let Err(ref route_err) = route_result
+                        && let CloudConfirmation::Ask { model, estimated_cost_usd } = cloud_confirmation(
+                            route_err,
+                            std::io::IsTerminal::is_terminal(&std::io::stdin()),
+                            cloud_asked,
+                        )
+                    {
+                        // Asked counts whichever way it is answered; a decline is
+                        // final for the session and must not be re-litigated.
+                        cloud_asked = true;
+                        if ask_cloud_confirmation(&model, estimated_cost_usd).await {
+                            // Held by the router for the rest of the session, so
+                            // the calls this turn fans out into — and every later
+                            // turn — inherit the approval without re-asking.
+                            router.confirm_cloud_for_session();
+                            route_result = match tokio::time::timeout(
+                                std::time::Duration::from_secs(chat_timeout_secs),
+                                router.route_chat_spec(
+                                    continuation_context.clone(),
+                                    tool_registry.as_deref(),
+                                    model_override.as_ref(),
+                                ),
+                            )
+                            .await
+                            {
+                                Ok(inner) => inner,
+                                Err(_elapsed) => {
+                                    error!(session.id = %session_id, "Chat inference timed out after {chat_timeout_secs}s");
+                                    Err(arkavo_router::Error::ModelExecution(
+                                        format!("Chat inference timed out after {chat_timeout_secs}s"),
+                                    ))
+                                }
+                            };
+                        }
+                    }
 
                     match route_result {
                         Ok(response) => {
@@ -1170,12 +1221,16 @@ impl ChatSessionManager {
                                     let executor = ToolExecutor::with_registry(registry.clone());
                                     let tool_results = executor.execute_batch(&response.tool_calls).await;
 
-                                    // Add assistant message with tool calls to context
-                                    conversation_context.push(Message::assistant(response.content.clone()));
+                                    // Add the assistant turn and pair every issued
+                                    // call with its output in the expected role
+                                    let before_tool_turn = conversation_context.len();
+                                    conversation_context.extend(
+                                        executed_tool_turn(&response, &tool_results),
+                                    );
 
-                                    // Format and add tool results to context as user message
-                                    let results_message = format_tool_results(&tool_results);
-                                    conversation_context.push(Message::user(results_message));
+                                    continuation_context.extend_from_slice(
+                                        &conversation_context[before_tool_turn..],
+                                    );
 
                                     // Send tool result deltas
                                     for (idx, result) in tool_results.iter().enumerate() {
@@ -1195,14 +1250,14 @@ impl ChatSessionManager {
 
                                     // Route again with same model to synthesize final answer from tool results
                                     let retry_result = tokio::time::timeout(
-                                        std::time::Duration::from_mins(2),
-                                        router.route_chat_spec(conversation_context.clone(), None, model_override.as_ref()),
+                                        std::time::Duration::from_secs(chat_timeout_secs),
+                                        router.route_chat_spec(continuation_context, None, Some(&spec)),
                                     )
                                     .await;
                                     let retry_result = match retry_result {
                                         Ok(inner) => inner,
                                         Err(_) => Err(arkavo_router::Error::ModelExecution(
-                                            "LLM inference timed out after 120s".to_string(),
+                                            format!("LLM inference timed out after {chat_timeout_secs}s"),
                                         )),
                                     };
                                     match retry_result {
@@ -1247,7 +1302,7 @@ impl ChatSessionManager {
                                             let _ = delta_tx.send(final_delta);
 
                                             // Add final assistant response to context
-                                            conversation_context.push(Message::assistant(clean_content));
+                                            conversation_context.push(final_resp.as_assistant_message());
                                         }
                                         Err(e) => {
                                             error!(error = %e, "Failed to get final response after tool execution");
@@ -1256,8 +1311,11 @@ impl ChatSessionManager {
                                     }
                                 } else {
                                     warn!("Tool calls received but no tool registry available");
-                                    // Add assistant message to context without tool execution
-                                    conversation_context.push(Message::assistant(response.content));
+                                    // The calls still need paired outputs or the next
+                                    // turn is rejected for a missing tool output.
+                                    conversation_context.extend(
+                                        unregistered_tool_turn(&response),
+                                    );
                                 }
                             } else {
                                 // No tool calls - send text delta and add to context
@@ -1271,7 +1329,7 @@ impl ChatSessionManager {
                                     timestamp: chrono::Utc::now(),
                                 };
                                 let _ = delta_tx.send(text_delta);
-                                conversation_context.push(Message::assistant(response.content));
+                                conversation_context.push(response.as_assistant_message());
                             }
                         }
                         Err(e) => {
@@ -1317,7 +1375,7 @@ impl ChatSessionManager {
                                         let hint_result = match hint_result {
                                             Ok(inner) => inner,
                                             Err(_) => Err(arkavo_router::Error::ModelExecution(
-                                                "LLM inference timed out after 120s".to_string(),
+                                                format!("LLM inference timed out after {chat_timeout_secs}s"),
                                             )),
                                         };
                                         match hint_result {
@@ -1337,7 +1395,9 @@ impl ChatSessionManager {
                                                 let _ = delta_tx.send(text_delta);
 
                                                 // Handle tool calls if present
-                                                if !response.tool_calls.is_empty() {
+                                                let tool_results = if response.tool_calls.is_empty() {
+                                                    Vec::new()
+                                                } else {
                                                     let executor = ToolExecutor::with_registry(registry.clone());
                                                     let tool_results = executor.execute_batch(&response.tool_calls).await;
 
@@ -1356,10 +1416,14 @@ impl ChatSessionManager {
                                                         };
                                                         let _ = delta_tx.send(result_delta);
                                                     }
-                                                }
+                                                    tool_results
+                                                };
 
-                                                // Add response to context
-                                                conversation_context.push(Message::assistant(response.content));
+                                                // Add the turn and its outputs together so the
+                                                // calls it issued are never left unanswered
+                                                conversation_context.extend(
+                                                    executed_tool_turn(&response, &tool_results),
+                                                );
                                             }
                                             Err(retry_err) => {
                                                 final_response = String::new();
@@ -1523,6 +1587,171 @@ impl ChatSessionManager {
 
         info!("Chat session manager shutdown complete");
     }
+}
+
+/// What the chat loop does when routing refuses an unconfirmed cloud call.
+#[derive(Debug, Clone, PartialEq)]
+enum CloudConfirmation {
+    /// Surface the router error unchanged: it is not a confirmation refusal,
+    /// there is no terminal to ask on, or the user has already answered this
+    /// session — yes or no — and asking again would only repeat the question.
+    Propagate,
+    /// Ask once, then retry the identical request if the user agrees.
+    Ask {
+        model: String,
+        estimated_cost_usd: f64,
+    },
+}
+
+/// A cloud-only install under `AskBeforeCloud` otherwise dead-ends: the router
+/// refuses automatic cloud selection and has no channel to reach the user, so
+/// the chat loop asks on its behalf and re-dispatches the same request.
+///
+/// `already_asked` covers both answers. A user who declined has answered the
+/// question for this session, so repeating it every turn would be nagging, not
+/// recovery; the original error propagates instead.
+fn cloud_confirmation(
+    error: &arkavo_router::Error,
+    interactive: bool,
+    already_asked: bool,
+) -> CloudConfirmation {
+    match error {
+        arkavo_router::Error::CloudConfirmationRequired {
+            model,
+            estimated_cost_usd,
+        } if interactive && !already_asked => CloudConfirmation::Ask {
+            model: model.clone(),
+            estimated_cost_usd: *estimated_cost_usd,
+        },
+        _ => CloudConfirmation::Propagate,
+    }
+}
+
+/// Put the y/N question on the controlling terminal, keeping the blocking stdin
+/// read off the async runtime. Anything but an explicit yes declines.
+async fn ask_cloud_confirmation(model: &str, estimated_cost_usd: f64) -> bool {
+    let question = format!(
+        "\nCloud inference with {model} is estimated at ${estimated_cost_usd:.4} for this request.\nSend this session's requests to the cloud? [y/N]: "
+    );
+    tokio::task::spawn_blocking(move || {
+        use std::io::{BufRead, Write};
+        let mut stdout = std::io::stdout();
+        if stdout.write_all(question.as_bytes()).is_err() || stdout.flush().is_err() {
+            return false;
+        }
+        let mut answer = String::new();
+        if std::io::stdin().lock().read_line(&mut answer).is_err() {
+            return false;
+        }
+        matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// Every call the assistant turn obliges the next request to answer, as
+/// `(call_id, tool_name)`.
+///
+/// A Responses turn replays its provider state verbatim, so the native
+/// `function_call` records — not the parsed calls — decide which outputs the
+/// provider demands.
+/// Chat Completions turns carry only parsed calls, and a call the local parser
+/// pulled out of prose has no id of its own, so one is synthesized the same way
+/// the streamed tool-call deltas synthesize theirs.
+fn pending_call_ids(response: &arkavo_llm::ProviderResponse) -> Vec<(String, String)> {
+    let mut calls: Vec<(String, String)> = response
+        .provider_state
+        .native_calls()
+        .map(|(call_id, name)| (call_id.to_string(), name.to_string()))
+        .collect();
+    for (idx, call) in response.tool_calls.iter().enumerate() {
+        let call_id = call
+            .call_id
+            .clone()
+            .unwrap_or_else(|| format!("call_{idx}"));
+        if !calls.iter().any(|(known, _)| *known == call_id) {
+            calls.push((call_id, call.tool_name.clone()));
+        }
+    }
+    calls
+}
+
+/// Replay one turn's tool results in the role the provider's next request needs.
+///
+/// Providers that issued native calls reject a continuation that answers them
+/// with anything but a paired tool-role message, so each result becomes its own
+/// `Role::Tool` message keyed by the call id. Calls parsed out of a Responses
+/// turn's prose have no provider-side call to answer and stay a user summary.
+fn tool_result_messages(
+    response: &arkavo_llm::ProviderResponse,
+    results: &[ToolExecutionResult],
+) -> Vec<Message> {
+    if !response.tool_results_use_tool_role() {
+        return vec![Message::user(format_tool_results(results))];
+    }
+    let pending = pending_call_ids(response);
+    results
+        .iter()
+        .enumerate()
+        .map(|(idx, result)| {
+            let call_id = result
+                .call_id
+                .clone()
+                .or_else(|| pending.get(idx).map(|(id, _)| id.clone()))
+                .unwrap_or_else(|| format!("call_{idx}"));
+            Message::tool_result(
+                serde_json::json!({
+                    "result": result.result, "success": result.success, "error": result.error
+                })
+                .to_string(),
+                call_id,
+                result.tool_name.clone(),
+            )
+        })
+        .collect()
+}
+
+/// Outputs for a turn whose calls this session cannot run.
+///
+/// Dropping them orphans the assistant's `function_call` items and the next
+/// request fails with "No tool output found", so the model is told the tool is
+/// unavailable instead of being left waiting for a result that never comes.
+fn unavailable_tool_results(response: &arkavo_llm::ProviderResponse) -> Vec<ToolExecutionResult> {
+    pending_call_ids(response)
+        .into_iter()
+        .map(|(call_id, tool_name)| ToolExecutionResult {
+            result: serde_json::json!({
+                "error": format!("Tool '{tool_name}' is unavailable: this session has no tool registry")
+            }),
+            error: Some(format!(
+                "Tool '{tool_name}' is unavailable: this session has no tool registry"
+            )),
+            tool_name,
+            call_id: Some(call_id),
+            success: false,
+            schema_hint: None,
+        })
+        .collect()
+}
+
+/// One assistant turn and the outputs answering it, in the order the next
+/// request must replay them. Every caller appends this whole slice so a turn's
+/// calls can never be committed to history without their results.
+fn executed_tool_turn(
+    response: &arkavo_llm::ProviderResponse,
+    results: &[ToolExecutionResult],
+) -> Vec<Message> {
+    let mut messages = vec![response.as_assistant_message()];
+    if !results.is_empty() {
+        messages.extend(tool_result_messages(response, results));
+    }
+    messages
+}
+
+/// The same turn when no tool registry is attached: the calls cannot run, so
+/// each one is answered with an "unavailable" output rather than left orphaned.
+fn unregistered_tool_turn(response: &arkavo_llm::ProviderResponse) -> Vec<Message> {
+    executed_tool_turn(response, &unavailable_tool_results(response))
 }
 
 /// Maximum characters per tool result to prevent exceeding LLM token limits
@@ -1754,6 +1983,7 @@ mod tests {
                     reasoning_content: None,
                     done: i == count - 1,
                     inference_timing: None,
+                    ..Default::default()
                 });
             }
             Self {
@@ -2102,5 +2332,255 @@ mod tests {
         );
 
         manager.shutdown().await;
+    }
+
+    fn function_call_item(call_id: &str, name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "function_call", "call_id": call_id, "name": name, "arguments": "{}"
+        })
+    }
+
+    fn parsed_call(name: &str, call_id: Option<&str>) -> arkavo_llm::ParsedToolCall {
+        arkavo_llm::ParsedToolCall {
+            tool_name: name.to_string(),
+            arguments: serde_json::json!({}),
+            call_id: call_id.map(str::to_string),
+        }
+    }
+
+    fn executed(name: &str, call_id: Option<&str>) -> ToolExecutionResult {
+        ToolExecutionResult {
+            tool_name: name.to_string(),
+            call_id: call_id.map(str::to_string),
+            result: serde_json::json!({"ok": true}),
+            success: true,
+            error: None,
+            schema_hint: None,
+        }
+    }
+
+    /// Every native call the assistant issued must be answered by a message
+    /// carrying its call id, or the provider rejects the next turn.
+    fn assert_every_call_is_paired(assistant: &Message, followers: &[Message]) {
+        let mut ids: Vec<String> = assistant
+            .provider_state
+            .native_call_ids()
+            .map(str::to_string)
+            .collect();
+        ids.extend(
+            assistant
+                .tool_calls
+                .iter()
+                .filter_map(|call| call.id.clone()),
+        );
+        assert!(!ids.is_empty(), "test fixture must issue at least one call");
+        for id in ids {
+            assert!(
+                followers.iter().any(|message| {
+                    message.role == arkavo_llm::Role::Tool
+                        && message.tool_call_id.as_deref() == Some(id.as_str())
+                }),
+                "call {id} has no paired tool result"
+            );
+        }
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn chat_completions_results_replay_as_tool_role_with_call_ids() {
+        let response = arkavo_llm::ProviderResponse {
+            tool_calls: vec![parsed_call("read_file", Some("call_a"))],
+            ..Default::default()
+        };
+        let messages = tool_result_messages(&response, &[executed("read_file", Some("call_a"))]);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, arkavo_llm::Role::Tool);
+        assert_eq!(messages[0].tool_call_id.as_deref(), Some("call_a"));
+        assert_every_call_is_paired(&response.as_assistant_message(), &messages);
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn native_function_call_items_replay_as_tool_role_with_call_ids() {
+        let response = arkavo_llm::ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                function_call_item("fc_1", "read_file"),
+                function_call_item("fc_2", "list_dir"),
+            ]),
+            tool_calls: vec![
+                parsed_call("read_file", Some("fc_1")),
+                parsed_call("list_dir", Some("fc_2")),
+            ],
+            ..Default::default()
+        };
+        let messages = tool_result_messages(
+            &response,
+            &[
+                executed("read_file", Some("fc_1")),
+                executed("list_dir", Some("fc_2")),
+            ],
+        );
+        assert_eq!(messages.len(), 2);
+        assert_every_call_is_paired(&response.as_assistant_message(), &messages);
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn prose_extracted_results_stay_a_user_message() {
+        let response = arkavo_llm::ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                serde_json::json!({"type": "reasoning", "id": "rs_1"}),
+            ]),
+            tool_calls: vec![parsed_call("read_file", None)],
+            ..Default::default()
+        };
+        let messages = tool_result_messages(&response, &[executed("read_file", None)]);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, arkavo_llm::Role::User);
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn no_tool_registry_branch_still_answers_every_native_call() {
+        let response = arkavo_llm::ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                function_call_item("fc_1", "read_file"),
+                function_call_item("fc_2", "list_dir"),
+            ]),
+            tool_calls: vec![
+                parsed_call("read_file", Some("fc_1")),
+                parsed_call("list_dir", Some("fc_2")),
+            ],
+            ..Default::default()
+        };
+        // Exactly what the no-registry branch appends to the context.
+        let context = unregistered_tool_turn(&response);
+
+        let (assistant, followers) = context.split_first().unwrap();
+        assert_eq!(assistant.role, arkavo_llm::Role::Assistant);
+        assert_every_call_is_paired(assistant, followers);
+        assert!(followers.iter().all(|m| m.content.contains("unavailable")));
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn hint_retry_branch_pushes_results_after_the_assistant_turn() {
+        let response = arkavo_llm::ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![function_call_item(
+                "fc_hint",
+                "read_file",
+            )]),
+            tool_calls: vec![parsed_call("read_file", Some("fc_hint"))],
+            ..Default::default()
+        };
+        // Exactly what the hint-retry branch appends to the context.
+        let results = vec![executed("read_file", Some("fc_hint"))];
+        let context = executed_tool_turn(&response, &results);
+
+        let (assistant, followers) = context.split_first().unwrap();
+        assert_eq!(assistant.role, arkavo_llm::Role::Assistant);
+        assert_every_call_is_paired(assistant, followers);
+    }
+
+    /// The hint-retry branch also runs for answers that called no tools; it must
+    /// still record the assistant turn and add nothing after it.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn a_turn_without_tool_calls_is_recorded_alone() {
+        let response = arkavo_llm::ProviderResponse {
+            content: "no tools needed".to_string(),
+            ..Default::default()
+        };
+        let context = executed_tool_turn(&response, &[]);
+        assert_eq!(context.len(), 1);
+        assert_eq!(context[0].role, arkavo_llm::Role::Assistant);
+        assert_eq!(context[0].content, "no tools needed");
+    }
+
+    #[spec("ASTRA-004")]
+    #[test]
+    fn cloud_confirmation_asks_at_most_once_per_interactive_session() {
+        let needs_confirmation = needs_cloud_confirmation();
+        assert_eq!(
+            cloud_confirmation(&needs_confirmation, true, false),
+            CloudConfirmation::Ask {
+                model: "gpt-6-astra".to_string(),
+                estimated_cost_usd: 0.0123,
+            }
+        );
+        // Non-interactive keeps the existing error path.
+        assert_eq!(
+            cloud_confirmation(&needs_confirmation, false, false),
+            CloudConfirmation::Propagate
+        );
+        // Already asked this session: never ask twice, never loop. This holds
+        // for an approval (the router carries it) and for a decline.
+        assert_eq!(
+            cloud_confirmation(&needs_confirmation, true, true),
+            CloudConfirmation::Propagate
+        );
+        // Any other routing failure is untouched.
+        assert_eq!(
+            cloud_confirmation(
+                &arkavo_router::Error::ModelExecution("boom".into()),
+                true,
+                false
+            ),
+            CloudConfirmation::Propagate
+        );
+    }
+
+    fn needs_cloud_confirmation() -> arkavo_router::Error {
+        arkavo_router::Error::CloudConfirmationRequired {
+            model: "gpt-6-astra".to_string(),
+            estimated_cost_usd: 0.0123,
+        }
+    }
+
+    /// Replays the session flag across turns: ask, decline, then a second turn
+    /// that hits the same refusal must not put the question again.
+    #[spec("ASTRA-004")]
+    #[test]
+    fn a_declined_session_is_never_asked_again() {
+        let error = needs_cloud_confirmation();
+        let mut cloud_asked = false;
+
+        assert!(matches!(
+            cloud_confirmation(&error, true, cloud_asked),
+            CloudConfirmation::Ask { .. }
+        ));
+        // The loop marks the question as put before reading the answer, so a
+        // decline is recorded exactly as an approval is.
+        cloud_asked = true;
+
+        assert_eq!(
+            cloud_confirmation(&error, true, cloud_asked),
+            CloudConfirmation::Propagate,
+            "a declined session must not be re-prompted on the next turn"
+        );
+    }
+
+    /// After a yes the router holds the approval for the session, so later turns
+    /// should not refuse at all — but if one still does, the loop must surface
+    /// the error rather than putting the question a second or third time.
+    #[spec("ASTRA-004")]
+    #[test]
+    fn an_approved_session_is_never_asked_again_across_turns() {
+        let error = needs_cloud_confirmation();
+        let mut cloud_asked = false;
+
+        assert!(matches!(
+            cloud_confirmation(&error, true, cloud_asked),
+            CloudConfirmation::Ask { .. }
+        ));
+        cloud_asked = true;
+
+        for turn in 1..=2 {
+            assert_eq!(
+                cloud_confirmation(&error, true, cloud_asked),
+                CloudConfirmation::Propagate,
+                "turn {turn} after an approval must not re-prompt"
+            );
+        }
     }
 }

@@ -8,6 +8,14 @@ pub enum Error {
     #[error("Model selection error: {0}")]
     Selection(String),
 
+    #[error(
+        "Cloud inference with {model} requires confirmation (estimated ${estimated_cost_usd:.4}). Select --model {model} to explicitly authorize this model."
+    )]
+    CloudConfirmationRequired {
+        model: String,
+        estimated_cost_usd: f64,
+    },
+
     #[error("Cost estimation error: {0}")]
     CostEstimation(String),
 

@@ -27,6 +27,7 @@ pub mod agent_registry;
 pub mod agent_specialization;
 pub mod auth;
 pub mod chat_commands;
+pub mod chat_history;
 pub mod chat_session;
 #[cfg(feature = "taint")]
 pub mod classification_evidence;

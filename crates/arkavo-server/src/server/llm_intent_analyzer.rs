@@ -1,10 +1,24 @@
-//! LLM-based intent analyzer using a local model (Qwen 0.8B or Ministral 3B).
+//! LLM-based intent analyzer. The arm is whatever the router resolved for this
+//! install — a cached local model where one is provisioned, the configured cloud
+//! model on a cloud-only install — so decomposition never provisions weights of
+//! its own.
 
+use arkavo_router::ModelChoice;
 use arkavo_tasks::intent_analyzer::{IntentAnalysis, IntentAnalyzer};
 use arkavo_tasks::task_planner::TaskPlanError;
 use async_trait::async_trait;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, warn};
+
+/// Budget for one decomposition. It has to cover more than inference:
+/// `route_fast` first waits on the router's single-permit synthesis semaphore,
+/// so a decomposition queued behind another internal call spends part of this
+/// budget queueing. The old 20 s ceiling was the bare generation time of a
+/// sub-billion-parameter local model and left no room for that wait. A cloud
+/// reasoning arm is additionally an order of magnitude slower to first token.
+const LOCAL_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(60);
+const CLOUD_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(90);
 
 pub(super) struct LlmIntentAnalyzer {
     router: Arc<arkavo_router::Router>,
@@ -16,20 +30,24 @@ impl LlmIntentAnalyzer {
     }
 }
 
+fn analysis_timeout(model: &ModelChoice) -> Duration {
+    if model.is_local() {
+        LOCAL_ANALYSIS_TIMEOUT
+    } else {
+        CLOUD_ANALYSIS_TIMEOUT
+    }
+}
+
 #[async_trait]
 impl IntentAnalyzer for LlmIntentAnalyzer {
     async fn analyze(&self, intent: &str) -> Result<IntentAnalysis, TaskPlanError> {
-        let provider = self
-            .router
-            .get_provider(&arkavo_router::ModelChoice::LocalQwen3)
-            .await
-            .or_else(|_| {
-                futures::executor::block_on(
-                    self.router
-                        .get_provider(&arkavo_router::ModelChoice::LocalMinistral3B),
-                )
-            })
-            .map_err(|_| TaskPlanError::LlmAnalysisFailed("no local model available".into()))?;
+        // `default_chat_model` is the router's own resolution of the execution
+        // arm — a cached local model where one is provisioned, the configured
+        // cloud arm otherwise — so a cloud-only install never reaches for
+        // weights it would have to download. `route_fast` then dispatches that
+        // same arm under the spend policy and the synthesis semaphore instead
+        // of bypassing both with a raw provider.
+        let model = self.router.default_chat_model();
 
         let system_prompt = r#"You are a task decomposition engine. Given a user intent, break it into 1-6 subtasks.
 Respond with ONLY a JSON object in this exact format:
@@ -57,15 +75,25 @@ Rules:
             arkavo_llm::Message::user(intent),
         ];
 
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(20),
-            provider.complete(messages),
-        )
-        .await
-        .map_err(|_| TaskPlanError::LlmAnalysisFailed("timeout after 20s".into()))?
-        .map_err(|e| TaskPlanError::LlmAnalysisFailed(format!("LLM error: {e}")))?;
+        let budget = analysis_timeout(&model);
+        let stream =
+            tokio::time::timeout(budget, self.router.route_fast("intent analysis", messages))
+                .await
+                .map_err(|_| {
+                    TaskPlanError::LlmAnalysisFailed(format!("timeout after {}s", budget.as_secs()))
+                })?
+                .map_err(|e| {
+                    TaskPlanError::LlmAnalysisFailed(format!("{} unavailable: {e}", model.name()))
+                })?;
+
+        let response = stream
+            .complete()
+            .await
+            .map_err(|e| TaskPlanError::LlmAnalysisFailed(format!("LLM error: {e}")))?
+            .content;
 
         debug!(
+            model = %model.name(),
             response_len = response.len(),
             "LLM intent analysis response"
         );
@@ -107,6 +135,170 @@ fn parse_llm_response(response: &str) -> Result<IntentAnalysis, TaskPlanError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_llm::{Message, Provider, StreamResponse};
+    use arkavo_router::{
+        ConnectivityChecker, ModelSelector, ProviderAvailability, ProviderFactory, Router,
+    };
+    use arkavo_test_macros::spec;
+    use futures::Stream;
+    use std::sync::Mutex;
+
+    const STUB_DECOMPOSITION: &str = r#"{"keywords":["ship"],"entities":[],"subtask_specs":[
+        {"task_type":"analyze","description":"Inspect the release","required_capabilities":[],"depends_on":[]},
+        {"task_type":"generate","description":"Write the notes","required_capabilities":[],"depends_on":[0]}
+    ]}"#;
+
+    /// Answers every dispatch with a fixed decomposition. Substituted for the
+    /// real client so no test reaches credentials, the model cache or a network.
+    struct StubProvider {
+        content: String,
+    }
+
+    #[async_trait]
+    impl Provider for StubProvider {
+        async fn complete_with_options(
+            &self,
+            _messages: Vec<Message>,
+            _max_tokens: Option<usize>,
+        ) -> arkavo_llm::Result<String> {
+            Ok(self.content.clone())
+        }
+
+        async fn stream(
+            &self,
+            _messages: Vec<Message>,
+        ) -> arkavo_llm::Result<
+            Box<dyn Stream<Item = arkavo_llm::Result<StreamResponse>> + Send + Unpin>,
+        > {
+            Ok(Box::new(futures::stream::empty()))
+        }
+
+        fn name(&self) -> &str {
+            "stub"
+        }
+    }
+
+    /// Records which arm the router asked to be built. That record is the
+    /// assertion: "analysis never reached for a local provider" is observed,
+    /// not inferred.
+    #[derive(Clone)]
+    struct RecordingFactory {
+        requested: Arc<Mutex<Vec<ModelChoice>>>,
+        content: String,
+    }
+
+    impl RecordingFactory {
+        fn new(content: &str) -> Self {
+            Self {
+                requested: Arc::new(Mutex::new(Vec::new())),
+                content: content.to_string(),
+            }
+        }
+
+        fn handle(&self) -> Arc<dyn ProviderFactory> {
+            Arc::new(self.clone())
+        }
+
+        fn requested(&self) -> Vec<ModelChoice> {
+            self.requested.lock().unwrap().clone()
+        }
+    }
+
+    impl ProviderFactory for RecordingFactory {
+        fn build(&self, model: &ModelChoice) -> arkavo_router::Result<Box<dyn Provider>> {
+            self.requested.lock().unwrap().push(model.clone());
+            Ok(Box::new(StubProvider {
+                content: self.content.clone(),
+            }))
+        }
+    }
+
+    async fn router_with(availability: ProviderAvailability, local_cached: bool) -> Router {
+        Router::new()
+            .await
+            .expect("router")
+            .with_selector(ModelSelector::with_availability(availability, local_cached))
+            .await
+            .with_connectivity(ConnectivityChecker::assume(true))
+    }
+
+    /// The regression: `analyze` used to call `get_provider(&LocalQwen3)` with a
+    /// `LocalMinistral3B` fallback, which on a cloud-only install with nothing
+    /// cached triggers a HuggingFace download. Restore that line and this test
+    /// fails on the `requested` assertions.
+    #[tokio::test]
+    #[spec("ASTRA-004")]
+    async fn cloud_only_install_never_requests_a_local_provider() {
+        let availability = ProviderAvailability {
+            openai: true,
+            ..ProviderAvailability::default()
+        };
+        let factory = RecordingFactory::new(STUB_DECOMPOSITION);
+        let router = router_with(availability, false)
+            .await
+            .with_provider_factory(factory.handle());
+        router.confirm_cloud_for_session();
+
+        let analyzer = LlmIntentAnalyzer::new(Arc::new(router));
+        let analysis = analyzer
+            .analyze("ship the release and write the notes")
+            .await
+            .expect("cloud-only analysis must succeed");
+        assert_eq!(analysis.subtask_specs.len(), 2);
+
+        let requested = factory.requested();
+        assert!(!requested.is_empty(), "no provider was ever requested");
+        assert!(
+            requested.iter().all(|m| !m.is_local()),
+            "cloud-only install requested a local arm: {requested:?}"
+        );
+        assert!(
+            !requested.contains(&ModelChoice::LocalQwen3),
+            "{requested:?}"
+        );
+        assert!(
+            !requested.contains(&ModelChoice::LocalMinistral3B),
+            "{requested:?}"
+        );
+    }
+
+    /// Mirror: an install that has weights and no cloud credentials keeps
+    /// running locally, so the fix did not simply push everyone to the cloud.
+    #[tokio::test]
+    #[spec("ASTRA-004")]
+    async fn cached_local_install_still_requests_a_local_provider() {
+        let factory = RecordingFactory::new(STUB_DECOMPOSITION);
+        let router = router_with(ProviderAvailability::default(), true)
+            .await
+            .with_provider_factory(factory.handle());
+
+        let analyzer = LlmIntentAnalyzer::new(Arc::new(router));
+        analyzer
+            .analyze("ship the release and write the notes")
+            .await
+            .expect("local analysis must succeed");
+
+        let requested = factory.requested();
+        assert!(!requested.is_empty(), "no provider was ever requested");
+        assert!(
+            requested.iter().all(ModelChoice::is_local),
+            "install with cached weights and no cloud went off-device: {requested:?}"
+        );
+    }
+
+    #[test]
+    #[spec("ASTRA-004")]
+    fn cloud_arm_gets_a_longer_budget_than_the_local_one() {
+        assert_eq!(
+            analysis_timeout(&ModelChoice::LocalQwen3),
+            LOCAL_ANALYSIS_TIMEOUT
+        );
+        assert_eq!(
+            analysis_timeout(&ModelChoice::Gpt6Astra),
+            CLOUD_ANALYSIS_TIMEOUT
+        );
+        assert!(CLOUD_ANALYSIS_TIMEOUT > LOCAL_ANALYSIS_TIMEOUT);
+    }
 
     #[test]
     fn parse_valid_response() {

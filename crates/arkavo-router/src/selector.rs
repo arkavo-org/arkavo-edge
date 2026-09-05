@@ -13,28 +13,50 @@ pub struct ProviderAvailability {
     pub kimi: bool,
     pub glm: bool,
     pub xai: bool,
+    pub openai: bool,
 }
 
 impl ProviderAvailability {
     /// Check environment variables for API keys
     pub fn from_env() -> Self {
         Self {
-            gemini: std::env::var("GEMINI_API_KEY").is_ok(),
-            anthropic: std::env::var("ANTHROPIC_API_KEY").is_ok(),
-            deepseek: std::env::var("DEEPSEEK_API_KEY").is_ok(),
-            kimi: std::env::var("MOONSHOT_API_KEY").is_ok(),
+            gemini: cfg!(feature = "gemini") && std::env::var("GEMINI_API_KEY").is_ok(),
+            anthropic: cfg!(feature = "llm-remote") && std::env::var("ANTHROPIC_API_KEY").is_ok(),
+            deepseek: cfg!(feature = "deepseek") && std::env::var("DEEPSEEK_API_KEY").is_ok(),
+            kimi: cfg!(feature = "kimi") && std::env::var("MOONSHOT_API_KEY").is_ok(),
             // Gated on the `glm` feature so the arm isn't marked feasible in a
             // build that can't instantiate it (instantiation is cfg(glm)).
             glm: cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
             // Same pattern for xAI Grok: feature + key.
+            openai: cfg!(feature = "openai")
+                && std::env::var("OPENAI_API_KEY").is_ok_and(|key| !key.trim().is_empty()),
             xai: cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok(),
         }
     }
 
     /// Check if any cloud provider is available
     pub fn has_cloud(&self) -> bool {
-        self.gemini || self.anthropic || self.deepseek || self.kimi || self.glm || self.xai
+        self.gemini
+            || self.anthropic
+            || self.deepseek
+            || self.kimi
+            || self.glm
+            || self.xai
+            || self.openai
     }
+}
+
+/// Where "is this local weight already on disk" is answered from.
+///
+/// Production reads the HuggingFace cache; callers that must be deterministic —
+/// tests, and downstream crates asserting selection without touching the
+/// machine — inject a fixed answer instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalWeights {
+    /// Ask the on-disk HuggingFace cache.
+    HuggingFaceCache,
+    /// Answer every cache question with this value.
+    Fixed(bool),
 }
 
 pub struct ModelSelector {
@@ -44,16 +66,12 @@ pub struct ModelSelector {
     /// Per-agent memory budget in bytes. Models exceeding this are excluded from
     /// feasible set. 0 means unconstrained (backward compat).
     pub(crate) max_memory_bytes: std::sync::atomic::AtomicU64,
+    local_weights: LocalWeights,
 }
 
 impl ModelSelector {
     pub fn new() -> Self {
-        Self {
-            budget_threshold: 0.80,
-            availability: ProviderAvailability::from_env(),
-            gpu_available: Self::check_gpu_status(),
-            max_memory_bytes: std::sync::atomic::AtomicU64::new(0),
-        }
+        Self::with_budget_threshold(0.80)
     }
 
     pub fn with_budget_threshold(budget_threshold: f64) -> Self {
@@ -62,6 +80,7 @@ impl ModelSelector {
             availability: ProviderAvailability::from_env(),
             gpu_available: Self::check_gpu_status(),
             max_memory_bytes: std::sync::atomic::AtomicU64::new(0),
+            local_weights: LocalWeights::HuggingFaceCache,
         }
     }
 
@@ -72,15 +91,24 @@ impl ModelSelector {
             .store(bytes, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Create selector with explicit provider availability (for testing)
-    #[cfg(test)]
-    pub fn with_availability(availability: ProviderAvailability) -> Self {
+    /// Selection seam: build a selector from an explicit provider availability
+    /// and an explicit answer to "are local weights cached", so a caller can
+    /// assert routing behaviour without depending on the machine's API-key
+    /// environment or HuggingFace cache. Install it with
+    /// [`crate::Router::with_selector`].
+    pub fn with_availability(availability: ProviderAvailability, local_cached: bool) -> Self {
         Self {
             budget_threshold: 0.80,
             availability,
-            gpu_available: true, // Assume GPU available in tests
+            gpu_available: true,
             max_memory_bytes: std::sync::atomic::AtomicU64::new(0),
+            local_weights: LocalWeights::Fixed(local_cached),
         }
+    }
+
+    /// How this selector answers local-weight cache questions.
+    pub fn local_weights(&self) -> LocalWeights {
+        self.local_weights
     }
 
     /// Check GPU acceleration status via arkavo-llm
@@ -125,7 +153,7 @@ impl ModelSelector {
 
         // If no GPU, skip large models to avoid slow CPU-only inference
         if !self.gpu_available {
-            if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B)
+            if self.is_local_model_cached(&ModelChoice::LocalMinistral3B)
                 && fits_budget(&ModelChoice::LocalMinistral3B)
             {
                 return ModelChoice::LocalMinistral3B;
@@ -135,21 +163,21 @@ impl ModelSelector {
 
         if prefer_larger {
             // GLM-4.7-Flash: 30B MoE, highest quality local model
-            if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
+            if self.is_local_model_cached(&ModelChoice::LocalGlm47Flash)
                 && Self::has_sufficient_ram(32)
                 && fits_budget(&ModelChoice::LocalGlm47Flash)
             {
                 ModelChoice::LocalGlm47Flash
-            } else if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
+            } else if self.is_local_model_cached(&ModelChoice::LocalQwen35_27B)
                 && Self::has_sufficient_ram(48)
                 && fits_budget(&ModelChoice::LocalQwen35_27B)
             {
                 ModelChoice::LocalQwen35_27B
-            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B)
+            } else if self.is_local_model_cached(&ModelChoice::LocalMinistral8B)
                 && fits_budget(&ModelChoice::LocalMinistral8B)
             {
                 ModelChoice::LocalMinistral8B
-            } else if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B)
+            } else if self.is_local_model_cached(&ModelChoice::LocalMinistral3B)
                 && fits_budget(&ModelChoice::LocalMinistral3B)
             {
                 ModelChoice::LocalMinistral3B
@@ -176,7 +204,21 @@ impl ModelSelector {
     /// the model first-run setup downloads — so chat never silently pulls an un-provisioned
     /// model the user never opted into.
     pub fn fastest_local_model(&self) -> ModelChoice {
-        Self::pick_fast_local_model(Self::is_local_model_cached)
+        Self::pick_fast_local_model(|m| self.is_local_model_cached(m))
+    }
+
+    /// Execution stays local when a provisioned model is runnable; cloud-only installs
+    /// use their configured provider without initiating a GGUF download.
+    pub fn default_execution_model(&self) -> ModelChoice {
+        let local = self.fastest_local_model();
+        if self.is_local_model_cached(&local) || !self.availability.has_cloud() {
+            local
+        } else {
+            self.feasible_models()
+                .into_iter()
+                .find(|m| m.is_local() && self.is_local_model_cached(m))
+                .unwrap_or_else(|| self.best_cloud_model(false))
+        }
     }
 
     /// Policy half of [`Self::fastest_local_model`], split out so the preference order and
@@ -209,7 +251,13 @@ impl ModelSelector {
     }
 
     /// Check if a local model is cached (static helper)
-    fn is_local_model_cached(model: &ModelChoice) -> bool {
+    pub(crate) fn is_local_model_cached(&self, model: &ModelChoice) -> bool {
+        if let LocalWeights::Fixed(cached) = self.local_weights {
+            return cached;
+        }
+        if !cfg!(feature = "llama-cpp") {
+            return false;
+        }
         match (model.repo_id(), model.gguf_filename()) {
             (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
             _ => false,
@@ -230,6 +278,16 @@ impl ModelSelector {
             } else {
                 ModelChoice::Gemini35Flash
             }
+        } else if self.availability.deepseek {
+            ModelChoice::DeepSeekV32
+        } else if self.availability.kimi {
+            ModelChoice::KimiK2
+        } else if self.availability.glm {
+            ModelChoice::Glm52
+        } else if self.availability.xai {
+            ModelChoice::Grok46
+        } else if self.availability.openai {
+            ModelChoice::Gpt6Astra
         } else {
             // No cloud available, use local (with availability check)
             self.best_available_local_model(prefer_pro)
@@ -292,8 +350,17 @@ impl ModelSelector {
             _ => self.best_available_local_model(self.gpu_available),
         };
 
-        // Enforce per-agent memory budget on the selected model
-        model.downgrade_for_budget(mem_budget)
+        // A cloud-only install must never try downloading the category's local default.
+        let model = model.downgrade_for_budget(mem_budget);
+        if model.is_local() && !self.is_local_model_cached(&model) && self.availability.has_cloud()
+        {
+            self.feasible_models()
+                .into_iter()
+                .find(|m| m.is_local() && self.is_local_model_cached(m))
+                .unwrap_or_else(|| self.best_cloud_model(false))
+        } else {
+            model
+        }
     }
 
     /// All models currently feasible (cached local + API keys for cloud).
@@ -308,39 +375,39 @@ impl ModelSelector {
             .load(std::sync::atomic::Ordering::Relaxed);
 
         // Local models (smallest first)
-        if Self::is_local_model_cached(&ModelChoice::LocalQwen3) {
+        if self.is_local_model_cached(&ModelChoice::LocalQwen3) {
             models.push(ModelChoice::LocalQwen3);
         }
-        if Self::is_local_model_cached(&ModelChoice::LocalGemma4E2B) {
+        if self.is_local_model_cached(&ModelChoice::LocalGemma4E2B) {
             models.push(ModelChoice::LocalGemma4E2B);
         }
         if self.gpu_available {
-            if Self::is_local_model_cached(&ModelChoice::LocalMinistral3B) {
+            if self.is_local_model_cached(&ModelChoice::LocalMinistral3B) {
                 models.push(ModelChoice::LocalMinistral3B);
             }
             // Gemma-4-E4B excluded: 1/8 tool accuracy (benchmark), needs grammar-constrained
             // generation. Re-enable when PEG output parser lands.
-            // if Self::is_local_model_cached(&ModelChoice::LocalGemma4E4B) {
+            // if self.is_local_model_cached(&ModelChoice::LocalGemma4E4B) {
             //     models.push(ModelChoice::LocalGemma4E4B);
             // }
-            if Self::is_local_model_cached(&ModelChoice::LocalMinistral8B) {
+            if self.is_local_model_cached(&ModelChoice::LocalMinistral8B) {
                 models.push(ModelChoice::LocalMinistral8B);
             }
-            if Self::is_local_model_cached(&ModelChoice::LocalGemma4_26B) {
+            if self.is_local_model_cached(&ModelChoice::LocalGemma4_26B) {
                 models.push(ModelChoice::LocalGemma4_26B);
             }
-            if Self::is_local_model_cached(&ModelChoice::LocalGemma4_31B) {
+            if self.is_local_model_cached(&ModelChoice::LocalGemma4_31B) {
                 models.push(ModelChoice::LocalGemma4_31B);
             }
-            if Self::is_local_model_cached(&ModelChoice::LocalGemma4_12B) {
+            if self.is_local_model_cached(&ModelChoice::LocalGemma4_12B) {
                 models.push(ModelChoice::LocalGemma4_12B);
             }
-            if Self::is_local_model_cached(&ModelChoice::LocalQwen35_27B)
+            if self.is_local_model_cached(&ModelChoice::LocalQwen35_27B)
                 && Self::has_sufficient_ram(48)
             {
                 models.push(ModelChoice::LocalQwen35_27B);
             }
-            if Self::is_local_model_cached(&ModelChoice::LocalGlm47Flash)
+            if self.is_local_model_cached(&ModelChoice::LocalGlm47Flash)
                 && Self::has_sufficient_ram(32)
             {
                 models.push(ModelChoice::LocalGlm47Flash);
@@ -397,6 +464,9 @@ impl ModelSelector {
             // beats the other low-cost cloud arms (DeepSeek, Gemini Flash).
             models.push(ModelChoice::Glm52);
         }
+        if self.availability.openai {
+            models.push(ModelChoice::Gpt6Astra);
+        }
         if self.availability.xai {
             // Grok 4.6 base arm (low effort) plus the xhigh companion so
             // Thompson Sampling can learn when max-depth reasoning pays off.
@@ -433,6 +503,7 @@ mod tests {
             kimi: false,
             glm: false,
             xai: false,
+            openai: false,
         }
     }
 
@@ -444,6 +515,7 @@ mod tests {
             kimi: false,
             glm: false,
             xai: false,
+            openai: false,
         }
     }
 
@@ -455,6 +527,7 @@ mod tests {
             kimi: false,
             glm: false,
             xai: false,
+            openai: false,
         }
     }
 
@@ -466,6 +539,7 @@ mod tests {
             kimi: false,
             glm: true,
             xai: false,
+            openai: false,
         }
     }
 
@@ -477,13 +551,56 @@ mod tests {
             kimi: false,
             glm: false,
             xai: true,
+            openai: false,
         }
+    }
+
+    #[test]
+    fn astra_only_cloud_is_runnable_for_local_category_defaults() {
+        let selector = ModelSelector::with_availability(
+            ProviderAvailability {
+                openai: true,
+                ..ProviderAvailability::default()
+            },
+            false,
+        );
+        assert!(selector.availability.has_cloud());
+        assert!(selector.feasible_models().contains(&ModelChoice::Gpt6Astra));
+        assert_eq!(selector.best_cloud_model(false), ModelChoice::Gpt6Astra);
+        // No local backend means cached GGUF files cannot make an arm runnable.
+        if !cfg!(feature = "llama-cpp") {
+            for category in [
+                TaskCategory::CodeSearch,
+                TaskCategory::BackendAPI,
+                TaskCategory::General,
+            ] {
+                let classification = Classification::new(category, 0.9, "task".into());
+                assert_eq!(
+                    selector.select_model_by_category(&classification),
+                    ModelChoice::Gpt6Astra
+                );
+            }
+            assert_eq!(selector.default_execution_model(), ModelChoice::Gpt6Astra);
+        }
+    }
+
+    #[test]
+    fn astra_does_not_replace_existing_cloud_preference() {
+        let selector = ModelSelector::with_availability(
+            ProviderAvailability {
+                openai: true,
+                gemini: true,
+                ..ProviderAvailability::default()
+            },
+            false,
+        );
+        assert_eq!(selector.best_cloud_model(false), ModelChoice::Gemini35Flash);
     }
 
     #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_frontend_routing_gemini() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
         let decision = selector
@@ -496,7 +613,7 @@ mod tests {
     #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_frontend_routing_anthropic() {
-        let selector = ModelSelector::with_availability(anthropic_only());
+        let selector = ModelSelector::with_availability(anthropic_only(), false);
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
         let decision = selector
@@ -509,7 +626,7 @@ mod tests {
     #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_code_search_routing() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let classification = Classification::new(
             TaskCategory::CodeSearch,
             0.85,
@@ -518,28 +635,44 @@ mod tests {
         let decision = selector
             .select(&classification, "Find all uses of")
             .unwrap();
-        assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
-        assert_eq!(decision.estimated_cost_usd, 0.0);
+        if selector.is_local_model_cached(&ModelChoice::LocalQwen3) {
+            assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
+            assert_eq!(decision.estimated_cost_usd, 0.0);
+        } else if decision.recommended_model.is_local() {
+            assert!(selector.is_local_model_cached(&decision.recommended_model));
+            assert_eq!(decision.estimated_cost_usd, 0.0);
+        } else {
+            assert_eq!(decision.recommended_model, ModelChoice::Gemini35Flash);
+            assert!(decision.estimated_cost_usd > 0.0);
+        }
     }
 
     #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_backend_api_routing_uses_local() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let classification =
             Classification::new(TaskCategory::BackendAPI, 0.85, "Backend API".to_string());
         let decision = selector
             .select(&classification, "Create a REST API endpoint")
             .unwrap();
-        assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
-        assert_eq!(decision.estimated_cost_usd, 0.0);
+        if selector.is_local_model_cached(&ModelChoice::LocalQwen3) {
+            assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
+            assert_eq!(decision.estimated_cost_usd, 0.0);
+        } else if decision.recommended_model.is_local() {
+            assert!(selector.is_local_model_cached(&decision.recommended_model));
+            assert_eq!(decision.estimated_cost_usd, 0.0);
+        } else {
+            assert_eq!(decision.recommended_model, ModelChoice::Gemini35Flash);
+            assert!(decision.estimated_cost_usd > 0.0);
+        }
     }
 
     #[spec("ROUTER-001")]
     #[spec("ROUTER-003")]
     #[tokio::test]
     async fn test_no_cloud_falls_back_to_local() {
-        let selector = ModelSelector::with_availability(ProviderAvailability::default());
+        let selector = ModelSelector::with_availability(ProviderAvailability::default(), false);
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
         let decision = selector
@@ -551,7 +684,7 @@ mod tests {
     #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_code_generation_routing_deepseek() {
-        let selector = ModelSelector::with_availability(deepseek_only());
+        let selector = ModelSelector::with_availability(deepseek_only(), false);
         let classification = Classification::new(
             TaskCategory::CodeGeneration,
             0.85,
@@ -566,7 +699,7 @@ mod tests {
 
     #[test]
     fn test_feasible_models_gemini_only() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let feasible = selector.feasible_models();
         assert!(feasible.contains(&ModelChoice::Gemini35Flash));
         assert!(feasible.contains(&ModelChoice::GeminiFlash));
@@ -578,7 +711,7 @@ mod tests {
 
     #[test]
     fn test_feasible_models_glm_only() {
-        let selector = ModelSelector::with_availability(glm_only());
+        let selector = ModelSelector::with_availability(glm_only(), false);
         let feasible = selector.feasible_models();
         assert!(feasible.contains(&ModelChoice::Glm52));
         assert!(!feasible.contains(&ModelChoice::DeepSeekV32));
@@ -587,7 +720,7 @@ mod tests {
 
     #[test]
     fn test_feasible_models_xai_only() {
-        let selector = ModelSelector::with_availability(xai_only());
+        let selector = ModelSelector::with_availability(xai_only(), false);
         let feasible = selector.feasible_models();
         assert!(feasible.contains(&ModelChoice::Grok46));
         assert!(feasible.contains(&ModelChoice::Grok46Xhigh));
@@ -608,7 +741,7 @@ mod tests {
     #[spec("ROUTER-003")]
     #[test]
     fn test_feasible_models_no_cloud_has_fallback() {
-        let selector = ModelSelector::with_availability(ProviderAvailability::default());
+        let selector = ModelSelector::with_availability(ProviderAvailability::default(), false);
         let feasible = selector.feasible_models();
         assert!(!feasible.is_empty());
     }

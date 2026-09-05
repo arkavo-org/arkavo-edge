@@ -14,6 +14,7 @@ pub mod secure_http;
 pub mod sentinel_scorer;
 #[cfg(feature = "sentinel")]
 pub mod sentinel_wiring;
+pub mod startup_policy;
 pub mod tool_integration;
 pub mod welcome;
 
@@ -56,7 +57,13 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .is_some_and(|a| matches!(a.as_str(), "-h" | "--help" | "help" | "-v" | "--version"));
 
     // First-run experience: check if models are available
-    if !is_help_or_version && first_run::is_first_run() {
+    if !is_help_or_version
+        && startup_policy::needs_local_setup(
+            args,
+            arkavo_router::selector::ProviderAvailability::from_env().has_cloud(),
+        )
+        && first_run::is_first_run()
+    {
         // Handle first-run flow in a runtime
         let runtime = tokio::runtime::Runtime::new()?;
         runtime.block_on(handle_first_run(verbose))?;

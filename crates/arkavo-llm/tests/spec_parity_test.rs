@@ -45,10 +45,7 @@ fn make_messages() -> Vec<Message> {
         role: Role::User,
         content: "Write a JSON object with three keys: name, version, type. Output only the JSON."
             .to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }]
 }
 
@@ -72,10 +69,7 @@ fn make_long_messages(approx_tokens: usize) -> Vec<Message> {
     vec![Message {
         role: Role::User,
         content: s,
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }]
 }
 
