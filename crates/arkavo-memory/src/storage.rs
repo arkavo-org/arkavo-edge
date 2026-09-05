@@ -8,7 +8,7 @@ use crate::models::{AgentConversation, Memory, SearchResult};
 use crate::workspace_config::WorkspaceConfig;
 use hnsw_rs::prelude::*;
 use sqlx::Row;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteRow};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -29,6 +29,42 @@ fn decode_embedding(blob: &[u8]) -> Vec<f32> {
         .iter()
         .map(|chunk| f32::from_le_bytes(*chunk))
         .collect()
+}
+
+// Every `memories` row selected with the full column set decodes the same way, so
+// `get`, `list_by_category`, `scan_recent` and the FTS path share this.
+fn memory_from_row(row: &SqliteRow) -> Result<Memory> {
+    let id_str: String = row.get("id");
+    let id =
+        Uuid::parse_str(&id_str).map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
+
+    let embedding_blob: Vec<u8> = row.get("embedding_blob");
+    let embedding: Vec<f32> = decode_embedding(&embedding_blob);
+
+    let metadata_str: Option<String> = row.get("metadata");
+    let metadata = metadata_str
+        .as_ref()
+        .map(|m| serde_json::from_str(m))
+        .transpose()?;
+
+    let created_at_str: String = row.get("created_at");
+    let updated_at_str: String = row.get("updated_at");
+    let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
+        .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
+        .with_timezone(&chrono::Utc);
+    let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
+        .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
+        .with_timezone(&chrono::Utc);
+
+    Ok(Memory {
+        id,
+        content: row.get("content"),
+        metadata,
+        category: row.get("category"),
+        embedding,
+        created_at,
+        updated_at,
+    })
 }
 
 // Lightweight struct for database queries that only need partial data
@@ -656,34 +692,7 @@ impl MemoryStorage {
             .await?
             .ok_or(MemoryError::NotFound)?;
 
-        let embedding_blob: Vec<u8> = row.get("embedding_blob");
-        let embedding: Vec<f32> = decode_embedding(&embedding_blob);
-
-        let metadata_str: Option<String> = row.get("metadata");
-        let metadata = metadata_str
-            .as_ref()
-            .map(|m| serde_json::from_str(m))
-            .transpose()?;
-
-        let created_at_str: String = row.get("created_at");
-        let updated_at_str: String = row.get("updated_at");
-
-        let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
-            .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
-            .with_timezone(&chrono::Utc);
-        let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
-            .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
-            .with_timezone(&chrono::Utc);
-
-        Ok(Memory {
-            id,
-            content: row.get("content"),
-            metadata,
-            category: row.get("category"),
-            embedding,
-            created_at,
-            updated_at,
-        })
+        memory_from_row(&row)
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<()> {
@@ -752,36 +761,45 @@ impl MemoryStorage {
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let id_str: String = row.get("id");
-            let id = Uuid::parse_str(&id_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
+            out.push(memory_from_row(&row)?);
+        }
+        Ok(out)
+    }
 
-            let embedding_blob: Vec<u8> = row.get("embedding_blob");
-            let embedding: Vec<f32> = decode_embedding(&embedding_blob);
+    /// Exact, newest-first scan used when the vector index cannot rank the query.
+    ///
+    /// `rowid DESC` is a required secondary key: `updated_at` is stored as an
+    /// RFC 3339 string and several memories written in the same tick compare
+    /// equal, which would otherwise leave the order up to SQLite.
+    async fn scan_recent(&self, limit: usize, category: Option<&str>) -> Result<Vec<SearchResult>> {
+        const COLUMNS: &str =
+            "SELECT id, content, metadata, category, embedding_blob, created_at, updated_at
+             FROM memories";
 
-            let metadata_str: Option<String> = row.get("metadata");
-            let metadata = metadata_str
-                .as_ref()
-                .map(|m| serde_json::from_str(m))
-                .transpose()?;
+        let rows = if let Some(cat) = category {
+            sqlx::query(&format!(
+                "{COLUMNS} WHERE category = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?"
+            ))
+            .bind(cat)
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(&format!(
+                "{COLUMNS} ORDER BY updated_at DESC, rowid DESC LIMIT ?"
+            ))
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await?
+        };
 
-            let created_at_str: String = row.get("created_at");
-            let updated_at_str: String = row.get("updated_at");
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
-                .with_timezone(&chrono::Utc);
-            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
-                .with_timezone(&chrono::Utc);
-
-            out.push(Memory {
-                id,
-                content: row.get("content"),
-                metadata,
-                category: row.get("category"),
-                embedding,
-                created_at,
-                updated_at,
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            // A zero-norm query carries no direction, so there is no similarity to
+            // report; recency is the only ordering signal available.
+            out.push(SearchResult {
+                memory: memory_from_row(&row)?,
+                score: 0.0,
             });
         }
         Ok(out)
@@ -794,6 +812,17 @@ impl MemoryStorage {
         category: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
         let query_embedding = self.embedding_service.generate_embedding(query).await?;
+
+        // Cosine distance is undefined for a zero-norm vector, and the backing
+        // implementation reports 0.0 rather than failing, so every indexed point ties
+        // at the best possible distance. The HNSW greedy walk then has no gradient to
+        // follow, and its layer assignment is seeded from OS entropy, so the subset of
+        // tied points it happens to reach differs on every process run -- it silently
+        // drops points even when the requested k exceeds the whole index. Rank exactly
+        // instead; without a query direction there is nothing for the index to do.
+        if query_embedding.iter().all(|v| *v == 0.0) {
+            return self.scan_recent(limit, category).await;
+        }
 
         let index_clone = Arc::clone(&self.index);
         let k = limit * 2;
@@ -922,39 +951,12 @@ impl MemoryStorage {
                 continue;
             }
 
-            let embedding_blob: Vec<u8> = row.get("embedding_blob");
-            let embedding: Vec<f32> = decode_embedding(&embedding_blob);
-
-            let metadata_str: Option<String> = row.get("metadata");
-            let metadata = metadata_str
-                .as_ref()
-                .map(|m| serde_json::from_str(m))
-                .transpose()?;
-
-            let created_at_str: String = row.get("created_at");
-            let updated_at_str: String = row.get("updated_at");
-
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
-                .with_timezone(&chrono::Utc);
-            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
-                .with_timezone(&chrono::Utc);
-
             let rank: f64 = row.get("rank");
             // BM25 returns negative values, more negative = better match
             // Normalize to 0-1 range (approximate)
             let score = (1.0 / (1.0 - rank)).clamp(0.0, 1.0) as f32;
 
-            let memory = Memory {
-                id,
-                content: row.get("content"),
-                metadata,
-                category: row.get("category"),
-                embedding,
-                created_at,
-                updated_at,
-            };
+            let memory = memory_from_row(&row)?;
 
             // Promote cold memory to hot tier
             self.promote_to_hot(&memory).await?;
