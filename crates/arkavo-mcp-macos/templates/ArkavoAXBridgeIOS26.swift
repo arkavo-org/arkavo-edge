@@ -95,7 +95,7 @@ import CoreGraphics
             print("  1. Updated entitlements (com.apple.private.coresimulator.host-accessibility)")
             print("  2. Xcode 16.5+ beta with iOS 26 SDK")
             print("  3. Running inside UI Test Runner bundle")
-            print("  4. Alternative: Use IDB or AppleScript for UI automation")
+            print("  4. Alternative: Use simctl or AppleScript for UI automation")
         }
     }
     
@@ -230,8 +230,8 @@ import CoreGraphics
         if isAXPAvailable {
             caps["functions"] = ["tap", "snapshot", "hitTest"]
         } else {
-            caps["functions"] = ["fallbackTap", "idbTap"]
-            caps["recommendation"] = "Use IDB or AppleScript for reliable UI automation on iOS 26 beta"
+            caps["functions"] = ["fallbackTap", "simctlTap"]
+            caps["recommendation"] = "Use simctl or AppleScript for reliable UI automation on iOS 26 beta"
         }
         
         return caps

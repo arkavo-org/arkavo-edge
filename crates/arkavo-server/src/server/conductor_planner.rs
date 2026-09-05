@@ -260,6 +260,9 @@ async fn execute_subtask(
         tool_memory,
         None, // compute_budget: planner doesn't enforce per-iteration budget
         None, // granted_tools: subtask planner is called from the orchestrator's own loop
+        // A subtask is a new tool loop, not a re-entry of the parent. Dropping
+        // the session guard here is how a specialist decomposition would send
+        // a credential the 1:1 path would have refused.
         #[cfg(feature = "taint")]
         Some(egress),
     )
@@ -288,6 +291,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[arkavo_test_macros::spec("SEQ-003")]
     #[test]
     fn planned_stages_preserve_session_taint() {
         let session = Arc::new(super::super::egress_guard::EgressGuard::new(

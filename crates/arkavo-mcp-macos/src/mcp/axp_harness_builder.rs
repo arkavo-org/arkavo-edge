@@ -23,7 +23,7 @@ impl AxpHarnessBuilder {
             schema: ToolSchema {
                 name: "build_test_harness".to_string(),
                 aliases: None,
-                description: "🚀 REQUIRED FIRST STEP! Build a generic AXP test harness for fast touch injection. Without this, taps take 300ms+ and IDB may fail with port conflicts. This creates a lightweight service that provides <30ms taps for ANY iOS app. Just provide the bundle ID - no Xcode project needed. Run this ONCE per app before any UI testing.".to_string(),
+                description: "🚀 REQUIRED FIRST STEP! Build a generic AXP test harness for fast touch injection. Without this, taps take 300ms+ via simctl/AppleScript fallback. This creates a lightweight service that provides <30ms taps for ANY iOS app. Just provide the bundle ID - no Xcode project needed. Run this ONCE per app before any UI testing.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -325,7 +325,7 @@ let package = Package(
             capabilities = vec![
                 "minimal_mode",
                 "ios26_beta_compatible",
-                "idb_fallback",
+                "simctl_applescript_fallback",
                 "limited_axp",
             ];
         }
@@ -344,7 +344,7 @@ let package = Package(
                     "<30ms"
                 },
                 "method": if ios_version.is_ios26_or_later() {
-                    "IDB fallback"
+                    "simctl/AppleScript fallback"
                 } else {
                     "AXP direct"
                 }
@@ -361,7 +361,7 @@ let package = Package(
                 "detected": true,
                 "runtime": ios_version.display_string(),
                 "mode": "minimal",
-                "note": "Using iOS 26 beta compatibility mode. AXP symbols may not be available, falling back to IDB for touch injection.",
+                "note": "Using iOS 26 beta compatibility mode. AXP symbols may not be available, falling back to simctl/AppleScript for touch injection.",
                 "recommendation": "For best performance, use iOS 18 simulators or wait for stable iOS 26 release"
             });
         }

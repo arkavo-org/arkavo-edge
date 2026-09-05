@@ -41,10 +41,16 @@ cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 # evidence types live there), so it must not be a default dependency:
 # Cargo feature unification would otherwise turn taint on for the shipped
 # binary and blow the 65MB cap.
-fingerprint = ["dep:arkavo-fingerprint"]
+# The `arkavo pack` command family: build a keyed index, seal a pack, verify
+# one. Named for the plan's ground rule rather than for the crate it started
+# with, now that it covers the pack format too. Also enables wrap-time pack
+# metadata on arkavo-gguf-tdf: `model protect` is always compiled, and that
+# path is live in protect/open so LTO cannot strip it from the default binary.
+knowledge-pack = ["dep:arkavo-fingerprint", "dep:arkavo-knowledge-pack", "arkavo-gguf-tdf/knowledge-pack"]
 # The DLP sentinel: the classification cascade wired into the critic
 # pipeline and the streaming release path. Off until the work reaches GA.
-sentinel = ["dep:arkavo-sentinel", "dep:arkavo-llama-cpp", "fingerprint", "arkavo-critic/sentinel", "arkavo-router/sentinel"]
+sentinel = ["dep:arkavo-sentinel", "dep:arkavo-llama-cpp", "knowledge-pack", "arkavo-critic/sentinel", "arkavo-router/sentinel"]
+fingerprint = ["knowledge-pack"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 iroh = ["arkavo-server/iroh", "arkavo-server/swarm-apply"]
 kas = ["arkavo-protocol/kas", "arkavo-server/kas"]
@@ -72,8 +78,8 @@ arkavo-repo = { path = "../arkavo-repo" }
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["persistence"] }
 arkavo-critic = { path = "../arkavo-critic" }
 arkavo-sentinel = { path = "../arkavo-sentinel", optional = true }
-# The sentinel detector runs on the same llama.cpp runtime as the knowledge model.
 arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
+arkavo-knowledge-pack = { path = "../arkavo-knowledge-pack", optional = true }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
 arkavo-ui-core = { path = "../arkavo-ui-core", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
@@ -132,6 +138,8 @@ serde_json = { workspace = true }
 arkavo-kimi = { path = "../arkavo-kimi" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-knowledge-pack = { path = "../arkavo-knowledge-pack" }
 
 # macOS-only dependencies
 [target.'cfg(target_os = "macos")'.dependencies]

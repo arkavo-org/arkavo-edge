@@ -35,6 +35,14 @@ default = []
 # themselves are async and belong to the caller, which already owns a runtime;
 # this crate stays synchronous and KAS-transport agnostic.
 kas = ["opentdf/kas-client"]
+# Wrap-time pack metadata (role, ceiling) written into `0.component.json` and
+# read at `open`. Off by default: `arkavo model protect` always compiles this
+# crate, and the serde path is live in `protect`/`open` so LTO cannot strip it.
+knowledge-pack = []
+
+[[test]]
+name = "knowledge_pack_test"
+required-features = ["knowledge-pack"]
 
 [lints]
 workspace = true

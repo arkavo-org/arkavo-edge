@@ -89,7 +89,6 @@ scenarios:
   - id: SENT-004
     name: Read calibrated thresholds from the pack manifest
     criticality: critical
-    wip: true
     given:
       - A verified knowledge pack is loaded
       - The manifest carries per-label calibrated thresholds
@@ -101,7 +100,9 @@ scenarios:
       - The detector and taxonomy versions in evidence match those in the manifest
     refs:
       - crates/arkavo-sentinel/src/calibration.rs:1-80
-    changed: "2026-08-30"
+      - crates/arkavo-knowledge-pack/src/load.rs:118-140
+      - crates/arkavo-knowledge-pack/src/manifest.rs:110-130
+    changed: "2026-08-31"
     edge_cases:
       - condition: The manifest omits a threshold for a label the model emits
         expected: The label fires conservatively and the omission is reported
@@ -301,9 +302,11 @@ scenarios:
       - The gap appears in the decision trace with the reason
       - Recovery is attempted on the next action rather than requiring a restart
     refs:
+      - crates/arkavo-sentinel/src/scoring.rs:100-155
+      - crates/arkavo-cli/src/sentinel_scorer.rs:176-229
       - crates/arkavo-sentinel/src/cascade.rs:31-60
       - crates/arkavo-protocol/src/classification_evidence.rs:160-215
-    changed: "2026-08-30"
+    changed: "2026-09-04"
     edge_cases:
       - condition: The sentinel is permanently absent on an egress-only node
         expected: The reference tiers still gate; absence is a configuration state, not an error per call
@@ -362,9 +365,11 @@ scenarios:
       - Queue depth is bounded and overflow holds content rather than dropping inspection
       - Latency percentiles for scoring are published separately from per-call overhead
     refs:
+      - crates/arkavo-llm/src/guarded_provider.rs:117-185
+      - crates/arkavo-fingerprint/src/near_tier.rs:86-120
       - crates/arkavo-sentinel/src/scoring.rs:160-235
       - crates/arkavo-sentinel/benches/holdback.rs:1-40
-    changed: "2026-08-30"
+    changed: "2026-09-04"
     edge_cases:
       - condition: The scoring queue is saturated
         expected: New spans are held pending inspection; none are released uninspected

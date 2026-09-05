@@ -10,6 +10,8 @@
 //! defaults 8 + 4. The executor sees a virtual linear GGUF through `read_at`
 //! and contains no TDF, AES, or KAS code.
 
+#[cfg(feature = "knowledge-pack")]
+mod component;
 mod error;
 mod ggml_type;
 mod gguf_header;
@@ -22,6 +24,8 @@ mod reader;
 mod segment_cache;
 mod writer;
 
+#[cfg(feature = "knowledge-pack")]
+pub use component::{COMPONENT_ENTRY, Classification, ComponentMetadata, ComponentRole};
 pub use error::GgufTdfError;
 pub use ggml_type::{block_traits, tensor_nbytes};
 pub use gguf_header::{GgufHeader, HeaderTensor, MAX_TENSOR_NAME_BYTES, identify, parse_header};

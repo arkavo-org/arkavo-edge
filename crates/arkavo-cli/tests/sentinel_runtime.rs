@@ -1,5 +1,6 @@
 //! Exercise the registered production provider boundary with controlled output.
 #![cfg(feature = "sentinel")]
+#![allow(clippy::disallowed_methods)] // Tokio test entrypoint owns its runtime.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -23,7 +24,7 @@ const CLEAN: &str = "Clear skies are expected throughout the coming week.";
 struct PublicTier;
 
 impl CascadeTier for PublicTier {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "public-classifier"
     }
 
@@ -54,6 +55,13 @@ fn cascade() -> Arc<Cascade> {
         DataCategory::Internal,
         SensitivityLevel::Confidential,
         "board-minutes",
+    );
+    builder.add_document(
+        &key,
+        "cerulean permit status remains private",
+        DataCategory::Internal,
+        SensitivityLevel::Confidential,
+        "split-field",
     );
     Arc::new(
         Cascade::new("1.0.0")
@@ -96,7 +104,7 @@ impl Provider for OutputProvider {
         })])))
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "runtime-regression"
     }
 }
@@ -145,6 +153,7 @@ async fn assert_stream_withheld(provider: &dyn Provider) {
 }
 
 // A single test owns the process-wide immutable registration in this binary.
+#[arkavo_test_macros::spec("SENT-007")]
 #[tokio::test]
 async fn registered_policy_protects_all_provider_output_paths() {
     response_policy::install(Arc::new(CascadeFactory::new(cascade()))).unwrap();
@@ -177,6 +186,14 @@ async fn registered_policy_protects_all_provider_output_paths() {
     });
     assert_withheld(reasoning.complete_with_tools(vec![], None, None).await);
     assert_stream_withheld(reasoning.as_ref()).await;
+
+    // Classification is over the whole output, including field boundaries.
+    let split = provider(ProviderResponse {
+        reasoning_content: Some("status remains private".into()),
+        ..content("cerulean permit")
+    });
+    assert_withheld(split.complete_with_tools(vec![], None, None).await);
+    assert_stream_withheld(split.as_ref()).await;
 
     let public = provider(content(CLEAN));
     assert_eq!(public.complete(vec![]).await.unwrap(), CLEAN);

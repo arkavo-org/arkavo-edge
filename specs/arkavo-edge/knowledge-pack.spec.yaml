@@ -2,7 +2,7 @@
 
 feature: Sealed Knowledge Packs
 module: arkavo_knowledge_pack
-version: 0.90.0
+version: 0.91.0
 
 invariants:
   - Every pack component is TDF-wrapped separately so partial distribution is possible
@@ -20,7 +20,6 @@ scenarios:
   - id: KP-001
     name: Wrap each pack component as its own TDF
     criticality: critical
-    wip: true
     given:
       - Distillation has produced knowledge adapters, a sentinel classifier, and a reference index
       - A target compartment set is known for each adapter
@@ -32,9 +31,10 @@ scenarios:
       - No component shares a payload key with another component
       - Component role and compartment are recorded in wrap options, not inferred from a file name
     refs:
-      - crates/arkavo-gguf-tdf/src/writer.rs:28-48
-      - crates/arkavo-swarmkit-runtime/src/tdf.rs:128-160
-    changed: "2026-08-30"
+      - crates/arkavo-gguf-tdf/src/component.rs:1-130
+      - crates/arkavo-gguf-tdf/src/writer.rs:28-60
+      - crates/arkavo-knowledge-pack/src/assemble.rs:90-150
+    changed: "2026-08-31"
     edge_cases:
       - condition: A pack contains zero adapters
         expected: Sentinel and index still form a valid pack
@@ -44,7 +44,6 @@ scenarios:
   - id: KP-002
     name: Bind pack contents with a signed manifest
     criticality: critical
-    wip: true
     given:
       - All pack components have been wrapped
       - An organization signing anchor is available
@@ -57,9 +56,9 @@ scenarios:
       - Manifest records parent pack lineage and the eval-evidence digest
       - A detached signature over the canonical manifest is written alongside it
     refs:
-      - crates/arkavo-gguf-tdf/src/lib.rs:85-95
-      - crates/arkavo-swarmkit-runtime/src/tdf.rs:421-460
-    changed: "2026-08-30"
+      - crates/arkavo-knowledge-pack/src/manifest.rs:1-200
+      - crates/arkavo-knowledge-pack/src/sign.rs:1-70
+    changed: "2026-08-31"
     edge_cases:
       - condition: A component digest is absent from the manifest
         expected: Assembly rejected before signing
@@ -69,7 +68,6 @@ scenarios:
   - id: KP-003
     name: Verify the manifest before releasing any component key
     criticality: critical
-    wip: true
     given:
       - A pack is presented to a runtime
       - The organization signing anchor is resolvable
@@ -80,9 +78,10 @@ scenarios:
       - Key release is refused when signature verification fails
       - Key material is zeroized after use
     refs:
-      - crates/arkavo-swarmkit-runtime/src/tdf.rs:371-418
-      - crates/arkavo-gguf-tdf/src/key.rs:1-40
-    changed: "2026-08-30"
+      - crates/arkavo-knowledge-pack/src/verify.rs:60-125
+      - crates/arkavo-knowledge-pack/src/blob.rs:80-140
+      - crates/arkavo-knowledge-pack/src/load.rs:60-115
+    changed: "2026-08-31"
     edge_cases:
       - condition: The signing anchor cannot be resolved
         expected: Pack refused; no offline trust-on-first-use fallback
@@ -92,7 +91,6 @@ scenarios:
   - id: KP-004
     name: Reject a tampered pack component
     criticality: critical
-    wip: true
     given:
       - A signed pack whose manifest lists a digest for every component
       - One component has been modified after signing
@@ -103,8 +101,8 @@ scenarios:
       - Failure is sticky for the pack, not retried per component
       - No partially loaded adapter remains resident
     refs:
-      - crates/arkavo-gguf-tdf/src/reader.rs:1-40
-    changed: "2026-08-30"
+      - crates/arkavo-knowledge-pack/src/verify.rs:86-120
+    changed: "2026-08-31"
     edge_cases:
       - condition: The manifest itself is modified
         expected: Signature verification fails first, before any digest check
@@ -112,7 +110,6 @@ scenarios:
   - id: KP-005
     name: Distribute sentinel and index without the knowledge model
     criticality: high
-    wip: true
     given:
       - An egress-only node enforces classification but performs no generation
       - A pack containing adapters, a sentinel, and an index exists
@@ -123,8 +120,9 @@ scenarios:
       - Manifest verification succeeds on the partial set
       - The node reports which components it holds for audit
     refs:
-      - crates/arkavo-swarmkit-runtime/src/tdf.rs:308-360
-    changed: "2026-08-30"
+      - crates/arkavo-knowledge-pack/src/verify.rs:40-70
+      - crates/arkavo-knowledge-pack/src/load.rs:150-175
+    changed: "2026-08-31"
     edge_cases:
       - condition: A component listed in the manifest is absent locally
         expected: Absence is recorded, not treated as tampering
@@ -142,8 +140,9 @@ scenarios:
       - The computed ceiling is recorded in the manifest and in component metadata
       - A lower classification cannot be asserted for the adapter after the fact
     refs:
-      - crates/arkavo-protocol/src/data_classification.rs:15-22
-    changed: "2026-08-30"
+      - crates/arkavo-gguf-tdf/src/component.rs:36-56
+      - crates/arkavo-knowledge-pack/src/manifest.rs:130-145
+    changed: "2026-08-31"
     edge_cases:
       - condition: A corpus item has no classification label
         expected: Conservative classification applied, matching the SEQ-001 ambiguity rule
@@ -164,8 +163,8 @@ scenarios:
       - Mixed-level adapter stacking is refused unless the session accepts the high-water-mark ceiling
       - The selected adapter set is recorded in the session's decision trace
     refs:
-      - crates/arkavo-llama-cpp/src/lib.rs:1-40
-    changed: "2026-08-30"
+      - crates/arkavo-knowledge-pack/src/selection.rs:1-180
+    changed: "2026-08-31"
     edge_cases:
       - condition: The session is entitled to no adapter
         expected: Base model serves the session with no adapter applied
@@ -175,7 +174,6 @@ scenarios:
   - id: KP-008
     name: Apply the model classification ceiling to generated output
     criticality: critical
-    wip: true
     given:
       - A served model records a classification ceiling in its component metadata
       - A request carries its own input taint
@@ -186,8 +184,10 @@ scenarios:
       - A model with no recorded ceiling is treated conservatively
       - The applied ceiling appears in egress decision evidence
     refs:
-      - crates/arkavo-gguf-tdf/src/writer.rs:28-48
-    changed: "2026-08-30"
+      - crates/arkavo-gguf-tdf/src/component.rs:88-120
+      - crates/arkavo-gguf-tdf/src/reader.rs:97-110
+      - crates/arkavo-cli/src/sentinel_wiring.rs:118-190
+    changed: "2026-08-31"
     edge_cases:
       - condition: Metadata and configuration disagree on the ceiling
         expected: The higher of the two applies
@@ -210,9 +210,11 @@ scenarios:
       - Unkeyed content hashes are never written to the index
       - The index is TDF-wrapped on output
     refs:
-      - crates/arkavo-config-encryption/src/lib.rs:35-98
+      - crates/arkavo-fingerprint/src/index.rs:1-320
       - crates/arkavo-fingerprint/src/simhash.rs:1-120
-    changed: "2026-08-30"
+      - crates/arkavo-knowledge-pack/src/blob.rs:1-80
+      - crates/arkavo-cli/src/commands/pack_seal.rs:130-160
+    changed: "2026-09-04"
     edge_cases:
       - condition: The tenant key is unavailable
         expected: Build fails rather than falling back to unkeyed hashes
@@ -231,7 +233,9 @@ scenarios:
       - Suppression entries are versioned with the index
       - A seeded boilerplate false positive no longer matches after suppression
       - Suppression cannot remove a shingle that carries a classified label
-    changed: "2026-08-30"
+    refs:
+      - crates/arkavo-fingerprint/src/reference_match.rs:1-120
+    changed: "2026-09-04"
     edge_cases:
       - condition: Classified text is embedded inside boilerplate
         expected: The classified span survives suppression
@@ -250,9 +254,11 @@ scenarios:
       - Near-duplicate scoring runs after the exact tier, not before it
       - Budget overrun degrades to asynchronous scoring rather than blocking the call
     refs:
+      - crates/arkavo-fingerprint/src/reference_match.rs:1-120
+      - crates/arkavo-fingerprint/src/simhash.rs:180-220
       - crates/arkavo-fingerprint/src/near_tier.rs:1-140
       - crates/arkavo-sentinel/src/cascade.rs:20-110
-    changed: "2026-08-30"
+    changed: "2026-09-04"
     edge_cases:
       - condition: The index is not yet loaded
         expected: Tier reports unavailable; the cascade proceeds without it and the gap is logged
@@ -272,7 +278,7 @@ scenarios:
       - Every derivation is produced by a provider running locally
       - No corpus content is sent to a remote provider at any stage
       - Derivations retain a link to their source chunk and its labels
-    changed: "2026-08-30"
+    changed: "2026-08-31"
     edge_cases:
       - condition: A remote provider is configured
         expected: The run refuses to start rather than silently downgrading confidentiality
@@ -289,7 +295,7 @@ scenarios:
       - Evaluation derivations are produced by a different method than training derivations
       - A leakage check proves no source family spans both sides
       - The split manifest digest is recorded in the pack manifest
-    changed: "2026-08-30"
+    changed: "2026-08-31"
     edge_cases:
       - condition: A source family is too small to split
         expected: The family is assigned wholly to one side and the choice is recorded
@@ -306,7 +312,7 @@ scenarios:
       - Thresholds are written into the manifest and covered by its signature
       - The runtime reads thresholds from the manifest, never from a compiled-in constant
       - Threshold provenance names the calibration set digest
-    changed: "2026-08-30"
+    changed: "2026-08-31"
     edge_cases:
       - condition: A label has too few positives to calibrate
         expected: The label ships with a conservative threshold marked as uncalibrated
@@ -323,7 +329,7 @@ scenarios:
       - Temporary directories contain no readable corpus content afterward
       - Interruption triggers the same cleanup path as completion
       - Cleanup failure is reported as a build failure, not a warning
-    changed: "2026-08-30"
+    changed: "2026-08-31"
     edge_cases:
       - condition: The process is killed without running cleanup
         expected: Intermediates were written wrapped, so no plaintext is exposed by the gap
@@ -340,7 +346,7 @@ scenarios:
       - Each correction carries a signature verifiable against the organization anchor
       - Unsigned corrections are rejected rather than downweighted
       - Admitted corrections are recorded in the next pack's lineage
-    changed: "2026-08-30"
+    changed: "2026-08-31"
     edge_cases:
       - condition: A correction would lower a label's classification
         expected: Treated as declassification and routed through the signed human workflow
@@ -358,7 +364,7 @@ scenarios:
       - Adapter content is not claimed to be revocable
       - The pack manifest states which facts are capsule-backed and therefore revocable
       - Revoking a capsule does not invalidate the adapter or the pack signature
-    changed: "2026-08-30"
+    changed: "2026-08-31"
     edge_cases:
       - condition: A revoked fact was also present in adapter training data
         expected: Revocation is reported as incomplete and a repack is required

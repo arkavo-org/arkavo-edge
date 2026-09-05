@@ -41,7 +41,7 @@ One distillation pipeline produces a **sealed knowledge pack**: policy-scoped kn
 - Extend `arkavo-protocol/src/data_classification.rs`: `TaintLabel { source_id, categories: Set<DataCategory>, sensitivity: SensitivityLevel, hops: Vec<ProvenanceHop> }`, `TaintSet` with monotonic-union ops (`union` = max sensitivity, ∪ categories, concat provenance), serde for the sequence ledger.
 - `DataTaintTracker` in `arkavo-session`: tag at ingestion (tool results, A2A receive, file reads), propagate through transformations, persist to ledger. Minimal `SequenceGraphBuilder` (SEQ-004): nodes per tool call, edges on output→input flow, params hash and taint labels in node metadata.
 - Define trait `ClassificationInferencer` — the SEQ-001 "classification level inferred" seam. First impl: `RegexInferencer` wrapping the existing `DatumType` detector. (Phase 4 plugs the sentinel into this same seam.)
-- LLM I/O rule (SEQ-002 edge case): output of inference inherits the union of input taints ∪ the serving model's classification ceiling (ceiling arrives in Phase 5 metadata; the runtime response factory uses Restricted until that metadata is verified).
+- LLM I/O rule (SEQ-002 edge case): output of inference inherits the union of input taints ∪ the serving model's classification ceiling (verified pack metadata supplies the ceiling; the runtime response factory uses Restricted for an unknown serving model).
 
 **Accept:** SEQ-001/002 tripwires flipped for implemented paths; propagation unit tests incl. encode-does-not-strip (base64/JSON); tracker overhead benched <50µs per call.
 
@@ -84,11 +84,11 @@ One distillation pipeline produces a **sealed knowledge pack**: policy-scoped kn
 
 **Accept:** SENT tripwires flipped; holdback latency p50/p95/p99 published in bench; e2e test proves a seeded canary in a completion is caught pre-release under mock provider.
 
-**Delivered (2026-08-30, 0.92.0).** SENT-001, 002, 003, 006, 007, 008, 009, 014, 015 and 016 flipped. Measured: cascade per-call overhead 1.39µs against the 50µs invariant; holdback window latency p50 6.21µs, p95 6.42µs, p99 6.96µs. The canary test drives a mock-provider completion through the release gate and asserts the consumer never sees it.
+**Delivered (2026-08-30, 0.91.0).** SENT-001, 002, 003, 006, 007, 008, 009, 014, 015 and 016 flipped. Measured: cascade per-call overhead 1.39µs against the 50µs invariant; holdback window latency p50 6.21µs, p95 6.42µs, p99 6.96µs. The canary test drives a mock-provider completion through the release gate and asserts the consumer never sees it.
 
-Still `wip`, with the reason each is not green:
+At Phase 4 completion, the following scenarios remained `wip`:
 
-- **SENT-004** — thresholds come from a `CalibrationTable` and none is compiled into the crate, but the scenario's `given` is a *verified* pack manifest, and manifest verification is Phase 5.
+- **SENT-004** — thresholds came from a `CalibrationTable`, but verified manifest loading was pending. Phase 5 delivered that path and flipped this scenario.
 - **SENT-005** — the loader opens the classifier through `GgufTdfArchive::open`/`unlock`, so the code path is real, but no sentinel artifact exists to load until Phase 6 and an untested load path is not a green one.
 - **SENT-010** — `ProbeBudget` is an identity-keyed bucket that several holders share, but the egress gate still owns a private limiter. Sharing one requires the budget to live in `arkavo-protocol`; the gate's crate cannot reach `arkavo-sentinel` without closing a dependency cycle.
 - **SENT-011** — denials are generic and no raw score reaches a signal, but sentinel evidence is not yet written to the audit sink, and the scenario needs both halves.
@@ -106,7 +106,7 @@ With the `sentinel` feature enabled, CLI startup installs an immutable process-w
 
 The default installed cascade contains the regex-backed pattern tier. A provisioned cascade can use `CascadeFactory` through the same startup registration API to add reference and classifier tiers. The factory builds the critic pipeline with `CircuitCheck` followed by `SentinelCheck`; the latter contributes classification evidence. The release adapter merges evidence into taint and asks the existing `EgressTaintGate` about `Destination::ExternalOutput`. Public-only evidence can pass policy, while restricted evidence or an inspection gap withholds the response. Classification alone does not grant release.
 
-Verified model-ceiling metadata is not yet available at this boundary. The factory therefore uses `Restricted` for an unknown serving model and holds its entire completion until inspection finishes. This conservative default governs buffering; policy still determines whether inspected output can leave. Signed pack verification, automatic component loading, and trusted model-ceiling discovery remain Phase 5 work. The runtime registration does not establish that a signed pack was loaded or that Phase 5 is complete.
+Phase 5 supplies signed pack verification and `SentinelRuntime::from_pack`, which loads verified components and exposes the manifest calibration, ceiling, cascade, gate, and critic check. Automatic pack and classifier provisioning at CLI startup remains absent: the default installed cascade does not imply a pack has been loaded. The response factory uses `Restricted` for an unknown serving model and holds its entire completion until inspection finishes. This conservative default governs buffering; policy still determines whether inspected output can leave. Callers provisioning a pack must bind verified ceiling metadata to the serving model before using a less restrictive buffering policy.
 
 With `taint` enabled, the conductor creates its session guard before task decomposition and shares it across sequential and parallel subtasks. Generated subtask context is ingested before dispatch. File destination checks resolve existing filesystem components, including symlinks, before testing workspace containment; absent file suffixes remain supported, while dangling or unreadable ancestors hold the call. Pre-dispatch validation does not make a later filesystem write atomic with that check.
 
@@ -120,6 +120,24 @@ With `taint` enabled, the conductor creates its session guard before task decomp
 - Revocation story stays honest in docs: revocable and volatile facts belong in TDF-RAG (key revocation is instant); fine-tuning is for stable terminology, schemas, procedures, domain behavior.
 
 **Accept:** KP tripwires flipped; pack build and verify round-trip in e2e; adapter selection integration test with two clearance levels; tampered manifest rejected.
+
+**Delivered (2026-08-31, 0.91.0).** KP-001 through KP-005 and KP-008 flipped, plus SENT-004, which this phase unblocked: thresholds now come from a verified manifest rather than from anything an operator can edit. `arkavo pack seal`, `verify` and `anchor` complete the command family, and `SentinelRuntime::from_pack` is the runtime call site Phase 4 left open — the gate and the critic check are now built from a signed pack instead of being constructible and unconstructed.
+
+Decisions taken under delegation, with the reasoning:
+
+- **The adapter *load* half is deferred; selection ships.** `llama_adapter_lora_init` takes a filesystem path and nothing else, and unlike `llama_model_load_from_file_ptr` — which is genuinely upstream — it has no pointer variant. A sealed adapter therefore cannot reach llama.cpp without either patching llama.cpp or writing plaintext weights to disk, and the second is what KP-003 and KP-015 exist to prevent. The load half is also untestable until Phase 6 produces an adapter artifact, which is the same reasoning that kept SENT-005 red. **KP-007 stays `wip`** for the load half; selection, ceilings and mixed-level refusal are implemented and tested at two clearance levels.
+- **No DID resolver.** `webvh` appears nowhere in the workspace, so verification takes a *resolved* anchor public key and anchor resolution stays a named seam. A verifier that fetched its own trust root would be choosing what to trust. KP-003's "no trust-on-first-use" edge is therefore: refuse when no anchor is supplied, which `arkavo pack verify` does.
+- **The signature covers the manifest bytes as written.** Not a re-serialization of a parsed struct: canonical-JSON round-tripping is where signature schemes quietly break, and a test pins that a parse-and-re-emit reproduces the signed bytes exactly.
+- **Component metadata lives in a plaintext archive member**, readable before any key request, because an egress node decides whether it is entitled to ask for a component's key by reading it. `GgufIndex` belongs to the external `opentdf-protocol` crate and `TdfManifest` has no extension field, so there was nowhere else for it; the signed pack manifest binds the member's digest, which is what makes the claim trustworthy.
+- **The `fingerprint` cargo feature is renamed `knowledge-pack`**, matching this plan's ground rule 3. It now gates the whole `arkavo pack` family rather than one crate.
+
+Still `wip`, with the reason each is not green:
+
+- **KP-006** — `high_water` and the manifest binding are in, and a recorded ceiling below the content it covers is now refused at load. But the headline clause is "adapter classification equals the maximum classification in its corpus", and nothing computes a corpus ceiling because no adapter and no distillation exist yet; the seal-time ceiling is still operator-typed. Green for the index, whose content classification is computable today; red until Phase 6 makes it true for adapters. Held to the same standard that kept SENT-005 red.
+- **KP-007** — selection ships; loading waits on the llama.cpp adapter API above.
+- **KP-009** — the index is now wrapped as a pack component and `pack seal` refuses a plaintext one, but the tenant key still arrives as `--key-file`; KAS-backed provisioning is unbuilt.
+- **KP-010** — the near-duplicate tier's fingerprint still votes over suppressed shingles, so boilerplate is excluded from the exact tier only.
+- **KP-011..KP-017** — distillation, calibration fitting, intermediate-artifact hygiene, reviewer provenance and capsule revocation are Phase 6 and beyond.
 
 ## Phase 6 — Distillation and training pipeline (extends the small-stories draft PR)
 
@@ -157,7 +175,7 @@ Resolved:
 
 Open:
 
-- **Release mapping proposal:** 0.91 → P0–P2 · 0.92 → P3–P4 · 0.93 → P5 · 0.94 → P6–P7.
+- **Release mapping:** 0.91.0 ships phases 0–5 (taint, keyed index, sentinel cascade, sealed packs) behind `taint` / `sentinel` / `knowledge-pack`. Phases 6–7 remain later releases. The earlier 0.91/0.92/0.93 split per phase was not used.
 
 ## Milestone map
 

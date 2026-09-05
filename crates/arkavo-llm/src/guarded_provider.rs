@@ -169,7 +169,8 @@ impl Provider for GuardedProvider {
                             ..Default::default()
                         };
                         if factory.verify(&response).await.is_err()
-                            || inspect_whole(&reasoning_gate, &text).is_err()
+                            || inspect_whole(&reasoning_gate, &format!("{completion}\n{text}"))
+                                .is_err()
                         {
                             item = Err(withheld());
                         } else if !text.is_empty() {

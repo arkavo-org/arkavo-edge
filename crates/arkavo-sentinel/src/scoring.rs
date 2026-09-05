@@ -273,10 +273,10 @@ mod tests {
     struct Failing;
 
     impl ScoringModel for Failing {
-        fn detector_version(&self) -> &str {
+        fn detector_version(&self) -> &'static str {
             "sentinel-0.1"
         }
-        fn taxonomy_version(&self) -> &str {
+        fn taxonomy_version(&self) -> &'static str {
             "1.0.0"
         }
         fn score(&self, _text: &str) -> Result<Vec<RawLabel>, String> {

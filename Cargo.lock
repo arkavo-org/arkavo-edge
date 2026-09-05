@@ -815,6 +815,7 @@ dependencies = [
  "arkavo-hrm",
  "arkavo-identity",
  "arkavo-kimi",
+ "arkavo-knowledge-pack",
  "arkavo-llama-cpp",
  "arkavo-llm",
  "arkavo-mcp",
@@ -1267,6 +1268,30 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "wiremock",
+]
+
+[[package]]
+name = "arkavo-knowledge-pack"
+version = "0.92.0"
+dependencies = [
+ "arkavo-crypto",
+ "arkavo-fingerprint",
+ "arkavo-gguf-tdf",
+ "arkavo-protocol",
+ "arkavo-sentinel",
+ "arkavo-test-macros",
+ "base64 0.22.1",
+ "hex",
+ "opentdf",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

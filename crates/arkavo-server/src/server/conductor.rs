@@ -115,6 +115,25 @@ pub async fn execute_with_conductor_and_learning(
 
     info!("Created HRM task {}", hrm_task.id);
 
+    // SEQ-003: built before any branch that runs tools. The 1:1 loop is not
+    // the only runner — planned subtasks, and a specialist that does not skip
+    // complexity, return from execute_with_plan without coming back here.
+    #[cfg(feature = "taint")]
+    let egress_guard = {
+        let session_id = hrm_task.id.to_string();
+        let agent_id = learning_bus
+            .map(|bus| bus.agent_id().to_string())
+            .unwrap_or_else(|| session_id.clone());
+        let mut destinations = arkavo_protocol::egress_destination::DestinationPolicy::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            destinations = destinations.workspace_root(cwd);
+        }
+        let guard = super::egress_guard::EgressGuard::new(session_id, agent_id)
+            .with_destination_policy(destinations);
+        guard.observe_input("task", &task_content);
+        std::sync::Arc::new(guard)
+    };
+
     // Helper to update both HRM intra-progress and UI progress
     let hrm_task_id = hrm_task.id;
     let update_progress = |msg: &str, pct: u8| {
@@ -152,28 +171,6 @@ pub async fn execute_with_conductor_and_learning(
         )
         .await;
     }
-
-    // SEQ-003: the egress guard is scoped to this task. It tracks what the
-    // session ingests and refuses calls that would send it somewhere policy
-    // does not allow. The workspace is the process's own directory: a write
-    // inside it stays under the agent's root, anything else is a release.
-    #[cfg(feature = "taint")]
-    let egress_guard = {
-        let session_id = hrm_task.id.to_string();
-        let agent_id = learning_bus
-            .map(|bus| bus.agent_id().to_string())
-            .unwrap_or_else(|| session_id.clone());
-        let mut destinations = arkavo_protocol::egress_destination::DestinationPolicy::new();
-        if let Ok(cwd) = std::env::current_dir() {
-            destinations = destinations.workspace_root(cwd);
-        }
-        let guard = super::egress_guard::EgressGuard::new(session_id, agent_id)
-            .with_destination_policy(destinations);
-        // The task text is ingested data: a secret handed to the agent in its
-        // prompt must be labelled before the first tool call, not after one.
-        guard.observe_input("task", &task_content);
-        std::sync::Arc::new(guard)
-    };
 
     // 2a. Check if task is complex enough to decompose into multiple subtasks.
     // Only decompose when the agent has MCP tools (external servers) — agents

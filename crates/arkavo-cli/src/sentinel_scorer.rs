@@ -407,7 +407,10 @@ target list; do not circulate outside the sales leadership group. MNKOI 00022144
             },
         )
         .unwrap();
-        assert_eq!(scores[2], 1.0, "prefix finding survives the public tail");
+        assert!(
+            (scores[2] - 1.0).abs() < f32::EPSILON,
+            "prefix finding survives the public tail"
+        );
         let inspected: Vec<_> = seen
             .borrow()
             .iter()

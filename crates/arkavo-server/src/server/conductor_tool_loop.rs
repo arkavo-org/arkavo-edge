@@ -842,6 +842,12 @@ async fn execute_tool_calls(
                 arkavo_observability::subsystem_timing::global_timing()
                     .mcp_tools
                     .record(latency_ms);
+                // SEQ-001: a failure that echoes its argument still carries
+                // whatever was in that argument, so this path has to label too.
+                #[cfg(feature = "taint")]
+                if let Some(guard) = egress {
+                    guard.observe_error(&tool_call.tool_name, &err_str);
+                }
                 observations.push(ToolCallObservation {
                     tool_name: tool_call.tool_name.clone(),
                     timestamp: chrono::Utc::now(),

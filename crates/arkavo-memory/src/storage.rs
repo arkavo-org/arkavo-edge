@@ -698,6 +698,60 @@ impl MemoryStorage {
         Ok(results)
     }
 
+    /// Every memory in a category, newest first.
+    ///
+    /// Exact, not nearest-neighbour. Listing is not a search: conversation
+    /// sessions all share a placeholder zero-vector, so HNSW can drop one.
+    pub async fn list_by_category(&self, category: &str, limit: usize) -> Result<Vec<Memory>> {
+        let rows = sqlx::query(
+            "SELECT id, content, metadata, category, embedding_blob, created_at, updated_at
+             FROM memories
+             WHERE category = ?
+             ORDER BY updated_at DESC
+             LIMIT ?",
+        )
+        .bind(category)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id_str: String = row.get("id");
+            let id = Uuid::parse_str(&id_str)
+                .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
+
+            let embedding_blob: Vec<u8> = row.get("embedding_blob");
+            let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
+
+            let metadata_str: Option<String> = row.get("metadata");
+            let metadata = metadata_str
+                .as_ref()
+                .map(|m| serde_json::from_str(m))
+                .transpose()?;
+
+            let created_at_str: String = row.get("created_at");
+            let updated_at_str: String = row.get("updated_at");
+            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
+                .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
+                .with_timezone(&chrono::Utc);
+            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
+                .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
+                .with_timezone(&chrono::Utc);
+
+            out.push(Memory {
+                id,
+                content: row.get("content"),
+                metadata,
+                category: row.get("category"),
+                embedding,
+                created_at,
+                updated_at,
+            });
+        }
+        Ok(out)
+    }
+
     async fn search_hot(
         &self,
         query: &str,

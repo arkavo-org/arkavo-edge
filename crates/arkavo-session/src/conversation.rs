@@ -613,16 +613,16 @@ impl ConversationManager {
 
     /// List all sessions
     pub async fn list_sessions(&self) -> anyhow::Result<Vec<ConversationSession>> {
-        let results = self
+        // Exact category listing, not vector search. Session memories all
+        // share a placeholder zero-vector, so HNSW can omit one of them.
+        let memories = self
             .memory_storage
-            .search("conversation_session", 50, Some("conversation"))
+            .list_by_category("conversation", 50)
             .await?;
 
-        let mut sessions: Vec<ConversationSession> = results
+        let mut sessions: Vec<ConversationSession> = memories
             .into_iter()
-            .filter_map(|result| {
-                serde_json::from_str::<ConversationSession>(&result.memory.content).ok()
-            })
+            .filter_map(|memory| serde_json::from_str::<ConversationSession>(&memory.content).ok())
             .collect();
 
         sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
@@ -1089,18 +1089,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         let id_c = manager.start_session("model-c").await.unwrap();
 
-        // Semantic search can be approximate with only a few vectors; retry until
-        // all created sessions are visible.
-        let mut sessions = Vec::new();
-        for _ in 0..20 {
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            sessions = manager.list_sessions().await.unwrap();
-            let ids: std::collections::HashSet<Uuid> = sessions.iter().map(|s| s.id).collect();
-            if ids.contains(&id_a) && ids.contains(&id_b) && ids.contains(&id_c) {
-                break;
-            }
-        }
-
+        let sessions = manager.list_sessions().await.unwrap();
         let ids: std::collections::HashSet<Uuid> = sessions.iter().map(|s| s.id).collect();
         assert!(ids.contains(&id_a), "session a should be listed");
         assert!(ids.contains(&id_b), "session b should be listed");

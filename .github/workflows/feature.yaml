@@ -271,15 +271,18 @@ jobs:
             # compiles them and nothing else would notice them breaking.
             cargo test --locked -p arkavo-fingerprint
             cargo test --locked -p arkavo-sentinel
+            cargo test --locked -p arkavo-knowledge-pack
+            cargo test --locked -p arkavo-gguf-tdf --features knowledge-pack --lib --test knowledge_pack_test
             cargo test --locked -p arkavo-protocol --features taint --test sentinel_test --test taint_propagation_test --test egress_taint_test
             cargo test --locked -p arkavo-server --features taint --lib egress_guard
             cargo test --locked -p arkavo-critic --features sentinel --lib checks::sentinel
-            # Pack-index unit tests live in arkavo-cli and only compile when
-            # the fingerprint crate is linked.
+            # Pack command tests live in arkavo-cli and only compile when the
+            # knowledge-pack feature (which pulls fingerprint) is on.
             cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel commands::pack
             # Phase 4's acceptance test: a seeded canary in a completion never
-            # reaches the consumer.
-            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary
+            # reaches the consumer. Phase 5 extends it: the gate is provisioned
+            # from a signed pack.
+            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary --test sentinel_runtime
           fi
 
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
@@ -315,6 +318,8 @@ jobs:
           elif [ "${{ matrix.group }}" = "dlp" ]; then
             cargo clippy --locked -p arkavo-fingerprint --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-sentinel --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-knowledge-pack --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-gguf-tdf --lib --bins --features knowledge-pack -- -D warnings
             cargo clippy --locked -p arkavo-protocol --lib --bins --features taint -- -D warnings
             cargo clippy --locked -p arkavo-critic --lib --bins --features sentinel -- -D warnings
             cargo clippy --locked -p arkavo-cli --lib --bins --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel -- -D warnings

@@ -18,10 +18,6 @@ This category highlights Arkavo's most unique and powerful features.
     *   **Scenario:** Point Arkavo at an iOS application's source code. The agent first analyzes the code to understand its structure. Then, it injects a test harness at runtime to intelligently explore the app's UI, discover a non-obvious bug (e.g., a crash after a specific sequence of inputs), and report it, all without human-written test scripts.
     *   **Why it's Compelling:** This is a "wow" demo that showcases the ultimate vision of the project. It combines AI-driven analysis, runtime injection, and intelligent testing, as outlined in `docs/longterm-memory.md`.
 
-*   **Demo: Automated IDB Companion Recovery**
-    *   **Scenario:** While running an iOS UI test, manually find and kill the `idb_companion` process. The demo shows the agent's UI interaction failing, but then Arkavo's monitoring system automatically detects the failure, triggers the recovery process, and successfully resumes the test.
-    *   **Why it's Compelling:** Demonstrates the self-healing, resilient, and production-ready nature of the platform, as detailed in `docs/IDB_COMPANION_MONITORING.md`.
-
 ### 1.2. LLM & Agentic Capabilities
 
 These demos showcase the flexibility and power of the agentic framework.

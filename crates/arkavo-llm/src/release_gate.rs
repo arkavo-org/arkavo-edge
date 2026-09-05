@@ -398,6 +398,7 @@ mod tests {
 
         assert!(last_done);
     }
+    #[arkavo_test_macros::spec("SENT-007")]
     #[tokio::test]
     async fn a_done_chunk_that_releases_a_window_keeps_all_text() {
         let inner = futures::stream::iter(vec![Ok(StreamResponse {
@@ -412,6 +413,7 @@ mod tests {
         assert!(chunk.done);
     }
 
+    #[arkavo_test_macros::spec("SENT-007")]
     #[tokio::test]
     async fn cancelling_a_stream_discards_held_text() {
         let gate = Canary::new("CANARY", 4096);

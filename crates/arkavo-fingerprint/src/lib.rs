@@ -12,7 +12,7 @@
 pub mod index;
 pub mod key;
 pub mod near_tier;
-pub(crate) mod reference_match;
+pub mod reference_match;
 pub mod shingle;
 pub mod simhash;
 pub mod tier;
