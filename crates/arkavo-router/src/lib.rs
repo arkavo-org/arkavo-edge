@@ -26,6 +26,8 @@ pub mod provider_info;
 pub(crate) mod provider_protected;
 pub(crate) mod quality_gate;
 pub mod response;
+#[cfg(feature = "sentinel")]
+pub mod response_policy;
 pub mod rlm;
 pub mod selector;
 pub mod selector_quality;

@@ -49,9 +49,7 @@ const LABELS: [(&str, SensitivityLevel, DataCategory); 3] = [
     ),
 ];
 
-/// Context the scorer needs. A span that arrives longer than this is scored on
-/// its tail: dropping the head costs the system prompt, whereas dropping the
-/// tail would cost the generation prompt the whole reading depends on.
+/// Maximum prompt size; longer content is inspected in overlapping spans.
 const SCORING_CONTEXT_TOKENS: u32 = 1024;
 
 /// A llama.cpp-backed classifier over a fine-tuned sentinel GGUF.
@@ -177,15 +175,16 @@ impl LlamaScoringModel {
     }
 
     fn score_inner(&self, text: &str) -> Result<Vec<RawLabel>, String> {
-        let prompt = self.prompt_for(text);
-        let mut tokens = tokenize_with_model(self.model.get_vocab(), &prompt)?;
-        if tokens.is_empty() {
-            return Err("sentinel prompt tokenized to nothing".to_string());
-        }
-        if tokens.len() > self.prompt_budget {
-            tokens.drain(..tokens.len() - self.prompt_budget);
-        }
+        score_spans(
+            text,
+            self.prompt_budget,
+            |span| tokenize_with_model(self.model.get_vocab(), &self.prompt_for(span)),
+            |tokens| self.score_tokens(tokens),
+        )
+        .map(raw_labels)
+    }
 
+    fn score_tokens(&self, tokens: &[i32]) -> Result<[f32; 3], String> {
         let ctx = self
             .context
             .lock()
@@ -194,7 +193,7 @@ impl LlamaScoringModel {
         // real reset, and an empty cache is what puts this prompt at position 0
         // of a single sequence — no state from the last span.
         ctx.get_memory().clear(true);
-        let batch = batch_get_one_with_logits(&tokens, true);
+        let batch = batch_get_one_with_logits(tokens, true);
         decode_batch(&ctx, batch)?;
         // Read under the same guard: the logits row belongs to the decode above
         // and is only meaningful until the next one. Released as soon as the
@@ -202,7 +201,10 @@ impl LlamaScoringModel {
         let logits = label_logits(&ctx, self.label_tokens, self.model.n_vocab())?;
         drop(ctx);
 
-        Ok(raw_labels(softmax(logits)))
+        if logits.iter().any(|value| !value.is_finite()) {
+            return Err("sentinel decode produced non-finite logits".into());
+        }
+        Ok(softmax(logits))
     }
 }
 
@@ -215,17 +217,62 @@ impl ScoringModel for LlamaScoringModel {
         &self.taxonomy_version
     }
 
-    fn score(&self, text: &str) -> Vec<RawLabel> {
-        match self.score_inner(text) {
-            Ok(labels) => labels,
-            Err(reason) => {
-                // The trait has nowhere to report a failure, and no labels reads
-                // downstream as "nothing found" — a fail-open. It is logged at
-                // error level so the silence is at least visible.
-                tracing::error!(%reason, "sentinel scoring failed; span left unclassified");
-                Vec::new()
-            }
+    fn score(&self, text: &str) -> Result<Vec<RawLabel>, String> {
+        self.score_inner(text)
+    }
+}
+
+/// Preserve the entire prompt around each span and overlap by a quarter of
+/// its characters so a boundary does not erase a classification signal.
+fn score_spans(
+    text: &str,
+    budget: usize,
+    tokenize: impl Fn(&str) -> Result<Vec<i32>, String>,
+    infer: impl Fn(&[i32]) -> Result<[f32; 3], String>,
+) -> Result<[f32; 3], String> {
+    let mut scores = [0.0_f32; 3];
+    let mut start: usize = 0;
+    loop {
+        let mut end = text
+            .len()
+            .min(start.saturating_add(budget.saturating_mul(4)));
+        while !text.is_char_boundary(end) {
+            end -= 1;
         }
+        let tokens = loop {
+            let tokens = tokenize(&text[start..end])?;
+            if tokens.is_empty() {
+                return Err("sentinel prompt tokenized to nothing".into());
+            }
+            if tokens.len() <= budget {
+                break tokens;
+            }
+            let characters = text[start..end].chars().count();
+            if characters <= 1 {
+                return Err("sentinel context cannot fit the prompt and one character".into());
+            }
+            end = start
+                + text[start..end]
+                    .char_indices()
+                    .nth(characters / 2)
+                    .expect("half of a nonempty span")
+                    .0;
+        };
+        for (maximum, score) in scores.iter_mut().zip(infer(&tokens)?) {
+            *maximum = maximum.max(score);
+        }
+        if end == text.len() {
+            return Ok(scores);
+        }
+        let characters = text[start..end].chars().count();
+        if characters == 0 {
+            return Err("sentinel context cannot fit one character".into());
+        }
+        let advance = characters - characters / 4;
+        start = text[start..end]
+            .char_indices()
+            .nth(advance)
+            .map_or(end, |(offset, _)| start + offset);
     }
 }
 
@@ -331,6 +378,90 @@ target list; do not circulate outside the sales leadership group. MNKOI 00022144
             .max_by(|a, b| a.score.total_cmp(&b.score))
             .expect("three labels")
             .label
+    }
+
+    #[test]
+    fn long_spans_preserve_prefix_overlap_and_utf8() {
+        let text = format!("secret{}tail", "é日x".repeat(30));
+        let seen = std::cell::RefCell::new(Vec::new());
+        let scores = score_spans(
+            &text,
+            20,
+            |span| {
+                seen.borrow_mut().push(span.to_string());
+                // Reserve prompt overhead exactly as the real tokenizer does.
+                Ok(std::iter::repeat_n(0, 8)
+                    .chain(span.chars().map(|c| c as i32))
+                    .collect())
+            },
+            |tokens| {
+                let span: String = tokens[8..]
+                    .iter()
+                    .map(|&c| char::from_u32(c as u32).unwrap())
+                    .collect();
+                Ok(if span.contains("secret") {
+                    [0.0, 0.0, 1.0]
+                } else {
+                    [1.0, 0.0, 0.0]
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(scores[2], 1.0, "prefix finding survives the public tail");
+        let inspected: Vec<_> = seen
+            .borrow()
+            .iter()
+            .filter(|span| span.chars().count() + 8 <= 20)
+            .cloned()
+            .collect();
+        assert!(inspected.first().unwrap().starts_with("secret"));
+        assert!(inspected.last().unwrap().ends_with("tail"));
+        let mut rebuilt = inspected[0].clone();
+        for pair in inspected.windows(2) {
+            let overlap = pair[0].chars().count() / 4;
+            let suffix: String = pair[0]
+                .chars()
+                .skip(pair[0].chars().count() - overlap)
+                .collect();
+            assert!(pair[1].starts_with(&suffix));
+            rebuilt.extend(pair[1].chars().skip(overlap));
+        }
+        assert_eq!(rebuilt, text);
+    }
+
+    #[test]
+    fn failures_and_uninspectable_context_are_errors() {
+        assert!(
+            score_spans(
+                "text",
+                20,
+                |_| Err("tokenization failed".into()),
+                |_| Ok([0.0; 3])
+            )
+            .is_err()
+        );
+        assert!(score_spans("text", 20, |_| Ok(vec![0]), |_| Err("decode failed".into())).is_err());
+        assert!(score_spans("text", 1, |_| Ok(vec![0; 8]), |_| Ok([0.0; 3])).is_err());
+        assert!(score_spans("text", 20, |_| Ok(vec![]), |_| Ok([0.0; 3])).is_err());
+    }
+
+    #[test]
+    fn a_later_segment_failure_discards_partial_success() {
+        let calls = std::cell::Cell::new(0);
+        let result = score_spans(
+            "abcdefghijklmnop",
+            8,
+            |span| Ok(span.chars().map(|c| c as i32).collect()),
+            |_| {
+                calls.set(calls.get() + 1);
+                if calls.get() == 1 {
+                    Ok([1.0, 0.0, 0.0])
+                } else {
+                    Err("later decode failed".into())
+                }
+            },
+        );
+        assert_eq!(result.unwrap_err(), "later decode failed");
     }
 
     #[test]
@@ -445,7 +576,7 @@ target list; do not circulate outside the sales leadership group. MNKOI 00022144
             (HOLIDAY_NOTICE, "internal"),
             (RESTRICTED_MEMO, "confidential"),
         ] {
-            let labels = model.score(span);
+            let labels = model.score(span).expect("score span");
             assert_eq!(labels.len(), 3);
             let sum: f32 = labels.iter().map(|l| l.score).sum();
             assert!((sum - 1.0).abs() < 1e-4, "scores sum to {sum}");

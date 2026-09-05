@@ -115,19 +115,20 @@ where
                         // would otherwise have that text bypass the gate
                         // entirely, which is the one span most likely to hold
                         // the end of a completion.
-                        if !chunk.content.is_empty()
-                            && this.gate.admit(&chunk.content) == GateOutcome::Blocked
-                        {
-                            this.blocked = true;
-                            return Poll::Ready(Some(Err(Error::Provider(
-                                GATE_BLOCKED.to_string(),
-                            ))));
-                        }
-                        return Poll::Ready(Some(finish(
-                            &this.gate,
-                            &mut this.blocked,
-                            Some(chunk),
-                        )));
+                        let released = match this.gate.admit(&chunk.content) {
+                            GateOutcome::Blocked => {
+                                this.blocked = true;
+                                return Poll::Ready(Some(Err(Error::Provider(
+                                    GATE_BLOCKED.into(),
+                                ))));
+                            }
+                            GateOutcome::Release(text) => text,
+                        };
+                        let tail = finish(&this.gate, &mut this.blocked, Some(chunk));
+                        return Poll::Ready(Some(tail.map(|mut tail| {
+                            tail.content.insert_str(0, &released);
+                            tail
+                        })));
                     }
                     match this.gate.admit(&chunk.content) {
                         GateOutcome::Blocked => {
@@ -153,6 +154,12 @@ where
                 }
             }
         }
+    }
+}
+
+impl<S> Drop for GatedStream<S> {
+    fn drop(&mut self) {
+        self.gate.discard();
     }
 }
 
@@ -390,5 +397,27 @@ mod tests {
         }
 
         assert!(last_done);
+    }
+    #[tokio::test]
+    async fn a_done_chunk_that_releases_a_window_keeps_all_text() {
+        let inner = futures::stream::iter(vec![Ok(StreamResponse {
+            content: "clean final text".into(),
+            reasoning_content: None,
+            done: true,
+            inference_timing: None,
+        })]);
+        let mut stream = gated(Box::pin(inner), Canary::new("CANARY", 8));
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(chunk.content, "clean final text");
+        assert!(chunk.done);
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_stream_discards_held_text() {
+        let gate = Canary::new("CANARY", 4096);
+        gate.admit("private pending text");
+        let stream = gated(Box::pin(futures::stream::pending()), gate.clone());
+        drop(stream);
+        assert!(gate.seen.lock().unwrap().is_empty());
     }
 }

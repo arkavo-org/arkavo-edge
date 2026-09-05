@@ -38,7 +38,9 @@ scenarios:
       - crates/arkavo-protocol/src/taint_inference.rs:1-135
       - crates/arkavo-protocol/src/taint_tracker.rs:1-209
       - crates/arkavo-events/src/payload.rs:77-125
-    changed: "2026-08-30"
+      - crates/arkavo-server/src/server/conductor.rs:155-176
+      - crates/arkavo-server/src/server/conductor_planner.rs:231-326
+    changed: "2026-09-04"
     edge_cases:
       - condition: Data source classification ambiguous
         expected: Conservative classification (assume sensitive)
@@ -98,8 +100,19 @@ scenarios:
       - crates/arkavo-protocol/src/http.rs:110-190
       - crates/arkavo-validation/src/url.rs:83-142
       - schemas/taxonomy-map.v1.json
-    changed: "2026-08-30"
+      - crates/arkavo-server/src/server/conductor.rs:155-210
+      - crates/arkavo-server/src/server/conductor_planner.rs:18-165
+      - crates/arkavo-protocol/src/egress_destination.rs:145-176
+      - crates/arkavo-protocol/src/egress_destination.rs:272-313
+      - crates/arkavo-cli/src/sentinel_wiring.rs:121-137
+    changed: "2026-09-04"
     edge_cases:
+      - condition: A task decomposes into sequential or parallel subtasks
+        expected: All stages share the session guard and accumulated taint before tool dispatch
+      - condition: An in-workspace path traverses a symlink outside the workspace
+        expected: Existing components resolve before containment checks, including before parent traversal
+      - condition: A path ancestor is a dangling symlink or cannot be resolved
+        expected: The destination is unresolved and held
       - condition: Destination is sanctioned internal endpoint
         expected: Taint policy allows, action proceeds
       - condition: Agent encodes tainted data to evade classification
@@ -362,7 +375,9 @@ scenarios:
       - crates/arkavo-protocol/src/egress_taint.rs:210-300
       - crates/arkavo-server/src/server/egress_guard.rs:125-215
       - crates/arkavo-observability/src/decision_trace.rs:107-150
-    changed: "2026-08-30"
+      - crates/arkavo-cli/src/sentinel_wiring.rs:121-137
+      - crates/arkavo-protocol/src/egress_destination.rs:18-75
+    changed: "2026-09-04"
     edge_cases:
       - condition: Destination on allowlist but payload tainted
         expected: Taint policy overrides destination allowlist

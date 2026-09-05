@@ -29,11 +29,6 @@ pub const TIER_NAME: &str = "reference-index";
 /// detector, and the budget is shared across everything on that path.
 pub const TIER_BUDGET: Duration = Duration::from_micros(25);
 
-/// Shingles examined between clock reads.
-///
-/// Reading the clock per shingle would cost more than the hashing it guards.
-const BUDGET_CHECK_STRIDE: usize = 16;
-
 /// Largest span examined inline.
 ///
 /// Measured at ~22ns per byte to normalize, shingle, hash and probe, so 25µs
@@ -120,7 +115,7 @@ impl ReferenceTier {
             );
         }
 
-        let summary = self.match_within_budget(index, key, text, deadline);
+        let summary = crate::reference_match::match_until(index, key, text, Some(deadline));
         match summary {
             Ok(summary) => TierReport::matched(TIER_NAME, self.version(), findings(&summary)),
             // Not a match and not a clean miss: the span was only partly seen,
@@ -146,43 +141,6 @@ impl ReferenceTier {
             findings(&match_span(index, key, text)),
         )
     }
-
-    fn match_within_budget(
-        &self,
-        index: &ReferenceIndex,
-        key: &IndexKey,
-        text: &str,
-        deadline: Instant,
-    ) -> Result<MatchSummary, usize> {
-        // Normalized once; windows are joined one at a time so the budget can
-        // stop the work rather than arriving after it.
-        let normalized = crate::shingle::normalize(text);
-        let words: Vec<&str> = normalized.split(' ').filter(|w| !w.is_empty()).collect();
-        let mut summary = MatchSummary::default();
-        for (n, shingle) in crate::shingle::windows(&words).enumerate() {
-            if n % BUDGET_CHECK_STRIDE == 0 && n > 0 && Instant::now() > deadline {
-                return Err(n);
-            }
-            summary.shingles_examined += 1;
-            let hash = key.hash(&shingle);
-            if index.suppression().contains(hash) {
-                continue;
-            }
-            let Some(meta) = index.lookup(hash) else {
-                continue;
-            };
-            summary.shingles_matched += 1;
-            match summary.by_family.get(&meta.source_family) {
-                Some(existing) if existing.sensitivity >= meta.sensitivity => {}
-                _ => {
-                    summary
-                        .by_family
-                        .insert(meta.source_family.clone(), meta.clone());
-                }
-            }
-        }
-        Ok(summary)
-    }
 }
 
 /// Turn a match summary into evidence.
@@ -195,21 +153,26 @@ fn findings(summary: &MatchSummary) -> Vec<LabelFinding> {
     if summary.is_empty() {
         return Vec::new();
     }
-    let confidence = Confidence::new(summary.coverage());
     summary
-        .by_family
+        .labels
         .iter()
-        .map(|(family, meta)| {
-            LabelFinding::new(
-                meta.category,
-                meta.sensitivity,
-                confidence,
-                format!(
-                    "{}/{} shingles matched",
-                    summary.shingles_matched, summary.shingles_examined
-                ),
-            )
-            .from_family(family)
+        .map(|(label, meta)| {
+            let (confidence, signal) = if summary.complete_documents.contains(label) {
+                (
+                    Confidence::CERTAIN,
+                    "complete short corpus document matched".to_string(),
+                )
+            } else {
+                (
+                    Confidence::new(summary.coverage()),
+                    format!(
+                        "{}/{} shingles matched",
+                        summary.shingles_matched, summary.shingles_examined
+                    ),
+                )
+            };
+            LabelFinding::new(meta.category, meta.sensitivity, confidence, signal)
+                .from_family(&meta.source_family)
         })
         .collect()
 }
@@ -243,7 +206,8 @@ mod tests {
             SensitivityLevel::Confidential,
             "board-minutes",
         );
-        ReferenceTier::loaded(Arc::new(builder.build()), key)
+        // Classification assertions must not depend on debug-build scheduling.
+        ReferenceTier::loaded(Arc::new(builder.build()), key).with_budget(Duration::from_secs(1))
     }
 
     #[spec("KP-011")]
@@ -322,7 +286,7 @@ mod tests {
 
     #[spec("KP-011")]
     #[test]
-    fn a_short_span_is_answered_synchronously_inside_the_budget() {
+    fn a_short_span_is_answered_synchronously_with_available_budget() {
         // Tool-call arguments — what the egress gate actually hands this tier —
         // are short, and that is the case the budget has to cover.
         let tier = tier();

@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::planner_config::get_planner_config;
 use crate::token_estimator;
 use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
-use arkavo_llm::{Message as LlmMessage, Provider};
+use arkavo_llm::Message as LlmMessage;
 use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
 use arkavo_router::Router;
 use chrono::Utc;

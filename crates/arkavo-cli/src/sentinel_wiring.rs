@@ -10,8 +10,12 @@
 use std::sync::{Arc, Mutex};
 
 use arkavo_critic::{ClassificationSource, SentinelEvidence};
-use arkavo_llm::{GateOutcome, ReleaseGate};
+use arkavo_llm::{GateOutcome, ReleaseGate, ReleaseGateFactory};
+use arkavo_protocol::classification_evidence::{ClassificationEvidence, Confidence};
 use arkavo_protocol::data_classification::SensitivityLevel;
+use arkavo_protocol::egress_destination::Destination;
+use arkavo_protocol::egress_taint::{EgressTaintGate, RequesterEntitlements};
+use arkavo_protocol::taint::TaintSet;
 use arkavo_sentinel::{Cascade, Holdback};
 
 /// The cascade as the critic pipeline sees it.
@@ -87,7 +91,7 @@ impl CascadeGate {
             // A gap is a reason to hold, not to release (SENT-013). Holding
             // here means blocking, because there is no later moment at which a
             // streamed token can be recalled.
-            if evidence.findings().next().is_some() || evidence.has_gap() {
+            if !may_release(&evidence) {
                 self.buffer().block();
                 return GateOutcome::Blocked;
             }
@@ -109,5 +113,116 @@ impl ReleaseGate for CascadeGate {
 
     fn discard(&self) {
         self.buffer().discard();
+    }
+}
+
+/// No caller clearance is implied by possession of a chat connection. The
+/// existing egress PDP interprets category and sensitivity restrictions.
+fn may_release(evidence: &ClassificationEvidence) -> bool {
+    if evidence.has_gap() {
+        tracing::warn!(evidence = ?evidence, "completion inspection incomplete");
+        return false;
+    }
+    let mut taint = TaintSet::new();
+    arkavo_sentinel::merge_evidence(&mut taint, evidence, Confidence::new(0.0));
+    let decision = EgressTaintGate::new().evaluate(
+        &taint,
+        &Destination::ExternalOutput,
+        &RequesterEntitlements::none(),
+    );
+    if !decision.may_send_plaintext() {
+        tracing::warn!(audit = %decision.audit_detail(), "completion withheld");
+    }
+    decision.may_send_plaintext()
+}
+
+pub struct CascadeFactory {
+    cascade: Arc<Cascade>,
+    critic: arkavo_critic::CriticPipeline,
+}
+
+impl CascadeFactory {
+    pub fn new(cascade: Arc<Cascade>) -> Self {
+        let critic = arkavo_critic::CriticPipeline::new()
+            .add_check(arkavo_critic::CircuitCheck::new())
+            .add_check(arkavo_critic::SentinelCheck::new(Arc::new(
+                CascadeSource::new(cascade.clone()),
+            )));
+        Self { cascade, critic }
+    }
+}
+
+#[async_trait::async_trait]
+impl ReleaseGateFactory for CascadeFactory {
+    async fn verify(&self, response: &arkavo_llm::ProviderResponse) -> arkavo_llm::Result<()> {
+        let input = arkavo_critic::VerificationInput::new(String::new(), response.clone(), vec![]);
+        if self.critic.verify(&input).await.passed {
+            Ok(())
+        } else {
+            Err(arkavo_llm::Error::Provider(arkavo_llm::GATE_BLOCKED.into()))
+        }
+    }
+
+    fn create(&self, _model: &str) -> Arc<dyn ReleaseGate> {
+        // Until verified pack metadata supplies the serving model's ceiling,
+        // an unknown model must not opt into partial streaming.
+        Arc::new(CascadeGate::new(
+            self.cascade.clone(),
+            SensitivityLevel::Restricted,
+        ))
+    }
+}
+
+/// Install the available tier for all routers created by the CLI and server.
+/// Provisioned cascades use the same registration seam; signed pack loading is
+/// separate from this runtime connection.
+pub fn install() {
+    let cascade = Arc::new(
+        Cascade::new(arkavo_protocol::taxonomy::TaxonomyMap::v1().version()).with_tier(Arc::new(
+            arkavo_sentinel::PatternTier::new(Arc::new(arkavo_protocol::RegexInferencer::new())),
+        )),
+    );
+    // A host may already have installed a provisioned cascade. Never replace
+    // its policy with the baseline tier during CLI initialization.
+    let _ = arkavo_router::response_policy::install(Arc::new(CascadeFactory::new(cascade)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_protocol::classification_evidence::{LabelFinding, TierReport};
+    use arkavo_protocol::data_classification::DataCategory;
+
+    #[test]
+    fn a_public_label_is_evidence_for_release_not_a_reason_to_block() {
+        let public = ClassificationEvidence::new("1.0.0").with_tier(TierReport::matched(
+            "sentinel",
+            "1",
+            vec![LabelFinding::new(
+                DataCategory::Public,
+                SensitivityLevel::Public,
+                Confidence::CERTAIN,
+                "public",
+            )],
+        ));
+        assert!(may_release(&public));
+        let mixed = public.with_tier(TierReport::matched(
+            "reference",
+            "1",
+            vec![LabelFinding::new(
+                DataCategory::Internal,
+                SensitivityLevel::Confidential,
+                Confidence::CERTAIN,
+                "confidential",
+            )],
+        ));
+        assert!(!may_release(&mixed));
+        assert!(!may_release(
+            &ClassificationEvidence::new("1.0.0").with_tier(TierReport::unavailable(
+                "sentinel",
+                "1",
+                "decode failed"
+            ))
+        ));
     }
 }

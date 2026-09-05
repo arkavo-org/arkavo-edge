@@ -72,6 +72,10 @@ impl SentinelCheck {
     /// every tool-call argument, inspected whole before anything runs.
     fn inspectable(input: &VerificationInput) -> String {
         let mut text = input.response.content.clone();
+        if let Some(reasoning) = &input.response.reasoning_content {
+            text.push('\n');
+            text.push_str(reasoning);
+        }
         for call in &input.response.tool_calls {
             text.push('\n');
             text.push_str(&call.arguments.to_string());
@@ -96,7 +100,14 @@ impl VerificationCheck for SentinelCheck {
 
     async fn verify(&self, input: &VerificationInput) -> CheckResult {
         let started = Instant::now();
-        let evidence = self.source.inspect(&Self::inspectable(input));
+        let source = self.source.clone();
+        let text = Self::inspectable(input);
+        let evidence = tokio::task::spawn_blocking(move || source.inspect(&text))
+            .await
+            .unwrap_or_else(|_| SentinelEvidence {
+                has_gap: true,
+                ..Default::default()
+            });
         let latency_us = started.elapsed().as_micros() as u64;
 
         if evidence.labels == 0 && !evidence.has_gap {
@@ -236,5 +247,11 @@ mod tests {
 
         assert_eq!(a.passed, b.passed);
         assert_eq!(a.failures().len(), b.failures().len());
+    }
+    #[test]
+    fn inspection_includes_reasoning() {
+        let mut input = input("public answer");
+        input.response.reasoning_content = Some("private reasoning".into());
+        assert!(SentinelCheck::inspectable(&input).contains("private reasoning"));
     }
 }

@@ -44,7 +44,7 @@ cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 fingerprint = ["dep:arkavo-fingerprint"]
 # The DLP sentinel: the classification cascade wired into the critic
 # pipeline and the streaming release path. Off until the work reaches GA.
-sentinel = ["dep:arkavo-sentinel", "dep:arkavo-llama-cpp", "fingerprint", "arkavo-critic/sentinel"]
+sentinel = ["dep:arkavo-sentinel", "dep:arkavo-llama-cpp", "fingerprint", "arkavo-critic/sentinel", "arkavo-router/sentinel"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 iroh = ["arkavo-server/iroh", "arkavo-server/swarm-apply"]
 kas = ["arkavo-protocol/kas", "arkavo-server/kas"]

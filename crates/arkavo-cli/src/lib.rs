@@ -43,6 +43,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         // Initialize security controls
         // SECURITY: Egress filter prevents SSRF attacks
         secure_http::init_egress_filter();
+        #[cfg(feature = "sentinel")]
+        sentinel_wiring::install();
     });
 
     // Check for verbose flag

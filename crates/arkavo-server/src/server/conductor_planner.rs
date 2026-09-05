@@ -31,6 +31,7 @@ pub(super) async fn execute_with_plan(
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
     system_prompt: Option<&str>,
     mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
+    #[cfg(feature = "taint")] egress: Arc<super::egress_guard::EgressGuard>,
 ) -> Result<String, String> {
     // 1. Plan subtasks via LLM
     let analyzer = LlmIntentAnalyzer::new(router.clone());
@@ -97,6 +98,8 @@ pub(super) async fn execute_with_plan(
                 learning_bus,
                 tool_memory,
                 system_prompt,
+                #[cfg(feature = "taint")]
+                egress.clone(),
             )
             .await;
             stage_outputs.push(result);
@@ -113,6 +116,9 @@ pub(super) async fn execute_with_plan(
                 let mem = tool_memory.cloned();
                 let sys = system_prompt.map(|s| s.to_string());
 
+                #[cfg(feature = "taint")]
+                let egress = egress.clone();
+
                 handles.push(tokio::spawn(async move {
                     execute_subtask(
                         &router,
@@ -123,6 +129,8 @@ pub(super) async fn execute_with_plan(
                         bus.as_ref(),
                         mem.as_ref(),
                         sys.as_deref(),
+                        #[cfg(feature = "taint")]
+                        egress,
                     )
                     .await
                 }));
@@ -230,7 +238,10 @@ async fn execute_subtask(
     learning_bus: Option<&Arc<LearningBus>>,
     tool_memory: Option<&Arc<tokio::sync::RwLock<ToolMemory>>>,
     system_prompt: Option<&str>,
+    #[cfg(feature = "taint")] egress: Arc<super::egress_guard::EgressGuard>,
 ) -> String {
+    #[cfg(feature = "taint")]
+    let egress = subtask_egress(egress, task_content);
     let mut messages = Vec::new();
     if let Some(sys) = system_prompt {
         messages.push(arkavo_llm::Message::system(sys));
@@ -249,11 +260,8 @@ async fn execute_subtask(
         tool_memory,
         None, // compute_budget: planner doesn't enforce per-iteration budget
         None, // granted_tools: subtask planner is called from the orchestrator's own loop
-        // The orchestrator's own loop owns the session guard; a subtask plan
-        // executed here re-enters through that loop, so passing a second guard
-        // would give the subtask a taint history the session never had.
         #[cfg(feature = "taint")]
-        None,
+        Some(egress),
     )
     .await
     {
@@ -262,5 +270,55 @@ async fn execute_subtask(
             warn!(error = %e, "Subtask execution failed");
             format!("[subtask error: {e}]")
         }
+    }
+}
+
+/// Planned stages share accumulated taint, including generated task context.
+#[cfg(feature = "taint")]
+fn subtask_egress(
+    egress: Arc<super::egress_guard::EgressGuard>,
+    task_content: &str,
+) -> Arc<super::egress_guard::EgressGuard> {
+    egress.observe_input("subtask", task_content);
+    egress
+}
+
+#[cfg(all(test, feature = "taint"))]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn planned_stages_preserve_session_taint() {
+        let session = Arc::new(super::super::egress_guard::EgressGuard::new(
+            "task", "agent",
+        ));
+        let first = subtask_egress(session.clone(), "Read the credential");
+        let credential = format!("{}-{}", "sk", "a".repeat(24));
+        first.observe_result("read_file", &json!({}), &credential);
+        let second = subtask_egress(session.clone(), "Send the encoded result");
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(
+            second
+                .check_call(
+                    "post",
+                    &json!({"url": "https://example.com/upload", "body": "encoded"})
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn planned_task_context_is_ingested_before_dispatch() {
+        let session = Arc::new(super::super::egress_guard::EgressGuard::new(
+            "task", "agent",
+        ));
+        let stage = subtask_egress(session.clone(), &format!("{}-{}", "sk", "b".repeat(24)));
+        assert!(Arc::ptr_eq(&session, &stage));
+        assert!(
+            stage
+                .check_call("post", &json!({"url": "https://example.com/upload"}))
+                .is_err()
+        );
     }
 }
