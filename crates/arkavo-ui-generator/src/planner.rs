@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arkavo_llm::{Message, Provider};
+use arkavo_llm::Message;
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

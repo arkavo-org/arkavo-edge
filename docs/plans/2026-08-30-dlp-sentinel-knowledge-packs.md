@@ -41,7 +41,7 @@ One distillation pipeline produces a **sealed knowledge pack**: policy-scoped kn
 - Extend `arkavo-protocol/src/data_classification.rs`: `TaintLabel { source_id, categories: Set<DataCategory>, sensitivity: SensitivityLevel, hops: Vec<ProvenanceHop> }`, `TaintSet` with monotonic-union ops (`union` = max sensitivity, ∪ categories, concat provenance), serde for the sequence ledger.
 - `DataTaintTracker` in `arkavo-session`: tag at ingestion (tool results, A2A receive, file reads), propagate through transformations, persist to ledger. Minimal `SequenceGraphBuilder` (SEQ-004): nodes per tool call, edges on output→input flow, params hash and taint labels in node metadata.
 - Define trait `ClassificationInferencer` — the SEQ-001 "classification level inferred" seam. First impl: `RegexInferencer` wrapping the existing `DatumType` detector. (Phase 4 plugs the sentinel into this same seam.)
-- LLM I/O rule (SEQ-002 edge case): output of inference inherits the union of input taints ∪ the serving model's classification ceiling (ceiling arrives in Phase 5 metadata; until then, config-supplied per model).
+- LLM I/O rule (SEQ-002 edge case): output of inference inherits the union of input taints ∪ the serving model's classification ceiling (verified pack metadata supplies the ceiling; the runtime response factory uses Restricted for an unknown serving model).
 
 **Accept:** SEQ-001/002 tripwires flipped for implemented paths; propagation unit tests incl. encode-does-not-strip (base64/JSON); tracker overhead benched <50µs per call.
 
@@ -78,7 +78,7 @@ One distillation pipeline produces a **sealed knowledge pack**: policy-scoped kn
 - Loader: sentinel classifier ships as TDF-GGUF, opened through the existing `arkavo-gguf-tdf` streaming reader (KAS-gated, zeroized) — the DLP model is protected by the mechanism it enforces.
 - `SentinelInferencer: ClassificationInferencer` emitting the SENT evidence contract. Calibrated per-label thresholds come from the pack manifest, never hardcoded. Output feeds `TaintSet` via monotonic union — it can only add.
 - Cascade orchestration (per outbound span): keyed-hash tier → SimHash tier → sentinel, with sentinel **off the <50µs hot path**: async scoring against a holdback buffer.
-- Streaming semantics in `arkavo-llm`: sentence/sliding-window holdback with overlap before token release; whole-field inspection of tool-call arguments before execution; models whose ceiling ≥ Confidential stream nothing partial (config per model classification). A completion cannot be unstreamed — this is the threat model, not a nicety.
+- Streaming semantics in `arkavo-llm`: sentence/sliding-window holdback with overlap before token release; whole-field inspection of tool-call arguments before execution; models whose ceiling ≥ Confidential stream nothing partial (the runtime factory uses Restricted until verified model metadata is available). A completion cannot be unstreamed — this is the threat model, not a nicety.
 - `SentinelCheck` added to `CriticPipeline` after `CircuitCheck`, returning evidence (not verdicts) for the policy layer.
 - Oracle protections active: gate and sentinel share the token-bucket budget; raw scores never cross the trust boundary.
 
@@ -86,9 +86,9 @@ One distillation pipeline produces a **sealed knowledge pack**: policy-scoped kn
 
 **Delivered (2026-08-30, 0.91.0).** SENT-001, 002, 003, 006, 007, 008, 009, 014, 015 and 016 flipped. Measured: cascade per-call overhead 1.39µs against the 50µs invariant; holdback window latency p50 6.21µs, p95 6.42µs, p99 6.96µs. The canary test drives a mock-provider completion through the release gate and asserts the consumer never sees it.
 
-Still `wip`, with the reason each is not green:
+At Phase 4 completion, the following scenarios remained `wip`:
 
-- **SENT-004** — thresholds come from a `CalibrationTable` and none is compiled into the crate, but the scenario's `given` is a *verified* pack manifest, and manifest verification is Phase 5.
+- **SENT-004** — thresholds came from a `CalibrationTable`, but verified manifest loading was pending. Phase 5 delivered that path and flipped this scenario.
 - **SENT-005** — the loader opens the classifier through `GgufTdfArchive::open`/`unlock`, so the code path is real, but no sentinel artifact exists to load until Phase 6 and an untested load path is not a green one.
 - **SENT-010** — `ProbeBudget` is an identity-keyed bucket that several holders share, but the egress gate still owns a private limiter. Sharing one requires the budget to live in `arkavo-protocol`; the gate's crate cannot reach `arkavo-sentinel` without closing a dependency cycle.
 - **SENT-011** — denials are generic and no raw score reaches a signal, but sentinel evidence is not yet written to the audit sink, and the scenario needs both halves.
@@ -99,6 +99,16 @@ Two deviations from the plan text, both deliberate:
 
 - The classifier tier is `SentinelTier: CascadeTier`, not `SentinelInferencer: ClassificationInferencer`. `ClassificationInferencer` returns `ClassifiedDatum`, whose closed `DatumType` cannot carry a confidence, a tier version, or a category that came from an index rather than a regex — which is exactly why `ClassificationEvidence` was added in Phase 3. Forcing the sentinel through the older trait would discard the evidence contract the phase exists to deliver.
 - The near-duplicate tier uses a bounded linear scan rather than banded LSH. Banding only guarantees recall below the band count, and the measured threshold a one-word edit needs is 32 of 128 bits; guaranteeing that would take enough bands that a lookup scans the corpus several times over. The bound (`MAX_DOCUMENTS`) buys the same property with none of the machinery, and this tier runs off the hot path.
+
+## Runtime enforcement scope
+
+With the `sentinel` feature enabled, CLI startup installs an immutable process-wide response policy before constructing routers. `arkavo-router::response_policy` wraps router-provided providers in `GuardedProvider`, covering ordinary completions, tool responses, schema responses, and streams. The same registration covers providers obtained by server and embedded-engine routers. Providers constructed directly outside the router need their own wrapper; the registration does not intercept arbitrary provider instances.
+
+The default installed cascade contains the regex-backed pattern tier. A provisioned cascade can use `CascadeFactory` through the same startup registration API to add reference and classifier tiers. The factory builds the critic pipeline with `CircuitCheck` followed by `SentinelCheck`; the latter contributes classification evidence. The release adapter merges evidence into taint and asks the existing `EgressTaintGate` about `Destination::ExternalOutput`. Public-only evidence can pass policy, while restricted evidence or an inspection gap withholds the response. Classification alone does not grant release.
+
+Phase 5 supplies signed pack verification and `SentinelRuntime::from_pack`, which loads verified components and exposes the manifest calibration, ceiling, cascade, gate, and critic check. Automatic pack and classifier provisioning at CLI startup remains absent: the default installed cascade does not imply a pack has been loaded. The response factory uses `Restricted` for an unknown serving model and holds its entire completion until inspection finishes. This conservative default governs buffering; policy still determines whether inspected output can leave. Callers provisioning a pack must bind verified ceiling metadata to the serving model before using a less restrictive buffering policy.
+
+With `taint` enabled, the conductor creates its session guard before task decomposition and shares it across sequential and parallel subtasks. Generated subtask context is ingested before dispatch. File destination checks resolve existing filesystem components, including symlinks, before testing workspace containment; absent file suffixes remain supported, while dangling or unreadable ancestors hold the call. Pre-dispatch validation does not make a later filesystem write atomic with that check.
 
 ## Phase 5 — Knowledge pack format, signing, adapter channel
 

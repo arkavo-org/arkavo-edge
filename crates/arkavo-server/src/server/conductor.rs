@@ -198,7 +198,7 @@ pub async fn execute_with_conductor_and_learning(
             system_prompt,
             mesh_state,
             #[cfg(feature = "taint")]
-            Some(egress_guard.clone()),
+            egress_guard.clone(),
         )
         .await
         {

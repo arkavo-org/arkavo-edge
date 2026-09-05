@@ -11,6 +11,8 @@ pub mod mock_provider;
 pub mod prompt_loader;
 pub mod secure_http;
 #[cfg(feature = "sentinel")]
+pub mod sentinel_scorer;
+#[cfg(feature = "sentinel")]
 pub mod sentinel_wiring;
 pub mod tool_integration;
 pub mod welcome;
@@ -41,6 +43,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         // Initialize security controls
         // SECURITY: Egress filter prevents SSRF attacks
         secure_http::init_egress_filter();
+        #[cfg(feature = "sentinel")]
+        sentinel_wiring::install();
     });
 
     // Check for verbose flag

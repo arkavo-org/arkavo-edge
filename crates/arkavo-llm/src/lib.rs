@@ -9,6 +9,7 @@ pub mod conversation_context;
 pub mod error;
 pub mod example_generator;
 pub mod gpu_fault;
+pub mod guarded_provider;
 pub mod image;
 pub mod mcp_converter;
 pub mod message;
@@ -20,6 +21,7 @@ pub mod provider;
 #[cfg(feature = "llm-remote")]
 pub mod providers;
 pub mod release_gate;
+pub use guarded_provider::{GuardedProvider, ReleaseGateFactory};
 pub mod stream;
 pub mod stream_adapter;
 pub mod stream_model;

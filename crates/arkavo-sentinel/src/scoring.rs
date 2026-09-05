@@ -43,7 +43,8 @@ pub struct RawLabel {
 pub trait ScoringModel: Send + Sync {
     fn detector_version(&self) -> &str;
     fn taxonomy_version(&self) -> &str;
-    fn score(&self, text: &str) -> Vec<RawLabel>;
+    /// Failures must remain inspection gaps, never successful empty findings.
+    fn score(&self, text: &str) -> Result<Vec<RawLabel>, String>;
 }
 
 /// The sentinel as a cascade tier.
@@ -96,7 +97,12 @@ impl SentinelTier {
         if let Some(reason) = &self.mismatch {
             return TierReport::unavailable(SENTINEL_TIER_NAME, self.version(), reason);
         }
-        let raw = self.model.score(text);
+        let raw = match self.model.score(text) {
+            Ok(raw) => raw,
+            Err(reason) => {
+                return TierReport::unavailable(SENTINEL_TIER_NAME, self.version(), reason);
+            }
+        };
         let uncalibrated = self
             .calibration
             .uncalibrated(raw.iter().map(|label| label.label.as_str()));
@@ -259,9 +265,32 @@ mod tests {
             &self.taxonomy
         }
 
-        fn score(&self, _text: &str) -> Vec<RawLabel> {
-            self.labels.clone()
+        fn score(&self, _text: &str) -> Result<Vec<RawLabel>, String> {
+            Ok(self.labels.clone())
         }
+    }
+
+    struct Failing;
+
+    impl ScoringModel for Failing {
+        fn detector_version(&self) -> &'static str {
+            "sentinel-0.1"
+        }
+        fn taxonomy_version(&self) -> &'static str {
+            "1.0.0"
+        }
+        fn score(&self, _text: &str) -> Result<Vec<RawLabel>, String> {
+            Err("decode failed".into())
+        }
+    }
+
+    #[spec("SENT-013")]
+    #[test]
+    fn model_failure_is_an_inspection_gap() {
+        let tier = SentinelTier::new(Arc::new(Failing), calibration());
+        let report = tier.examine("unclassified content");
+        assert!(report.is_unavailable());
+        assert!(format!("{report:?}").contains("decode failed"));
     }
 
     fn model(labels: Vec<RawLabel>) -> Arc<dyn ScoringModel> {

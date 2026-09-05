@@ -210,10 +210,11 @@ scenarios:
       - Unkeyed content hashes are never written to the index
       - The index is TDF-wrapped on output
     refs:
+      - crates/arkavo-fingerprint/src/index.rs:1-320
       - crates/arkavo-fingerprint/src/simhash.rs:1-120
       - crates/arkavo-knowledge-pack/src/blob.rs:1-80
       - crates/arkavo-cli/src/commands/pack_seal.rs:130-160
-    changed: "2026-08-31"
+    changed: "2026-09-04"
     edge_cases:
       - condition: The tenant key is unavailable
         expected: Build fails rather than falling back to unkeyed hashes
@@ -232,7 +233,9 @@ scenarios:
       - Suppression entries are versioned with the index
       - A seeded boilerplate false positive no longer matches after suppression
       - Suppression cannot remove a shingle that carries a classified label
-    changed: "2026-08-31"
+    refs:
+      - crates/arkavo-fingerprint/src/reference_match.rs:1-120
+    changed: "2026-09-04"
     edge_cases:
       - condition: Classified text is embedded inside boilerplate
         expected: The classified span survives suppression
@@ -251,9 +254,11 @@ scenarios:
       - Near-duplicate scoring runs after the exact tier, not before it
       - Budget overrun degrades to asynchronous scoring rather than blocking the call
     refs:
+      - crates/arkavo-fingerprint/src/reference_match.rs:1-120
+      - crates/arkavo-fingerprint/src/simhash.rs:180-220
       - crates/arkavo-fingerprint/src/near_tier.rs:1-140
       - crates/arkavo-sentinel/src/cascade.rs:20-110
-    changed: "2026-08-31"
+    changed: "2026-09-04"
     edge_cases:
       - condition: The index is not yet loaded
         expected: Tier reports unavailable; the cascade proceeds without it and the gap is logged

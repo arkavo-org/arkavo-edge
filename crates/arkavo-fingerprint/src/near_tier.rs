@@ -108,7 +108,7 @@ impl NearDuplicateTier {
             );
         }
         match crate::simhash::fingerprint_until(key, text, Some(deadline)) {
-            Ok(found) => self.judge(index, found),
+            Ok(found) => self.judge(index, found, Some(deadline)),
             Err(examined) => TierReport::unavailable(
                 NEAR_TIER_NAME,
                 self.version(),
@@ -128,7 +128,7 @@ impl NearDuplicateTier {
             );
         };
         match crate::simhash::fingerprint_until(key, text, None) {
-            Ok(found) => self.judge(index, found),
+            Ok(found) => self.judge(index, found, None),
             // Unreachable without a deadline, but reporting a gap is the safe
             // reading of an impossible state.
             Err(examined) => TierReport::unavailable(
@@ -145,10 +145,22 @@ impl NearDuplicateTier {
     /// clean miss. The distinction matters: this tier cannot see a short span,
     /// and letting that read as "nothing here" is how a cascade quietly stops
     /// covering the sizes it was never able to cover.
-    fn judge(&self, index: &NearDuplicateIndex, found: Option<(u128, usize)>) -> TierReport {
+    fn judge(
+        &self,
+        index: &NearDuplicateIndex,
+        found: Option<(u128, usize)>,
+        deadline: Option<Instant>,
+    ) -> TierReport {
         match found {
             Some((fingerprint, shingles)) if shingles >= MIN_SHINGLES => {
-                self.report(index.nearest(fingerprint))
+                match index.nearest_until(fingerprint, deadline) {
+                    Ok(found) => self.report(found),
+                    Err(examined) => TierReport::unavailable(
+                        NEAR_TIER_NAME,
+                        self.version(),
+                        format!("budget exhausted after {examined} documents; scoring deferred"),
+                    ),
+                }
             }
             Some((_, shingles)) => TierReport::unavailable(
                 NEAR_TIER_NAME,
@@ -319,5 +331,15 @@ mod tests {
         let report = tier(&key).examine_until(&document(1), Instant::now());
 
         assert!(report.is_unavailable());
+    }
+    #[test]
+    fn expired_lookup_deadline_defers_after_fingerprinting() {
+        let key = key();
+        let tier = tier(&key);
+        let found = crate::simhash::fingerprint_until(&key, &document(1), None).unwrap();
+        let index = tier.index.as_ref().unwrap();
+        let report = tier.judge(index, found, Some(Instant::now()));
+        assert!(report.is_unavailable());
+        assert!(!tier.judge(index, found, None).findings().is_empty());
     }
 }

@@ -100,7 +100,7 @@ impl Planner {
                 })?;
             Arc::from(provider)
         } else if let Some(gemini) = self.router.get_planning_provider() {
-            Arc::new(gemini)
+            Arc::from(gemini)
         } else {
             return Err(Error::Other(anyhow::anyhow!(
                 "Planning model not available. Set GEMINI_API_KEY for remote planning."
@@ -248,7 +248,7 @@ impl Planner {
                 })?;
             Arc::from(p)
         } else if let Some(gemini) = self.router.get_planning_provider() {
-            Arc::new(gemini)
+            Arc::from(gemini)
         } else {
             return Err(Error::Other(anyhow::anyhow!(
                 "Adjustment requires a model. Set GEMINI_API_KEY for remote planning."

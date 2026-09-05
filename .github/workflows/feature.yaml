@@ -282,7 +282,7 @@ jobs:
             # Phase 4's acceptance test: a seeded canary in a completion never
             # reaches the consumer. Phase 5 extends it: the gate is provisioned
             # from a signed pack.
-            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary
+            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary --test sentinel_runtime
           fi
 
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)

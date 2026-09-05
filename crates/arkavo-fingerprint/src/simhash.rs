@@ -181,9 +181,27 @@ impl NearDuplicateIndex {
     }
 
     /// Closest indexed document within [`MAX_HAMMING`], if any.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal scan abandons a lookup without a deadline.
     pub fn nearest(&self, fingerprint: SimHash) -> Option<NearMatch> {
+        self.nearest_until(fingerprint, None)
+            .expect("lookup without a deadline cannot expire")
+    }
+
+    pub(crate) fn nearest_until(
+        &self,
+        fingerprint: SimHash,
+        deadline: Option<Instant>,
+    ) -> Result<Option<NearMatch>, usize> {
         let mut best: Option<(u32, &EntryMeta)> = None;
-        for (indexed, meta) in &self.documents {
+        for (examined, (indexed, meta)) in self.documents.iter().enumerate() {
+            if examined.is_multiple_of(16)
+                && deadline.is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                return Err(examined);
+            }
             let distance = (fingerprint ^ indexed).count_ones();
             if distance > MAX_HAMMING {
                 continue;
@@ -196,10 +214,13 @@ impl NearDuplicateIndex {
                 _ => best = Some((distance, meta)),
             }
         }
-        best.map(|(distance, meta)| NearMatch {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(self.documents.len());
+        }
+        Ok(best.map(|(distance, meta)| NearMatch {
             meta: meta.clone(),
             distance,
-        })
+        }))
     }
 
     pub fn max_sensitivity(&self) -> arkavo_protocol::data_classification::SensitivityLevel {

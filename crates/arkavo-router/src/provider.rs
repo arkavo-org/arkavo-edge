@@ -2,6 +2,7 @@ use crate::decision::ModelChoice;
 use crate::error::{Error, Result};
 use crate::model_discovery;
 use arkavo_llm::Provider;
+use std::path::Path;
 
 #[cfg(feature = "llama-cpp")]
 fn sampling_config_for(
@@ -34,6 +35,17 @@ fn sampling_config_for(
 }
 
 impl super::Router {
+    fn protect_provider(&self, provider: Box<dyn Provider>) -> Box<dyn Provider> {
+        #[cfg(feature = "sentinel")]
+        {
+            crate::response_policy::protect(provider)
+        }
+        #[cfg(not(feature = "sentinel"))]
+        {
+            provider
+        }
+    }
+
     /// Get a provider for the given model choice (local or cloud)
     pub async fn get_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
         self.instantiate_provider(model).await
@@ -46,12 +58,14 @@ impl super::Router {
 
     /// Get a Gemini provider for complex planning/thinking tasks
     #[cfg(feature = "gemini")]
-    pub fn get_planning_provider(&self) -> Option<arkavo_llm::GeminiProvider> {
-        arkavo_llm::GeminiProvider::new().ok()
+    pub fn get_planning_provider(&self) -> Option<Box<dyn Provider>> {
+        arkavo_llm::GeminiProvider::new()
+            .ok()
+            .map(|provider| self.protect_provider(Box::new(provider)))
     }
 
     #[cfg(not(feature = "gemini"))]
-    pub fn get_planning_provider(&self) -> Option<()> {
+    pub fn get_planning_provider(&self) -> Option<Box<dyn Provider>> {
         None
     }
 
@@ -79,10 +93,10 @@ impl super::Router {
         cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok()
     }
 
-    pub fn get_anthropic_provider(
-        &self,
-    ) -> Option<arkavo_llm::providers::anthropic::AnthropicProvider> {
-        arkavo_llm::providers::anthropic::AnthropicProvider::from_env().ok()
+    pub fn get_anthropic_provider(&self) -> Option<Box<dyn Provider>> {
+        arkavo_llm::providers::anthropic::AnthropicProvider::from_env()
+            .ok()
+            .map(|provider| self.protect_provider(Box::new(provider)))
     }
 
     pub(crate) fn get_local_fallback(
@@ -203,7 +217,74 @@ impl super::Router {
             provider
         };
 
-        Ok(Box::new(provider))
+        Ok(self.protect_provider(Box::new(provider)))
+    }
+
+    /// Load an on-disk GGUF (or `.gguf.tdf`) by path. Not a named catalog model.
+    #[cfg(feature = "llama-cpp")]
+    pub(crate) async fn instantiate_gguf_path(
+        &self,
+        path: &Path,
+        use_spec_decoding: bool,
+    ) -> Result<Box<dyn Provider>> {
+        let resolved = model_discovery::resolve_gguf_path(path);
+        if !resolved.exists() {
+            return Err(Error::ModelExecution(format!(
+                "GGUF not found: {}",
+                path.display()
+            )));
+        }
+        let canonical = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
+        let registry_name = format!("gguf:{}", canonical.display());
+
+        if !self.model_registry.is_loaded(&registry_name) {
+            tracing::info!(
+                model = %registry_name,
+                path = %canonical.display(),
+                "Loading GGUF path into registry"
+            );
+            self.ensure_loaded(&registry_name, &canonical).await?;
+
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            if let Ok(ctx) = self.model_registry.acquire_fresh_context(&registry_name) {
+                let _ = self
+                    .model_registry
+                    .release_context(&registry_name, ctx, true);
+                tracing::info!(model = %registry_name, "Context pool pre-warmed");
+            }
+            tracing::info!(model = %registry_name, "GGUF loaded and cached in registry");
+        } else {
+            tracing::debug!(model = %registry_name, "Using cached GGUF from registry");
+        }
+
+        let sampling = arkavo_llm::SamplingConfig {
+            use_spec_decoding,
+            thinking_mode: Some(arkavo_llm::ThinkingMode::Off),
+            ..arkavo_llm::SamplingConfig::default()
+        };
+        let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
+            self.model_registry.clone(),
+            registry_name.clone(),
+            sampling,
+        )
+        .map_err(|e| {
+            Error::ModelExecution(format!(
+                "Failed to create provider for {registry_name}: {e}"
+            ))
+        })?;
+        Ok(self.protect_provider(Box::new(provider)))
+    }
+
+    #[cfg(not(feature = "llama-cpp"))]
+    pub(crate) async fn instantiate_gguf_path(
+        &self,
+        path: &Path,
+        _use_spec_decoding: bool,
+    ) -> Result<Box<dyn Provider>> {
+        Err(Error::ModelExecution(format!(
+            "llama-cpp required to load GGUF {}",
+            path.display()
+        )))
     }
 
     /// Create a provider with execution-mode overrides: temp 0.1, thinking off.
@@ -243,7 +324,7 @@ impl super::Router {
                 "Failed to create execution provider for {registry_name}: {e}"
             ))
         })?;
-        Ok(Box::new(provider))
+        Ok(self.protect_provider(Box::new(provider)))
     }
 
     #[cfg(not(feature = "llama-cpp"))]
@@ -281,11 +362,11 @@ impl super::Router {
                 // Pass the routed model id so distinct arms reach distinct
                 // API models instead of collapsing to the env/default model.
                 if let Ok(provider) = AnthropicProvider::from_env_with_model(model.name()) {
-                    Ok(Box::new(provider))
+                    Ok(self.protect_provider(Box::new(provider)))
                 } else {
                     #[cfg(feature = "gemini")]
                     if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
-                        return Ok(Box::new(provider));
+                        return Ok(self.protect_provider(Box::new(provider)));
                     }
                     Err(Error::ModelExecution(
                         "ANTHROPIC_API_KEY not set and no fallback available".to_string(),
@@ -309,7 +390,7 @@ impl super::Router {
                     arkavo_llm::GeminiProvider::for_model_with_thinking(api_model, thinking)
                         .or_else(|_| arkavo_llm::GeminiProvider::new());
                 if let Ok(provider) = built {
-                    Ok(Box::new(provider))
+                    Ok(self.protect_provider(Box::new(provider)))
                 } else {
                     #[cfg(feature = "llama-cpp")]
                     {
@@ -339,7 +420,7 @@ impl super::Router {
                                 "Failed to create fallback local provider: {e}"
                             ))
                         })?;
-                        Ok(Box::new(provider))
+                        Ok(self.protect_provider(Box::new(provider)))
                     }
                     #[cfg(not(feature = "llama-cpp"))]
                     {
@@ -377,7 +458,7 @@ impl super::Router {
                 let provider = AnthropicProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create Kimi provider: {e}"))
                 })?;
-                Ok(Box::new(provider))
+                Ok(self.protect_provider(Box::new(provider)))
             }
             #[cfg(feature = "glm")]
             ModelChoice::Glm52 => {
@@ -404,7 +485,7 @@ impl super::Router {
                 let provider = OpenAIProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create GLM provider: {e}"))
                 })?;
-                Ok(Box::new(provider))
+                Ok(self.protect_provider(Box::new(provider)))
             }
             #[cfg(feature = "xai")]
             ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
@@ -431,7 +512,7 @@ impl super::Router {
                 let provider = ResponsesProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create xAI Responses provider: {e}"))
                 })?;
-                Ok(Box::new(provider))
+                Ok(self.protect_provider(Box::new(provider)))
             }
             #[allow(unreachable_patterns)]
             _ => Err(Error::ModelExecution(format!(

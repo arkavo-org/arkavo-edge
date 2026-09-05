@@ -52,6 +52,7 @@ uuid = { version = "1.18.1", features = ["v4"] }
 [features]
 default = ["llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai"]
 critic = []
+sentinel = []
 advisor-persistence = ["dep:arkavo-memory"]
 llama-cpp = ["arkavo-llm/llama-cpp", "dep:arkavo-gguf-tdf", "dep:opentdf", "dep:arkavo-identity"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]

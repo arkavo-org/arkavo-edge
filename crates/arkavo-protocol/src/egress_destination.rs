@@ -17,6 +17,8 @@ use serde_json::Value;
 /// Where data is headed, as far as the parameters reveal.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Destination {
+    /// Plaintext completion delivered to the requesting caller.
+    ExternalOutput,
     /// A sanctioned endpoint inside the trust boundary.
     Internal { url: String },
     /// An endpoint outside it.
@@ -37,7 +39,9 @@ impl Destination {
     pub fn is_external(&self) -> bool {
         matches!(
             self,
-            Destination::External { .. } | Destination::ExternalPath { .. }
+            Destination::External { .. }
+                | Destination::ExternalPath { .. }
+                | Destination::ExternalOutput
         )
     }
 
@@ -47,6 +51,7 @@ impl Destination {
     /// the destination is a denial that confirms a guess about it.
     pub fn class(&self) -> &'static str {
         match self {
+            Destination::ExternalOutput => "caller-output",
             Destination::Internal { .. } => "internal-endpoint",
             Destination::External { .. } => "external-url",
             Destination::Workspace { .. } => "workspace-path",
@@ -58,6 +63,7 @@ impl Destination {
     /// Full identity of the destination. Audit sinks only.
     pub fn audit_detail(&self) -> String {
         match self {
+            Destination::ExternalOutput => "caller-output".into(),
             Destination::Internal { url } => format!("internal:{url}"),
             Destination::External { url } => format!("external:{url}"),
             Destination::Workspace { path } => format!("workspace:{}", path.display()),
@@ -117,7 +123,7 @@ impl DestinationPolicy {
             // a consumer of anything — whoever picks the file up has no key
             // request path, so "wrapped" there is just bytes leaving.
             Destination::Workspace { .. } => true,
-            Destination::ExternalPath { .. } => false,
+            Destination::ExternalPath { .. } | Destination::ExternalOutput => false,
             Destination::Internal { url } | Destination::External { url } => {
                 host_of(url).is_some_and(|h| self.tdf_capable_hosts.contains(&normalize_host(&h)))
             }
@@ -148,16 +154,20 @@ impl DestinationPolicy {
                 hint: "path".to_string(),
             },
             Some(root) => {
-                // A relative path resolves against the workspace, so it has to
-                // be joined before the prefix test — otherwise `notes.md` fails
-                // to start with the root and reads as an escape, and
-                // `../../etc/passwd` reads as one only by accident.
-                let resolved = if given.is_absolute() {
-                    normalize(&given)
+                // Resolve existing components before processing `..`: a symlink
+                // can change both the target directory and its parent.
+                let candidate = if given.is_absolute() {
+                    given
                 } else {
-                    normalize(&root.join(&given))
+                    root.join(given)
                 };
-                if resolved.starts_with(normalize(root)) {
+                let (Ok(resolved), Ok(root)) = (resolve_path(&candidate), resolve_path(root))
+                else {
+                    return Destination::Unresolved {
+                        hint: "path".into(),
+                    };
+                };
+                if resolved.starts_with(root) {
                     Destination::Workspace { path: resolved }
                 } else {
                     Destination::ExternalPath { path: resolved }
@@ -259,20 +269,40 @@ fn looks_like_relative_file(s: &str) -> bool {
     })
 }
 
-/// Resolve `.` and `..` lexically. The gate runs before the write, so the path
-/// need not exist, which rules out canonicalizing against the filesystem.
-fn normalize(path: &Path) -> PathBuf {
+/// Resolve existing ancestors while permitting a new file or directory suffix.
+/// Unreadable or dangling symlink ancestors cannot establish containment.
+fn resolve_path(path: &Path) -> std::io::Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
     let mut out = PathBuf::new();
-    for component in path.components() {
+    for component in absolute.components() {
         match component {
             Component::CurDir => {}
+            Component::Prefix(_) | Component::RootDir => out.push(component.as_os_str()),
             Component::ParentDir => {
                 out.pop();
             }
-            other => out.push(other.as_os_str()),
+            other => {
+                out.push(other.as_os_str());
+                match std::fs::canonicalize(&out) {
+                    Ok(resolved) => out = resolved,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        // A dangling link exists even though canonicalization
+                        // reports NotFound; treating it as a new file is unsafe.
+                        match std::fs::symlink_metadata(&out) {
+                            Err(missing) if missing.kind() == std::io::ErrorKind::NotFound => {}
+                            _ => return Err(error),
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Host extraction is the validation crate's, deliberately: the gate must see
@@ -295,6 +325,15 @@ mod tests {
         DestinationPolicy::new()
             .sanction_host("vault.internal")
             .workspace_root("/work/agent")
+    }
+
+    #[test]
+    fn caller_output_crosses_the_boundary_without_a_wrap_transport() {
+        let output = Destination::ExternalOutput;
+        assert!(output.is_external());
+        assert_eq!(output.class(), "caller-output");
+        assert_eq!(output.audit_detail(), "caller-output");
+        assert!(!policy().can_consume_tdf(&output));
     }
 
     #[test]
@@ -464,5 +503,43 @@ mod tests {
             url: "https://attacker.example/x".into()
         }));
         assert!(!policy.can_consume_tdf(&Destination::Unresolved { hint: "s3".into() }));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod symlink_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn resolves_symlinks_before_checking_workspace_containment() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("workspace");
+        let external = temp.path().join("external");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(external.join("child")).unwrap();
+        symlink(external.join("child"), root.join("link")).unwrap();
+        symlink(&root, temp.path().join("alias")).unwrap();
+        symlink(external.join("missing"), root.join("dangling")).unwrap();
+        let policy = DestinationPolicy::new().workspace_root(&root);
+        for suffix in ["link/new.txt", "link/../new.txt"] {
+            assert!(matches!(
+                policy.classify_path(suffix),
+                Destination::ExternalPath { .. }
+            ));
+        }
+        assert!(matches!(
+            policy.classify_path("new/subdir/file.txt"),
+            Destination::Workspace { .. }
+        ));
+        assert!(matches!(
+            policy.classify_path("dangling/file.txt"),
+            Destination::Unresolved { .. }
+        ));
+        let alias = temp.path().join("alias/new.txt");
+        assert!(matches!(
+            policy.classify_path(alias.to_str().unwrap()),
+            Destination::Workspace { .. }
+        ));
     }
 }

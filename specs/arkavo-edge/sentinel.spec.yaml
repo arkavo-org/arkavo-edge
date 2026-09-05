@@ -2,7 +2,7 @@
 
 feature: DLP Sentinel Classifier
 module: arkavo_sentinel
-version: 0.91.0
+version: 0.92.0
 
 invariants:
   - The sentinel labels; the policy decision point authorizes
@@ -32,8 +32,13 @@ scenarios:
     refs:
       - crates/arkavo-protocol/src/classification_evidence.rs:1-60
       - crates/arkavo-sentinel/src/scoring.rs:56-140
-    changed: "2026-08-30"
+      - crates/arkavo-cli/src/sentinel_wiring.rs:121-137
+      - crates/arkavo-protocol/src/egress_destination.rs:18-75
+      - crates/arkavo-protocol/src/egress_taint.rs:393-506
+    changed: "2026-09-04"
     edge_cases:
+      - condition: Evidence contains only Public labels and no inspection gap
+        expected: The egress policy may release it; a label alone is not a denial
       - condition: The policy decision point is unavailable
         expected: Content is held, not released on sentinel evidence alone
 
@@ -53,7 +58,8 @@ scenarios:
       - crates/arkavo-protocol/src/classification_evidence.rs:44-160
       - crates/arkavo-sentinel/src/pattern_tier.rs:1-75
       - crates/arkavo-fingerprint/src/tier.rs:96-135
-    changed: "2026-08-30"
+      - crates/arkavo-fingerprint/src/reference_match.rs:1-100
+    changed: "2026-09-04"
     edge_cases:
       - condition: A tier contributed no signal
         expected: The tier is recorded as consulted with no match, not omitted
@@ -143,7 +149,8 @@ scenarios:
       - crates/arkavo-sentinel/src/cascade.rs:1-135
       - crates/arkavo-fingerprint/src/near_tier.rs:1-60
       - crates/arkavo-sentinel/src/scoring.rs:150-200
-    changed: "2026-08-30"
+      - crates/arkavo-cli/src/sentinel_wiring.rs:176-187
+    changed: "2026-09-04"
     edge_cases:
       - condition: An earlier tier already fires the maximum label
         expected: Later tiers may still run for evidence but cannot lower the result
@@ -160,13 +167,17 @@ scenarios:
     then:
       - Tokens are released only after the window covering them has been inspected
       - Windows overlap so a label spanning a window boundary is still seen
-      - A held window that fires a label is never released
+      - A held window denied by the policy decision point is never released
       - Holdback latency percentiles are observable
     refs:
       - crates/arkavo-sentinel/src/holdback.rs:1-230
       - crates/arkavo-llm/src/release_gate.rs:1-175
       - crates/arkavo-cli/src/sentinel_wiring.rs:44-115
-    changed: "2026-08-30"
+      - crates/arkavo-llm/src/guarded_provider.rs:122-188
+      - crates/arkavo-router/src/response_policy.rs:1-24
+      - crates/arkavo-cli/src/lib.rs:40-48
+      - crates/arkavo-cli/tests/sentinel_canary.rs:1-242
+    changed: "2026-09-04"
     edge_cases:
       - condition: The completion ends mid-window
         expected: The final partial window is inspected before release
@@ -182,11 +193,14 @@ scenarios:
     then:
       - Every argument field is inspected in full before the tool runs
       - No argument is streamed to the tool incrementally
-      - A label firing on any field blocks the call before side effects occur
+      - Evidence from every field reaches policy before side effects occur
+      - A policy denial on any field blocks the complete call
       - Evidence names the field that fired
     refs:
       - crates/arkavo-server/src/server/egress_guard.rs:104-175
-    changed: "2026-08-30"
+      - crates/arkavo-llm/src/guarded_provider.rs:35-68
+      - crates/arkavo-server/src/server/conductor_planner.rs:231-326
+    changed: "2026-09-04"
     edge_cases:
       - condition: An argument is a nested structure
         expected: Nested values are inspected, not only the top level
@@ -205,8 +219,11 @@ scenarios:
     refs:
       - crates/arkavo-sentinel/src/holdback.rs:96-120
       - crates/arkavo-cli/src/sentinel_wiring.rs:52-70
-    changed: "2026-08-30"
+      - crates/arkavo-cli/src/sentinel_wiring.rs:166-174
+    changed: "2026-09-04"
     edge_cases:
+      - condition: Verified classification-ceiling metadata is unavailable
+        expected: The runtime uses Restricted and holds the entire completion until inspected
       - condition: A client requests streaming explicitly
         expected: The request is served without streaming rather than refused outright
 
@@ -285,9 +302,11 @@ scenarios:
       - The gap appears in the decision trace with the reason
       - Recovery is attempted on the next action rather than requiring a restart
     refs:
+      - crates/arkavo-sentinel/src/scoring.rs:100-155
+      - crates/arkavo-cli/src/sentinel_scorer.rs:176-229
       - crates/arkavo-sentinel/src/cascade.rs:31-60
       - crates/arkavo-protocol/src/classification_evidence.rs:160-215
-    changed: "2026-08-30"
+    changed: "2026-09-04"
     edge_cases:
       - condition: The sentinel is permanently absent on an egress-only node
         expected: The reference tiers still gate; absence is a configuration state, not an error per call
@@ -307,7 +326,9 @@ scenarios:
       - crates/arkavo-critic/src/checks/sentinel.rs:1-125
       - crates/arkavo-critic/src/pipeline.rs:100-125
       - crates/arkavo-critic/src/checks/circuit.rs:29-170
-    changed: "2026-08-30"
+      - crates/arkavo-cli/src/sentinel_wiring.rs:139-164
+      - crates/arkavo-llm/src/guarded_provider.rs:35-55
+    changed: "2026-09-04"
     edge_cases:
       - condition: The circuit check already blocked the action
         expected: The sentinel check is skipped; a block is not softened by later evidence
@@ -326,7 +347,8 @@ scenarios:
     refs:
       - crates/arkavo-sentinel/src/scoring.rs:60-95
       - crates/arkavo-sentinel/src/calibration.rs:70-80
-    changed: "2026-08-30"
+      - crates/arkavo-cli/src/sentinel_scorer.rs:1-100
+    changed: "2026-09-04"
     edge_cases:
       - condition: The taxonomy map adds a label the detector cannot emit
         expected: The pairing is accepted; the label is reachable only through other tiers
@@ -343,9 +365,11 @@ scenarios:
       - Queue depth is bounded and overflow holds content rather than dropping inspection
       - Latency percentiles for scoring are published separately from per-call overhead
     refs:
+      - crates/arkavo-llm/src/guarded_provider.rs:117-185
+      - crates/arkavo-fingerprint/src/near_tier.rs:86-120
       - crates/arkavo-sentinel/src/scoring.rs:160-235
       - crates/arkavo-sentinel/benches/holdback.rs:1-40
-    changed: "2026-08-30"
+    changed: "2026-09-04"
     edge_cases:
       - condition: The scoring queue is saturated
         expected: New spans are held pending inspection; none are released uninspected

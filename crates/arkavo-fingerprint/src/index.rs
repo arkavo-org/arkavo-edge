@@ -12,7 +12,9 @@
 //! they do not remove known ones, and a suppression list wired the other way
 //! would be the shortest path to violating that.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+pub use crate::reference_match::{MatchSummary, match_span};
 
 use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
 use serde::{Deserialize, Serialize};
@@ -91,6 +93,15 @@ pub struct ReferenceIndex {
     pub key_fingerprint: String,
     entries: HashMap<ShingleHash, EntryMeta>,
     suppression: SuppressionIndex,
+    #[serde(default)]
+    additional_entries: HashMap<ShingleHash, Vec<EntryMeta>>,
+    // Older indices did not record widths, so query every possible short span.
+    #[serde(default = "legacy_widths")]
+    pub(crate) short_widths: BTreeSet<usize>,
+}
+
+fn legacy_widths() -> BTreeSet<usize> {
+    (1..crate::shingle::SHINGLE_WORDS).collect()
 }
 
 impl ReferenceIndex {
@@ -100,6 +111,7 @@ impl ReferenceIndex {
             key_fingerprint: key.fingerprint(),
             documents: Vec::new(),
             suppressed_candidates: HashSet::new(),
+            short_widths: BTreeSet::new(),
         }
     }
 
@@ -123,6 +135,7 @@ impl ReferenceIndex {
     pub fn max_sensitivity(&self) -> SensitivityLevel {
         self.entries
             .values()
+            .chain(self.additional_entries.values().flatten())
             .map(|e| e.sensitivity)
             .max()
             .unwrap_or(SensitivityLevel::Public)
@@ -130,7 +143,12 @@ impl ReferenceIndex {
 
     /// Categories present, for deriving the wrap policy.
     pub fn categories(&self) -> Vec<DataCategory> {
-        let mut categories: Vec<DataCategory> = self.entries.values().map(|e| e.category).collect();
+        let mut categories: Vec<DataCategory> = self
+            .entries
+            .values()
+            .chain(self.additional_entries.values().flatten())
+            .map(|e| e.category)
+            .collect();
         categories.sort_unstable();
         categories.dedup();
         categories
@@ -140,6 +158,13 @@ impl ReferenceIndex {
     /// hash-map probe, so a miss costs the same as a hit.
     pub fn lookup(&self, hash: ShingleHash) -> Option<&EntryMeta> {
         self.entries.get(&hash)
+    }
+
+    /// Every label associated with a digest, including independent categories.
+    pub fn lookup_all(&self, hash: ShingleHash) -> impl Iterator<Item = &EntryMeta> {
+        self.lookup(hash)
+            .into_iter()
+            .chain(self.additional_entries.get(&hash).into_iter().flatten())
     }
 
     /// Confirm the supplied key built this index.
@@ -178,6 +203,7 @@ pub struct ReferenceIndexBuilder {
     /// suppressed depends on what else the document it came from still has.
     documents: Vec<(Vec<ShingleHash>, EntryMeta)>,
     suppressed_candidates: HashSet<ShingleHash>,
+    short_widths: BTreeSet<usize>,
 }
 
 impl ReferenceIndexBuilder {
@@ -195,7 +221,14 @@ impl ReferenceIndexBuilder {
         sensitivity: SensitivityLevel,
         source_family: &str,
     ) {
-        let hashes: Vec<ShingleHash> = shingle_text(text).iter().map(|s| key.hash(s)).collect();
+        let shingles = shingle_text(text);
+        if let Some(shingle) = shingles.first() {
+            let width = shingle.split(' ').count();
+            if width < crate::shingle::SHINGLE_WORDS {
+                self.short_widths.insert(width);
+            }
+        }
+        let hashes: Vec<ShingleHash> = shingles.iter().map(|s| key.hash(s)).collect();
         if hashes.is_empty() {
             return;
         }
@@ -238,20 +271,31 @@ impl ReferenceIndexBuilder {
             }
         }
 
-        let mut entries: HashMap<ShingleHash, EntryMeta> = HashMap::new();
+        let mut labels: HashMap<ShingleHash, Vec<EntryMeta>> = HashMap::new();
         for (hashes, meta) in self.documents.drain(..) {
             for hash in hashes {
                 if suppression.contains(hash) {
                     continue;
                 }
-                // A shared shingle takes the higher classification, for the same
-                // reason a taint union takes the maximum.
-                match entries.get(&hash) {
-                    Some(existing) if existing.sensitivity >= meta.sensitivity => {}
-                    _ => {
-                        entries.insert(hash, meta.clone());
-                    }
+                let entries = labels.entry(hash).or_default();
+                if let Some(existing) = entries.iter_mut().find(|entry| {
+                    entry.category == meta.category && entry.source_family == meta.source_family
+                }) {
+                    existing.sensitivity = existing.sensitivity.max(meta.sensitivity);
+                } else {
+                    entries.push(meta.clone());
                 }
+            }
+        }
+        let mut entries = HashMap::new();
+        let mut additional_entries = HashMap::new();
+        for (hash, mut labels) in labels {
+            labels.sort_by_key(|meta| meta.sensitivity);
+            if let Some(highest) = labels.pop() {
+                entries.insert(hash, highest);
+            }
+            if !labels.is_empty() {
+                additional_entries.insert(hash, labels);
             }
         }
 
@@ -260,61 +304,11 @@ impl ReferenceIndexBuilder {
             taxonomy_version: self.taxonomy_version,
             key_fingerprint: self.key_fingerprint,
             entries,
+            additional_entries,
+            short_widths: self.short_widths,
             suppression,
         }
     }
-}
-
-/// How much of a span the index recognized.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct MatchSummary {
-    pub shingles_examined: usize,
-    pub shingles_matched: usize,
-    /// Highest classification any matched shingle carried, per family.
-    pub by_family: BTreeMap<String, EntryMeta>,
-}
-
-impl MatchSummary {
-    /// Fraction of the span the index recognized, as a calibration input.
-    ///
-    /// Coverage rather than a raw count: one matching shingle in a long
-    /// document is a coincidence, the same shingle in a two-line span is the
-    /// document.
-    pub fn coverage(&self) -> f32 {
-        if self.shingles_examined == 0 {
-            return 0.0;
-        }
-        self.shingles_matched as f32 / self.shingles_examined as f32
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.shingles_matched == 0
-    }
-}
-
-/// Query an index with a span.
-pub fn match_span(index: &ReferenceIndex, key: &IndexKey, text: &str) -> MatchSummary {
-    let mut summary = MatchSummary::default();
-    for shingle in shingle_text(text) {
-        summary.shingles_examined += 1;
-        let hash = key.hash(&shingle);
-        if index.suppression.contains(hash) {
-            continue;
-        }
-        let Some(meta) = index.lookup(hash) else {
-            continue;
-        };
-        summary.shingles_matched += 1;
-        match summary.by_family.get(&meta.source_family) {
-            Some(existing) if existing.sensitivity >= meta.sensitivity => {}
-            _ => {
-                summary
-                    .by_family
-                    .insert(meta.source_family.clone(), meta.clone());
-            }
-        }
-    }
-    summary
 }
 
 #[cfg(test)]
