@@ -212,7 +212,7 @@ mod tests {
                 tier.examine_unbudgeted(&query),
                 tier.examine_until(&query, Instant::now() + Duration::from_secs(1)),
             ] {
-                assert_eq!(report.findings().len(), 1, "{secret}");
+                assert_eq!(report.findings().len(), 1, "one finding per planted secret");
                 assert_eq!(report.findings()[0].confidence, Confidence::CERTAIN);
             }
         }
