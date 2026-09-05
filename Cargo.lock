@@ -1606,7 +1606,6 @@ dependencies = [
  "arkavo-mcp",
  "arkavo-test-macros",
  "async-trait",
- "bytemuck",
  "chrono",
  "fastembed",
  "hnsw_rs",

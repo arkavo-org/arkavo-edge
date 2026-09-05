@@ -15,6 +15,22 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use uuid::Uuid;
 
+// Embeddings are written as little-endian f32 bytes (see `store_with_replay_state`,
+// which builds `embedding_blob` via `f.to_le_bytes()`). sqlx hands blobs back as a
+// plain `Vec<u8>` with no alignment guarantee -- an empty `Vec<u8>` even has a
+// dangling pointer with alignment 1 -- so casting the bytes to `&[f32]` in place
+// (e.g. via `bytemuck::cast_slice`) can panic on unaligned input. Decoding
+// f32-at-a-time with `from_le_bytes` copies out of the blob instead of reinterpreting
+// it, so it works regardless of the blob's alignment. Any trailing bytes that don't
+// fill a full 4-byte chunk are dropped rather than causing a panic.
+fn decode_embedding(blob: &[u8]) -> Vec<f32> {
+    blob.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
+        .collect()
+}
+
 // Lightweight struct for database queries that only need partial data
 #[derive(sqlx::FromRow)]
 struct MemoryRow {
@@ -383,12 +399,7 @@ impl MemoryStorage {
             let embedding_blob: Vec<u8> = row.get("embedding_blob");
             let id = Uuid::parse_str(&id_str)
                 .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
-            let embedding: Vec<f32> = embedding_blob
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|chunk| f32::from_le_bytes(*chunk))
-                .collect();
+            let embedding: Vec<f32> = decode_embedding(&embedding_blob);
             parsed.push((id, embedding));
         }
 
@@ -646,7 +657,7 @@ impl MemoryStorage {
             .ok_or(MemoryError::NotFound)?;
 
         let embedding_blob: Vec<u8> = row.get("embedding_blob");
-        let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
+        let embedding: Vec<f32> = decode_embedding(&embedding_blob);
 
         let metadata_str: Option<String> = row.get("metadata");
         let metadata = metadata_str
@@ -746,7 +757,7 @@ impl MemoryStorage {
                 .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
 
             let embedding_blob: Vec<u8> = row.get("embedding_blob");
-            let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
+            let embedding: Vec<f32> = decode_embedding(&embedding_blob);
 
             let metadata_str: Option<String> = row.get("metadata");
             let metadata = metadata_str
@@ -912,7 +923,7 @@ impl MemoryStorage {
             }
 
             let embedding_blob: Vec<u8> = row.get("embedding_blob");
-            let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
+            let embedding: Vec<f32> = decode_embedding(&embedding_blob);
 
             let metadata_str: Option<String> = row.get("metadata");
             let metadata = metadata_str
@@ -1039,13 +1050,7 @@ impl MemoryStorage {
         for row in rows {
             if let Some(category) = row.category {
                 // Convert binary blob to f32 vector
-                let mem_embedding: Vec<f32> = row
-                    .embedding_blob
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|chunk| f32::from_le_bytes(*chunk))
-                    .collect();
+                let mem_embedding: Vec<f32> = decode_embedding(&row.embedding_blob);
                 let score = EmbeddingService::cosine_similarity(&embedding, &mem_embedding);
 
                 if score > best_score {
@@ -1236,5 +1241,42 @@ mod tests {
             MemoryStorage::sanitize_fts5_word("hello\"world"),
             "hello\"world"
         );
+    }
+
+    // Regression test for a Linux-only panic: `bytemuck::cast_slice::<u8, f32>`
+    // requires the input slice to be 4-byte aligned, but a `Vec<u8>` returned by
+    // sqlx carries no such guarantee. Slicing off a leading byte here reproduces
+    // an unaligned blob the way sqlx can hand one back; `decode_embedding` must
+    // decode it without relying on the slice's address.
+    #[test]
+    fn test_decode_embedding_handles_misaligned_blob() {
+        let values: [f32; 3] = [1.0, -2.5, 3.25];
+        let mut bytes = vec![0u8]; // leading pad byte forces misalignment below
+        for v in values {
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+
+        let misaligned = &bytes[1..];
+        assert_ne!(
+            misaligned
+                .as_ptr()
+                .align_offset(std::mem::align_of::<f32>()),
+            0,
+            "test setup should produce a misaligned slice"
+        );
+
+        assert_eq!(decode_embedding(misaligned), values.to_vec());
+    }
+
+    #[test]
+    fn test_decode_embedding_empty_blob_yields_empty_vec() {
+        assert_eq!(decode_embedding(&[]), Vec::<f32>::new());
+    }
+
+    #[test]
+    fn test_decode_embedding_ignores_trailing_partial_chunk() {
+        let mut bytes = 1.5f32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&[0xAA, 0xBB, 0xCC]); // 3 stray bytes, not a full f32
+        assert_eq!(decode_embedding(&bytes), vec![1.5]);
     }
 }
