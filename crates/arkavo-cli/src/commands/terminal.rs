@@ -294,7 +294,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                             eprintln!("[LLM Task] Streaming via Direct LLM");
                         }
                         let mut full_response = String::new();
-                        let mut response_items = Vec::new();
+                        let mut provider_state = arkavo_llm::ProviderState::default();
 
                         let _ = llm_tx.send("<<STREAM_START>>".to_string()).await;
 
@@ -307,7 +307,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                                         break;
                                     }
                                     if response.done {
-                                        response_items = response.response_items;
+                                        provider_state = response.provider_state;
                                         break;
                                     }
                                 }
@@ -322,7 +322,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
 
                         let mut assistant = Message::assistant(full_response);
-                        assistant.response_items = response_items;
+                        assistant.provider_state = provider_state;
                         messages_clone.push(assistant);
 
                         if SHOW_DEBUG.load(Ordering::Relaxed) {

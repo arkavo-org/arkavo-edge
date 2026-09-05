@@ -1,3 +1,4 @@
+use crate::provider_state::ProviderState;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,10 +28,10 @@ pub struct ToolCall {
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Message {
-    /// Provider-owned conversation items, replayed only by Responses providers.
-    /// These are opaque state, never user-facing reasoning text.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub response_items: Vec<serde_json::Value>,
+    /// Provider-owned conversation items, replayed only by the wire family that
+    /// produced them. These are opaque state, never user-facing reasoning text.
+    #[serde(default, skip_serializing_if = "ProviderState::is_empty")]
+    pub provider_state: ProviderState,
     pub role: Role,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,7 +52,7 @@ pub struct Message {
 impl Message {
     pub fn system(content: impl Into<String>) -> Self {
         Self {
-            response_items: Vec::new(),
+            provider_state: ProviderState::default(),
             role: Role::System,
             content: content.into(),
             images: None,
@@ -63,7 +64,7 @@ impl Message {
 
     pub fn user(content: impl Into<String>) -> Self {
         Self {
-            response_items: Vec::new(),
+            provider_state: ProviderState::default(),
             role: Role::User,
             content: content.into(),
             images: None,
@@ -75,7 +76,7 @@ impl Message {
 
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
-            response_items: Vec::new(),
+            provider_state: ProviderState::default(),
             role: Role::Assistant,
             content: content.into(),
             images: None,
@@ -93,7 +94,7 @@ impl Message {
         tool_calls: Vec<ToolCall>,
     ) -> Self {
         Self {
-            response_items: Vec::new(),
+            provider_state: ProviderState::default(),
             role: Role::Assistant,
             content: content.into(),
             images: None,
@@ -112,7 +113,7 @@ impl Message {
         name: impl Into<String>,
     ) -> Self {
         Self {
-            response_items: Vec::new(),
+            provider_state: ProviderState::default(),
             role: Role::Tool,
             content: content.into(),
             images: None,
@@ -124,7 +125,7 @@ impl Message {
 
     pub fn user_with_images(content: impl Into<String>, images: Vec<String>) -> Self {
         Self {
-            response_items: Vec::new(),
+            provider_state: ProviderState::default(),
             role: Role::User,
             content: content.into(),
             images: Some(images),
@@ -163,7 +164,7 @@ impl std::fmt::Debug for Message {
             .field("tool_call_id", &self.tool_call_id)
             .field("tool_name", &self.tool_name)
             .field("tool_calls", &self.tool_calls)
-            .field("response_items_count", &self.response_items.len())
+            .field("provider_state", &self.provider_state)
             .finish()
     }
 }

@@ -181,11 +181,10 @@ fn convert_messages_to_deepseek_provider(
 /// Convert arkavo-deepseek stream response to arkavo-llm stream response
 fn convert_stream_response(resp: arkavo_deepseek::StreamResponse) -> StreamResponse {
     StreamResponse {
-        response_items: Vec::new(),
         content: resp.content.unwrap_or_default(),
         reasoning_content: resp.reasoning_content,
         done: resp.done,
-        inference_timing: None,
+        ..Default::default()
     }
 }
 
@@ -334,13 +333,11 @@ impl Provider for DeepSeekProvider {
         let finish_reason = first_choice.finish_reason.clone();
 
         Ok(ProviderResponse {
-            response_items: Vec::new(),
             content: first_choice.message.content.clone().unwrap_or_default(),
             reasoning_content: first_choice.message.reasoning_content.clone(),
             tool_calls: parsed_tool_calls,
             finish_reason,
-            inference_timing: None,
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 }

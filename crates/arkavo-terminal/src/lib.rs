@@ -365,13 +365,13 @@ pub async fn run() -> Result<()> {
                                 .await;
 
                             let mut full_response = String::new();
-                            let mut response_items = Vec::new();
+                            let mut provider_state = arkavo_llm::ProviderState::default();
 
                             while let Some(chunk_result) = stream.next().await {
                                 match chunk_result {
                                     Ok(chunk) => {
                                         if chunk.done {
-                                            response_items = chunk.response_items;
+                                            provider_state = chunk.provider_state;
                                         }
                                         if !chunk.content.is_empty() {
                                             full_response.push_str(&chunk.content);
@@ -485,7 +485,7 @@ pub async fn run() -> Result<()> {
 
                             // Send the full response back to be added to conversation history
                             let mut assistant = Message::assistant(full_response);
-                            assistant.response_items = response_items;
+                            assistant.provider_state = provider_state;
                             let _ = response_tx.send(assistant).await;
                         }
                         Err(e) => {

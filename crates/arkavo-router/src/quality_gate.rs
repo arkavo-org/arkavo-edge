@@ -819,23 +819,19 @@ impl super::Router {
 // A rejected tool call still needs an output paired to its native ID before
 // Responses can continue the conversation. Nothing in this retry was executed.
 fn append_rejected_response(messages: &mut Vec<Message>, response: &ProviderResponse) {
-    if response.response_items.is_empty() {
+    if response.provider_state.is_empty() {
         messages.push(Message::assistant(response.content.clone()));
         return;
     }
     messages.push(response.as_assistant_message());
-    for item in &response.response_items {
-        if item.get("type").and_then(serde_json::Value::as_str) == Some("function_call")
-            && let Some(id) = item.get("call_id").and_then(serde_json::Value::as_str)
-        {
-            messages.push(Message::tool_result(
-                "Tool call rejected by response validation; it was not executed.",
-                id,
-                item.get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("tool"),
-            ));
-        }
+    for (id, name) in response.provider_state.native_calls() {
+        messages.push(Message::tool_result(
+            "Tool call rejected by response validation; it was not executed.",
+            id,
+            // A provider that recorded a call but omitted its name still needs
+            // an answer, so it is attributed to a generic tool, not dropped.
+            if name.is_empty() { "tool" } else { name },
+        ));
     }
 }
 
@@ -903,10 +899,10 @@ mod tests {
     #[test]
     fn validation_retry_preserves_reasoning_and_resolves_tool_ids() {
         let response = arkavo_llm::ProviderResponse {
-            response_items: vec![
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
                 serde_json::json!({"type":"reasoning","id":"reasoning-1","encrypted_content":"opaque"}),
                 serde_json::json!({"type":"function_call","call_id":"call-1","name":"read","arguments":"{}"}),
-            ],
+            ]),
             tool_calls: vec![arkavo_llm::tool_parser::ParsedToolCall {
                 tool_name: "read".into(),
                 arguments: serde_json::json!({}),
@@ -917,7 +913,7 @@ mod tests {
         let mut messages = Vec::new();
         super::append_rejected_response(&mut messages, &response);
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].response_items, response.response_items);
+        assert_eq!(messages[0].provider_state, response.provider_state);
         assert_eq!(messages[1].tool_call_id.as_deref(), Some("call-1"));
         assert!(messages[1].content.contains("not executed"));
     }

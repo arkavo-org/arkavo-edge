@@ -108,11 +108,10 @@ fn convert_messages_to_kimi(messages: Vec<Message>) -> Vec<arkavo_kimi::Message>
 /// Convert arkavo-kimi stream response to arkavo-llm stream response
 fn convert_stream_response(resp: arkavo_kimi::StreamResponse) -> StreamResponse {
     StreamResponse {
-        response_items: Vec::new(),
         content: resp.content,
         reasoning_content: resp.reasoning_content,
         done: resp.done,
-        inference_timing: None,
+        ..Default::default()
     }
 }
 

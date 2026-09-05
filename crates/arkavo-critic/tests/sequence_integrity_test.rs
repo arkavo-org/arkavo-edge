@@ -10,13 +10,13 @@ fn make_input(text: &str) -> VerificationInput {
     VerificationInput::new(
         text.into(),
         ProviderResponse {
-            response_items: Vec::new(),
             content: text.to_string(),
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         },
         vec![],
     )

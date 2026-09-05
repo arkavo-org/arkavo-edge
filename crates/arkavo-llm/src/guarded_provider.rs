@@ -178,7 +178,6 @@ impl Provider for GuardedProvider {
                             &mut *reasoning.lock().unwrap_or_else(|e| e.into_inner()),
                         );
                         let response = ProviderResponse {
-                            response_items: Vec::new(),
                             content: completion.clone(),
                             reasoning_content: Some(text.clone()),
                             ..Default::default()

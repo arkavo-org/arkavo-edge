@@ -121,13 +121,13 @@ mod tests {
     #[test]
     fn test_verification_input_creation() {
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "Test".to_string(),
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("prompt".to_string(), response, vec![])

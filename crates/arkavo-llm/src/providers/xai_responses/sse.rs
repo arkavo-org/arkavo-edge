@@ -81,11 +81,8 @@ pub(super) fn handle_sse_data_line(
             return SseAction::Finished;
         }
         return SseAction::Emit(StreamResponse {
-            response_items: Vec::new(),
-            content: String::new(),
-            reasoning_content: None,
             done: true,
-            inference_timing: None,
+            ..Default::default()
         });
     }
 
@@ -97,11 +94,8 @@ pub(super) fn handle_sse_data_line(
         "response.output_text.delta" => {
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                 SseAction::Emit(StreamResponse {
-                    response_items: Vec::new(),
                     content: delta.to_string(),
-                    reasoning_content: None,
-                    done: false,
-                    inference_timing: None,
+                    ..Default::default()
                 })
             } else {
                 SseAction::Ignore
@@ -110,11 +104,8 @@ pub(super) fn handle_sse_data_line(
         "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                 SseAction::Emit(StreamResponse {
-                    response_items: Vec::new(),
-                    content: String::new(),
                     reasoning_content: Some(delta.to_string()),
-                    done: false,
-                    inference_timing: None,
+                    ..Default::default()
                 })
             } else {
                 SseAction::Ignore
@@ -132,11 +123,9 @@ pub(super) fn handle_sse_data_line(
                 Some(timing_from_usage(&usage))
             });
             SseAction::Emit(StreamResponse {
-                response_items: Vec::new(),
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
                 inference_timing: timing,
+                ..Default::default()
             })
         }
         "response.failed" => {

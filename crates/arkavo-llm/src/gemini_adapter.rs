@@ -187,7 +187,6 @@ impl Provider for GeminiProvider {
         let adapter_stream = gemini_stream.map(|result| {
             result
                 .map(|response| StreamResponse {
-                    response_items: Vec::new(),
                     content: response.text.unwrap_or_default(),
                     // Surface Gemini 3.5 thought-summary segments via the
                     // standard reasoning-content channel.
@@ -196,6 +195,7 @@ impl Provider for GeminiProvider {
                     // Token usage only arrives on the terminal chunk;
                     // intermediate deltas get `None`.
                     inference_timing: response.usage.as_ref().map(timing_from_usage),
+                    ..Default::default()
                 })
                 .map_err(|e| Error::Stream(format!("Stream error: {e}")))
         });
@@ -321,7 +321,6 @@ impl Provider for GeminiProvider {
             .collect();
 
         Ok(ProviderResponse {
-            response_items: Vec::new(),
             content: accumulated_text,
             reasoning_content: if accumulated_thought.is_empty() {
                 None
@@ -329,9 +328,8 @@ impl Provider for GeminiProvider {
                 Some(accumulated_thought)
             },
             tool_calls: parsed_tool_calls,
-            finish_reason: None,
             inference_timing: last_usage.as_ref().map(timing_from_usage),
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 }

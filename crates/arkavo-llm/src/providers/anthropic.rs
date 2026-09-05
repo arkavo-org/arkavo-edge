@@ -746,11 +746,9 @@ impl Provider for AnthropicProvider {
                                 if let Some((content, done)) = delivery
                                     && tx
                                         .send(Ok(StreamResponse {
-                                            response_items: Vec::new(),
                                             content,
-                                            reasoning_content: None,
                                             done,
-                                            inference_timing: None,
+                                            ..Default::default()
                                         }))
                                         .await
                                         .is_err()
@@ -857,7 +855,6 @@ impl Provider for AnthropicProvider {
         }
 
         Ok(ProviderResponse {
-            response_items: Vec::new(),
             content: text_content,
             reasoning_content: if reasoning.is_empty() {
                 None
@@ -866,8 +863,7 @@ impl Provider for AnthropicProvider {
             },
             tool_calls,
             finish_reason: message.stop_reason,
-            inference_timing: None,
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 }

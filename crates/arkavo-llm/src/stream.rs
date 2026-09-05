@@ -1,11 +1,12 @@
 use crate::provider::InferenceTiming;
+use crate::provider_state::ProviderState;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct StreamResponse {
-    /// Opaque Responses state, populated only on successful terminal chunks.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub response_items: Vec<serde_json::Value>,
+    /// Opaque provider state, populated only on successful terminal chunks.
+    #[serde(default, skip_serializing_if = "ProviderState::is_empty")]
+    pub provider_state: ProviderState,
     pub content: String,
     /// Reasoning/thinking content from models with thinking mode (e.g., DeepSeek V3.2-Speciale)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -23,7 +24,7 @@ impl std::fmt::Debug for StreamResponse {
             .field("reasoning_content", &self.reasoning_content)
             .field("done", &self.done)
             .field("inference_timing", &self.inference_timing)
-            .field("response_items_count", &self.response_items.len())
+            .field("provider_state", &self.provider_state)
             .finish()
     }
 }

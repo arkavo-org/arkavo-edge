@@ -191,13 +191,13 @@ mod tests {
         VerificationInput::new(
             "test".into(),
             ProviderResponse {
-                response_items: Vec::new(),
                 content: String::new(),
                 reasoning_content: None,
                 tool_calls: vec![],
                 finish_reason: None,
                 inference_timing: None,
                 quality_gate_retries: 0,
+                ..Default::default()
             },
             vec![],
         )

@@ -321,7 +321,7 @@ pub async fn process_with_tools(
             // Not architect mode - convert RouteResponse to ProviderResponse
             let result = stream.complete().await?;
             ProviderResponse {
-                response_items: result.response_items,
+                provider_state: result.provider_state,
                 content: result.content,
                 reasoning_content: result.reasoning_content,
                 tool_calls: result.tool_calls,
@@ -969,10 +969,10 @@ mod tests {
     fn every_native_function_call_gets_a_paired_result() {
         // A Responses turn always parses one call per function_call item.
         let response = ProviderResponse {
-            response_items: vec![
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
                 function_call_item("fc_1", "read_file"),
                 function_call_item("fc_2", "list_dir"),
-            ],
+            ]),
             tool_calls: vec![
                 ParsedToolCall {
                     tool_name: "read_file".into(),
@@ -994,8 +994,7 @@ mod tests {
                 executed("list_dir", Some("fc_2")),
             ],
         );
-        for item in &response.response_items {
-            let call_id = item["call_id"].as_str().unwrap();
+        for call_id in response.provider_state.native_call_ids() {
             assert!(
                 messages
                     .iter()
@@ -1025,7 +1024,9 @@ mod tests {
     #[test]
     fn prose_extracted_results_stay_a_user_message() {
         let response = ProviderResponse {
-            response_items: vec![serde_json::json!({"type": "reasoning", "id": "rs_1"})],
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                serde_json::json!({"type": "reasoning", "id": "rs_1"}),
+            ]),
             tool_calls: vec![ParsedToolCall {
                 tool_name: "read_file".into(),
                 arguments: serde_json::json!({}),
@@ -1057,13 +1058,13 @@ mod tests {
     async fn critic_blocks_unsafe_content_before_execution() {
         let critic = arkavo_critic::default_pipeline();
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "Here is an api_key: secret123".to_string(),
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result =
@@ -1075,13 +1076,13 @@ mod tests {
     async fn critic_validates_schema_on_tool_call_path() {
         let critic = arkavo_critic::default_pipeline();
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "Calling tool".to_string(),
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
         let tool_calls = vec![ParsedToolCall {
             tool_name: "unknown_tool".to_string(),

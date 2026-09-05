@@ -105,8 +105,8 @@ impl Deliberator {
                 tool_calls: vec![],
                 finish_reason: None,
                 inference_timing: None,
-                response_items: Vec::new(),
                 quality_gate_retries: 0,
+                ..Default::default()
             }
         };
 
@@ -189,8 +189,8 @@ impl Deliberator {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
-            response_items: Vec::new(),
             quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 
@@ -293,8 +293,8 @@ Otherwise, list the specific issues found."#,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
-            response_items: Vec::new(),
             quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 
@@ -350,8 +350,8 @@ Otherwise, list the specific issues found."#,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
-            response_items: Vec::new(),
             quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 }

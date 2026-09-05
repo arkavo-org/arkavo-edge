@@ -32,13 +32,10 @@ async fn test_gpt4o_vision_basic() {
     let test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
     let messages = vec![Message {
-        response_items: Vec::new(),
         role: Role::User,
         content: "What color is this image? Reply with just the color name.".to_string(),
         images: Some(vec![test_image_base64.to_string()]),
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let response = provider
@@ -78,22 +75,15 @@ async fn test_gpt4o_vision_with_text() {
 
     let messages = vec![
         Message {
-            response_items: Vec::new(),
             role: Role::System,
             content: "You are an image analysis assistant.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         },
         Message {
-            response_items: Vec::new(),
             role: Role::User,
             content: "Describe this image in one sentence.".to_string(),
             images: Some(vec![test_image_base64]),
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         },
     ];
 
@@ -128,15 +118,12 @@ async fn test_gpt4o_multiple_images() {
     let blue_pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==";
 
     let messages = vec![Message {
-        response_items: Vec::new(),
         role: Role::User,
         content:
             "I'm showing you two images. Are they the same color? Reply with just 'yes' or 'no'."
                 .to_string(),
         images: Some(vec![red_pixel.to_string(), blue_pixel.to_string()]),
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let response = provider
@@ -171,15 +158,12 @@ async fn test_gpt4o_vision_streaming() {
     let test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
     let messages = vec![Message {
-        response_items: Vec::new(),
         role: Role::User,
         content:
             "Describe this image in detail, mentioning its color, size, and any patterns you see."
                 .to_string(),
         images: Some(vec![test_image_base64.to_string()]),
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     use futures::StreamExt;
@@ -232,13 +216,10 @@ async fn test_non_vision_model_with_image_fails() {
     let test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
     let messages = vec![Message {
-        response_items: Vec::new(),
         role: Role::User,
         content: "What do you see in this image?".to_string(),
         images: Some(vec![test_image_base64.to_string()]),
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let result = provider.complete(messages).await;
@@ -294,13 +275,10 @@ async fn test_gpt4o_with_local_image_file() {
     let encoded_image = base64_engine.encode(&image_data);
 
     let messages = vec![Message {
-        response_items: Vec::new(),
         role: Role::User,
         content: "What's in this image? Describe it briefly.".to_string(),
         images: Some(vec![encoded_image]),
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let response = provider

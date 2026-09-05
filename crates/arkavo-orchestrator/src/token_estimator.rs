@@ -89,7 +89,6 @@ mod tests {
     #[test]
     fn test_tokens_from_response_uses_inference_timing() {
         let resp = ProviderResponse {
-            response_items: Vec::new(),
             content: "short".to_string(),
             reasoning_content: None,
             tool_calls: vec![],
@@ -108,6 +107,7 @@ mod tests {
                 avg_logprob: None,
             }),
             quality_gate_retries: 0,
+            ..Default::default()
         };
         let (input, output) = tokens_from_response("long prompt text here", &resp);
         assert_eq!(input, 123, "should use provider-reported value");
@@ -117,13 +117,13 @@ mod tests {
     #[test]
     fn test_tokens_from_response_falls_back() {
         let resp = ProviderResponse {
-            response_items: Vec::new(),
             content: "a response body".to_string(),
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
         let (input, output) = tokens_from_response("the prompt text", &resp);
         assert!(input > 0);

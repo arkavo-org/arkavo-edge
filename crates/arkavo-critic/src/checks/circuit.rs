@@ -181,13 +181,13 @@ mod tests {
 
     fn make_response(content: &str, tool_calls: Vec<ParsedToolCall>) -> ProviderResponse {
         ProviderResponse {
-            response_items: Vec::new(),
             content: content.to_string(),
             reasoning_content: None,
             tool_calls,
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         }
     }
 

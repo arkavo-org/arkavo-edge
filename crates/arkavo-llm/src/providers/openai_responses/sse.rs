@@ -111,10 +111,7 @@ fn event(data: &str, emitted: &mut String) -> Result<Option<StreamResponse>> {
             emitted.push_str(delta);
             Ok(Some(StreamResponse {
                 content: delta.into(),
-                reasoning_content: None,
-                done: false,
-                inference_timing: None,
-                response_items: Vec::new(),
+                ..Default::default()
             }))
         }
         Some("response.completed") => {
@@ -137,7 +134,7 @@ fn event(data: &str, emitted: &mut String) -> Result<Option<StreamResponse>> {
                 reasoning_content: None,
                 done: true,
                 inference_timing: response.inference_timing,
-                response_items: response.response_items,
+                provider_state: response.provider_state,
             }))
         }
         Some("response.failed" | "response.incomplete") => {
@@ -184,7 +181,13 @@ mod tests {
         let chunk = event(&data, &mut "hel".into()).unwrap().unwrap();
         assert_eq!(chunk.content, "lo");
         assert!(chunk.done);
-        assert_eq!(chunk.response_items.len(), 1);
+        assert_eq!(
+            chunk
+                .provider_state
+                .replay_items_for(crate::ProviderStateTag::OpenAiResponses)
+                .map(|items| items.len()),
+            Some(1)
+        );
     }
 
     #[arkavo_test_macros::spec("ASTRA-003")]

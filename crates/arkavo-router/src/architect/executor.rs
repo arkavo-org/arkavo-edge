@@ -331,7 +331,6 @@ mod tests {
         let executor = ArchitectExecutor::new(Arc::new(router));
 
         let resp = ProviderResponse {
-            response_items: Vec::new(),
             content: "hello".into(),
             inference_timing: Some(arkavo_llm::InferenceTiming {
                 n_cached_prompt_eval: None,
@@ -356,7 +355,6 @@ mod tests {
 
         // n_eval and n_thinking_eval are disjoint; cost must sum them once.
         let with_thinking = ProviderResponse {
-            response_items: Vec::new(),
             content: "hello".into(),
             inference_timing: Some(arkavo_llm::InferenceTiming {
                 n_cached_prompt_eval: None,

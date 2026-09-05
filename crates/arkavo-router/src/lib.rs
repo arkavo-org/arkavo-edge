@@ -175,7 +175,7 @@ impl RouterEvent {
 use arkavo_identity::IdentitySession;
 #[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
-use arkavo_llm::{Message, Role};
+use arkavo_llm::{Message, ProviderState, Role};
 use arkavo_mcp_tools::ToolRegistry;
 use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
@@ -1333,7 +1333,7 @@ impl Router {
                 let response = RouteResponse {
                     content: arch_result.final_response,
                     tool_calls: Vec::new(),
-                    response_items: Vec::new(),
+                    provider_state: ProviderState::default(),
                     reasoning_content: None,
                     inference_timing: None,
                     // Attribute the run to the model that planned it, not a
@@ -1366,7 +1366,7 @@ impl Router {
         let response = RouteResponse {
             content: provider_response.content,
             tool_calls: provider_response.tool_calls,
-            response_items: provider_response.response_items,
+            provider_state: provider_response.provider_state,
             reasoning_content: provider_response.reasoning_content,
             inference_timing: provider_response.inference_timing,
             model,
@@ -1467,7 +1467,7 @@ impl Router {
         let response = RouteResponse {
             content: response.content,
             tool_calls: response.tool_calls,
-            response_items: response.response_items,
+            provider_state: response.provider_state,
             reasoning_content: response.reasoning_content,
             inference_timing: response.inference_timing,
             model,

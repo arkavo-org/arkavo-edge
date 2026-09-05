@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::decision::ModelChoice;
-use arkavo_llm::{InferenceTiming, ParsedToolCall};
+use arkavo_llm::{InferenceTiming, ParsedToolCall, ProviderState};
 use futures::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -16,7 +16,7 @@ pub struct RouteStream {
     accumulated: String,
     /// Tool calls from the response (populated when created from_response)
     tool_calls: Vec<ParsedToolCall>,
-    response_items: Vec<serde_json::Value>,
+    provider_state: ProviderState,
     reasoning_content: Option<String>,
     inference_timing: Option<InferenceTiming>,
     architect_savings: Option<f64>,
@@ -49,8 +49,8 @@ pub struct RouteResponse {
     pub content: String,
     /// Tool calls requested by the model (if any)
     pub tool_calls: Vec<ParsedToolCall>,
-    /// Opaque Responses items needed for stateless tool continuations.
-    pub response_items: Vec<serde_json::Value>,
+    /// Opaque provider state needed for stateless tool continuations.
+    pub provider_state: ProviderState,
     pub reasoning_content: Option<String>,
     pub inference_timing: Option<InferenceTiming>,
     /// The model that produced this response
@@ -74,7 +74,7 @@ impl RouteStream {
             metadata,
             accumulated: String::new(),
             tool_calls: Vec::new(),
-            response_items: Vec::new(),
+            provider_state: ProviderState::default(),
             reasoning_content: None,
             inference_timing: None,
             architect_savings: None,
@@ -103,7 +103,7 @@ impl RouteStream {
             metadata,
             accumulated: String::new(),
             tool_calls,
-            response_items: response.response_items,
+            provider_state: response.provider_state,
             reasoning_content: response.reasoning_content,
             inference_timing: response.inference_timing,
             architect_savings: response.architect_savings,
@@ -131,7 +131,7 @@ impl RouteStream {
         Ok(RouteResponse {
             content: self.accumulated,
             tool_calls: self.tool_calls,
-            response_items: self.response_items,
+            provider_state: self.provider_state,
             reasoning_content: self.reasoning_content,
             inference_timing: self.inference_timing,
             model: self.metadata.model,
@@ -161,9 +161,9 @@ mod tests {
         let response = RouteResponse {
             content: "Hello, world!".to_string(),
             tool_calls: vec![],
-            response_items: vec![
+            provider_state: ProviderState::openai_responses(vec![
                 serde_json::json!({"type":"reasoning", "encrypted_content":"opaque"}),
-            ],
+            ]),
             reasoning_content: Some("Summary".into()),
             inference_timing: None,
             model: ModelChoice::LocalGemma270M,
@@ -177,7 +177,11 @@ mod tests {
 
         let result = stream.complete().await.unwrap();
         assert_eq!(result.content, "Hello, world!");
-        assert_eq!(result.response_items[0]["encrypted_content"], "opaque");
+        let items = result
+            .provider_state
+            .replay_items_for(arkavo_llm::ProviderStateTag::OpenAiResponses)
+            .expect("openai state is replayable");
+        assert_eq!(items[0]["encrypted_content"], "opaque");
         assert_eq!(result.reasoning_content.as_deref(), Some("Summary"));
     }
 

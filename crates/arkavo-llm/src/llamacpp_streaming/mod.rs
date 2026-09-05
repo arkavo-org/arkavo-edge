@@ -385,11 +385,8 @@ async fn generate_tokens_pooled_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
-                        response_items: Vec::new(),
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -411,11 +408,8 @@ async fn generate_tokens_pooled_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
-                        response_items: Vec::new(),
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -449,11 +443,8 @@ async fn generate_tokens_pooled_baseline(
             if !piece.is_empty()
                 && tx
                     .send(Ok(StreamResponse {
-                        response_items: Vec::new(),
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }))
                     .is_err()
             {
@@ -476,11 +467,8 @@ async fn generate_tokens_pooled_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
-                        response_items: Vec::new(),
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -515,11 +503,9 @@ async fn generate_tokens_pooled_baseline(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
-                response_items: Vec::new(),
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
                 inference_timing: Some(timing),
+                ..Default::default()
             }));
         }
         Err(e) => {
@@ -737,11 +723,8 @@ async fn generate_tokens_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
-                        response_items: Vec::new(),
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -761,11 +744,8 @@ async fn generate_tokens_baseline(
             // so downstream consumers (process_stream) can detect and suppress them
             if special_text == "<think>" || special_text == "</think>" {
                 let _ = tx.send(Ok(StreamResponse {
-                    response_items: Vec::new(),
                     content: special_text,
-                    reasoning_content: None,
-                    done: false,
-                    inference_timing: None,
+                    ..Default::default()
                 }));
             }
 
@@ -784,11 +764,8 @@ async fn generate_tokens_baseline(
                     let piece = extract_valid_utf8(&mut utf8_buffer);
                     if !piece.is_empty() {
                         let _ = tx.send(Ok(StreamResponse {
-                            response_items: Vec::new(),
                             content: piece,
-                            reasoning_content: None,
-                            done: false,
-                            inference_timing: None,
+                            ..Default::default()
                         }));
                     }
                 }
@@ -808,11 +785,8 @@ async fn generate_tokens_baseline(
                     let piece = extract_valid_utf8(&mut utf8_buffer);
                     if !piece.is_empty() {
                         let _ = tx.send(Ok(StreamResponse {
-                            response_items: Vec::new(),
                             content: piece,
-                            reasoning_content: None,
-                            done: false,
-                            inference_timing: None,
+                            ..Default::default()
                         }));
                     }
                 }
@@ -838,11 +812,8 @@ async fn generate_tokens_baseline(
             // Only send if we have content
             if !piece.is_empty() {
                 let response = StreamResponse {
-                    response_items: Vec::new(),
                     content: piece,
-                    reasoning_content: None,
-                    done: false,
-                    inference_timing: None,
+                    ..Default::default()
                 };
 
                 if tx.send(Ok(response)).is_err() {
@@ -873,11 +844,8 @@ async fn generate_tokens_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
-                        response_items: Vec::new(),
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -908,11 +876,9 @@ async fn generate_tokens_baseline(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
-                response_items: Vec::new(),
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
                 inference_timing: Some(timing),
+                ..Default::default()
             }));
         }
         Err(e) => {

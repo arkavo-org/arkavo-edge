@@ -97,11 +97,11 @@ impl Provider for OutputProvider {
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
         // Text on the done chunk must survive admission and final inspection.
         Ok(Box::new(futures::stream::iter(vec![Ok(StreamResponse {
-            response_items: Vec::new(),
             content: self.0.content.clone(),
             reasoning_content: self.0.reasoning_content.clone(),
             done: true,
             inference_timing: None,
+            ..Default::default()
         })])))
     }
 
@@ -116,7 +116,6 @@ fn provider(response: ProviderResponse) -> Box<dyn Provider> {
 
 fn content(text: &str) -> ProviderResponse {
     ProviderResponse {
-        response_items: Vec::new(),
         content: text.into(),
         ..Default::default()
     }
@@ -183,7 +182,6 @@ async fn registered_policy_protects_all_provider_output_paths() {
     assert_withheld(tools.complete_with_tools(vec![], None, None).await);
 
     let reasoning = provider(ProviderResponse {
-        response_items: Vec::new(),
         reasoning_content: Some(CANARY.into()),
         ..content(CLEAN)
     });
@@ -192,7 +190,6 @@ async fn registered_policy_protects_all_provider_output_paths() {
 
     // Classification is over the whole output, including field boundaries.
     let split = provider(ProviderResponse {
-        response_items: Vec::new(),
         reasoning_content: Some("status remains private".into()),
         ..content("cerulean permit")
     });

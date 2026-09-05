@@ -202,13 +202,13 @@ mod tests {
 
     fn response(content: &str) -> ProviderResponse {
         ProviderResponse {
-            response_items: Vec::new(),
             content: content.to_string(),
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         }
     }
 
@@ -344,7 +344,6 @@ mod tests {
         let input = VerificationInput::new(
             "Test".to_string(),
             ProviderResponse {
-                response_items: Vec::new(),
                 content: "The password is secret123".to_string(),
                 reasoning_content: None,
                 tool_calls: vec![ParsedToolCall {
@@ -355,6 +354,7 @@ mod tests {
                 finish_reason: None,
                 inference_timing: None,
                 quality_gate_retries: 0,
+                ..Default::default()
             },
             vec![tool],
         );

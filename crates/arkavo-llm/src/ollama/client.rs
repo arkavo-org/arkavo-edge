@@ -231,11 +231,9 @@ impl Provider for OllamaClient {
                             match serde_json::from_str::<ChatResponse>(line) {
                                 Ok(resp) => {
                                     responses.push(Ok(StreamResponse {
-                                        response_items: Vec::new(),
                                         content: resp.message.content,
-                                        reasoning_content: None,
                                         done: resp.done,
-                                        inference_timing: None,
+                                        ..Default::default()
                                     }));
                                 }
                                 Err(e) => {
@@ -250,11 +248,9 @@ impl Provider for OllamaClient {
                                         serde_json::from_str::<StreamingResponse>(line)
                                     {
                                         responses.push(Ok(StreamResponse {
-                                            response_items: Vec::new(),
                                             content: stream_resp.response.unwrap_or_default(),
-                                            reasoning_content: None,
                                             done: stream_resp.done,
-                                            inference_timing: None,
+                                            ..Default::default()
                                         }));
                                     } else {
                                         warn!("Failed to parse response: {line}");

@@ -686,8 +686,8 @@ mod tests {
             }],
             finish_reason: None,
             inference_timing: None,
-            response_items: Vec::new(),
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result = judge
@@ -718,8 +718,8 @@ mod tests {
             }],
             finish_reason: None,
             inference_timing: None,
-            response_items: Vec::new(),
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result = judge
@@ -746,8 +746,8 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
-            response_items: Vec::new(),
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result = judge
@@ -774,8 +774,8 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
-            response_items: Vec::new(),
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         // Tool execution failed
@@ -814,8 +814,8 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
-            response_items: Vec::new(),
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         // Tool execution failed
@@ -861,8 +861,8 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
-            response_items: Vec::new(),
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         // Tool execution failed

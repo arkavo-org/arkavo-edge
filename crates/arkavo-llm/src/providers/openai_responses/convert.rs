@@ -1,5 +1,6 @@
 use super::OpenAIResponsesConfig;
 use crate::provider::InferenceTiming;
+use crate::provider_state::{ProviderState, ProviderStateTag};
 use crate::tool_parser::ParsedToolCall;
 use crate::{Error, Message, ProviderResponse, Result, Role};
 use serde_json::{Value, json};
@@ -20,10 +21,14 @@ pub(super) fn request(
     }
     let mut input = Vec::new();
     for message in messages {
-        if message.role == Role::Assistant && !message.response_items.is_empty() {
+        if message.role == Role::Assistant
+            && let Some(items) = message
+                .provider_state
+                .replay_items_for(ProviderStateTag::OpenAiResponses)
+        {
             // Replay the provider's ordered output exactly, including encrypted
             // reasoning and call IDs. Adding reconstructed calls would duplicate them.
-            input.extend(message.response_items);
+            input.extend(items);
             continue;
         }
         if message.role == Role::Tool {
@@ -185,7 +190,7 @@ fn parse_response(value: &Value) -> Result<ProviderResponse> {
             }
         }
     }
-    result.response_items.clone_from(output);
+    result.provider_state = ProviderState::openai_responses(output.clone());
     result.finish_reason = Some(
         if result.tool_calls.is_empty() {
             "stop"

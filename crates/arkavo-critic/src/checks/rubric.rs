@@ -272,13 +272,13 @@ mod tests {
 
     fn make_input(content: &str, context: Option<serde_json::Value>) -> VerificationInput {
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: content.to_string(),
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
         let mut input = VerificationInput::new("test task".to_string(), response, vec![]);
         if let Some(ctx) = context {

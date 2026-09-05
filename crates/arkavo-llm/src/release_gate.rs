@@ -18,6 +18,7 @@ use std::task::{Context, Poll};
 
 use futures::Stream;
 
+use crate::provider_state::ProviderState;
 use crate::stream::StreamResponse;
 use crate::{Error, Result};
 
@@ -146,8 +147,11 @@ where
                                 continue;
                             }
                             return Poll::Ready(Some(Ok(StreamResponse {
-                                response_items: Vec::new(),
                                 content: text,
+                                // Opaque state belongs only to a terminal chunk;
+                                // blank it here so a provider that ever stamps it
+                                // mid-stream cannot push it through the gate.
+                                provider_state: ProviderState::default(),
                                 ..chunk
                             })));
                         }
@@ -177,12 +181,9 @@ fn finish(
             Err(Error::Provider(GATE_BLOCKED.to_string()))
         }
         GateOutcome::Release(text) => {
-            let mut final_chunk = done.unwrap_or(StreamResponse {
-                response_items: Vec::new(),
-                content: String::new(),
-                reasoning_content: None,
+            let mut final_chunk = done.unwrap_or_else(|| StreamResponse {
                 done: true,
-                inference_timing: None,
+                ..Default::default()
             });
             final_chunk.content = text;
             final_chunk.done = true;
@@ -252,20 +253,14 @@ mod tests {
             .iter()
             .map(|p| {
                 Ok(StreamResponse {
-                    response_items: Vec::new(),
                     content: (*p).to_string(),
-                    reasoning_content: None,
-                    done: false,
-                    inference_timing: None,
+                    ..Default::default()
                 })
             })
             .collect();
         out.push(Ok(StreamResponse {
-            response_items: Vec::new(),
-            content: String::new(),
-            reasoning_content: None,
             done: true,
-            inference_timing: None,
+            ..Default::default()
         }));
         out
     }
@@ -321,18 +316,13 @@ mod tests {
     async fn text_arriving_on_the_done_chunk_is_still_inspected() {
         let inner = futures::stream::iter(vec![
             Ok(StreamResponse {
-                response_items: Vec::new(),
                 content: "a clean opening ".to_string(),
-                reasoning_content: None,
-                done: false,
-                inference_timing: None,
+                ..Default::default()
             }),
             Ok(StreamResponse {
-                response_items: Vec::new(),
                 content: "and then CANARY at the very end".to_string(),
-                reasoning_content: None,
                 done: true,
-                inference_timing: None,
+                ..Default::default()
             }),
         ]);
         let mut stream = gated(Box::pin(inner), Canary::new("CANARY", 4096));
@@ -358,18 +348,13 @@ mod tests {
     async fn clean_text_on_the_done_chunk_still_reaches_the_consumer() {
         let inner = futures::stream::iter(vec![
             Ok(StreamResponse {
-                response_items: Vec::new(),
                 content: "an opening ".to_string(),
-                reasoning_content: None,
-                done: false,
-                inference_timing: None,
+                ..Default::default()
             }),
             Ok(StreamResponse {
-                response_items: Vec::new(),
                 content: "and a closing".to_string(),
-                reasoning_content: None,
                 done: true,
-                inference_timing: None,
+                ..Default::default()
             }),
         ]);
         let mut stream = gated(Box::pin(inner), Canary::new("CANARY", 4096));
@@ -410,16 +395,44 @@ mod tests {
     #[tokio::test]
     async fn a_done_chunk_that_releases_a_window_keeps_all_text() {
         let inner = futures::stream::iter(vec![Ok(StreamResponse {
-            response_items: Vec::new(),
             content: "clean final text".into(),
-            reasoning_content: None,
             done: true,
-            inference_timing: None,
+            ..Default::default()
         })]);
         let mut stream = gated(Box::pin(inner), Canary::new("CANARY", 8));
         let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(chunk.content, "clean final text");
         assert!(chunk.done);
+    }
+
+    /// Opaque state is a terminal-chunk concern. Should a provider ever stamp it
+    /// on a mid-stream chunk, the gate must not forward it: the released chunk is
+    /// rebuilt from inspected text, and passing state through it would hand the
+    /// consumer provider bytes the gate never looked at.
+    #[arkavo_test_macros::spec("ASTRA-002")]
+    #[tokio::test]
+    async fn a_released_mid_stream_chunk_carries_no_provider_state() {
+        let inner = futures::stream::iter(vec![
+            Ok(StreamResponse {
+                content: "a clean opening ".into(),
+                provider_state: ProviderState::openai_responses(vec![serde_json::json!(
+                    {"type":"reasoning","encrypted_content":"opaque-canary"}
+                )]),
+                ..Default::default()
+            }),
+            Ok(StreamResponse {
+                done: true,
+                ..Default::default()
+            }),
+        ]);
+        // A window shorter than the first chunk makes the gate release it
+        // mid-stream, which is the path that rebuilds the chunk.
+        let mut stream = gated(Box::pin(inner), Canary::new("CANARY", 8));
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(chunk.content, "a clean opening ");
+        assert!(!chunk.done);
+        assert!(chunk.provider_state.is_empty());
+        assert!(!format!("{chunk:?}").contains("opaque-canary"));
     }
 
     #[arkavo_test_macros::spec("SENT-007")]

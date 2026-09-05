@@ -327,7 +327,7 @@ impl ConversationManager {
             timestamp: Utc::now(),
             token_count,
             is_summary: false,
-            provider_message: (!message.response_items.is_empty()
+            provider_message: (!message.provider_state.is_empty()
                 || !message.tool_calls.is_empty()
                 || message.role == arkavo_llm::Role::Tool)
                 .then(|| message.clone()),
@@ -1053,10 +1053,10 @@ mod tests {
                 id: Some("call_1".into()),
             }],
         );
-        assistant.response_items = vec![
+        assistant.provider_state = arkavo_llm::ProviderState::openai_responses(vec![
             json!({"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque-test-state"}),
             json!({"type": "function_call", "call_id": "call_1", "name": "clock", "arguments": "{}"}),
-        ];
+        ]);
         manager.add_message(&assistant).await.unwrap();
         manager
             .add_message(&Message::tool_result("noon", "call_1", "clock"))
@@ -1067,7 +1067,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(context.len(), 2);
-        assert_eq!(context[0].response_items, assistant.response_items);
+        assert_eq!(context[0].provider_state, assistant.provider_state);
         assert_eq!(context[0].tool_calls[0].id.as_deref(), Some("call_1"));
         assert_eq!(context[1].tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(context[1].role, arkavo_llm::Role::Tool);

@@ -25,13 +25,9 @@ async fn test_openai_basic_connectivity() {
     let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![Message {
-        response_items: Vec::new(),
         role: Role::User,
         content: "Say 'test successful' and nothing else.".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let response = provider
@@ -59,13 +55,9 @@ async fn test_openai_authentication_error() {
         OpenAIProvider::new(config).expect("Provider creation should succeed with invalid key");
 
     let messages = vec![Message {
-        response_items: Vec::new(),
         role: Role::User,
         content: "Hello".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let result = provider.complete(messages).await;
@@ -101,13 +93,9 @@ async fn test_openai_rate_limiting() {
             let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
             let messages = vec![Message {
-                response_items: Vec::new(),
                 role: Role::User,
                 content: format!("Count to {i} and respond with just the numbers"),
-                images: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_calls: Vec::new(),
+                ..Default::default()
             }];
             provider.complete(messages).await
         });
@@ -183,22 +171,14 @@ async fn test_openai_system_message() {
 
     let messages = vec![
         Message {
-            response_items: Vec::new(),
             role: Role::System,
             content: "You are a pirate. Always respond in pirate speak.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         },
         Message {
-            response_items: Vec::new(),
             role: Role::User,
             content: "Say hello".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         },
     ];
 
@@ -235,31 +215,19 @@ async fn test_openai_multi_turn_conversation() {
 
     let messages = vec![
         Message {
-            response_items: Vec::new(),
             role: Role::User,
             content: "My favorite color is blue. Remember this.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         },
         Message {
-            response_items: Vec::new(),
             role: Role::Assistant,
             content: "I'll remember that your favorite color is blue.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         },
         Message {
-            response_items: Vec::new(),
             role: Role::User,
             content: "What's my favorite color?".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         },
     ];
 

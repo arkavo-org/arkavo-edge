@@ -29,10 +29,11 @@ mod tests {
     #[test]
     fn window_keeps_call_and_outputs_together() {
         let mut call = Message::assistant("");
-        call.response_items = vec![serde_json::json!({
-            "type": "function_call", "call_id": "call_a", "name": "clock",
-            "arguments": "{}"
-        })];
+        call.provider_state =
+            arkavo_llm::ProviderState::openai_responses(vec![serde_json::json!({
+                "type": "function_call", "call_id": "call_a", "name": "clock",
+                "arguments": "{}"
+            })]);
         let messages = vec![
             Message::user("old turn"),
             Message::assistant("old answer"),
@@ -45,7 +46,13 @@ mod tests {
         let window = recent_turns(&messages, 3);
         assert_eq!(window.len(), 5);
         assert_eq!(window[0].content, "use clock");
-        assert_eq!(window[1].response_items[0]["call_id"], "call_a");
+        assert_eq!(
+            window[1]
+                .provider_state
+                .native_call_ids()
+                .collect::<Vec<_>>(),
+            ["call_a"]
+        );
         assert_eq!(window[2].tool_call_id.as_deref(), Some("call_a"));
     }
 }

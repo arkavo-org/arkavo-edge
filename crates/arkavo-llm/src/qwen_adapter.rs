@@ -52,12 +52,12 @@ fn convert_message(msg: Message) -> arkavo_qwen::Message {
 
 fn convert_stream_response(resp: arkavo_qwen::StreamResponse) -> crate::StreamResponse {
     crate::StreamResponse {
-        response_items: Vec::new(),
         content: resp.content,
         // Qwen stream payload currently emits only content/tool-calls deltas.
         // Keep this as None until arkavo-qwen exposes a reasoning channel.
         reasoning_content: None,
         done: resp.done,
+        ..Default::default()
     }
 }
 

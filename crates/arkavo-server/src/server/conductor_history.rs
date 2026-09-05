@@ -22,12 +22,10 @@ pub(super) fn compactable_prefix(messages: &[Message], keep_recent: usize) -> us
                 })
                 .or_else(|| {
                     messages[..start].iter().rposition(|candidate| {
-                        candidate.response_items.iter().any(|item| {
-                            item.get("type").and_then(serde_json::Value::as_str)
-                                == Some("function_call")
-                                && item.get("call_id").and_then(serde_json::Value::as_str)
-                                    == message.tool_call_id.as_deref()
-                        })
+                        candidate
+                            .provider_state
+                            .native_call_ids()
+                            .any(|call_id| Some(call_id) == message.tool_call_id.as_deref())
                     })
                 });
             if let Some(owner) = owner {
@@ -80,14 +78,15 @@ mod tests {
 
     fn batch(ids: &[&str]) -> Message {
         let mut message = Message::assistant("");
-        message.response_items = ids
-            .iter()
-            .map(|id| {
-                json!({
-                    "type": "function_call", "call_id": id, "name": "read", "arguments": "{}"
+        message.provider_state = arkavo_llm::ProviderState::openai_responses(
+            ids.iter()
+                .map(|id| {
+                    json!({
+                        "type": "function_call", "call_id": id, "name": "read", "arguments": "{}"
+                    })
                 })
-            })
-            .collect();
+                .collect(),
+        );
         message
     }
 
@@ -107,7 +106,7 @@ mod tests {
         assert_eq!(compactable_prefix(&messages, 2), 2);
         let mut compacted = messages.clone();
         compacted.drain(1..=compactable_prefix(&messages, 2));
-        assert_eq!(compacted[1].response_items.len(), 3);
+        assert_eq!(compacted[1].provider_state.native_call_ids().count(), 3);
         assert_eq!(compacted.last().unwrap().content, "adjust strategy");
     }
 
@@ -146,7 +145,9 @@ mod tests {
     #[test]
     fn text_extracted_response_tools_use_user_feedback() {
         let response = arkavo_llm::ProviderResponse {
-            response_items: vec![json!({"type":"message", "content":[]})],
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                json!({"type":"message", "content":[]}),
+            ]),
             tool_calls: vec![arkavo_llm::ParsedToolCall {
                 tool_name: "read".into(),
                 arguments: json!({}),
@@ -159,7 +160,7 @@ mod tests {
         assert!(feedback.tool_call_id.is_none());
         assert!(use_tool_role(&arkavo_llm::ProviderResponse::default()));
         let response = arkavo_llm::ProviderResponse {
-            response_items: batch(&["native"]).response_items,
+            provider_state: batch(&["native"]).provider_state,
             ..Default::default()
         };
         let feedback = tool_feedback("result", "native", "read", use_tool_role(&response));

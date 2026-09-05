@@ -64,13 +64,9 @@ mod tests {
                 .expect("Failed to load model");
 
         let messages = vec![Message {
-            response_items: Vec::new(),
             role: Role::User,
             content: "What is the capital of France? Answer in one word.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         }];
 
         let response = provider
@@ -111,13 +107,9 @@ mod tests {
         let tools: serde_json::Value = serde_json::from_str(TEST_TOOLS).unwrap();
 
         let messages = vec![Message {
-            response_items: Vec::new(),
             role: Role::User,
             content: "What's the weather in New York?".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         }];
 
         let response = provider
@@ -179,13 +171,9 @@ mod tests {
         let tools: serde_json::Value = serde_json::from_str(MULTI_TOOLS).unwrap();
 
         let messages = vec![Message {
-            response_items: Vec::new(),
             role: Role::User,
             content: "What time is it in Tokyo right now?".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         }];
 
         let response = provider

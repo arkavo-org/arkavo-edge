@@ -616,7 +616,6 @@ mod tests {
         let tools = vec![create_test_tool_info("search")];
 
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "Searching...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -627,6 +626,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result = judge
@@ -649,7 +649,6 @@ mod tests {
         let tools = vec![create_test_tool_info("search")];
 
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "Using tool...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -660,6 +659,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result = judge
@@ -683,13 +683,13 @@ mod tests {
 
         // LLM claims success when tool failed
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "I used the send_task tool and it completed successfully.".to_string(),
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         // Tool execution failed

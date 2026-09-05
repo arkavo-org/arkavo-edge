@@ -125,7 +125,6 @@ mod tests {
         let tools = vec![create_test_tool("search")];
 
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "Searching...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -136,6 +135,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("Find test".to_string(), response, tools);
@@ -151,7 +151,6 @@ mod tests {
         let tools = vec![create_test_tool("search")];
 
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "Using tool...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -162,6 +161,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("Test".to_string(), response, tools);
@@ -179,7 +179,6 @@ mod tests {
         let tools = vec![create_test_tool("search")];
 
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "Searching...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -190,6 +189,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("Find test".to_string(), response, tools);
@@ -205,13 +205,13 @@ mod tests {
         let check = SchemaCheck::new();
 
         let response = ProviderResponse {
-            response_items: Vec::new(),
             content: "No tools needed".to_string(),
             reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("Test".to_string(), response, vec![]);

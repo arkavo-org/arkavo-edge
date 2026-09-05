@@ -2,7 +2,7 @@
 #![allow(clippy::disallowed_methods)] // Tokio test entrypoints own their runtimes.
 
 use arkavo_llm::providers::{OpenAIResponsesConfig, OpenAIResponsesProvider};
-use arkavo_llm::{Message, Provider};
+use arkavo_llm::{Message, Provider, ProviderStateTag};
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -98,7 +98,17 @@ async fn tool_completion_preserves_opaque_state_and_actual_usage() {
         .await
         .unwrap();
     assert_eq!(result.tool_calls[0].call_id.as_deref(), Some("call_1"));
-    assert_eq!(result.response_items[0]["encrypted_content"], "opaque");
+    let replayed = result
+        .provider_state
+        .clone()
+        .replay_items_for(ProviderStateTag::OpenAiResponses)
+        .expect("Responses state must replay to its own family");
+    assert_eq!(replayed.len(), 2);
+    assert_eq!(replayed[0]["encrypted_content"], "opaque");
+    assert_eq!(
+        result.provider_state.native_call_ids().collect::<Vec<_>>(),
+        vec!["call_1"]
+    );
     assert!(result.reasoning_content.is_none());
     assert_eq!(result.inference_timing.unwrap().n_eval, 10);
     let request = request.await.unwrap();
@@ -142,9 +152,15 @@ async fn stream_reassembles_utf8_and_emits_terminal_tail_and_usage_once() {
         if chunk.done {
             done_count += 1;
             assert_eq!(chunk.inference_timing.unwrap().n_eval, 10);
-            assert_eq!(chunk.response_items.len(), 1);
+            assert_eq!(
+                chunk
+                    .provider_state
+                    .replay_items_for(ProviderStateTag::OpenAiResponses)
+                    .map(|items| items.len()),
+                Some(1)
+            );
         } else {
-            assert!(chunk.response_items.is_empty());
+            assert!(chunk.provider_state.is_empty());
         }
     }
     assert_eq!(content, "🌍 hello");
@@ -256,7 +272,12 @@ async fn live_astra_text_tools_schema_and_stream() {
         .call_id
         .clone()
         .expect("missing native call ID");
-    assert!(!call.response_items.is_empty());
+    assert!(
+        call.provider_state
+            .clone()
+            .replay_items_for(ProviderStateTag::OpenAiResponses)
+            .is_some_and(|items| !items.is_empty())
+    );
     let mut continuation = messages;
     continuation.push(call.as_assistant_message());
     continuation.push(Message::tool_result("probe-green", call_id, "read_probe"));
@@ -293,7 +314,12 @@ async fn live_astra_text_tools_schema_and_stream() {
             assert!(!done);
             done = true;
             assert!(chunk.inference_timing.is_some());
-            assert!(!chunk.response_items.is_empty());
+            assert!(
+                chunk
+                    .provider_state
+                    .replay_items_for(ProviderStateTag::OpenAiResponses)
+                    .is_some_and(|items| !items.is_empty())
+            );
         }
     }
     assert!(done && !content.trim().is_empty());

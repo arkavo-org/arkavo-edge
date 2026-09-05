@@ -522,13 +522,11 @@ impl Provider for OpenAIProvider {
             .map_err(|e| crate::Error::Provider(e.to_string()))?;
 
         Ok(ProviderResponse {
-            response_items: Vec::new(),
             content,
-            reasoning_content: None,
             tool_calls,
             finish_reason,
             inference_timing,
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 
@@ -610,11 +608,8 @@ impl Provider for OpenAIProvider {
                                 if data == "[DONE]" {
                                     if tx
                                         .send(Ok(StreamResponse {
-                                            response_items: Vec::new(),
-                                            content: String::new(),
-                                            reasoning_content: None,
                                             done: true,
-                                            inference_timing: None,
+                                            ..Default::default()
                                         }))
                                         .await
                                         .is_err()
@@ -626,11 +621,9 @@ impl Provider for OpenAIProvider {
                                     && let Some(content) = &choice.delta.content
                                     && tx
                                         .send(Ok(StreamResponse {
-                                            response_items: Vec::new(),
                                             content: content.clone(),
-                                            reasoning_content: None,
                                             done: choice.finish_reason.is_some(),
-                                            inference_timing: None,
+                                            ..Default::default()
                                         }))
                                         .await
                                         .is_err()
@@ -786,7 +779,6 @@ mod tests {
         let provider = OpenAIProvider::new(OpenAIConfig::default()).unwrap();
         let messages = vec![
             Message {
-                response_items: Vec::new(),
                 role: Role::Assistant,
                 tool_calls: vec![crate::ToolCall {
                     name: "get_time".to_string(),
@@ -796,7 +788,6 @@ mod tests {
                 ..Default::default()
             },
             Message {
-                response_items: Vec::new(),
                 role: Role::Tool,
                 content: "12:00 UTC".to_string(),
                 tool_call_id: Some("call_1".to_string()),

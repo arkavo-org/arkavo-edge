@@ -1652,22 +1652,17 @@ async fn ask_cloud_confirmation(model: &str, estimated_cost_usd: f64) -> bool {
 /// Every call the assistant turn obliges the next request to answer, as
 /// `(call_id, tool_name)`.
 ///
-/// A Responses turn replays its `response_items` verbatim, so the `function_call`
-/// items — not the parsed calls — decide which outputs the provider demands.
+/// A Responses turn replays its provider state verbatim, so the native
+/// `function_call` records — not the parsed calls — decide which outputs the
+/// provider demands.
 /// Chat Completions turns carry only parsed calls, and a call the local parser
 /// pulled out of prose has no id of its own, so one is synthesized the same way
 /// the streamed tool-call deltas synthesize theirs.
 fn pending_call_ids(response: &arkavo_llm::ProviderResponse) -> Vec<(String, String)> {
     let mut calls: Vec<(String, String)> = response
-        .response_items
-        .iter()
-        .filter(|item| item["type"] == "function_call")
-        .filter_map(|item| {
-            Some((
-                item["call_id"].as_str()?.to_string(),
-                item["name"].as_str().unwrap_or_default().to_string(),
-            ))
-        })
+        .provider_state
+        .native_calls()
+        .map(|(call_id, name)| (call_id.to_string(), name.to_string()))
         .collect();
     for (idx, call) in response.tool_calls.iter().enumerate() {
         let call_id = call
@@ -1984,11 +1979,11 @@ mod tests {
             let mut chunks = Vec::with_capacity(count);
             for i in 0..count {
                 chunks.push(arkavo_llm::StreamResponse {
-                    response_items: Vec::new(),
                     content: "x".to_string(),
                     reasoning_content: None,
                     done: i == count - 1,
                     inference_timing: None,
+                    ..Default::default()
                 });
             }
             Self {
@@ -2368,10 +2363,9 @@ mod tests {
     /// carrying its call id, or the provider rejects the next turn.
     fn assert_every_call_is_paired(assistant: &Message, followers: &[Message]) {
         let mut ids: Vec<String> = assistant
-            .response_items
-            .iter()
-            .filter(|item| item["type"] == "function_call")
-            .filter_map(|item| item["call_id"].as_str().map(str::to_string))
+            .provider_state
+            .native_call_ids()
+            .map(str::to_string)
             .collect();
         ids.extend(
             assistant
@@ -2409,10 +2403,10 @@ mod tests {
     #[test]
     fn native_function_call_items_replay_as_tool_role_with_call_ids() {
         let response = arkavo_llm::ProviderResponse {
-            response_items: vec![
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
                 function_call_item("fc_1", "read_file"),
                 function_call_item("fc_2", "list_dir"),
-            ],
+            ]),
             tool_calls: vec![
                 parsed_call("read_file", Some("fc_1")),
                 parsed_call("list_dir", Some("fc_2")),
@@ -2434,7 +2428,9 @@ mod tests {
     #[test]
     fn prose_extracted_results_stay_a_user_message() {
         let response = arkavo_llm::ProviderResponse {
-            response_items: vec![serde_json::json!({"type": "reasoning", "id": "rs_1"})],
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                serde_json::json!({"type": "reasoning", "id": "rs_1"}),
+            ]),
             tool_calls: vec![parsed_call("read_file", None)],
             ..Default::default()
         };
@@ -2447,10 +2443,10 @@ mod tests {
     #[test]
     fn no_tool_registry_branch_still_answers_every_native_call() {
         let response = arkavo_llm::ProviderResponse {
-            response_items: vec![
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
                 function_call_item("fc_1", "read_file"),
                 function_call_item("fc_2", "list_dir"),
-            ],
+            ]),
             tool_calls: vec![
                 parsed_call("read_file", Some("fc_1")),
                 parsed_call("list_dir", Some("fc_2")),
@@ -2470,7 +2466,10 @@ mod tests {
     #[test]
     fn hint_retry_branch_pushes_results_after_the_assistant_turn() {
         let response = arkavo_llm::ProviderResponse {
-            response_items: vec![function_call_item("fc_hint", "read_file")],
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![function_call_item(
+                "fc_hint",
+                "read_file",
+            )]),
             tool_calls: vec![parsed_call("read_file", Some("fc_hint"))],
             ..Default::default()
         };
