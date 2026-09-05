@@ -1,3 +1,6 @@
+#[path = "replay_state.rs"]
+mod replay_state;
+
 use crate::embeddings::EmbeddingService;
 use crate::error::{MemoryError, Result};
 use crate::event_store::{EventStore, SerializedEvent, StoredEvent};
@@ -119,6 +122,7 @@ impl MemoryStorage {
             .await?;
 
         Self::ensure_table_exists(&pool).await?;
+        replay_state::ensure_table_exists(&pool).await?;
 
         let hnsw = Self::create_new_index(&config);
         let event_store = EventStore::new(pool.clone());
@@ -541,6 +545,16 @@ impl MemoryStorage {
     }
 
     pub async fn store(&self, memory: Memory) -> Result<()> {
+        self.store_with_replay_state(memory, None).await
+    }
+
+    /// Persist a public memory and its private provider state atomically.
+    /// State is never included in embeddings, search results, or public metadata.
+    pub async fn store_with_replay_state(
+        &self,
+        memory: Memory,
+        replay_state: Option<&[u8]>,
+    ) -> Result<()> {
         let id_str = memory.id.to_string();
         let embedding_blob: Vec<u8> = memory
             .embedding
@@ -553,6 +567,7 @@ impl MemoryStorage {
             .map(serde_json::to_string)
             .transpose()?;
 
+        let mut transaction = self.pool.begin().await?;
         sqlx::query(
             r#"
             INSERT INTO memories (id, content, metadata, category, embedding_blob, created_at, updated_at)
@@ -566,8 +581,17 @@ impl MemoryStorage {
         .bind(&embedding_blob)
         .bind(memory.created_at.to_rfc3339())
         .bind(memory.updated_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
+
+        if let Some(state) = replay_state {
+            sqlx::query("INSERT INTO conversation_replay_state (memory_id, state) VALUES (?, ?)")
+                .bind(&id_str)
+                .bind(state)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
 
         // Only update indexes if embedding is not empty
         if !memory.embedding.is_empty() {

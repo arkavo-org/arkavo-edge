@@ -2,20 +2,39 @@ use std::time::Duration;
 
 pub struct ConnectivityChecker {
     timeout: Duration,
+    /// Fixed answer, bypassing the probe. Set by [`Self::assume`] so callers
+    /// that must be deterministic (tests, air-gapped runs) do not have their
+    /// behaviour decided by whether a network happens to be reachable.
+    assumed: Option<bool>,
 }
 
 impl ConnectivityChecker {
     pub fn new() -> Self {
         Self {
             timeout: Duration::from_secs(2),
+            assumed: None,
         }
     }
 
     pub fn with_timeout(timeout: Duration) -> Self {
-        Self { timeout }
+        Self {
+            timeout,
+            assumed: None,
+        }
+    }
+
+    /// Answer every connectivity question with `online`, without probing.
+    pub fn assume(online: bool) -> Self {
+        Self {
+            timeout: Duration::from_secs(2),
+            assumed: Some(online),
+        }
     }
 
     pub async fn is_online(&self) -> bool {
+        if let Some(online) = self.assumed {
+            return online;
+        }
         self.check_connectivity().await
     }
 

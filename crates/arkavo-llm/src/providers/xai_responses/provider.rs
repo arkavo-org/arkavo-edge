@@ -236,6 +236,7 @@ impl Provider for ResponsesProvider {
         // v1: full-transcript multi-turn (previous_response_id always None).
         let result = self.create(messages, tools, max_tokens, None).await?;
         Ok(ProviderResponse {
+            response_items: Vec::new(),
             content: result.content,
             reasoning_content: result.reasoning_content,
             tool_calls: result.tool_calls,

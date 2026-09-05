@@ -96,6 +96,9 @@ pub enum ModelChoice {
     /// routing. The API model id is still `grok-4.6`; effort is sent as
     /// `reasoning.effort = "xhigh"`.
     Grok46Xhigh,
+    /// OpenAI flagship via Responses: 1,050,000 context, 128,000 max output,
+    /// medium reasoning by default. Premium arm, never a category preference.
+    Gpt6Astra,
 }
 
 impl ModelChoice {
@@ -137,6 +140,7 @@ impl ModelChoice {
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek-chat",
             Self::KimiK2 => "kimi-k2.5",
             Self::Glm52 => "glm-5.2",
+            Self::Gpt6Astra => "gpt-6-astra",
             Self::Grok46 => "grok-4.6",
             // Thompson Sampling sees each effort tier as a distinct arm, so
             // the canonical name carries the suffix. `grok_api_model()`
@@ -171,6 +175,7 @@ impl ModelChoice {
             | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus | Self::ClaudeFable5 => "anthropic",
             Self::KimiK2 => "kimi",
+            Self::Gpt6Astra => "openai",
             Self::Grok46 | Self::Grok46Xhigh => "grok",
         }
     }
@@ -199,6 +204,7 @@ impl ModelChoice {
             "deepseek-coder-v2-lite-instruct" => Some(Self::LocalDeepSeekCoder),
             "deepseek-chat" => Some(Self::DeepSeekV32),
             "kimi-k2.5" => Some(Self::KimiK2),
+            "gpt-6-astra" => Some(Self::Gpt6Astra),
             "grok-4.6-xhigh" | "grok-4.6-x-high" | "grok46-xhigh" | "grok-xhigh" => {
                 Some(Self::Grok46Xhigh)
             }
@@ -300,6 +306,7 @@ impl ModelChoice {
         Self::Glm52,
         Self::Grok46,
         Self::Grok46Xhigh,
+        Self::Gpt6Astra,
     ];
 
     pub fn is_anthropic(&self) -> bool {
@@ -409,6 +416,7 @@ impl ModelChoice {
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
             Self::KimiK2 => "kimi",
             Self::Glm52 => "zhipu",
+            Self::Gpt6Astra => "openai",
             Self::Grok46 | Self::Grok46Xhigh => "xai",
         }
     }
@@ -448,7 +456,8 @@ impl ModelChoice {
             | Self::KimiK2
             | Self::Glm52
             | Self::Grok46
-            | Self::Grok46Xhigh => PlannerTier::Large,
+            | Self::Grok46Xhigh
+            | Self::Gpt6Astra => PlannerTier::Large,
         }
     }
 
@@ -649,6 +658,7 @@ impl ModelChoice {
             Self::DeepSeekV32Speciale => "DeepSeek V3.2 Speciale",
             Self::KimiK2 => "Kimi K2.5",
             Self::Glm52 => "GLM-5.2",
+            Self::Gpt6Astra => "GPT-6 Astra",
             Self::Grok46 => "Grok 4.6",
             Self::Grok46Xhigh => "Grok 4.6 (xhigh)",
         }
@@ -823,6 +833,11 @@ impl RoutingDecision {
                 ]
             }
             // Grok 4.6 steps to mid-tier cloud then a local safety net.
+            (ModelChoice::Gpt6Astra, _) => vec![
+                ModelChoice::ClaudeSonnet,
+                ModelChoice::Gemini35Flash,
+                ModelChoice::LocalMinistral8B,
+            ],
             (ModelChoice::Grok46, _) => {
                 vec![
                     ModelChoice::ClaudeSonnet,
@@ -845,6 +860,11 @@ impl RoutingDecision {
         let token_estimate = category.estimated_tokens();
 
         match model {
+            ModelChoice::Gpt6Astra => {
+                f64::from(token_estimate.output)
+                    .mul_add(50.0, f64::from(token_estimate.input) * 10.0)
+                    / 1_000_000.0
+            }
             ModelChoice::GeminiFlash => {
                 let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.30;
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.50;
@@ -972,6 +992,7 @@ impl RoutingDecision {
 
     fn estimate_time(model: &ModelChoice, _category: TaskCategory) -> Duration {
         match model {
+            ModelChoice::Gpt6Astra => Duration::from_secs(20),
             ModelChoice::GeminiFlash => Duration::from_secs(3),
             // Gemini 3.5 Flash sustains ~280 tok/s — faster than legacy Flash.
             // Latency scales roughly with the thinking budget; tiers are
@@ -1025,6 +1046,25 @@ pub struct TokenEstimate {
 #[allow(clippy::disallowed_methods)]
 #[allow(clippy::float_cmp)]
 mod tests {
+    #[test]
+    fn astra_catalog_round_trip_and_cost() {
+        let model = super::ModelChoice::Gpt6Astra;
+        assert_eq!(
+            super::ModelChoice::from_name(model.name()),
+            Some(model.clone())
+        );
+        assert_eq!(model.provider(), "openai");
+        assert!(model.is_cloud());
+        assert!(super::ModelChoice::ALL_CLOUD.contains(&model));
+        assert_eq!(model.capability(), super::PlannerTier::Large);
+        assert!(
+            super::RoutingDecision::estimate_cost(
+                &model,
+                crate::classifier::TaskCategory::CodeGeneration
+            ) > 0.0
+        );
+    }
+
     use super::*;
     use arkavo_budget::TokenCost;
     use arkavo_budget::config::{BudgetConfig, BudgetLimits};

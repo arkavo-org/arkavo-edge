@@ -30,6 +30,7 @@ fn get_or_create_runtime() -> &'static Runtime {
     })
 }
 
+#[cfg(all(unix, feature = "mcp-tools"))]
 fn box_error<E: std::error::Error + Send + Sync + 'static>(
     e: E,
 ) -> Box<dyn std::error::Error + Send + Sync> {
@@ -227,7 +228,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             // Router provides: cost optimization, quality validation, TS learning
             #[cfg(all(unix, feature = "mcp-tools"))]
             let route_result: std::result::Result<
-                Option<String>,
+                Option<arkavo_llm::ProviderResponse>,
                 Box<dyn std::error::Error + Send + Sync>,
             > = match (router.as_ref(), &client_clone) {
                 (Some(router), _) => {
@@ -240,7 +241,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         )
                         .await
                     {
-                        Ok(response) => Ok(Some(response.content)),
+                        Ok(response) => Ok(Some(response)),
                         Err(e) => Err(box_error(e)),
                     }
                 }
@@ -252,12 +253,15 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             let use_streaming_fallback = match &route_result {
                 Ok(Some(_)) => false,
                 Ok(None) => true,
-                Err(_) => true,
+                Err(error) => {
+                    let _ = llm_tx.send(format!("Error: {error}")).await;
+                    continue;
+                }
             };
 
             #[cfg(not(all(unix, feature = "mcp-tools")))]
             let route_result: std::result::Result<
-                Option<String>,
+                Option<arkavo_llm::ProviderResponse>,
                 Box<dyn std::error::Error + Send + Sync>,
             > = Ok(None);
             #[cfg(not(all(unix, feature = "mcp-tools")))]
@@ -265,7 +269,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
             if !use_streaming_fallback {
                 // Router returned a complete response — send as single chunk
-                if let Ok(Some(content)) = route_result {
+                if let Ok(Some(response)) = route_result {
+                    let content = response.content.clone();
                     if SHOW_DEBUG.load(Ordering::Relaxed) {
                         eprintln!("[LLM Task] Response via Router (Thompson Sampling)");
                     }
@@ -274,7 +279,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
 
                     // Add assistant response to messages
-                    messages_clone.push(Message::assistant(&content));
+                    messages_clone.push(response.as_assistant_message());
                 }
             } else {
                 // Fallback to direct LLM streaming
@@ -289,6 +294,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                             eprintln!("[LLM Task] Streaming via Direct LLM");
                         }
                         let mut full_response = String::new();
+                        let mut response_items = Vec::new();
 
                         let _ = llm_tx.send("<<STREAM_START>>".to_string()).await;
 
@@ -301,6 +307,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                                         break;
                                     }
                                     if response.done {
+                                        response_items = response.response_items;
                                         break;
                                     }
                                 }
@@ -314,7 +321,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
                         let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
 
-                        messages_clone.push(Message::assistant(full_response));
+                        let mut assistant = Message::assistant(full_response);
+                        assistant.response_items = response_items;
+                        messages_clone.push(assistant);
 
                         if SHOW_DEBUG.load(Ordering::Relaxed) {
                             eprintln!(

@@ -1,44 +1,110 @@
-use super::{ArchitectPlan, ComplexityScore, Subtask};
+use super::{ArchitectPlan, ComplexityScore, Subtask, planning_provider};
 use crate::classifier::TaskCategory;
 use crate::decision::ModelChoice;
 use crate::selector::ProviderAvailability;
-use crate::{Error, Result};
+use crate::{Error, Result, Router};
 use arkavo_llm::{Message, Provider};
 use serde::Deserialize;
+use std::sync::Arc;
 
 /// Creates execution plans by decomposing complex tasks using Opus
 pub struct ArchitectPlanner {
     availability: ProviderAvailability,
+    /// Accounting home for the planning call. Without it the plan is still
+    /// produced, but the spend leaves no ledger entry (ASTRA-005), so every
+    /// caller that has a router should attach it.
+    router: Option<Arc<Router>>,
 }
 
 impl ArchitectPlanner {
     pub fn new() -> Self {
         Self {
             availability: ProviderAvailability::from_env(),
+            router: None,
         }
     }
 
-    /// Create a plan using Opus (or best available model) to decompose the task
+    /// Bill the planning call against the router's shared budget tracker, and
+    /// resolve the planning client through that router.
+    #[must_use]
+    pub fn with_router(mut self, router: Arc<Router>) -> Self {
+        self.router = Some(router);
+        self
+    }
+
+    /// Plan against explicitly configured providers instead of reading the
+    /// environment, so a caller that already knows its provider set (or is
+    /// asserting behaviour) is not at the mercy of ambient API keys.
+    #[must_use]
+    pub fn with_availability(mut self, availability: ProviderAvailability) -> Self {
+        self.availability = availability;
+        self
+    }
+
+    /// The arm this planner would use, or `None` when nothing configured can
+    /// plan. Architect mode is a cloud-planned optimisation, so a caller that
+    /// has a cheaper path (`Router::route` falls back to standard routing)
+    /// should ask this before committing: on a key-less local install there is
+    /// no planner, and finding that out inside `create_plan` would cost a turn
+    /// the cached local model can serve.
+    pub fn planning_model(&self) -> Option<ModelChoice> {
+        planning_provider::choose_model(&self.availability)
+    }
+
+    /// Create a plan using the best configured planning model.
+    ///
+    /// The gates run before the client exists: the shared ledger answers first
+    /// (so an exhausted budget reports as `BudgetExceeded`, not as a policy
+    /// denial), then the cloud policy. A refused plan therefore never opens a
+    /// connection, and the caller sees the refusal rather than a downstream
+    /// credential error. Usage is settled after the call against the model that
+    /// actually served it.
     pub async fn create_plan(
         &self,
         task: &str,
         complexity: ComplexityScore,
     ) -> Result<ArchitectPlan> {
-        let provider = self.get_planning_provider()?;
+        let model = planning_provider::choose_model(&self.availability)
+            .ok_or_else(planning_provider::no_planning_model)?;
+        let messages = vec![Message::user(self.build_planning_prompt(task))];
+        let preflight = crate::usage::estimate_request(&messages, None, 4096);
+        let settled = crate::usage::estimate_request(&messages, None, 0);
+        let budget = self.router.as_ref().and_then(|r| r.call_budget());
+        if let Some(router) = self.router.as_ref() {
+            // The planning arm is chosen from the configured providers, never
+            // named by the caller, so the cloud gate gets no authorization.
+            let estimated_cost = router.usage_cost(&model, &preflight);
+            if let Some(budget) = budget {
+                budget.check(estimated_cost).await?;
+            }
+            router.authorize_call(&model, estimated_cost, false).await?;
+        }
 
-        let prompt = self.build_planning_prompt(task);
-        let messages = vec![Message::user(prompt)];
-
-        // Use complete_with_tools to get ProviderResponse with reasoning_content
-        let response = provider
-            .complete_with_tools(messages, None, None)
-            .await
-            .map_err(|e| Error::ModelExecution(format!("Planning phase failed: {e}")))?;
+        let provider = self.planning_client(&model).await?;
+        // complete_with_tools yields a ProviderResponse, which carries both
+        // reasoning_content and the measured inference_timing the ledger needs.
+        let result = provider.complete_with_tools(messages, None, None).await;
+        let response = match self.router.as_ref() {
+            Some(router) => {
+                router
+                    .account_result(&model, &settled, result, budget)
+                    .await
+            }
+            None => result.map_err(Error::Provider),
+        }
+        .map_err(|e| match e {
+            passthrough @ (Error::BudgetExceeded(_)
+            | Error::BudgetError(_)
+            | Error::ModerationBlocked { .. }
+            | Error::CloudConfirmationRequired { .. }) => passthrough,
+            other => Error::ModelExecution(format!("Planning phase failed: {other}")),
+        })?;
 
         let mut plan = self.parse_plan_response(task, &response.content, complexity)?;
 
         // Capture reasoning from thinking models (e.g., DeepSeek V3.2-Speciale)
         plan.planning_reasoning = response.reasoning_content;
+        plan.planning_model = Some(model);
 
         // Calculate cost estimates
         self.estimate_costs(&mut plan);
@@ -46,35 +112,14 @@ impl ArchitectPlanner {
         Ok(plan)
     }
 
-    fn get_planning_provider(&self) -> Result<Box<dyn Provider>> {
-        // Prefer Anthropic Opus for planning (highest quality)
-        if self.availability.anthropic {
-            use arkavo_llm::providers::anthropic::AnthropicProvider;
-            if let Ok(provider) = AnthropicProvider::from_env() {
-                return Ok(Box::new(provider));
-            }
+    /// Client for the planning arm. With a router attached it comes from the
+    /// router's own construction path, so planning cannot diverge from the rest
+    /// of routing (and inherits any provider substitution installed there).
+    async fn planning_client(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
+        match self.router.as_ref() {
+            Some(router) => Ok(router.get_provider_attributed(model).await?.0),
+            None => planning_provider::build(model),
         }
-
-        // DeepSeek V3.2-Speciale is excellent for planning (reasoning-only, cost-effective)
-        #[cfg(feature = "deepseek")]
-        if self.availability.deepseek {
-            use arkavo_llm::DeepSeekProvider;
-            if let Ok(provider) = DeepSeekProvider::v32_speciale() {
-                return Ok(Box::new(provider));
-            }
-        }
-
-        // Fallback to Gemini Pro
-        #[cfg(feature = "gemini")]
-        if self.availability.gemini
-            && let Ok(provider) = arkavo_llm::GeminiProvider::new()
-        {
-            return Ok(Box::new(provider));
-        }
-
-        Err(Error::ModelExecution(
-            "No planning model available. Set ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, or GEMINI_API_KEY.".to_string(),
-        ))
     }
 
     fn build_planning_prompt(&self, task: &str) -> String {
@@ -172,6 +217,16 @@ Guidelines:
 
     /// Select the best model for a subtask category
     fn select_model_for_category(&self, category: TaskCategory) -> ModelChoice {
+        if self.availability.openai
+            && !self.availability.anthropic
+            && !self.availability.gemini
+            && !self.availability.deepseek
+            && !self.availability.kimi
+            && !self.availability.glm
+            && !self.availability.xai
+        {
+            return ModelChoice::Gpt6Astra;
+        }
         match category {
             // Frontend tasks: Use cheaper, fast models
             TaskCategory::FrontendUI => {
@@ -249,6 +304,7 @@ Guidelines:
         let token_estimate = category.estimated_tokens();
 
         match model {
+            ModelChoice::Gpt6Astra => crate::RoutingDecision::estimate_cost(model, category),
             ModelChoice::GeminiFlash => {
                 let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.30;
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.50;
@@ -312,7 +368,14 @@ impl Default for ArchitectPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::architect::executor::ArchitectExecutor;
+    use crate::test_support::{CountingProvider, only};
+    use arkavo_budget::{BudgetConfig, BudgetTracker, TokenCost};
     use arkavo_test_macros::spec;
+
+    const TWO_STEP_PLAN: &str = r#"{"subtasks":[
+        {"description":"first step","category":"general","dependencies":[]},
+        {"description":"second step","category":"general","dependencies":[]}]}"#;
 
     #[spec("ROUTER-010")]
     #[test]
@@ -341,6 +404,7 @@ mod tests {
                 | ModelChoice::Gemini35Flash
                 | ModelChoice::ClaudeSonnet
                 | ModelChoice::LocalMinistral3B
+                | ModelChoice::Gpt6Astra
         ));
     }
 
@@ -353,7 +417,197 @@ mod tests {
         // Should prefer capable models for backend
         assert!(matches!(
             model,
-            ModelChoice::ClaudeOpus | ModelChoice::GeminiPro | ModelChoice::LocalMinistral8B
+            ModelChoice::ClaudeOpus
+                | ModelChoice::GeminiPro
+                | ModelChoice::LocalMinistral8B
+                | ModelChoice::Gpt6Astra
         ));
+    }
+
+    /// A cloud-only install where OpenAI is the single configured provider —
+    /// the deployment shape that made every subtask pick Astra.
+    fn astra_planner(router: Arc<Router>) -> ArchitectPlanner {
+        ArchitectPlanner {
+            availability: only("openai"),
+            router: Some(router),
+        }
+    }
+
+    async fn astra_router(
+        tracker: &Arc<BudgetTracker>,
+        provider: &CountingProvider,
+    ) -> Arc<Router> {
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        Arc::new(
+            router
+                .with_cloud_policy(arkavo_budget::CloudPolicy::CloudWithinCap)
+                .with_connectivity(crate::ConnectivityChecker::assume(true))
+                .with_budget_tracker(tracker.clone())
+                .with_provider_factory(provider.factory()),
+        )
+    }
+
+    async fn astra_plan(router: &Arc<Router>) -> Result<ArchitectPlan> {
+        astra_planner(router.clone())
+            .create_plan("ship the feature", ComplexityScore::simple())
+            .await
+    }
+
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn planning_and_every_subtask_reach_the_shared_ledger() {
+        let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+        let provider = CountingProvider::new(TWO_STEP_PLAN);
+        let router = astra_router(&tracker, &provider).await;
+
+        let plan = astra_plan(&router).await.unwrap();
+        assert_eq!(plan.subtasks.len(), 2);
+        assert_eq!(plan.planning_model, Some(ModelChoice::Gpt6Astra));
+        assert!(
+            plan.subtasks
+                .iter()
+                .all(|s| s.assigned_model == ModelChoice::Gpt6Astra)
+        );
+
+        let result = ArchitectExecutor::new(router)
+            .execute(&plan, Vec::new(), None)
+            .await
+            .unwrap();
+        assert!(result.subtask_results.iter().all(|r| r.success));
+        assert_eq!(
+            provider.calls(),
+            3,
+            "one planning call plus one per subtask"
+        );
+        assert!(result.actual_cost_usd > 0.0);
+
+        let history = tracker.get_spending_history(10).await;
+        assert_eq!(history.len(), 3, "planning plus one entry per subtask");
+        assert!(
+            history
+                .iter()
+                .all(|e| e.model == "gpt-6-astra" && e.provider == "openai")
+        );
+    }
+
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn exhausted_budget_stops_the_next_subtask_before_it_spends() {
+        let mut config = BudgetConfig::default();
+        // Funds the planning call and the first subtask, not the second.
+        config.limits.session_limit = Some(TokenCost::from_cents(100));
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+        let provider = CountingProvider::new(TWO_STEP_PLAN);
+        let router = astra_router(&tracker, &provider).await;
+
+        let plan = astra_plan(&router).await.unwrap();
+        let error = ArchitectExecutor::new(router)
+            .execute(&plan, Vec::new(), None)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::BudgetExceeded(_)), "got {error:?}");
+        assert_eq!(
+            provider.calls(),
+            2,
+            "the refused subtask is never dispatched"
+        );
+        assert_eq!(tracker.get_spending_history(10).await.len(), 2);
+    }
+
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn a_failed_attempt_at_the_ceiling_is_not_redispatched() {
+        let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+        // First subtask succeeds, second fails with no rung above it.
+        let provider = CountingProvider::failing_from("done", 1);
+        let router = astra_router(&tracker, &provider).await;
+        let mut plan = ArchitectPlan::new("ship the feature".into(), ComplexityScore::simple());
+        for index in 0..2 {
+            plan.add_subtask(
+                Subtask::new(index, format!("step {index}"), TaskCategory::General)
+                    .with_model(ModelChoice::ClaudeFable5, 0.0),
+            );
+        }
+
+        let result = ArchitectExecutor::new(router)
+            .execute(&plan, Vec::new(), None)
+            .await
+            .unwrap();
+        assert_eq!(provider.calls(), 2, "no retry against the same model");
+        assert!(!result.subtask_results[1].success);
+        assert_eq!(result.subtask_results[1].retry_count, 1);
+        assert!(
+            result.subtask_results[1]
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("no available escalation target")
+        );
+        // The failed attempt reported usage, so it stays charged.
+        assert_eq!(tracker.get_spending_history(10).await.len(), 2);
+    }
+
+    /// Planning is a paid cloud call too, so the gates must run before the
+    /// planning client is built — otherwise a refused plan surfaces as a
+    /// credential error from a connection that should never have been opened.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn local_only_denies_the_planning_call() {
+        let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+        let provider = CountingProvider::new(TWO_STEP_PLAN);
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = Arc::new(
+            router
+                .with_cloud_policy(arkavo_budget::CloudPolicy::LocalOnly)
+                .with_connectivity(crate::ConnectivityChecker::assume(true))
+                .with_budget_tracker(tracker.clone())
+                .with_provider_factory(provider.factory()),
+        );
+
+        let error = astra_plan(&router).await.unwrap_err();
+        assert!(
+            matches!(&error, Error::ModerationBlocked { policy_id, .. } if policy_id == "cloud_spend"),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a denied plan must not open a client");
+        assert_eq!(provider.calls(), 0);
+        assert!(tracker.get_spending_history(10).await.is_empty());
+    }
+
+    /// Architect subtasks spend like any other cloud call, so the executor's
+    /// own provider resolution has to face the cloud policy too.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn local_only_denies_a_cloud_subtask() {
+        let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+        let provider = CountingProvider::new("done");
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = Arc::new(
+            router
+                .with_cloud_policy(arkavo_budget::CloudPolicy::LocalOnly)
+                .with_connectivity(crate::ConnectivityChecker::assume(true))
+                .with_budget_tracker(tracker.clone())
+                .with_provider_factory(provider.factory()),
+        );
+        let mut plan = ArchitectPlan::new("ship the feature".into(), ComplexityScore::simple());
+        plan.add_subtask(
+            Subtask::new(0, "only step".into(), TaskCategory::General)
+                .with_model(ModelChoice::Gpt6Astra, 0.0),
+        );
+
+        let error = ArchitectExecutor::new(router)
+            .execute(&plan, Vec::new(), None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModerationBlocked { policy_id, .. } if policy_id == "cloud_spend"),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0);
+        assert_eq!(provider.calls(), 0);
+        assert!(tracker.get_spending_history(10).await.is_empty());
     }
 }

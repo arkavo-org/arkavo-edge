@@ -125,6 +125,7 @@ mod tests {
         let tools = vec![create_test_tool("search")];
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Searching...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -150,6 +151,7 @@ mod tests {
         let tools = vec![create_test_tool("search")];
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Using tool...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -177,6 +179,7 @@ mod tests {
         let tools = vec![create_test_tool("search")];
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Searching...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -202,6 +205,7 @@ mod tests {
         let check = SchemaCheck::new();
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "No tools needed".to_string(),
             reasoning_content: None,
             tool_calls: vec![],

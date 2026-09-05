@@ -25,6 +25,7 @@ async fn test_gpt_4o_model() {
     let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider for GPT-5");
 
     let messages = vec![Message {
+        response_items: Vec::new(),
         role: Role::User,
         content: "What model are you? Reply with just your model name.".to_string(),
         images: None,
@@ -64,6 +65,7 @@ async fn test_gpt_4_turbo_model() {
     let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider for GPT-5");
 
     let messages = vec![Message {
+        response_items: Vec::new(),
         role: Role::User,
         content: "Generate a haiku about Rust programming. Reply with just the haiku.".to_string(),
         images: None,
@@ -106,6 +108,7 @@ async fn test_gpt_35_turbo_model() {
     let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider for GPT-5");
 
     let messages = vec![Message {
+        response_items: Vec::new(),
         role: Role::User,
         content: "What is 2 + 2? Reply with just the number.".to_string(),
         images: None,
@@ -155,6 +158,7 @@ async fn test_model_performance_comparison() {
         match OpenAIProvider::new(config) {
             Ok(provider) => {
                 let messages = vec![Message {
+                    response_items: Vec::new(),
                     role: Role::User,
                     content: test_prompt.to_string(),
                     images: None,
@@ -206,6 +210,7 @@ async fn test_context_window_handling() {
 
     let messages = vec![
         Message {
+            response_items: Vec::new(),
             role: Role::System,
             content: format!("Remember this text: {long_text}"),
             images: None,
@@ -214,6 +219,7 @@ async fn test_context_window_handling() {
             tool_calls: Vec::new(),
         },
         Message {
+            response_items: Vec::new(),
             role: Role::User,
             content:
                 "How many times does the word 'fox' appear in the text I asked you to remember?"
@@ -251,6 +257,7 @@ async fn test_json_mode_response() {
 
     let messages = vec![
         Message {
+            response_items: Vec::new(),
             role: Role::System,
             content: "You must respond with valid JSON only.".to_string(),
             images: None,
@@ -259,6 +266,7 @@ async fn test_json_mode_response() {
         tool_calls: Vec::new(),
         },
         Message {
+            response_items: Vec::new(),
             role: Role::User,
             content: r#"Create a JSON object with fields: "name" (string), "age" (number), and "active" (boolean)."#.to_string(),
             images: None,
@@ -304,6 +312,7 @@ async fn test_model_fallback() {
     let provider = OpenAIProvider::new(config).expect("Provider creation should succeed");
 
     let messages = vec![Message {
+        response_items: Vec::new(),
         role: Role::User,
         content: "Hello".to_string(),
         images: None,

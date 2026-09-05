@@ -11,12 +11,15 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
+openai = ["arkavo-cli/openai"]
+cloud = ["llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
 # Full defaults with all LLM providers
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "web-ui", "claude-agent"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
-# Default features for Windows
-windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "web-ui"]
+# Default features for Windows: every cloud provider the router's own
+# `windows` feature carries, and no llama-cpp (the Windows build is C++-free).
+windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui"]
 memory = ["arkavo-cli/memory"]
 embeddings = ["memory", "arkavo-cli/embeddings"]
 mdns = ["arkavo-cli/mdns"]

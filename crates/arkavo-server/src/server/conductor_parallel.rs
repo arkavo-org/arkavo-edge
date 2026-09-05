@@ -224,12 +224,11 @@ async fn planner_track(
         let char_budget = model_ctx * 4;
         let mut context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         if context_chars > char_budget && messages.len() > 3 {
-            let keep_recent = 2;
-            let compactable = messages.len() - 1 - keep_recent;
+            let compactable = super::conductor_history::compactable_prefix(&messages, 2);
             if compactable > 0 {
                 let old_messages: Vec<String> = messages[1..=compactable]
                     .iter()
-                    .map(|m| format!("[{:?}] {}", m.role, &m.content[..m.content.len().min(500)]))
+                    .map(super::conductor_history::summary_line)
                     .collect();
                 let old_chars: usize = messages[1..=compactable]
                     .iter()
@@ -360,7 +359,7 @@ async fn planner_track(
                 // Round 0 produced text but no tool calls. Retry on round 1
                 // with an explicit instruction to use tools.
                 warn!("Planner round 0: no tool calls, will retry with tool nudge");
-                messages.push(arkavo_llm::Message::assistant(response.content.clone()));
+                messages.push(response.as_assistant_message());
                 messages.push(arkavo_llm::Message::user(
                     "You MUST use a tool now. Pick the most appropriate tool and call it."
                         .to_string(),
@@ -382,7 +381,8 @@ async fn planner_track(
         result.tool_call_count += call_count;
         info!("Planner round {plan_round}: produced {call_count} tool calls");
 
-        messages.push(arkavo_llm::Message::assistant(response.content.clone()));
+        let native_tool_role = super::conductor_history::use_tool_role(&response);
+        messages.push(response.as_assistant_message());
 
         if plan_tx
             .send(PlannedActions {
@@ -410,10 +410,11 @@ async fn planner_track(
                 // Push tool results with proper role so Jinja templates
                 // (especially Gemma 4) render <|tool_response> tokens.
                 for tr in &feedback.tool_results {
-                    messages.push(arkavo_llm::Message::tool_result(
+                    messages.push(super::conductor_history::tool_feedback(
                         &tr.content,
                         &tr.call_id,
                         &tr.tool_name,
+                        native_tool_role,
                     ));
                 }
                 if feedback.should_replan {

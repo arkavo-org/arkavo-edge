@@ -169,11 +169,7 @@ impl Provider for OllamaClient {
         _max_tokens: Option<usize>,
     ) -> Result<String> {
         let model = self.select_model(&messages).await?;
-        let request = ChatRequest {
-            model,
-            messages,
-            stream: false,
-        };
+        let request = ChatRequest::new(model, messages, false);
 
         debug!("Sending chat request to Ollama");
         let response = self
@@ -200,11 +196,7 @@ impl Provider for OllamaClient {
         messages: Vec<Message>,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
         let model = self.select_model(&messages).await?;
-        let request = ChatRequest {
-            model,
-            messages,
-            stream: true,
-        };
+        let request = ChatRequest::new(model, messages, true);
 
         debug!("Sending streaming chat request to Ollama");
         let response = self
@@ -239,6 +231,7 @@ impl Provider for OllamaClient {
                             match serde_json::from_str::<ChatResponse>(line) {
                                 Ok(resp) => {
                                     responses.push(Ok(StreamResponse {
+                                        response_items: Vec::new(),
                                         content: resp.message.content,
                                         reasoning_content: None,
                                         done: resp.done,
@@ -257,6 +250,7 @@ impl Provider for OllamaClient {
                                         serde_json::from_str::<StreamingResponse>(line)
                                     {
                                         responses.push(Ok(StreamResponse {
+                                            response_items: Vec::new(),
                                             content: stream_resp.response.unwrap_or_default(),
                                             reasoning_content: None,
                                             done: stream_resp.done,

@@ -146,6 +146,7 @@ where
                                 continue;
                             }
                             return Poll::Ready(Some(Ok(StreamResponse {
+                                response_items: Vec::new(),
                                 content: text,
                                 ..chunk
                             })));
@@ -177,6 +178,7 @@ fn finish(
         }
         GateOutcome::Release(text) => {
             let mut final_chunk = done.unwrap_or(StreamResponse {
+                response_items: Vec::new(),
                 content: String::new(),
                 reasoning_content: None,
                 done: true,
@@ -250,6 +252,7 @@ mod tests {
             .iter()
             .map(|p| {
                 Ok(StreamResponse {
+                    response_items: Vec::new(),
                     content: (*p).to_string(),
                     reasoning_content: None,
                     done: false,
@@ -258,6 +261,7 @@ mod tests {
             })
             .collect();
         out.push(Ok(StreamResponse {
+            response_items: Vec::new(),
             content: String::new(),
             reasoning_content: None,
             done: true,
@@ -317,12 +321,14 @@ mod tests {
     async fn text_arriving_on_the_done_chunk_is_still_inspected() {
         let inner = futures::stream::iter(vec![
             Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: "a clean opening ".to_string(),
                 reasoning_content: None,
                 done: false,
                 inference_timing: None,
             }),
             Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: "and then CANARY at the very end".to_string(),
                 reasoning_content: None,
                 done: true,
@@ -352,12 +358,14 @@ mod tests {
     async fn clean_text_on_the_done_chunk_still_reaches_the_consumer() {
         let inner = futures::stream::iter(vec![
             Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: "an opening ".to_string(),
                 reasoning_content: None,
                 done: false,
                 inference_timing: None,
             }),
             Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: "and a closing".to_string(),
                 reasoning_content: None,
                 done: true,
@@ -402,6 +410,7 @@ mod tests {
     #[tokio::test]
     async fn a_done_chunk_that_releases_a_window_keeps_all_text() {
         let inner = futures::stream::iter(vec![Ok(StreamResponse {
+            response_items: Vec::new(),
             content: "clean final text".into(),
             reasoning_content: None,
             done: true,

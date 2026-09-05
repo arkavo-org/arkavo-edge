@@ -7,7 +7,7 @@ use crate::{Error, Result, Router};
 use arkavo_budget::TokenCost;
 use arkavo_budget::cost::TokenUsage;
 use arkavo_budget::provider_costs::ProviderPricing;
-use arkavo_budget::tracker::{ArchitectCostMetadata, BudgetTracker, SpendingRecord};
+use arkavo_budget::tracker::{BudgetTracker, SpendingRecord};
 use arkavo_llm::Message;
 use arkavo_mcp_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
@@ -115,6 +115,9 @@ pub struct CostOrchestrator {
     /// model's built-in static estimate. Populated from the SwarmKit manifest
     /// at authoring time — never fetched from a vendor endpoint at runtime.
     pricing: ProviderPricing,
+    /// Substitutes provider construction for the architect phases. See
+    /// [`crate::Router::with_provider_factory`].
+    provider_factory: Option<Arc<dyn crate::ProviderFactory>>,
 }
 
 impl CostOrchestrator {
@@ -141,7 +144,23 @@ impl CostOrchestrator {
             budget_threshold: 0.80,
             cloud_policy: arkavo_budget::CloudPolicy::default(),
             pricing,
+            provider_factory: None,
         })
+    }
+
+    /// Route model selection through an explicitly configured selector rather
+    /// than the ambient environment.
+    #[must_use]
+    pub fn with_selector(mut self, selector: ModelSelector) -> Self {
+        self.selector = Arc::new(selector);
+        self
+    }
+
+    /// Substitute provider construction for the architect phases.
+    #[must_use]
+    pub fn with_provider_factory(mut self, factory: Arc<dyn crate::ProviderFactory>) -> Self {
+        self.provider_factory = Some(factory);
+        self
     }
 
     pub async fn route_with_budget(&self, task: &str, agent_id: &str) -> Result<RoutingDecision> {
@@ -450,75 +469,25 @@ impl CostOrchestrator {
             ));
         }
 
-        // Create architect plan
-        let planner = ArchitectPlanner::new();
+        // One router clone bills both phases against the shared tracker under
+        // the calling agent's identity. Planning and every subtask attempt
+        // record their own measured usage through `CallBudget`, so this method
+        // must not re-record their cost afterwards — that would double-charge
+        // the agent for the same calls.
+        let router = Arc::new(self.create_router_for_executor(agent_id).await?);
+        let planner = ArchitectPlanner::new()
+            .with_availability(self.selector.availability.clone())
+            .with_router(router.clone());
         let plan = planner
             .create_plan(task, complexity.clone())
             .await
             .map_err(|e| Error::ArchitectError(e.to_string()))?;
 
-        // Record planning cost (estimate ~10% of total architect cost for planning)
-        let planning_cost_usd = plan.architect_estimate_usd * 0.1;
-        let planning_cost_metadata = ArchitectCostMetadata {
-            plan_id: plan.id,
-            phase: "planning".to_string(),
-            subtask_index: None,
-            subtask_id: None,
-            opus_only_estimate: plan.opus_only_estimate_usd,
-        };
-
-        let planning_cost = TokenCost::from_dollars(planning_cost_usd);
-        let input_tokens = complexity.estimated_output_tokens;
-        let output_tokens = complexity.estimated_output_tokens / 2;
-        let _ = self
-            .budget_tracker
-            .record_architect_spending(
-                agent_id.to_string(),
-                "anthropic".to_string(),
-                "claude-opus".to_string(),
-                arkavo_budget::cost::TokenUsage::new(input_tokens, output_tokens),
-                planning_cost,
-                planning_cost_metadata,
-            )
-            .await;
-
-        // Execute the plan
-        let router = self.create_router_for_executor().await?;
-        let executor = ArchitectExecutor::new(Arc::new(router));
+        let executor = ArchitectExecutor::new(router);
         let result = executor
             .execute(&plan, messages, tool_registry)
             .await
             .map_err(|e| Error::ArchitectError(e.to_string()))?;
-
-        // Record execution costs for each subtask
-        for subtask_result in &result.subtask_results {
-            let opus_per_subtask = if !plan.subtasks.is_empty() {
-                plan.opus_only_estimate_usd / plan.subtasks.len() as f64
-            } else {
-                0.0
-            };
-
-            let exec_metadata = ArchitectCostMetadata {
-                plan_id: plan.id,
-                phase: "execution".to_string(),
-                subtask_index: Some(subtask_result.index),
-                subtask_id: Some(subtask_result.subtask_id),
-                opus_only_estimate: opus_per_subtask,
-            };
-
-            let subtask_cost = TokenCost::from_dollars(subtask_result.actual_cost_usd);
-            let _ = self
-                .budget_tracker
-                .record_architect_spending(
-                    agent_id.to_string(),
-                    subtask_result.model_used.provider().to_string(),
-                    subtask_result.model_used.name().to_string(),
-                    arkavo_budget::cost::TokenUsage::new(0, 0),
-                    subtask_cost,
-                    exec_metadata,
-                )
-                .await;
-        }
 
         // Update metrics
         let mut metrics = self.orchestrator_metrics.write().await;
@@ -544,9 +513,19 @@ impl CostOrchestrator {
         Ok(ArchitectRoutingResult::Architect(result))
     }
 
-    /// Create a minimal router for the executor
-    async fn create_router_for_executor(&self) -> Result<Router> {
-        Router::new().await
+    /// Router for the architect phases: it carries the shared budget tracker
+    /// and the calling agent's ledger identity so planning and subtask spend
+    /// land on that agent's budget with the model that actually served them.
+    async fn create_router_for_executor(&self, agent_id: &str) -> Result<Router> {
+        let mut router = Router::new()
+            .await?
+            .with_cloud_policy(self.cloud_policy)
+            .with_budget_tracker(self.budget_tracker.clone())
+            .with_budget_agent(agent_id);
+        if let Some(factory) = &self.provider_factory {
+            router = router.with_provider_factory(factory.clone());
+        }
+        Ok(router)
     }
 
     /// Get architect savings summary from budget tracker
@@ -785,5 +764,63 @@ mod tests {
 
         assert!(decision.current_usage_percent >= 0.0);
         assert!(!decision.reasoning.is_empty());
+    }
+
+    /// The orchestrator used to record the planning cost as a hardcoded
+    /// `anthropic`/`claude-opus` charge and then re-record every subtask, on
+    /// top of whatever the phases themselves spent. Planning and execution now
+    /// bill once each, through `CallBudget`, under the calling agent and the
+    /// model that actually served the call.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn architect_phases_bill_once_each_with_real_attribution() {
+        use crate::test_support::{CountingProvider, only};
+
+        const COMPLEX_TASK: &str = "Refactor the authentication system. First, update the user \
+             model to support OAuth. Then, create new API endpoints for token refresh. After \
+             that, update the frontend components to handle the new auth flow. Finally, write \
+             comprehensive tests for all the changes.";
+        const TWO_STEP_PLAN: &str = r#"{"subtasks":[
+            {"description":"first step","category":"general","dependencies":[]},
+            {"description":"second step","category":"general","dependencies":[]}]}"#;
+
+        let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+        let provider = CountingProvider::new(TWO_STEP_PLAN);
+        let orchestrator = CostOrchestrator::new(tracker.clone())
+            .await
+            .unwrap()
+            .with_cloud_policy(arkavo_budget::CloudPolicy::CloudWithinCap)
+            .with_selector(ModelSelector::with_availability(only("openai"), false))
+            .with_provider_factory(provider.factory());
+
+        let result = orchestrator
+            .route_with_architect(COMPLEX_TASK, "github-orchestrator", Vec::new(), None)
+            .await
+            .unwrap();
+        assert!(result.is_architect());
+        assert_eq!(
+            provider.calls(),
+            3,
+            "one planning call plus one per subtask"
+        );
+
+        let history = tracker.get_spending_history(20).await;
+        assert_eq!(
+            history.len(),
+            3,
+            "every real call is charged exactly once: {history:?}"
+        );
+        assert!(
+            history
+                .iter()
+                .all(|entry| entry.agent_id == "github-orchestrator"),
+            "spend stays on the calling agent's budget"
+        );
+        assert!(
+            history
+                .iter()
+                .all(|entry| entry.model == "gpt-6-astra" && entry.provider == "openai"),
+            "attribution follows the serving model, not a hardcoded guess: {history:?}"
+        );
     }
 }

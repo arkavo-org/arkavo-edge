@@ -75,6 +75,7 @@ impl Provider for MockProvider {
 
         tokio::spawn(async move {
             let _ = tx.send(Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: response,
                 reasoning_content: None,
                 done: true,

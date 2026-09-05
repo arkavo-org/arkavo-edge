@@ -105,6 +105,7 @@ pub struct BudgetTracker {
     agent_status: Arc<RwLock<HashMap<String, BudgetStatus>>>,
     spending_history: Arc<RwLock<Vec<SpendingRecord>>>,
     event_sender: broadcast::Sender<BudgetEvent>,
+    pub(crate) fractional_spending: tokio::sync::Mutex<HashMap<(String, String, String), u64>>,
 }
 
 impl BudgetTracker {
@@ -117,10 +118,29 @@ impl BudgetTracker {
             agent_status: Arc::new(RwLock::new(HashMap::new())),
             spending_history: Arc::new(RwLock::new(Vec::new())),
             event_sender,
+            fractional_spending: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
 
     pub async fn can_afford(&self, agent_id: &str, estimated_cost: TokenCost) -> Result<bool> {
+        // Unbooked fractions are real spending, even before a whole ledger cent accrues.
+        let fractions = self.fractional_spending.lock().await;
+        let (global_micros, agent_micros) =
+            fractions
+                .iter()
+                .fold((0u64, 0u64), |(global, agent), (key, micros)| {
+                    (
+                        global.saturating_add(*micros),
+                        if key.0 == agent_id {
+                            agent.saturating_add(*micros)
+                        } else {
+                            agent
+                        },
+                    )
+                });
+        let global_estimate =
+            estimated_cost + TokenCost::from_cents(global_micros.div_ceil(10_000));
+        let agent_estimate = estimated_cost + TokenCost::from_cents(agent_micros.div_ceil(10_000));
         let config = self.config.read().await;
         let status = self.status.read().await;
 
@@ -134,7 +154,7 @@ impl BudgetTracker {
 
         for (limit, spent) in global_checks {
             if let Some(limit_value) = limit
-                && spent + estimated_cost > limit_value
+                && spent + global_estimate > limit_value
             {
                 return Ok(false);
             }
@@ -152,7 +172,7 @@ impl BudgetTracker {
 
             for (limit, spent) in agent_checks {
                 if let Some(limit_value) = limit
-                    && spent + estimated_cost > limit_value
+                    && spent + agent_estimate > limit_value
                 {
                     return Ok(false);
                 }

@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 #[cfg(feature = "llama-cpp")]
 use crate::judge;
 use crate::learning::BurstFeedback;
+use crate::usage::{CallBudget, RoutedResponse};
 use crate::{classifier, prompt_advisor, selector_quality, tool_extraction, validator};
 use arkavo_llm::{Message, ProviderResponse};
 use arkavo_mcp_tools::ToolRegistry;
@@ -18,175 +19,6 @@ impl super::Router {
             .await
     }
 
-    /// Route for execution iterations — stripped profile for fast tool calls.
-    ///
-    /// Uses near-greedy temperature (0.1), thinking disabled, max 200 tokens,
-    /// and skips Judge validation. For iterations where the model just needs
-    /// to emit the next tool call, not reason about it.
-    pub async fn route_with_tools_execution(
-        &self,
-        _task_description: &str,
-        messages: Vec<Message>,
-        tool_registry: Option<&ToolRegistry>,
-        model_hint: Option<&crate::ModelChoice>,
-    ) -> Result<ProviderResponse> {
-        // Execution mode: bypass classification and Thompson Sampling entirely.
-        // The model is already known (from the hint or fastest local fallback)
-        // and all tools should be passed with compact schemas since the model
-        // already saw full schemas in round 0.
-        let model = model_hint
-            .cloned()
-            .unwrap_or_else(|| self.selector.fastest_local_model());
-
-        let tools_json = match tool_registry {
-            Some(registry) => {
-                // Pass ALL tools with NameAndDescription detail level.
-                // Empty query returns everything — no keyword filtering needed
-                // since the model already knows which tools to call.
-                let tool_infos =
-                    registry.search_tools("", arkavo_mcp_tools::DetailLevel::NameAndDescription);
-                let json = match model {
-                    crate::ModelChoice::GeminiFlash
-                    | crate::ModelChoice::Gemini35Flash
-                    | crate::ModelChoice::Gemini35FlashMinimal
-                    | crate::ModelChoice::Gemini35FlashMedium
-                    | crate::ModelChoice::Gemini35FlashHigh
-                    | crate::ModelChoice::GeminiPro => {
-                        arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
-                    }
-                    _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
-                };
-                Some(json)
-            }
-            None => None,
-        };
-
-        let provider = self.instantiate_provider(&model).await?;
-        let _permit = self
-            .inference_semaphore
-            .acquire()
-            .await
-            .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
-
-        let mut response = provider
-            .complete_with_tools(messages, tools_json, None)
-            .await
-            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
-
-        response.tool_calls = tool_extraction::filter_and_extract_tool_calls(response.tool_calls);
-
-        if response.tool_calls.is_empty() && !response.content.is_empty() {
-            let extracted = tool_extraction::extract_tool_calls_from_text(&response.content);
-            if !extracted.is_empty() {
-                response.tool_calls = extracted;
-            }
-        }
-
-        Ok(response)
-    }
-
-    /// Route with a model override — bypass classification, Thompson Sampling,
-    /// and quality gate retries. Use when AGENTS.md specifies `model:` and the
-    /// caller wants the exact model with minimal overhead.
-    pub async fn route_with_tools_override(
-        &self,
-        task_description: &str,
-        messages: Vec<Message>,
-        tool_registry: Option<&ToolRegistry>,
-        model: &crate::ModelChoice,
-    ) -> Result<ProviderResponse> {
-        let inference_start = std::time::Instant::now();
-
-        // Track whether tools were actually attached (non-empty) so the
-        // quality scorer can penalize text-only responses correctly. A
-        // registry that returns zero matches must NOT count as attached —
-        // otherwise the model gets penalized for legitimately producing
-        // text when no tools were callable.
-        let (tools_json, tools_were_attached) = match tool_registry {
-            Some(registry) => {
-                let detail_level = tool_extraction::detail_level_for_model(model);
-                let keywords = tool_extraction::extract_keywords(task_description);
-                let input_tokens = tool_extraction::estimate_tokens(task_description);
-                let tool_infos = tool_extraction::search_tools_hybrid(
-                    registry,
-                    &keywords,
-                    detail_level,
-                    Some(input_tokens),
-                )
-                .await;
-                let attached = !tool_infos.is_empty();
-                let json = match model {
-                    crate::ModelChoice::GeminiFlash
-                    | crate::ModelChoice::Gemini35Flash
-                    | crate::ModelChoice::Gemini35FlashMinimal
-                    | crate::ModelChoice::Gemini35FlashMedium
-                    | crate::ModelChoice::Gemini35FlashHigh
-                    | crate::ModelChoice::GeminiPro => {
-                        arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
-                    }
-                    _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
-                };
-                (Some(json), attached)
-            }
-            None => (None, false),
-        };
-
-        let use_spec = self.decide_spec_with_event(model.name());
-        let provider = self.instantiate_provider_with_spec(model, use_spec).await?;
-        let _permit = self
-            .inference_semaphore
-            .acquire()
-            .await
-            .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
-        let mut response = provider
-            .complete_with_tools(messages, tools_json, None)
-            .await
-            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
-
-        response.tool_calls = tool_extraction::filter_and_extract_tool_calls(response.tool_calls);
-
-        if response.tool_calls.is_empty() && !response.content.is_empty() {
-            let extracted = tool_extraction::extract_tool_calls_from_text(&response.content);
-            if !extracted.is_empty() {
-                response.tool_calls = extracted;
-            }
-        }
-
-        let elapsed = inference_start.elapsed();
-        let quality = selector_quality::compute_response_quality(
-            &response.content,
-            elapsed.as_millis() as u64,
-            "general",
-            response.tool_calls.len(),
-            tools_were_attached,
-        );
-        tracing::info!(
-            model = model.name(),
-            quality = format!("{quality:.3}").as_str(),
-            latency_ms = elapsed.as_millis() as u64,
-            response_len = response.content.len(),
-            tool_call_count = response.tool_calls.len(),
-            "Model override: inference completed"
-        );
-        self.model_learning
-            .immediate_update(
-                model.name(),
-                &BurstFeedback::success(
-                    uuid::Uuid::new_v4(),
-                    "general".to_string(),
-                    elapsed.as_millis() as u64,
-                )
-                .with_quality(quality),
-            )
-            .await;
-
-        if let Ok(mut guard) = self.last_routed_model.write() {
-            *guard = Some(model.name().to_string());
-        }
-
-        Ok(response)
-    }
-
     /// Route with a model hint from AGENTS.md configuration.
     ///
     /// If the hinted model is available, it biases the initial Thompson Sampling
@@ -198,7 +30,45 @@ impl super::Router {
         tool_registry: Option<&ToolRegistry>,
         model_hint: Option<&crate::ModelChoice>,
     ) -> Result<ProviderResponse> {
-        self.route_with_tools_internal(task_description, messages, tool_registry, model_hint, false)
+        self.route_with_tools_internal(
+            task_description,
+            messages,
+            tool_registry,
+            model_hint,
+            false,
+            None,
+        )
+        .await
+        .map(|r| r.response)
+    }
+
+    /// Attribute every completed attempt, including responses rejected by a retry gate.
+    /// Spending is recorded inside the loop, so a later error cannot erase earlier usage.
+    pub async fn route_with_tools_budgeted(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        budget: CallBudget<'_>,
+    ) -> Result<RoutedResponse> {
+        self.route_with_tools_internal(
+            task_description,
+            messages,
+            tool_registry,
+            None,
+            false,
+            Some(budget),
+        )
+        .await
+    }
+
+    pub async fn route_with_tools_attributed(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+    ) -> Result<RoutedResponse> {
+        self.route_with_tools_internal(task_description, messages, tool_registry, None, false, None)
             .await
     }
 
@@ -209,8 +79,10 @@ impl super::Router {
         tool_registry: Option<&ToolRegistry>,
         model_hint: Option<&crate::ModelChoice>,
         execution_mode: bool,
-    ) -> Result<ProviderResponse> {
+        budget: Option<CallBudget<'_>>,
+    ) -> Result<RoutedResponse> {
         const MAX_RETRIES: u8 = 3;
+        let budget = budget.or_else(|| self.call_budget());
         let mut current_decision = self.classify(task_description).await?;
 
         // Execution iterations: when a model hint is provided (from AGENTS.md),
@@ -261,6 +133,16 @@ impl super::Router {
         }
 
         let mut feedback_messages: Vec<Message> = Vec::new();
+        let mut attempts = Vec::new();
+        // Cloud arm already authorized for this dispatch. The user's one-shot
+        // confirmation is consumed once — by the collapse upgrade or by the
+        // first attempt — so retries against that same model must not re-ask,
+        // while a switch to a different cloud arm still does.
+        let mut authorized_cloud: Option<crate::ModelChoice> = None;
+        // Set only when a *user* approval (one-shot or session) paid for this
+        // dispatch. A caller naming a model authorizes that model, not a later
+        // upgrade to a different, possibly dearer arm — so it must not count.
+        let mut user_paid_for_cloud = false;
 
         let input_tokens = tool_extraction::estimate_tokens(task_description);
         let is_simple = prompt_advisor::is_simple_query(&task_description.to_lowercase());
@@ -294,6 +176,9 @@ impl super::Router {
                     let json = match current_decision.recommended_model {
                         crate::ModelChoice::GeminiFlash
                         | crate::ModelChoice::Gemini35Flash
+                        | crate::ModelChoice::Gemini35FlashMinimal
+                        | crate::ModelChoice::Gemini35FlashMedium
+                        | crate::ModelChoice::Gemini35FlashHigh
                         | crate::ModelChoice::GeminiPro => {
                             arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
                         }
@@ -380,12 +265,37 @@ impl super::Router {
                 }
             }
 
+            let actual_model = current_decision.recommended_model.clone();
+            let estimated_usage = crate::usage::estimate_request(
+                &advised_messages,
+                tools_json.as_ref(),
+                if execution_mode { 200 } else { 4096 },
+            );
+            let estimated_cost = self.usage_cost(&actual_model, &estimated_usage);
+            // Cloud-spend policy gates the tool-loop exactly as it gates chat,
+            // and before the provider is built so a denial never opens a client.
+            // "Explicit" means the caller named this model (an applied hint) or
+            // it was already authorized for this dispatch.
+            let caller_authorized = authorized_cloud.as_ref() == Some(&actual_model)
+                || effective_hint.is_some_and(|hint| *hint == actual_model);
+            if let Some(budget) = budget {
+                budget.check(estimated_cost).await?;
+            }
+            let approval_pending = self.cloud_confirmation_pending();
+            self.authorize_call(&actual_model, estimated_cost, caller_authorized)
+                .await?;
+            if actual_model.is_cloud() {
+                authorized_cloud = Some(actual_model.clone());
+                // A cloud arm the caller did not name can only have cleared the
+                // gate on the user's approval, which `authorize_call` has now
+                // spent.
+                user_paid_for_cloud |= !caller_authorized && approval_pending;
+            }
             let provider = if execution_mode {
-                self.instantiate_provider_execution(&current_decision.recommended_model)
-                    .await?
+                self.instantiate_provider_execution(&actual_model).await?
             } else {
-                self.instantiate_provider_with_spec(
-                    &current_decision.recommended_model,
+                self.instantiate_provider_exact_with_spec(
+                    &actual_model,
                     current_decision.use_spec_decoding,
                 )
                 .await?
@@ -415,12 +325,29 @@ impl super::Router {
             self.check_local_feasibility(&current_decision.recommended_model, input_tokens as u32);
 
             let max_tokens = if execution_mode { Some(200usize) } else { None };
+            let request_usage =
+                crate::usage::estimate_request(&advised_messages, tools_json.as_ref(), 0);
             let mut response = match provider
                 .complete_with_tools(advised_messages, tools_json, max_tokens)
                 .await
             {
                 Ok(r) => r,
                 Err(e) => {
+                    if let Some(timing) = e.inference_timing() {
+                        let failed_response = ProviderResponse {
+                            inference_timing: Some(timing.clone()),
+                            ..Default::default()
+                        };
+                        let attributed = self.attribute_response(
+                            actual_model.clone(),
+                            &request_usage,
+                            &failed_response,
+                        );
+                        if let Some(budget) = budget {
+                            budget.record(&attributed).await?;
+                        }
+                        attempts.push(attributed);
+                    }
                     self.record_model_cooldown(current_decision.recommended_model.name())
                         .await;
 
@@ -471,6 +398,13 @@ impl super::Router {
                     return Err(Error::ModelExecution(format!("Provider error: {e}")));
                 }
             };
+
+            let attributed =
+                self.attribute_response(actual_model.clone(), &request_usage, &response);
+            if let Some(budget) = budget {
+                budget.record(&attributed).await?;
+            }
+            attempts.push(attributed);
 
             // Record per-attempt inference latency so retries are individually visible
             let attempt_ms = inference_start.elapsed().as_millis() as u64;
@@ -553,7 +487,7 @@ impl super::Router {
                         let available_tool_names: Vec<&str> =
                             tool_infos.iter().map(|t| t.name.as_str()).collect();
                         let fix = validation_error.fix_suggestion(&available_tool_names);
-                        feedback_messages.push(Message::assistant(response.content.clone()));
+                        append_rejected_response(&mut feedback_messages, &response);
                         feedback_messages.push(Message::user(format!(
                             "ERROR: {validation_error}\n\nFix: {fix}",
                         )));
@@ -567,7 +501,11 @@ impl super::Router {
                         "Validation failed after {} attempts, returning response",
                         MAX_RETRIES
                     );
-                    return Ok(response);
+                    return Ok(RoutedResponse {
+                        response,
+                        model: actual_model,
+                        attempts,
+                    });
                 }
 
                 // Skip Judge validation in execution mode — fast syntax check is sufficient
@@ -629,8 +567,7 @@ impl super::Router {
                                         .reason
                                         .as_deref()
                                         .unwrap_or("Quality check failed");
-                                    feedback_messages
-                                        .push(Message::assistant(response.content.clone()));
+                                    append_rejected_response(&mut feedback_messages, &response);
                                     feedback_messages.push(Message::user(format!(
                                         "ERROR: Your response was rejected: {reason}\n\nPlease fix the issue and try again. Use the correct tool call format.",
                                     )));
@@ -644,7 +581,11 @@ impl super::Router {
                                     "Judge rejected after {} attempts, returning response",
                                     MAX_RETRIES
                                 );
-                                return Ok(response);
+                                return Ok(RoutedResponse {
+                                    response,
+                                    model: actual_model,
+                                    attempts,
+                                });
                             }
                         }
                         Err(e) => {
@@ -695,7 +636,13 @@ impl super::Router {
                     let allow_cloud = if let UpgradeOffer::Offer(reason) = offer {
                         let caps = self.cloud_spend_caps().await;
                         let projected = self.projected_cloud_cost(&current_decision);
-                        let confirmed = self.consume_cloud_confirmation();
+                        // A user approval spent by this dispatch's own first
+                        // attempt still counts: the one-shot flag is gone, but
+                        // asking the same user twice for one request is the bug
+                        // the session-sticky flag exists to avoid. An explicit
+                        // caller model is deliberately not enough — it approves
+                        // that arm, not an upgrade to a different one.
+                        let confirmed = user_paid_for_cloud || self.cloud_confirmed();
                         match planes::authorize_upgrade(
                             self.cloud_policy(),
                             reason,
@@ -770,6 +717,9 @@ impl super::Router {
                             "Re-routed after local collapse"
                         );
                         current_decision = next;
+                        if allow_cloud && current_decision.recommended_model.is_cloud() {
+                            authorized_cloud = Some(current_decision.recommended_model.clone());
+                        }
                         continue;
                     }
                 }
@@ -853,18 +803,39 @@ impl super::Router {
             }
 
             response.quality_gate_retries = attempt;
-            return Ok(response);
+            return Ok(RoutedResponse {
+                response,
+                model: actual_model,
+                attempts,
+            });
         }
 
-        tracing::warn!("Route loop completed without returning, using empty response");
-        Ok(ProviderResponse {
-            content: String::new(),
-            reasoning_content: None,
-            tool_calls: Vec::new(),
-            finish_reason: None,
-            inference_timing: None,
-            quality_gate_retries: MAX_RETRIES,
+        Err(Error::MaxRetriesExceeded {
+            attempts: MAX_RETRIES,
         })
+    }
+}
+
+// A rejected tool call still needs an output paired to its native ID before
+// Responses can continue the conversation. Nothing in this retry was executed.
+fn append_rejected_response(messages: &mut Vec<Message>, response: &ProviderResponse) {
+    if response.response_items.is_empty() {
+        messages.push(Message::assistant(response.content.clone()));
+        return;
+    }
+    messages.push(response.as_assistant_message());
+    for item in &response.response_items {
+        if item.get("type").and_then(serde_json::Value::as_str) == Some("function_call")
+            && let Some(id) = item.get("call_id").and_then(serde_json::Value::as_str)
+        {
+            messages.push(Message::tool_result(
+                "Tool call rejected by response validation; it was not executed.",
+                id,
+                item.get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("tool"),
+            ));
+        }
     }
 }
 
@@ -926,6 +897,175 @@ mod tests {
             quality_no_penalty > quality_with_penalty,
             "empty-tools path must avoid the -0.7 tool-required penalty \
              (no_penalty={quality_no_penalty}, with_penalty={quality_with_penalty})"
+        );
+    }
+    #[spec("ASTRA-002")]
+    #[test]
+    fn validation_retry_preserves_reasoning_and_resolves_tool_ids() {
+        let response = arkavo_llm::ProviderResponse {
+            response_items: vec![
+                serde_json::json!({"type":"reasoning","id":"reasoning-1","encrypted_content":"opaque"}),
+                serde_json::json!({"type":"function_call","call_id":"call-1","name":"read","arguments":"{}"}),
+            ],
+            tool_calls: vec![arkavo_llm::tool_parser::ParsedToolCall {
+                tool_name: "read".into(),
+                arguments: serde_json::json!({}),
+                call_id: Some("call-1".into()),
+            }],
+            ..Default::default()
+        };
+        let mut messages = Vec::new();
+        super::append_rejected_response(&mut messages, &response);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].response_items, response.response_items);
+        assert_eq!(messages[1].tool_call_id.as_deref(), Some("call-1"));
+        assert!(messages[1].content.contains("not executed"));
+    }
+
+    /// The tool loop dispatches paid cloud calls exactly like chat, so it must
+    /// consult the same cloud-spend policy — `LocalOnly` used to be silently
+    /// ignored here, letting an OPENAI_API_KEY-only agent reach Astra.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn local_only_denies_the_tool_loop_path() {
+        use crate::Error;
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("ok");
+        let router = cloud_router(arkavo_budget::CloudPolicy::LocalOnly, "openai", &provider).await;
+        let error = router
+            .route_with_tools_attributed(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("summarize the diff")],
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModerationBlocked { policy_id, .. } if policy_id == "cloud_spend"),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a denied call must not open a client");
+        assert_eq!(provider.calls(), 0);
+    }
+
+    /// Amendment (b): an auto-selected cloud arm has no caller authorization,
+    /// so `AskBeforeCloud` must ask before the loop spends anything.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn auto_selected_cloud_asks_before_the_loop_spends() {
+        use crate::Error;
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("ok");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::AskBeforeCloud,
+            "openai",
+            &provider,
+        )
+        .await;
+        let error = router
+            .route_with_tools_attributed(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("summarize the diff")],
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::CloudConfirmationRequired { model, .. } if model == "gpt-6-astra"),
+            "got {error:?}"
+        );
+        assert_eq!(provider.calls(), 0);
+    }
+
+    /// Amendment (c): once confirmed the loop proceeds — and a retry *inside*
+    /// that loop must not re-ask, because the one-shot flag is already spent.
+    /// The empty registry rejects the answer's tool call, so all three attempts
+    /// run against the same authorized arm.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn confirmation_covers_every_retry_of_the_same_arm() {
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::calling_tool("no_such_tool");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::AskBeforeCloud,
+            "openai",
+            &provider,
+        )
+        .await;
+        router.confirm_next_cloud_upgrade();
+
+        let registry = ToolRegistry::empty();
+        let routed = router
+            .route_with_tools_attributed(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("summarize the diff")],
+                Some(&registry),
+            )
+            .await
+            .expect("the confirmed arm must not be re-asked mid-loop");
+        assert_eq!(routed.model, crate::ModelChoice::Gpt6Astra);
+        assert_eq!(
+            provider.calls(),
+            3,
+            "every validation retry reuses the authorization granted once"
+        );
+    }
+
+    /// The collapse plane may upgrade a breakdown to cloud once the spend plane
+    /// authorizes it. That authorization consumes the user's one-shot flag, so
+    /// the retry it schedules must inherit it — otherwise the loop either
+    /// re-asks (and fails the whole request) or silently re-offers the upgrade
+    /// it was just granted.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_confirmed_collapse_upgrade_is_not_re_asked() {
+        use crate::selector::ModelSelector;
+        use crate::test_support::{CountingProvider, only};
+        use crate::{ConnectivityChecker, Router, RouterEvent};
+
+        // Exactly two feasible arms: the cheapest cached local model and the one
+        // configured cloud provider. The memory budget drops every other local.
+        let selector = ModelSelector::with_availability(only("openai"), true);
+        selector.set_memory_budget(600_000_000);
+        assert_eq!(
+            selector.feasible_models(),
+            vec![
+                crate::ModelChoice::LocalQwen3,
+                crate::ModelChoice::Gpt6Astra
+            ]
+        );
+
+        let provider = CountingProvider::blank_then("a complete answer for the request");
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = router
+            .with_cloud_policy(arkavo_budget::CloudPolicy::AskBeforeCloud)
+            .with_connectivity(ConnectivityChecker::assume(true))
+            .with_selector(selector)
+            .await
+            .with_provider_factory(provider.factory());
+        let _ = router.drain_events();
+        router.confirm_next_cloud_upgrade();
+
+        let routed = router
+            .route_with_tools_attributed(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("summarize the diff")],
+                None,
+            )
+            .await
+            .expect("a confirmed dispatch must not be re-asked mid-loop");
+        assert!(!routed.response.content.is_empty());
+        assert_eq!(provider.calls(), 2, "the collapse must have been retried");
+        assert!(
+            !router
+                .drain_events()
+                .iter()
+                .any(|event| matches!(event, RouterEvent::CloudUpgradeOffered { .. })),
+            "an already-confirmed upgrade must not be offered again"
         );
     }
 }

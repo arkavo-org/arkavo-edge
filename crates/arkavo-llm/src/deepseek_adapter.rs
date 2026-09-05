@@ -120,22 +120,60 @@ impl DeepSeekProvider {
     }
 }
 
-/// Convert arkavo-llm messages to arkavo-deepseek ChatMessage
+/// Convert arkavo-llm messages to arkavo-deepseek ChatMessage.
+///
+/// Tool results become user turns rather than assistant turns: the chat API
+/// continues a trailing assistant message instead of answering it, so the
+/// model would finish its own tool output. The wire `Role::Tool` is not usable
+/// either — this adapter never forwards the assistant `tool_calls` that a tool
+/// message must pair with by id, and an unpaired tool message is rejected.
 fn convert_messages_to_deepseek(messages: Vec<Message>) -> Vec<ChatMessage> {
     messages
         .into_iter()
-        .map(|msg| ChatMessage {
-            role: match msg.role {
-                Role::System => arkavo_deepseek::Role::System,
-                Role::User => arkavo_deepseek::Role::User,
-                Role::Assistant | Role::Tool => arkavo_deepseek::Role::Assistant,
-            },
-            content: MessageContent::Text {
-                content: msg.content,
-            },
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
+        .map(|msg| {
+            let (role, content) = match msg.role {
+                Role::System => (arkavo_deepseek::Role::System, msg.content),
+                Role::User => (arkavo_deepseek::Role::User, msg.content),
+                Role::Assistant => (arkavo_deepseek::Role::Assistant, msg.content),
+                Role::Tool => (arkavo_deepseek::Role::User, msg.tool_result_as_user_text()),
+            };
+            ChatMessage {
+                role,
+                content: MessageContent::Text { content },
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            }
+        })
+        .collect()
+}
+
+/// Convert arkavo-llm messages to the streaming path's message type, which has
+/// no tool role at all — tool results take the same user rendering as on the
+/// completion path.
+fn convert_messages_to_deepseek_provider(
+    messages: Vec<Message>,
+) -> Vec<arkavo_deepseek::provider::Message> {
+    messages
+        .into_iter()
+        .map(|msg| {
+            let (role, content) = match msg.role {
+                Role::System => (arkavo_deepseek::provider::MessageRole::System, msg.content),
+                Role::User => (arkavo_deepseek::provider::MessageRole::User, msg.content),
+                Role::Assistant => (
+                    arkavo_deepseek::provider::MessageRole::Assistant,
+                    msg.content,
+                ),
+                Role::Tool => (
+                    arkavo_deepseek::provider::MessageRole::User,
+                    msg.tool_result_as_user_text(),
+                ),
+            };
+            arkavo_deepseek::provider::Message {
+                role,
+                content,
+                images: msg.images,
+            }
         })
         .collect()
 }
@@ -143,6 +181,7 @@ fn convert_messages_to_deepseek(messages: Vec<Message>) -> Vec<ChatMessage> {
 /// Convert arkavo-deepseek stream response to arkavo-llm stream response
 fn convert_stream_response(resp: arkavo_deepseek::StreamResponse) -> StreamResponse {
     StreamResponse {
+        response_items: Vec::new(),
         content: resp.content.unwrap_or_default(),
         reasoning_content: resp.reasoning_content,
         done: resp.done,
@@ -193,20 +232,7 @@ impl Provider for DeepSeekProvider {
         messages: Vec<Message>,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
         // Convert to provider Message format for stream
-        let provider_messages: Vec<arkavo_deepseek::provider::Message> = messages
-            .into_iter()
-            .map(|msg| arkavo_deepseek::provider::Message {
-                role: match msg.role {
-                    Role::System => arkavo_deepseek::provider::MessageRole::System,
-                    Role::User => arkavo_deepseek::provider::MessageRole::User,
-                    Role::Assistant | Role::Tool => {
-                        arkavo_deepseek::provider::MessageRole::Assistant
-                    }
-                },
-                content: msg.content,
-                images: msg.images,
-            })
-            .collect();
+        let provider_messages = convert_messages_to_deepseek_provider(messages);
 
         // Use the arkavo-deepseek Provider trait
         use arkavo_deepseek::Provider as DeepSeekProviderTrait;
@@ -308,6 +334,7 @@ impl Provider for DeepSeekProvider {
         let finish_reason = first_choice.finish_reason.clone();
 
         Ok(ProviderResponse {
+            response_items: Vec::new(),
             content: first_choice.message.content.clone().unwrap_or_default(),
             reasoning_content: first_choice.message.reasoning_content.clone(),
             tool_calls: parsed_tool_calls,
@@ -349,5 +376,59 @@ impl DeepSeekProvider {
                 })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    fn tool_calling_history() -> Vec<Message> {
+        vec![
+            Message::user("what is the weather in Dublin"),
+            Message::assistant_with_tool_calls(
+                "Checking the forecast.",
+                vec![crate::ToolCall {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"Dublin"}"#.to_string(),
+                    id: Some("call_1".to_string()),
+                }],
+            ),
+            Message::tool_result("sunny, 21C", "call_1", "get_weather"),
+        ]
+    }
+
+    /// The chat API continues a trailing assistant message rather than
+    /// answering it, so a tool result replayed under that role makes the model
+    /// finish its own tool output. The adapter forwards no assistant
+    /// `tool_calls`, so the result cannot use the wire tool role either.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn tool_result_is_not_sent_as_an_assistant_turn() {
+        let converted = convert_messages_to_deepseek(tool_calling_history());
+
+        let last = converted.last().expect("conversation is not empty");
+        assert_ne!(last.role, arkavo_deepseek::Role::Assistant);
+        assert_eq!(last.role, arkavo_deepseek::Role::User);
+        let MessageContent::Text { content } = &last.content else {
+            panic!("tool results convert to plain text");
+        };
+        assert!(content.contains("sunny, 21C"), "{content}");
+        assert!(content.contains("get_weather"), "{content}");
+    }
+
+    /// The streaming path has its own message type whose role enum has no tool
+    /// variant, so it needs the same user rendering as the completion path.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn streaming_tool_result_is_not_sent_as_an_assistant_turn() {
+        let converted = convert_messages_to_deepseek_provider(tool_calling_history());
+
+        let last = converted.last().expect("conversation is not empty");
+        assert_ne!(last.role, arkavo_deepseek::provider::MessageRole::Assistant);
+        assert_eq!(last.role, arkavo_deepseek::provider::MessageRole::User);
+        assert!(last.content.contains("sunny, 21C"), "{}", last.content);
+        assert!(last.content.contains("get_weather"), "{}", last.content);
     }
 }

@@ -7,8 +7,10 @@ use crate::tool_parser::ParsedToolCall;
 use crate::{Message, Result, StreamResponse};
 
 /// Response from a provider that may include tool calls
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ProviderResponse {
+    /// Exact Responses output items for stateless continuation; never display these.
+    pub response_items: Vec<Value>,
     pub content: String,
     /// Reasoning/thinking content from models with thinking mode (e.g., DeepSeek V3.2-Speciale)
     pub reasoning_content: Option<String>,
@@ -20,6 +22,45 @@ pub struct ProviderResponse {
     pub quality_gate_retries: u8,
 }
 
+impl ProviderResponse {
+    /// Distinguish provider-native calls from tool syntax extracted from prose.
+    pub fn has_native_response_calls(&self) -> bool {
+        self.response_items
+            .iter()
+            .any(|item| item["type"] == "function_call")
+    }
+
+    /// Whether this turn's tool results must be replayed as `Role::Tool`.
+    ///
+    /// Chat Completions providers (OpenAI-compatible, GLM, Grok, Anthropic)
+    /// carry no `response_items` at all, yet their assistant `tool_calls` are
+    /// native and the API rejects any continuation that answers them with a
+    /// user message. Local templates likewise expect tool roles. Only a
+    /// Responses turn that returned items without a `function_call` among them
+    /// had its calls extracted from prose, and a `function_call_output` cannot
+    /// be submitted for a call the provider never recorded.
+    pub fn tool_results_use_tool_role(&self) -> bool {
+        self.response_items.is_empty() || self.has_native_response_calls()
+    }
+
+    /// Preserve native tool IDs and opaque provider state in the next turn.
+    pub fn as_assistant_message(&self) -> Message {
+        let mut message = Message::assistant_with_tool_calls(
+            self.content.clone(),
+            self.tool_calls
+                .iter()
+                .map(|call| crate::message::ToolCall {
+                    name: call.tool_name.clone(),
+                    arguments: call.arguments.to_string(),
+                    id: call.call_id.clone(),
+                })
+                .collect(),
+        );
+        message.response_items.clone_from(&self.response_items);
+        message
+    }
+}
+
 /// Timing and token-usage data from the LLM inference engine.
 /// Populated by llama.cpp and by cloud providers that surface usage
 /// metadata (Gemini 3.5's `usageMetadata` block in particular).
@@ -29,8 +70,14 @@ pub struct InferenceTiming {
     pub prompt_eval_ms: f64,
     /// Token generation time in ms
     pub generation_ms: f64,
-    /// Number of prompt tokens evaluated (not served from KV cache)
+    /// Total prompt tokens, including tokens served from the provider cache
     pub n_prompt_eval: u32,
+    /// Cached input tokens, a subset of n_prompt_eval (not additional input).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_cached_prompt_eval: Option<u32>,
+    /// Cache-write input tokens, disjoint from cached reads and included in n_prompt_eval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_cache_write_prompt_eval: Option<u32>,
     /// Number of tokens generated and surfaced to the caller (visible
     /// text + tool calls — for thinking models this excludes the
     /// internal chain-of-thought).
@@ -127,6 +174,7 @@ pub trait Provider: Send + Sync {
     ) -> Result<ProviderResponse> {
         let content = self.complete_with_options(messages, max_tokens).await?;
         Ok(ProviderResponse {
+            response_items: Vec::new(),
             content,
             reasoning_content: None,
             tool_calls: Vec::new(),
@@ -152,5 +200,103 @@ pub trait Provider: Send + Sync {
     ) -> Result<String> {
         // Default: ignore schema, use regular completion
         self.complete_with_options(messages, max_tokens).await
+    }
+    /// Structured completion retaining usage and opaque conversation state.
+    async fn complete_with_schema_response(
+        &self,
+        messages: Vec<Message>,
+        schema: Option<Value>,
+        max_tokens: Option<usize>,
+    ) -> Result<ProviderResponse> {
+        let content = self
+            .complete_with_schema(messages, schema, max_tokens)
+            .await?;
+        Ok(ProviderResponse {
+            content,
+            ..Default::default()
+        })
+    }
+}
+
+impl std::fmt::Debug for ProviderResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProviderResponse")
+            .field("content", &self.content)
+            .field("reasoning_content", &self.reasoning_content)
+            .field("tool_calls", &self.tool_calls)
+            .field("finish_reason", &self.finish_reason)
+            .field("inference_timing", &self.inference_timing)
+            .field("quality_gate_retries", &self.quality_gate_retries)
+            .field("response_items_count", &self.response_items.len())
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+    use serde_json::json;
+
+    fn call(name: &str, id: Option<&str>) -> ParsedToolCall {
+        ParsedToolCall {
+            tool_name: name.to_string(),
+            arguments: json!({}),
+            call_id: id.map(str::to_string),
+        }
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn chat_completions_tool_calls_replay_as_tool_role() {
+        let response = ProviderResponse {
+            tool_calls: vec![call("read", Some("call_abc"))],
+            ..Default::default()
+        };
+        assert!(response.response_items.is_empty());
+        assert!(!response.has_native_response_calls());
+        assert!(response.tool_results_use_tool_role());
+        assert_eq!(
+            response.as_assistant_message().tool_calls[0].id.as_deref(),
+            Some("call_abc")
+        );
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn responses_function_call_items_replay_as_tool_role() {
+        let response = ProviderResponse {
+            response_items: vec![json!({
+                "type": "function_call", "call_id": "fc_1", "name": "read", "arguments": "{}"
+            })],
+            tool_calls: vec![call("read", Some("fc_1"))],
+            ..Default::default()
+        };
+        assert!(response.tool_results_use_tool_role());
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn prose_extracted_calls_alongside_items_use_user_role() {
+        let response = ProviderResponse {
+            response_items: vec![
+                json!({"type": "reasoning", "id": "rs_1", "summary": []}),
+                json!({"type": "message", "role": "assistant", "content": []}),
+            ],
+            tool_calls: vec![call("read", None)],
+            ..Default::default()
+        };
+        assert!(!response.tool_results_use_tool_role());
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn plain_text_turn_carries_no_tool_calls_to_pair() {
+        let response = ProviderResponse {
+            content: "hello".to_string(),
+            ..Default::default()
+        };
+        assert!(response.tool_results_use_tool_role());
+        assert!(response.as_assistant_message().tool_calls.is_empty());
     }
 }

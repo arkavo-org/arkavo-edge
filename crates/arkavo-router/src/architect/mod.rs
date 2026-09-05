@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod complexity;
+mod escalation;
 mod executor;
 mod planner;
+mod planning_provider;
 
 pub use complexity::{ComplexityScore, ComplexityScorer};
 pub use executor::{ArchitectExecutor, SubtaskResult};
@@ -29,6 +31,11 @@ pub struct ArchitectPlan {
     /// Reasoning/thinking content from the planning model (e.g., DeepSeek V3.2-Speciale)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub planning_reasoning: Option<String>,
+    /// Model that actually produced this plan. `None` on a plan built outside
+    /// the planner (a hand-assembled or legacy-deserialized plan), where there
+    /// is no planning call to attribute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning_model: Option<ModelChoice>,
 }
 
 impl ArchitectPlan {
@@ -41,6 +48,7 @@ impl ArchitectPlan {
             opus_only_estimate_usd: 0.0,
             architect_estimate_usd: 0.0,
             planning_reasoning: None,
+            planning_model: None,
         }
     }
 

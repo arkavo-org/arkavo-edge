@@ -1296,6 +1296,7 @@ impl Provider for LlamaCppProvider {
         };
 
         Ok(ProviderResponse {
+            response_items: Vec::new(),
             content: display_content,
             reasoning_content,
             tool_calls,

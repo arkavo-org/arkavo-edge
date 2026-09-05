@@ -302,6 +302,7 @@ mod tests {
     async fn chat_stream_receives_deltas_and_handles_errors() {
         let chunks = vec![
             Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: "Hel".to_string(),
                 reasoning_content: None,
                 done: false,
@@ -309,12 +310,14 @@ mod tests {
             }),
             Err(Error::Stream("mid-stream failure".to_string())),
             Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: "lo".to_string(),
                 reasoning_content: None,
                 done: false,
                 inference_timing: None,
             }),
             Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: String::new(),
                 reasoning_content: None,
                 done: true,

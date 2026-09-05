@@ -26,6 +26,7 @@ async fn test_openai_streaming_basic() {
     let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![Message {
+        response_items: Vec::new(),
         role: Role::User,
         content: "List the numbers from 1 to 5, separated by spaces.".to_string(),
         images: None,
@@ -87,6 +88,7 @@ async fn test_openai_streaming_performance() {
     let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![Message {
+        response_items: Vec::new(),
         role: Role::User,
         content: "Write a 3-sentence story about a robot.".to_string(),
         images: None,
@@ -157,6 +159,7 @@ async fn test_openai_streaming_interruption() {
     let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![Message {
+        response_items: Vec::new(),
         role: Role::User,
         content: "Count from 1 to 100, one number per line.".to_string(),
         images: None,
@@ -210,6 +213,7 @@ async fn test_openai_streaming_with_system_message() {
 
     let messages = vec![
         Message {
+            response_items: Vec::new(),
             role: Role::System,
             content: "You are a poet. Respond only in haiku format.".to_string(),
             images: None,
@@ -218,6 +222,7 @@ async fn test_openai_streaming_with_system_message() {
             tool_calls: Vec::new(),
         },
         Message {
+            response_items: Vec::new(),
             role: Role::User,
             content: "Describe streaming data".to_string(),
             images: None,
@@ -289,6 +294,7 @@ async fn test_openai_streaming_concurrent() {
             let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
             let messages = vec![Message {
+                response_items: Vec::new(),
                 role: Role::User,
                 content: prompt_owned.clone(),
                 images: None,
@@ -361,6 +367,7 @@ async fn test_openai_streaming_error_handling() {
     let provider = OpenAIProvider::new(config).expect("Provider creation should succeed");
 
     let messages = vec![Message {
+        response_items: Vec::new(),
         role: Role::User,
         content: "Hello".to_string(),
         images: None,

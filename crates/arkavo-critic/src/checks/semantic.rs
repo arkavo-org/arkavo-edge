@@ -253,6 +253,7 @@ mod tests {
         let check = SemanticCheck::with_judge(judge);
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Here are the search results.".to_string(),
             reasoning_content: None,
             tool_calls: vec![arkavo_llm::tool_parser::ParsedToolCall {
@@ -287,6 +288,7 @@ mod tests {
         let check = SemanticCheck::with_judge(judge);
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Using nonexistent tool".to_string(),
             reasoning_content: None,
             tool_calls: vec![arkavo_llm::tool_parser::ParsedToolCall {

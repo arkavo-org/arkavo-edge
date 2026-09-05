@@ -121,6 +121,7 @@ mod tests {
     #[test]
     fn test_verification_input_creation() {
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Test".to_string(),
             reasoning_content: None,
             tool_calls: vec![],

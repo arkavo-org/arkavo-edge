@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=../schema.json
+feature: GPT-6 Astra agent harness
+module: arkavo_llm::providers::openai_responses
+version: 0.93.0
+invariants:
+  - Astra tool calls use Responses and retain provider call IDs
+  - Opaque reasoning state is replayed without being displayed as text
+  - Existing release policy applies before tool execution or output delivery
+  - Execution spending is attributed to the actual serving model
+scenarios:
+  - id: ASTRA-001
+    name: Send a compatible Astra request
+    criticality: critical
+    given: [Astra provider configured with credentials]
+    when: A completion or structured response is requested
+    then:
+      - The model is gpt-6-astra on the Responses endpoint
+      - Unsupported sampling parameters are absent
+      - Structured output uses the requested JSON schema
+      - API errors and incomplete responses are surfaced
+    refs: [crates/arkavo-llm/src/providers/openai_responses/provider.rs]
+    changed: "2026-09-05"
+  - id: ASTRA-002
+    name: Continue native tool calls across turns
+    criticality: critical
+    given: [An assistant response contains native calls and opaque reasoning items]
+    when: Tool results and a later user turn are submitted
+    then:
+      - Exact provider state is preserved
+      - Tool outputs carry the original call IDs
+      - History trimming does not orphan tool results
+    refs: [crates/arkavo-protocol/src/chat_history.rs, crates/arkavo-session/src/conversation.rs]
+    changed: "2026-09-05"
+  - id: ASTRA-003
+    name: Stream and cancel a response
+    criticality: high
+    given: [A streamed Responses request]
+    when: Network events arrive or the consumer cancels
+    then:
+      - Fragmented UTF-8 and SSE frames are assembled correctly
+      - Terminal metadata preserves usage and conversation state
+      - Premature EOF reports an error
+      - Cancellation stops consuming the HTTP body
+    refs: [crates/arkavo-llm/src/providers/openai_responses/sse.rs]
+    changed: "2026-09-05"
+  - id: ASTRA-004
+    name: Route with cloud credentials and no local weights
+    criticality: high
+    given: [An OpenAI-enabled build and configured OPENAI_API_KEY, No cached local model]
+    when: Chat starts with automatic selection or an explicit Astra model
+    then:
+      - Startup does not require downloading local weights
+      - The selected provider is available in the compiled feature set
+      - Existing cloud-spend policy remains effective
+    refs: [crates/arkavo-router/src/selector.rs, crates/arkavo-cli/src/startup_policy.rs]
+    changed: "2026-09-05"
+  - id: ASTRA-005
+    name: Account for execution spending
+    criticality: critical
+    given: [A shared budget tracker and provider usage]
+    when: Planning or execution attempts complete
+    then:
+      - Spending records identify the actual provider and model
+      - Cached input and reasoning output are counted exactly once
+      - Fractional-cent requests accumulate in the shared budget
+      - Rejected retries remain charged
+      - Exhausted budgets prevent further execution
+    refs: [crates/arkavo-router/src/usage.rs, crates/arkavo-budget/src/tracker.rs]
+    changed: "2026-09-05"
+  - id: ASTRA-006
+    name: Enforce policy on Astra output
+    criticality: critical
+    given: [An installed sentinel response policy]
+    when: Astra returns text or native tool arguments
+    then:
+      - The response is inspected before delivery or execution
+      - Schema responses use the same enforcement boundary
+      - Withheld content does not reach the consumer
+    refs: [crates/arkavo-llm/src/guarded_provider.rs, crates/arkavo-cli/tests/sentinel_runtime.rs]
+    changed: "2026-09-05"

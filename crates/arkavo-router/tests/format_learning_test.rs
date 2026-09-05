@@ -118,6 +118,7 @@ async fn test_format_with_model(
         tool_call_id: None,
         tool_name: None,
         tool_calls: Vec::new(),
+        response_items: Vec::new(),
     }];
 
     let start = Instant::now();

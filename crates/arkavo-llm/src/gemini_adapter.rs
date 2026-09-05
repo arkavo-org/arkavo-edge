@@ -187,6 +187,7 @@ impl Provider for GeminiProvider {
         let adapter_stream = gemini_stream.map(|result| {
             result
                 .map(|response| StreamResponse {
+                    response_items: Vec::new(),
                     content: response.text.unwrap_or_default(),
                     // Surface Gemini 3.5 thought-summary segments via the
                     // standard reasoning-content channel.
@@ -320,6 +321,7 @@ impl Provider for GeminiProvider {
             .collect();
 
         Ok(ProviderResponse {
+            response_items: Vec::new(),
             content: accumulated_text,
             reasoning_content: if accumulated_thought.is_empty() {
                 None
@@ -341,6 +343,8 @@ impl Provider for GeminiProvider {
 /// thinking — are the load-bearing fields for cost tracking.
 fn timing_from_usage(usage: &UsageMetadata) -> InferenceTiming {
     InferenceTiming {
+        n_cached_prompt_eval: None,
+        n_cache_write_prompt_eval: None,
         prompt_eval_ms: 0.0,
         generation_ms: 0.0,
         n_prompt_eval: usage.prompt_token_count.unwrap_or(0),
@@ -376,13 +380,9 @@ impl GeminiProvider {
                     }
                 }
                 Role::Tool => {
-                    // Tool results go as user messages with context
-                    let tool_text = if let Some(name) = &msg.tool_name {
-                        format!("[Tool result from {}]: {}", name, msg.content)
-                    } else {
-                        msg.content.clone()
-                    };
-                    contents.push(("user".to_string(), tool_text));
+                    // Gemini's `contents` array knows only user and model, so a
+                    // tool result travels as user text that names its tool.
+                    contents.push(("user".to_string(), msg.tool_result_as_user_text()));
                 }
             }
         }

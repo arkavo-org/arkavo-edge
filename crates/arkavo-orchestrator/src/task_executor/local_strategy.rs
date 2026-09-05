@@ -18,6 +18,10 @@ use crate::error::{Error, Result};
 pub struct LocalTaskStrategy {
     router: Option<Arc<Router>>,
     tool_registry: Option<Arc<ToolRegistry>>,
+    /// Model selection supplied by the caller. When set, execution skips
+    /// discovery entirely, so it depends on neither the HuggingFace cache nor
+    /// the ambient API keys.
+    models: Option<SelectedModels>,
 }
 
 impl Default for LocalTaskStrategy {
@@ -31,6 +35,7 @@ impl LocalTaskStrategy {
         Self {
             router: None,
             tool_registry: None,
+            models: None,
         }
     }
 
@@ -43,6 +48,18 @@ impl LocalTaskStrategy {
     /// Set the tool registry for MCP tool execution
     pub fn with_tools(mut self, registry: Arc<ToolRegistry>) -> Self {
         self.tool_registry = Some(registry);
+        self
+    }
+
+    /// Run against an explicit model selection instead of discovering one.
+    ///
+    /// Discovery reads the HuggingFace cache and the ambient API keys, which
+    /// makes the outcome a property of the machine rather than of the code. A
+    /// caller that already knows its models — or is asserting behaviour —
+    /// supplies them here and gets the same execution path deterministically.
+    #[must_use]
+    pub fn with_models(mut self, models: SelectedModels) -> Self {
+        self.models = Some(models);
         self
     }
 
@@ -315,28 +332,34 @@ impl TaskStrategy for LocalTaskStrategy {
         config: &TaskConfig,
         ui: &dyn TaskUI,
     ) -> Result<TaskResult> {
-        // Step 1: Discover available models
-        let local_models = Self::discover_local_models();
-        let cloud_models = Self::detect_cloud_models();
+        // Steps 1 and 2: discover what this machine offers and pick from it —
+        // unless the caller already named a selection, in which case neither
+        // the HuggingFace cache nor the environment is consulted.
+        let models = match self.models.clone() {
+            Some(models) => models,
+            None => {
+                let local_models = Self::discover_local_models();
+                let cloud_models = Self::detect_cloud_models();
 
-        self.show_models(ui, &local_models, &cloud_models);
+                self.show_models(ui, &local_models, &cloud_models);
 
-        // Step 2: Select models for task
-        let models = Self::select_models(&local_models, &cloud_models).ok_or_else(|| {
-            ui.error("No models available");
-            ui.error("Please either:");
-            ui.error("  - Set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY");
-            ui.error(&format!(
-                "  - Download a local model with: {}",
-                arkavo_router::decision::ModelChoice::LocalQwen3
-                    .download_hint()
-                    .unwrap_or_default()
-            ));
-            Error::Model {
-                operation: "select models for task".to_string(),
-                details: "no local or cloud models available".to_string(),
+                Self::select_models(&local_models, &cloud_models).ok_or_else(|| {
+                    ui.error("No models available");
+                    ui.error("Please either:");
+                    ui.error("  - Set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY");
+                    ui.error(&format!(
+                        "  - Download a local model with: {}",
+                        arkavo_router::decision::ModelChoice::LocalQwen3
+                            .download_hint()
+                            .unwrap_or_default()
+                    ));
+                    Error::Model {
+                        operation: "select models for task".to_string(),
+                        details: "no local or cloud models available".to_string(),
+                    }
+                })?
             }
-        })?;
+        };
 
         self.show_selected(ui, &models);
 
@@ -543,6 +566,7 @@ impl LocalTaskStrategy {
 mod tests {
     use super::*;
     use crate::task_executor::MockUI;
+    use arkavo_test_macros::spec;
     use std::path::PathBuf;
 
     #[test]
@@ -630,23 +654,143 @@ mod tests {
         let _ = strategy.is_available().await;
     }
 
+    /// Answers every completion with fixed content and records which arm the
+    /// router asked for, so a test can assert the served model rather than
+    /// infer it. Never streams: this strategy only ever completes.
+    #[derive(Clone)]
+    struct StubProvider {
+        content: String,
+        built: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl StubProvider {
+        fn new(content: &str) -> Self {
+            Self {
+                content: content.to_string(),
+                built: Arc::new(std::sync::Mutex::new(Vec::new())),
+            }
+        }
+
+        fn built_models(&self) -> Vec<String> {
+            self.built.lock().expect("factory log").clone()
+        }
+    }
+
+    #[async_trait]
+    impl arkavo_llm::Provider for StubProvider {
+        async fn complete_with_options(
+            &self,
+            _: Vec<Message>,
+            _: Option<usize>,
+        ) -> arkavo_llm::Result<String> {
+            Ok(self.content.clone())
+        }
+
+        async fn stream(
+            &self,
+            _: Vec<Message>,
+        ) -> arkavo_llm::Result<
+            Box<
+                dyn tokio_stream::Stream<Item = arkavo_llm::Result<arkavo_llm::StreamResponse>>
+                    + Send
+                    + Unpin,
+            >,
+        > {
+            Err(arkavo_llm::Error::Provider(
+                "the task strategy completes, it does not stream".to_string(),
+            ))
+        }
+
+        fn name(&self) -> &str {
+            "stub"
+        }
+    }
+
+    impl arkavo_router::ProviderFactory for StubProvider {
+        fn build(
+            &self,
+            model: &arkavo_router::decision::ModelChoice,
+        ) -> arkavo_router::Result<Box<dyn arkavo_llm::Provider>> {
+            self.built
+                .lock()
+                .expect("factory log")
+                .push(model.name().to_string());
+            Ok(Box::new(self.clone()))
+        }
+    }
+
+    /// A router with no credentials, no model cache and no network: one cached
+    /// local arm, every provider substituted by `stub`.
+    async fn substituted_router(stub: &StubProvider) -> Router {
+        let selector = arkavo_router::ModelSelector::with_availability(
+            arkavo_router::ProviderAvailability::default(),
+            true,
+        );
+        let mut router = Router::new_offline().await.expect("offline router");
+        router.set_offline_mode(false);
+        router
+            .with_connectivity(arkavo_router::ConnectivityChecker::assume(true))
+            .with_selector(selector)
+            .await
+            .with_provider_factory(Arc::new(stub.clone()))
+    }
+
+    fn local_only_selection() -> SelectedModels {
+        let model = ModelInfo::local(
+            "medium.gguf",
+            PathBuf::from("/medium"),
+            4.0,
+            ModelCapability::Medium,
+        );
+        SelectedModels {
+            gather_model: model.clone(),
+            planning_model: model.clone(),
+            verify_model: model,
+        }
+    }
+
+    /// `execute` end to end with every external dependency injected: the model
+    /// selection instead of the HuggingFace cache, a substituted provider
+    /// instead of credentials and the network. It used to build a live
+    /// `Router::new()` and assert a substring of whatever this machine happened
+    /// to produce, which meant it asserted nothing on a keyed machine and would
+    /// have spent real money on one.
+    #[spec("ASTRA-004")]
     #[tokio::test]
     async fn test_local_strategy_execute() {
-        let strategy = LocalTaskStrategy::new();
+        let stub = StubProvider::new("The plan is to change nothing.");
+        let strategy = LocalTaskStrategy::new()
+            .with_router(Arc::new(substituted_router(&stub).await))
+            .with_models(local_only_selection());
         let ui = MockUI::new().with_confirmations(vec![true]);
         let config = TaskConfig {
             auto_approve: true,
             ..Default::default()
         };
 
-        // This test depends on whether models are available in the environment
-        // We just verify it doesn't panic and handles gracefully
-        let result = strategy.execute("test task", &config, &ui).await;
+        let result = strategy
+            .execute("test task", &config, &ui)
+            .await
+            .expect("a fully substituted run must succeed");
 
-        // Either succeeds with models or fails with no-models error
-        match result {
-            Ok(r) => assert!(r.success || r.message.contains("completed")),
-            Err(e) => assert!(e.to_string().contains("model") || e.to_string().contains("No")),
-        }
+        assert!(result.success, "{result:?}");
+        assert!(
+            result.message.contains("test task"),
+            "the result names the task it completed: {}",
+            result.message
+        );
+
+        let built = stub.built_models();
+        assert!(
+            !built.is_empty(),
+            "the strategy must actually have routed through the provider"
+        );
+        assert!(
+            built
+                .iter()
+                .all(|name| arkavo_router::decision::ModelChoice::from_name(name)
+                    .is_some_and(|model| model.is_local())),
+            "no credentials are configured, so no cloud arm may be built: {built:?}"
+        );
     }
 }

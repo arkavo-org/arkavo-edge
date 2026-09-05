@@ -80,6 +80,7 @@ mod tests {
 
     fn user(content: &str) -> Message {
         Message {
+            response_items: Vec::new(),
             role: Role::User,
             content: content.to_string(),
             images: None,

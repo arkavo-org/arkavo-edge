@@ -187,6 +187,7 @@ mod tests {
         let validator = ResponseValidator::new(&tools);
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Searching...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -208,6 +209,7 @@ mod tests {
         let validator = ResponseValidator::new(&tools);
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Using tool...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -236,6 +238,7 @@ mod tests {
         let validator = ResponseValidator::new(&tools);
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Searching...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -265,6 +268,7 @@ mod tests {
         let validator = ResponseValidator::new(&tools);
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "Searching...".to_string(),
             reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
@@ -299,6 +303,7 @@ mod tests {
         let validator = ResponseValidator::new(&tools);
 
         let response = ProviderResponse {
+            response_items: Vec::new(),
             content: "No tools needed".to_string(),
             reasoning_content: None,
             tool_calls: vec![],

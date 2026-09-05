@@ -385,6 +385,7 @@ async fn generate_tokens_pooled_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
+                        response_items: Vec::new(),
                         content: piece,
                         reasoning_content: None,
                         done: false,
@@ -410,6 +411,7 @@ async fn generate_tokens_pooled_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
+                        response_items: Vec::new(),
                         content: piece,
                         reasoning_content: None,
                         done: false,
@@ -447,6 +449,7 @@ async fn generate_tokens_pooled_baseline(
             if !piece.is_empty()
                 && tx
                     .send(Ok(StreamResponse {
+                        response_items: Vec::new(),
                         content: piece,
                         reasoning_content: None,
                         done: false,
@@ -473,6 +476,7 @@ async fn generate_tokens_pooled_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
+                        response_items: Vec::new(),
                         content: piece,
                         reasoning_content: None,
                         done: false,
@@ -486,6 +490,8 @@ async fn generate_tokens_pooled_baseline(
         let perf = perf_context(&ctx);
         drop(ctx);
         let timing = InferenceTiming {
+            n_cached_prompt_eval: None,
+            n_cache_write_prompt_eval: None,
             prompt_eval_ms: perf.t_p_eval_ms,
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
@@ -509,6 +515,7 @@ async fn generate_tokens_pooled_baseline(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: String::new(),
                 reasoning_content: None,
                 done: true,
@@ -730,6 +737,7 @@ async fn generate_tokens_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
+                        response_items: Vec::new(),
                         content: piece,
                         reasoning_content: None,
                         done: false,
@@ -753,6 +761,7 @@ async fn generate_tokens_baseline(
             // so downstream consumers (process_stream) can detect and suppress them
             if special_text == "<think>" || special_text == "</think>" {
                 let _ = tx.send(Ok(StreamResponse {
+                    response_items: Vec::new(),
                     content: special_text,
                     reasoning_content: None,
                     done: false,
@@ -775,6 +784,7 @@ async fn generate_tokens_baseline(
                     let piece = extract_valid_utf8(&mut utf8_buffer);
                     if !piece.is_empty() {
                         let _ = tx.send(Ok(StreamResponse {
+                            response_items: Vec::new(),
                             content: piece,
                             reasoning_content: None,
                             done: false,
@@ -798,6 +808,7 @@ async fn generate_tokens_baseline(
                     let piece = extract_valid_utf8(&mut utf8_buffer);
                     if !piece.is_empty() {
                         let _ = tx.send(Ok(StreamResponse {
+                            response_items: Vec::new(),
                             content: piece,
                             reasoning_content: None,
                             done: false,
@@ -827,6 +838,7 @@ async fn generate_tokens_baseline(
             // Only send if we have content
             if !piece.is_empty() {
                 let response = StreamResponse {
+                    response_items: Vec::new(),
                     content: piece,
                     reasoning_content: None,
                     done: false,
@@ -861,6 +873,7 @@ async fn generate_tokens_baseline(
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
+                        response_items: Vec::new(),
                         content: piece,
                         reasoning_content: None,
                         done: false,
@@ -873,6 +886,8 @@ async fn generate_tokens_baseline(
 
         let perf = perf_context(&ctx);
         let timing = InferenceTiming {
+            n_cached_prompt_eval: None,
+            n_cache_write_prompt_eval: None,
             prompt_eval_ms: perf.t_p_eval_ms,
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
@@ -893,6 +908,7 @@ async fn generate_tokens_baseline(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: String::new(),
                 reasoning_content: None,
                 done: true,

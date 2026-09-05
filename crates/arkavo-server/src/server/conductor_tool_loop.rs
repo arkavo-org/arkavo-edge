@@ -133,12 +133,11 @@ pub(super) async fn run_tool_loop(
         let mut context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         if context_chars > char_budget && messages.len() > 3 {
             // Collect oldest non-system messages to compact (keep system + 2 recent)
-            let keep_recent = 2;
-            let compactable = messages.len() - 1 - keep_recent; // exclude system
+            let compactable = super::conductor_history::compactable_prefix(&messages, 2);
             if compactable > 0 {
                 let old_messages: Vec<String> = messages[1..=compactable]
                     .iter()
-                    .map(|m| format!("[{:?}] {}", m.role, &m.content[..m.content.len().min(500)]))
+                    .map(super::conductor_history::summary_line)
                     .collect();
                 let old_chars: usize = messages[1..=compactable]
                     .iter()
@@ -458,19 +457,7 @@ pub(super) async fn run_tool_loop(
         // reconstructing one with empty arguments from the tool results. Calls
         // are emitted in the same order as the tool results pushed below, so the
         // template pairs them positionally and by call id.
-        let assistant_tool_calls: Vec<arkavo_llm::ToolCall> = response
-            .tool_calls
-            .iter()
-            .map(|tc| arkavo_llm::ToolCall {
-                name: tc.tool_name.clone(),
-                arguments: tc.arguments.to_string(),
-                id: tc.call_id.clone(),
-            })
-            .collect();
-        messages.push(arkavo_llm::Message::assistant_with_tool_calls(
-            response.content.clone(),
-            assistant_tool_calls,
-        ));
+        messages.push(response.as_assistant_message());
 
         let tool_result_parts = execute_tool_calls(
             &response.tool_calls,
@@ -577,16 +564,18 @@ pub(super) async fn run_tool_loop(
         // Push tool results as proper tool-role messages so Jinja templates
         // (especially Gemma 4) generate the correct token structure.
         // Falls back to user-role for models without native tool response support.
+        let native_tool_role = super::conductor_history::use_tool_role(&response);
         if response.tool_calls.len() == 1 {
             let tc = &response.tool_calls[0];
             let call_id = tc
                 .call_id
                 .clone()
                 .unwrap_or_else(|| format!("call_{total_step_idx}"));
-            messages.push(arkavo_llm::Message::tool_result(
+            messages.push(super::conductor_history::tool_feedback(
                 format!("{result_to_append}{exploration_nudge}"),
                 call_id,
                 &tc.tool_name,
+                native_tool_role,
             ));
         } else {
             // Multiple tool calls: push one tool_result per call
@@ -599,10 +588,11 @@ pub(super) async fn run_tool_loop(
                     .get(i)
                     .cloned()
                     .unwrap_or_else(|| "ok".to_string());
-                messages.push(arkavo_llm::Message::tool_result(
+                messages.push(super::conductor_history::tool_feedback(
                     part,
                     call_id,
                     &tc.tool_name,
+                    native_tool_role,
                 ));
             }
             if !exploration_nudge.is_empty() {

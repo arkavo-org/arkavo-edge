@@ -52,6 +52,7 @@ fn stream_of(text: &str) -> Vec<arkavo_llm::Result<StreamResponse>> {
         .chunks(7)
         .map(|c| {
             Ok(StreamResponse {
+                response_items: Vec::new(),
                 content: String::from_utf8_lossy(c).to_string(),
                 reasoning_content: None,
                 done: false,
@@ -60,6 +61,7 @@ fn stream_of(text: &str) -> Vec<arkavo_llm::Result<StreamResponse>> {
         })
         .collect();
     chunks.push(Ok(StreamResponse {
+        response_items: Vec::new(),
         content: String::new(),
         reasoning_content: None,
         done: true,

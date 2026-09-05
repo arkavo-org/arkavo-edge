@@ -42,7 +42,12 @@ pub fn estimate_tokens(text: &str) -> u32 {
 pub fn tokens_from_response(prompt: &str, response: &ProviderResponse) -> (u32, u32) {
     if let Some(timing) = &response.inference_timing {
         // Provider reported real counts.
-        return (timing.n_prompt_eval, timing.n_eval);
+        return (
+            timing.n_prompt_eval,
+            timing
+                .n_eval
+                .saturating_add(timing.n_thinking_eval.unwrap_or(0)),
+        );
     }
     // Fallback: estimate from text length.
     let input = estimate_tokens(prompt);
@@ -84,6 +89,7 @@ mod tests {
     #[test]
     fn test_tokens_from_response_uses_inference_timing() {
         let resp = ProviderResponse {
+            response_items: Vec::new(),
             content: "short".to_string(),
             reasoning_content: None,
             tool_calls: vec![],
@@ -91,6 +97,8 @@ mod tests {
             inference_timing: Some(InferenceTiming {
                 prompt_eval_ms: 0.0,
                 generation_ms: 0.0,
+                n_cached_prompt_eval: None,
+                n_cache_write_prompt_eval: None,
                 n_prompt_eval: 123,
                 n_eval: 45,
                 n_thinking_eval: None,
@@ -109,6 +117,7 @@ mod tests {
     #[test]
     fn test_tokens_from_response_falls_back() {
         let resp = ProviderResponse {
+            response_items: Vec::new(),
             content: "a response body".to_string(),
             reasoning_content: None,
             tool_calls: vec![],

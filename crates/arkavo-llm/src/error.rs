@@ -2,6 +2,12 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    /// A failed or refused response can still consume billable tokens.
+    #[error("Provider error: {message}")]
+    ProviderResponseFailure {
+        message: String,
+        inference_timing: Option<crate::provider::InferenceTiming>,
+    },
     #[cfg(feature = "llm-remote")]
     #[error("HTTP request failed: {0}")]
     Request(#[from] reqwest::Error),
@@ -44,6 +50,26 @@ pub enum Error {
 }
 
 impl Error {
+    /// Retain known billing metadata when a later validation or release check fails.
+    pub fn with_inference_timing(self, timing: Option<crate::provider::InferenceTiming>) -> Self {
+        if self.inference_timing().is_some() || timing.is_none() {
+            return self;
+        }
+        Self::ProviderResponseFailure {
+            message: self.to_string(),
+            inference_timing: timing,
+        }
+    }
+
+    pub fn inference_timing(&self) -> Option<&crate::provider::InferenceTiming> {
+        match self {
+            Self::ProviderResponseFailure {
+                inference_timing, ..
+            } => inference_timing.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Whether this error represents a GPU fault that may be recoverable via retry.
     pub fn is_gpu_fault(&self) -> bool {
         matches!(self, Error::GpuFault { .. })

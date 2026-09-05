@@ -686,6 +686,7 @@ mod tests {
             }],
             finish_reason: None,
             inference_timing: None,
+            response_items: Vec::new(),
             quality_gate_retries: 0,
         };
 
@@ -717,6 +718,7 @@ mod tests {
             }],
             finish_reason: None,
             inference_timing: None,
+            response_items: Vec::new(),
             quality_gate_retries: 0,
         };
 
@@ -744,6 +746,7 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
+            response_items: Vec::new(),
             quality_gate_retries: 0,
         };
 
@@ -771,6 +774,7 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
+            response_items: Vec::new(),
             quality_gate_retries: 0,
         };
 
@@ -810,6 +814,7 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
+            response_items: Vec::new(),
             quality_gate_retries: 0,
         };
 
@@ -856,6 +861,7 @@ mod tests {
             tool_calls: vec![],
             finish_reason: None,
             inference_timing: None,
+            response_items: Vec::new(),
             quality_gate_retries: 0,
         };
 
