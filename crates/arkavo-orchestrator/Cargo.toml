@@ -30,7 +30,7 @@ arkavo-budget = { path = "../arkavo-budget" }
 arkavo-arp = { path = "../arkavo-arp" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-github = { path = "../arkavo-github" }
-arkavo-router = { path = "../arkavo-router", features = ["llama-cpp", "gemini"] }
+arkavo-router = { path = "../arkavo-router", default-features = false, features = ["gemini"] }
 arkavo-llm = { path = "../arkavo-llm" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-context = { path = "../arkavo-context" }
@@ -53,8 +53,16 @@ tempfile = { workspace = true }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [features]
-default = []
+default = ["llama-cpp", "deepseek", "kimi", "glm", "xai"]
 mdns = ["mdns-sd"]
+# Router model providers previously enabled unconditionally via arkavo-router's
+# default features. Default-ON here so standalone builds are unchanged; the
+# CLI turns them off for slim builds with default-features = false.
+llama-cpp = ["arkavo-router/llama-cpp"]
+deepseek = ["arkavo-router/deepseek"]
+kimi = ["arkavo-router/kimi"]
+glm = ["arkavo-router/glm"]
+xai = ["arkavo-router/xai"]
 # Real TDF bundle encryption via OpenTdfService. Pulls arkavo-tdf (opentdf)
 # and arkavo-protocol's KAS-side wrap_bundle. Off by default so non-KAS
 # builds stay light; the CLI's kas feature turns it on.

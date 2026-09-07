@@ -55,7 +55,11 @@ async fn verify_response_with_critic(
         response_for_critic,
         available_tools,
     );
+    let gate_start = std::time::Instant::now();
     let result = critic.verify(&input).await;
+    arkavo_observability::subsystem_timing::global_timing()
+        .dispatch_gate
+        .record(gate_start.elapsed().as_millis() as u64);
     if result.passed {
         Ok(())
     } else {

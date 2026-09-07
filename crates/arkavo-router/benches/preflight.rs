@@ -3,7 +3,10 @@
 //! Per LLM integration testing requirements (docs/llm-integration-testing-requirements.md):
 //! - Moderation check must add < 5ms to total request time on M4
 
+#![allow(clippy::semicolon_if_nothing_returned)]
+
 use arkavo_router::preflight::{PolicyId, PreflightFeature, PreflightModerator};
+use arkavo_torg_circuits::CircuitFeature;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use torg_core::{BoolOp, Graph, Node, Source};
 

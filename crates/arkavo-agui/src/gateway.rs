@@ -476,6 +476,8 @@ impl AgUiGateway {
         // Static file routes (no rate limiting — browser loads many files at once)
         let static_routes = Router::new()
             .route("/", get(crate::gateway_static::index_handler))
+            .route("/healthz", get(crate::gateway_health::healthz_handler))
+            .route("/readyz", get(crate::gateway_health::readyz_handler))
             .route(
                 "/static/*path",
                 get(crate::gateway_static::static_file_handler),
@@ -486,9 +488,18 @@ impl AgUiGateway {
             .layer(crate::gateway_security::security_headers())
             .with_state(state);
 
-        let addr: SocketAddr = ([0, 0, 0, 0], self.port).into();
-        println!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
-        println!("Open http://127.0.0.1:{} in your web browser", self.port);
+        let addr = crate::gateway_bind::resolve_bind_addr(self.port);
+        if addr.ip().is_loopback() {
+            println!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
+            println!("Open http://127.0.0.1:{} in your web browser", self.port);
+        } else {
+            println!("Starting AG-UI Gateway on http://{addr}");
+            eprintln!(
+                "AG-UI: WARNING — gateway has no authentication and is reachable from the network ({}={})",
+                crate::gateway_bind::BIND_ENV_VAR,
+                addr.ip()
+            );
+        }
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
         axum::serve(

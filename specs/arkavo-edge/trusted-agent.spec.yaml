@@ -49,7 +49,7 @@ trust_chain:
       inputs: [device_public_key, registration_record]
       outputs: [auth_token]
       gate: auth_token is valid and initially carries only config-fetch capability
-      v2_upgrade: auth_token is sender-constrained to the attested key (DPoP cnf.jkt / mTLS) and obtainable via OAuth Token Exchange from an external IdP (token-binding.spec.yaml TOK-001/004)
+      v2_upgrade: auth_token is a sender-constrained CWT bound to the attested key (cnf COSE_Key per RFC 8747 / mTLS) and obtainable via OAuth Token Exchange from an external IdP (token-binding.spec.yaml TOK-001/004)
 
     - phase: 5
       name: Config encryption

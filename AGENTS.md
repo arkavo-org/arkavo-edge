@@ -131,4 +131,6 @@ ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1 cargo run -p arkavo -- chat --prompt "What ti
 ## 7. Environment Variables
 - `ARKAVO_DEBUG=1`: General debug logging.
 - `ARKAVO_DEBUG_CHAT=1`: Chat/Template/Token debug.
+- `ARKAVO_DELEGATION_PUBLIC_KEY_PEM`: Trusted authnz-rs ES256 public key (inline PEM or path to PEM file) used to verify delegation JWTs at registration. Unset → delegation entitlements are never granted (fail-closed).
+- `ARKAVO_ALLOW_UNVERIFIED_DELEGATION=1`: INSECURE dev/test escape hatch — accepts delegation JWTs without signature verification. Never set in production.
 - ccache must be installed for development builds

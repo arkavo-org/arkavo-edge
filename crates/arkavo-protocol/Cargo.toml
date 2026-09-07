@@ -136,6 +136,9 @@ jsonrpsee = { workspace = true, features = ["server", "macros"] }
 tracing-subscriber = { workspace = true }
 # For tests
 tempfile = { workspace = true }
+# Runtime ES256 key generation for delegation-JWT tests — test key material
+# must not be committed to the repo.
+p256 = { version = "0.13", features = ["pem"] }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-server = { path = "../arkavo-server" }
 arkavo-test-macros = { path = "../arkavo-test-macros" }

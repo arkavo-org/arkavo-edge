@@ -70,7 +70,10 @@ pub struct DelegationToken {
 
 impl DelegationToken {
     /// Compute the canonical payload bytes for signing.
-    fn payload_bytes(&self) -> Result<Vec<u8>, DelegationError> {
+    ///
+    /// Issuers sign these bytes; the verifier recomputes them when checking
+    /// the signature, so both sides must use this exact serialization.
+    pub fn payload_bytes(&self) -> Result<Vec<u8>, DelegationError> {
         let payload = serde_json::json!({
             "issuer_did": self.issuer_did,
             "subject_did": self.subject_did,

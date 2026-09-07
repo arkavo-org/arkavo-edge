@@ -31,7 +31,7 @@ components:
   - name: token-binding
     file: token-binding.spec.yaml
     module: arkavo_agent_auth
-    description: Sender-constrained agent tokens (DPoP/mTLS) and attestation-based OAuth Token Exchange
+    description: Sender-constrained agent tokens (CWT/COSE cnf, mTLS) and attestation-based OAuth Token Exchange
     criticality: critical
     scenario_count: 10
     invariants:
@@ -978,10 +978,33 @@ components:
       - Token file written atomically at unix mode 0o600
       - Refresh-before-expiry with 60-second skew; dead refresh deletes the token file
 
+  - name: agent-cwt
+    file: agent-cwt.spec.yaml
+    module: arkavo_cwt
+    description: COSE_Sign1/ES256 verification of the agent CWT against the published COSE key set
+    criticality: critical
+    scenario_count: 3
+    invariants:
+      - ES256 only
+      - Keys matched on raw kid bytes from the published COSE key set
+      - Unknown kid refreshes the key set at most once per ttl
+
+  - name: permit-dispatch
+    file: permit-dispatch.spec.yaml
+    module: arkavo_dispatch_gate
+    description: Permit-bound tool dispatch through the MCP proxy - authn, policy and budget stages over CWT permits
+    criticality: critical
+    scenario_count: 11
+    invariants:
+      - No tools/call reaches upstream without a trusted-issuer permit and a proof of possession
+      - Per-permit state is keyed on the permit's signed identity, never its bytes
+      - The permit and proof never reach the upstream server
+      - Untrusted input is bounded before it is parsed, hashed, or buffered
+
 stats:
-  total_specs: 83
-  total_scenarios: 805
-  critical_scenarios: 245
+  total_specs: 85
+  total_scenarios: 819
+  critical_scenarios: 255
   coverage_areas:
     - authentication
     - authorization

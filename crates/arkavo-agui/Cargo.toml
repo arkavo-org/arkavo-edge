@@ -12,7 +12,7 @@ default = ["mdns", "llama-cpp", "web-ui"]
 web-ui = []  # Current warp-based web UI (default)
 cef-ui = ["dep:arkavo-cef"]  # CEF-based native UI (macOS .pkg only)
 mdns = ["dep:mdns-sd"]
-llama-cpp = ["arkavo-router/llama-cpp"]
+llama-cpp = ["arkavo-router/llama-cpp", "arkavo-ui-generator/llama-cpp"]
 # Windows compatible features (no C++ dependencies)
 windows = ["mdns", "arkavo-router/windows"]
 # Auto-launch can decrypt .swarmkit.tdf files at gateway boot via opentdf-rs.
@@ -44,7 +44,7 @@ arkavo-router = { path = "../arkavo-router", default-features = false }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-debugger = { path = "../arkavo-debugger" }
-arkavo-ui-generator = { path = "../arkavo-ui-generator" }
+arkavo-ui-generator = { path = "../arkavo-ui-generator", default-features = false }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-validation = { path = "../arkavo-validation" }

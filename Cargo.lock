@@ -807,6 +807,7 @@ dependencies = [
  "arkavo-crypto",
  "arkavo-dataflow",
  "arkavo-device-identity",
+ "arkavo-dispatch-gate",
  "arkavo-events",
  "arkavo-fingerprint",
  "arkavo-gguf-tdf",
@@ -822,11 +823,13 @@ dependencies = [
  "arkavo-mcp-claude",
  "arkavo-mcp-macos",
  "arkavo-mcp-mesh",
+ "arkavo-mcp-proxy",
  "arkavo-mcp-runtime",
  "arkavo-mcp-tools",
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-orchestrator",
+ "arkavo-permit",
  "arkavo-protocol",
  "arkavo-registration",
  "arkavo-repo",
@@ -845,6 +848,7 @@ dependencies = [
  "clap",
  "dirs 6.0.0",
  "futures",
+ "hex",
  "hf-hub 0.5.0 (git+https://github.com/huggingface/hf-hub?rev=cc015aa814e46ef880b57e6c955674f9fcc5084b)",
  "libc",
  "mdns-sd",
@@ -968,6 +972,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-cwt"
+version = "0.92.0"
+dependencies = [
+ "arkavo-test-macros",
+ "base64 0.22.1",
+ "ciborium",
+ "coset",
+ "ed25519-dalek 2.2.0",
+ "p256",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
 name = "arkavo-dataflow"
 version = "0.92.0"
 dependencies = [
@@ -1048,6 +1070,17 @@ dependencies = [
  "thiserror 2.0.18",
  "uuid",
  "windows 0.58.0",
+]
+
+[[package]]
+name = "arkavo-dispatch-gate"
+version = "0.92.0"
+dependencies = [
+ "arkavo-crypto",
+ "arkavo-permit",
+ "arkavo-test-macros",
+ "coset",
+ "serde_json",
 ]
 
 [[package]]
@@ -1528,6 +1561,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-mcp-proxy"
+version = "0.92.0"
+dependencies = [
+ "arkavo-crypto",
+ "arkavo-dispatch-gate",
+ "arkavo-observability",
+ "arkavo-permit",
+ "arkavo-test-macros",
+ "async-trait",
+ "base64 0.22.1",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arkavo-mcp-runtime"
 version = "0.92.0"
 dependencies = [
@@ -1714,6 +1764,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-permit"
+version = "0.92.0"
+dependencies = [
+ "arkavo-crypto",
+ "arkavo-cwt",
+ "arkavo-test-macros",
+ "blake3",
+ "ciborium",
+ "coset",
+ "ed25519-dalek 2.2.0",
+ "hex",
+ "p256",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "arkavo-policy-cache"
 version = "0.92.0"
 dependencies = [
@@ -1766,6 +1834,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "notify",
+ "p256",
  "rand 0.8.6",
  "regex",
  "reqwest 0.12.28",
@@ -1861,6 +1930,7 @@ dependencies = [
  "criterion",
  "dashmap",
  "dirs 6.0.0",
+ "ed25519-dalek 2.2.0",
  "futures",
  "glob",
  "hf-hub 0.5.0 (git+https://github.com/huggingface/hf-hub?rev=cc015aa814e46ef880b57e6c955674f9fcc5084b)",
@@ -3274,7 +3344,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3438,6 +3508,16 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "coset"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1eb98d5e9155e2cf7cd942c8b3033097d4563b6fb0a00b9caecb74669555c058"
+dependencies = [
+ "ciborium",
+ "ciborium-io",
+]
 
 [[package]]
 name = "cpu-time"
@@ -3833,7 +3913,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -5551,7 +5631,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -12415,7 +12495,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
