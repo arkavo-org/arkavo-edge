@@ -103,11 +103,8 @@ impl Planner {
             None
         };
 
-        let estimated = estimate_request(
-            &messages,
-            schema.as_ref(),
-            planner_config.max_tokens().unwrap_or(4096) as u32,
-        );
+        let max_tokens = planner_config.max_tokens().unwrap_or(4096);
+        let estimated = estimate_request(&messages, schema.as_ref(), max_tokens as u32);
         let budget = CallBudget {
             tracker: &self.budget_tracker,
             agent_id: "github-orchestrator",
@@ -116,8 +113,16 @@ impl Planner {
             .check(self.router.usage_cost(&actual_model, &estimated))
             .await
             .map_err(|e| Error::Other(e.into()))?;
+        self.router
+            .authorize_call(
+                &actual_model,
+                self.router.usage_cost(&actual_model, &estimated),
+                false,
+            )
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
         let response = planning_provider
-            .complete_with_schema_response(messages, schema, planner_config.max_tokens())
+            .complete_with_schema_response(messages, schema, Some(max_tokens))
             .await;
         let response = self
             .account_failure(response, &actual_model, &estimated, budget)
@@ -238,8 +243,16 @@ impl Planner {
             .check(self.router.usage_cost(&actual_model, &estimated))
             .await
             .map_err(|e| Error::Other(e.into()))?;
+        self.router
+            .authorize_call(
+                &actual_model,
+                self.router.usage_cost(&actual_model, &estimated),
+                false,
+            )
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
         let response = provider
-            .complete_with_schema_response(messages, None, None)
+            .complete_with_schema_response(messages, None, Some(4096))
             .await;
         let response = self
             .account_failure(response, &actual_model, &estimated, budget)
@@ -293,6 +306,123 @@ impl Planner {
                     "Planning LLM call failed: {error}"
                 )))
             }
+        }
+    }
+}
+
+#[cfg(all(test, feature = "openai"))]
+mod tests {
+    use super::*;
+    use arkavo_budget::{BudgetConfig, CloudPolicy};
+    use arkavo_llm::{Message, Provider};
+    use arkavo_router::{ModelChoice, ProviderFactory};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Clone)]
+    struct DispatchCounter(Arc<AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl Provider for DispatchCounter {
+        async fn complete_with_options(
+            &self,
+            _: Vec<Message>,
+            _: Option<usize>,
+        ) -> arkavo_llm::Result<String> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(arkavo_llm::Error::Provider("unexpected dispatch".into()))
+        }
+
+        async fn stream(
+            &self,
+            _: Vec<Message>,
+        ) -> arkavo_llm::Result<
+            Box<
+                dyn tokio_stream::Stream<Item = arkavo_llm::Result<arkavo_llm::StreamResponse>>
+                    + Send
+                    + Unpin,
+            >,
+        > {
+            panic!("planning does not stream")
+        }
+
+        fn name(&self) -> &str {
+            "dispatch-counter"
+        }
+    }
+
+    impl ProviderFactory for DispatchCounter {
+        fn build(&self, _: &ModelChoice) -> arkavo_router::Result<Box<dyn Provider>> {
+            Ok(Box::new(self.clone()))
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_policy_blocks_planning_and_adjustment_before_dispatch() {
+        for policy in [CloudPolicy::LocalOnly, CloudPolicy::AskBeforeCloud] {
+            let counter = DispatchCounter(Arc::new(AtomicUsize::new(0)));
+            let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+            let availability = arkavo_router::ProviderAvailability {
+                openai: true,
+                ..Default::default()
+            };
+            let mut router = Router::new_offline().await.unwrap();
+            router.set_offline_mode(false);
+            let router = router
+                .with_selector(arkavo_router::ModelSelector::with_availability(
+                    availability,
+                    false,
+                ))
+                .await
+                .with_connectivity(arkavo_router::ConnectivityChecker::assume(true))
+                .with_cloud_policy(policy)
+                .with_provider_factory(Arc::new(counter.clone()));
+            let planner = Planner::new(tracker.clone(), Arc::new(router), None);
+            let assignment: AgentAssignment = serde_json::from_value(serde_json::json!({
+                "issue_number": 1, "repository": "test/repo", "issue_title": "Fix a bug",
+                "issue_body": "Private issue content", "assigned_agent_id": null,
+                "assignment_rationale": "test",
+                "routing_decision": {
+                    "strategy": "plan_first", "rationale": "test", "should_notify_human": false,
+                    "priority": "medium", "analysis": {
+                        "issue_type": "bug", "complexity": "simple", "technologies": [],
+                        "required_capabilities": [], "estimated_tokens": 1000
+                    }
+                }
+            }))
+            .unwrap();
+            let step = PlanStep {
+                step_number: 1,
+                description: "Fix a bug".into(),
+                commands: vec![],
+                verification: vec![],
+                confidence: 0.5,
+            };
+            let failures = [VerificationResult {
+                check: crate::cognitive_engine_core::VerificationCheck::TestsPassing,
+                passed: false,
+                details: "Private failure details".into(),
+            }];
+            for error in [
+                planner.plan(&assignment).await.unwrap_err(),
+                planner.adjust(&step, &failures).await.unwrap_err(),
+            ] {
+                let Error::Other(error) = error else {
+                    panic!("unexpected error")
+                };
+                let error = error
+                    .downcast_ref::<arkavo_router::Error>()
+                    .expect("router policy error");
+                assert!(
+                    matches!(
+                        error,
+                        arkavo_router::Error::ModerationBlocked { .. }
+                            | arkavo_router::Error::CloudConfirmationRequired { .. }
+                    ),
+                    "{error}"
+                );
+            }
+            assert_eq!(counter.0.load(Ordering::SeqCst), 0);
+            assert!(tracker.get_spending_history(10).await.is_empty());
         }
     }
 }

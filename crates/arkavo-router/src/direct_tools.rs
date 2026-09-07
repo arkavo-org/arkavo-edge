@@ -91,7 +91,7 @@ impl super::Router {
             .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
 
         let result = provider
-            .complete_with_tools(messages, tools_json, None)
+            .complete_with_tools(messages, tools_json, Some(4096))
             .await;
         let mut response = self
             .account_result(&model, &request_usage, result, budget)
@@ -192,7 +192,7 @@ impl super::Router {
             .await
             .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
         let result = provider
-            .complete_with_tools(messages, tools_json, None)
+            .complete_with_tools(messages, tools_json, Some(4096))
             .await;
         let mut response = self
             .account_result(&model, &request_usage, result, budget)

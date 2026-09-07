@@ -163,11 +163,11 @@ impl ArchitectExecutor {
             let use_tools = tools_json.is_some() && provider.supports_tools();
             let result = if use_tools {
                 provider
-                    .complete_with_tools(messages, tools_json, None)
+                    .complete_with_tools(messages, tools_json, Some(4096))
                     .await
             } else {
                 provider
-                    .complete_with_schema_response(messages, None, None)
+                    .complete_with_schema_response(messages, None, Some(4096))
                     .await
             };
 

@@ -1457,7 +1457,9 @@ impl Router {
             budget.check(estimated_cost).await?;
         }
         tracing::debug!(task = task_description, "Executing internal model call");
-        let result = provider.complete_with_tools(messages, None, None).await;
+        let result = provider
+            .complete_with_tools(messages, None, Some(16_384))
+            .await;
         let response = self
             .account_result(&model, &estimated, result, budget)
             .await?;
@@ -1574,7 +1576,7 @@ impl Router {
             }
         }
         let result = provider
-            .complete_with_tools(messages, tools_json, None)
+            .complete_with_tools(messages, tools_json, Some(16_384))
             .await;
         let mut response = if let Some(model) = named {
             self.account_result(model, &estimated, result, budget)

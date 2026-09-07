@@ -83,7 +83,9 @@ impl ArchitectPlanner {
         let provider = self.planning_client(&model).await?;
         // complete_with_tools yields a ProviderResponse, which carries both
         // reasoning_content and the measured inference_timing the ledger needs.
-        let result = provider.complete_with_tools(messages, None, None).await;
+        let result = provider
+            .complete_with_tools(messages, None, Some(4096))
+            .await;
         let response = match self.router.as_ref() {
             Some(router) => {
                 router
@@ -217,17 +219,7 @@ Guidelines:
 
     /// Select the best model for a subtask category
     fn select_model_for_category(&self, category: TaskCategory) -> ModelChoice {
-        if self.availability.openai
-            && !self.availability.anthropic
-            && !self.availability.gemini
-            && !self.availability.deepseek
-            && !self.availability.kimi
-            && !self.availability.glm
-            && !self.availability.xai
-        {
-            return ModelChoice::Gpt6Astra;
-        }
-        match category {
+        let preferred = match category {
             // Frontend tasks: Use cheaper, fast models
             TaskCategory::FrontendUI => {
                 if self.availability.gemini {
@@ -297,6 +289,16 @@ Guidelines:
                     ModelChoice::LocalQwen3
                 }
             }
+        };
+        // Category preferences may name local weights on a cloud-only install.
+        let local_cached = self
+            .router
+            .as_ref()
+            .is_some_and(|router| router.selector.is_local_model_cached(&preferred));
+        if preferred.is_local() && !local_cached {
+            planning_provider::choose_model(&self.availability).unwrap_or(preferred)
+        } else {
+            preferred
         }
     }
 
@@ -422,6 +424,27 @@ mod tests {
                 | ModelChoice::LocalMinistral8B
                 | ModelChoice::Gpt6Astra
         ));
+    }
+
+    #[cfg(feature = "openai")]
+    #[test]
+    fn mixed_cloud_providers_keep_subtasks_runnable() {
+        for other in ["xai", "glm", "kimi", "deepseek"] {
+            let mut availability = only(other);
+            availability.openai = true;
+            let planner = ArchitectPlanner::new().with_availability(availability);
+            for category in [
+                TaskCategory::FrontendUI,
+                TaskCategory::BackendAPI,
+                TaskCategory::Documentation,
+                TaskCategory::CodeSearch,
+            ] {
+                assert!(
+                    !planner.select_model_for_category(category).is_local(),
+                    "{other}: {category:?}"
+                );
+            }
+        }
     }
 
     /// A cloud-only install where OpenAI is the single configured provider —

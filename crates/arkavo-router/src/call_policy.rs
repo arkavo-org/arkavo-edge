@@ -5,7 +5,8 @@ use arkavo_budget::{
 };
 
 impl Router {
-    pub(crate) async fn authorize_call(
+    /// Enforce cloud policy and spend caps before dispatching a provider call.
+    pub async fn authorize_call(
         &self,
         model: &ModelChoice,
         dollars: f64,

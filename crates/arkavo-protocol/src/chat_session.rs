@@ -1700,10 +1700,12 @@ fn tool_result_messages(
                 .or_else(|| pending.get(idx).map(|(id, _)| id.clone()))
                 .unwrap_or_else(|| format!("call_{idx}"));
             Message::tool_result(
-                serde_json::json!({
-                    "result": result.result, "success": result.success, "error": result.error
-                })
-                .to_string(),
+                arkavo_llm::tool_result::bounded_tool_output(
+                    serde_json::json!({
+                        "result": result.result, "success": result.success, "error": result.error
+                    })
+                    .to_string(),
+                ),
                 call_id,
                 result.tool_name.clone(),
             )
@@ -1771,11 +1773,15 @@ fn format_tool_results(results: &[ToolExecutionResult]) -> String {
 
             // Truncate large results to prevent exceeding LLM token limits
             if result_json.len() > MAX_TOOL_RESULT_CHARS {
-                let truncated = &result_json[..MAX_TOOL_RESULT_CHARS];
+                let mut end = MAX_TOOL_RESULT_CHARS;
+                while !result_json.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let truncated = &result_json[..end];
                 let break_point = truncated
                     .rfind('\n')
                     .or_else(|| truncated.rfind(' '))
-                    .unwrap_or(MAX_TOOL_RESULT_CHARS);
+                    .unwrap_or(end);
                 let _ = writeln!(
                     formatted,
                     "Result (truncated from {} to {} chars):\n{}...\n[OUTPUT TRUNCATED]",
@@ -2382,6 +2388,28 @@ mod tests {
                 }),
                 "call {id} has no paired tool result"
             );
+        }
+    }
+
+    #[test]
+    fn paired_tool_results_are_bounded() {
+        let response = arkavo_llm::ProviderResponse {
+            tool_calls: vec![arkavo_llm::tool_parser::ParsedToolCall {
+                tool_name: "read_file".into(),
+                arguments: serde_json::json!({}),
+                call_id: Some("call_large".into()),
+            }],
+            ..Default::default()
+        };
+        for success in [true, false] {
+            let mut result = executed("read_file", Some("call_large"));
+            result.result = serde_json::json!("界".repeat(200_000));
+            result.success = success;
+            result.error = Some("é".repeat(200_000));
+            let messages = tool_result_messages(&response, &[result]);
+            assert_eq!(messages[0].tool_call_id.as_deref(), Some("call_large"));
+            assert!(messages[0].content.len() <= arkavo_llm::tool_result::MAX_TOOL_RESULT_BYTES);
+            assert!(messages[0].content.contains("OUTPUT TRUNCATED"));
         }
     }
 

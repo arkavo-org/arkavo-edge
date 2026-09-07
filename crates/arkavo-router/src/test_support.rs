@@ -123,8 +123,12 @@ impl Provider for CountingProvider {
     async fn complete_with_options(
         &self,
         _: Vec<Message>,
-        _: Option<usize>,
+        max_tokens: Option<usize>,
     ) -> arkavo_llm::Result<String> {
+        assert!(
+            max_tokens.is_some(),
+            "dispatch must carry its authorized output allowance"
+        );
         self.respond().map(|response| response.content)
     }
 
@@ -149,8 +153,12 @@ impl Provider for CountingProvider {
         &self,
         _: Vec<Message>,
         _: Option<serde_json::Value>,
-        _: Option<usize>,
+        max_tokens: Option<usize>,
     ) -> arkavo_llm::Result<ProviderResponse> {
+        assert!(
+            max_tokens.is_some(),
+            "dispatch must carry its authorized output allowance"
+        );
         self.respond()
     }
 
@@ -158,8 +166,12 @@ impl Provider for CountingProvider {
         &self,
         _: Vec<Message>,
         _: Option<serde_json::Value>,
-        _: Option<usize>,
+        max_tokens: Option<usize>,
     ) -> arkavo_llm::Result<ProviderResponse> {
+        assert!(
+            max_tokens.is_some(),
+            "dispatch must carry its authorized output allowance"
+        );
         self.respond()
     }
 }

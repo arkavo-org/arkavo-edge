@@ -22,6 +22,7 @@ pub mod provider_state;
 #[cfg(feature = "llm-remote")]
 pub mod providers;
 pub mod release_gate;
+pub mod tool_result;
 pub use guarded_provider::{GuardedProvider, ReleaseGateFactory};
 pub mod stream;
 pub mod stream_adapter;

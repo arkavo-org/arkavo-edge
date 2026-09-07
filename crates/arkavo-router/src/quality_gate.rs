@@ -266,10 +266,11 @@ impl super::Router {
             }
 
             let actual_model = current_decision.recommended_model.clone();
+            let max_tokens = if execution_mode { 200usize } else { 4096 };
             let estimated_usage = crate::usage::estimate_request(
                 &advised_messages,
                 tools_json.as_ref(),
-                if execution_mode { 200 } else { 4096 },
+                max_tokens as u32,
             );
             let estimated_cost = self.usage_cost(&actual_model, &estimated_usage);
             // Cloud-spend policy gates the tool-loop exactly as it gates chat,
@@ -324,11 +325,10 @@ impl super::Router {
             // spends.
             self.check_local_feasibility(&current_decision.recommended_model, input_tokens as u32);
 
-            let max_tokens = if execution_mode { Some(200usize) } else { None };
             let request_usage =
                 crate::usage::estimate_request(&advised_messages, tools_json.as_ref(), 0);
             let mut response = match provider
-                .complete_with_tools(advised_messages, tools_json, max_tokens)
+                .complete_with_tools(advised_messages, tools_json, Some(max_tokens))
                 .await
             {
                 Ok(r) => r,
