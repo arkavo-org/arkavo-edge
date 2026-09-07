@@ -33,6 +33,8 @@ pub mod classification_evidence;
 pub mod config;
 pub mod config_transport;
 pub mod data_classification;
+#[cfg(feature = "taint")]
+pub mod derived_stamp;
 pub mod discovery;
 #[cfg(feature = "taint")]
 pub mod egress_destination;
@@ -50,6 +52,8 @@ pub mod network;
 pub mod oauth2;
 pub mod openrpc;
 pub mod peer_manager;
+#[cfg(feature = "taint")]
+pub mod policy_join;
 pub mod push_notifications;
 pub mod rate_limit;
 pub mod rate_limit_middleware;
@@ -97,6 +101,11 @@ pub use config::{A2aConfig, A2aConfigBuilder, BufferConfig, ConfigManager};
 pub use data_classification::{
     ClassifiedDatum, DataCategory, DatumType, DlpAction, DlpPolicy, SensitivityLevel,
 };
+#[cfg(feature = "taint")]
+pub use derived_stamp::{
+    DerivedAssertion, DerivedTag, DerivedWrap, SignedDerivedAssertion, plan_derived_wrap,
+    sign_derived_assertion, verify_derived_assertion,
+};
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 #[cfg(feature = "taint")]
 pub use egress_destination::{Destination, DestinationPolicy, extract_destinations};
@@ -116,6 +125,8 @@ pub use metrics_subscription::{
 };
 pub use network::{NetworkError, get_service_ip};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
+#[cfg(feature = "taint")]
+pub use policy_join::{PolicySet, UNKNOWN_VALUE};
 pub use rate_limit::{IpRateLimiter, RateLimitConfig, RateLimiter, spawn_cleanup_task};
 pub use rate_limit_middleware::{extract_client_ip, ip_rate_limit_middleware};
 pub use registration::{
@@ -138,7 +149,9 @@ pub use taint_tracker::{DEFAULT_FLOOR, DataTaintTracker, ModelCeilings};
 pub use task_executor::{TaskEvent, TaskExecutor, TaskExecutorConfig};
 pub use task_store::{SqliteTaskStore, Task, TaskStore};
 #[cfg(feature = "taint")]
-pub use taxonomy::{AttributeRequirement, LabelPolicy, TaxonomyMap};
+pub use taxonomy::{
+    AttributeRequirement, LabelPolicy, TaxonomyMap, canonical_definition_fqn, canonical_value_fqn,
+};
 pub use transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
 pub use types::{
     AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType, DiscoverFeaturesDisclose,

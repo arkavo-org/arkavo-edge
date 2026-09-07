@@ -137,17 +137,24 @@ scenarios:
     then:
       - Adapter classification equals the maximum classification in its corpus
       - Merging two adapters produces the maximum of their classifications
+      - Conjunctive attributes on the adapter are the union of those on its inputs
+      - Wrap attributes are platform value FQNs (namespace/attr/definition/value/value)
       - The computed ceiling is recorded in the manifest and in component metadata
       - A lower classification cannot be asserted for the adapter after the fact
     refs:
       - crates/arkavo-gguf-tdf/src/component.rs:36-56
       - crates/arkavo-knowledge-pack/src/manifest.rs:130-145
+      - crates/arkavo-protocol/src/policy_join.rs
     changed: "2026-08-31"
     edge_cases:
       - condition: A corpus item has no classification label
         expected: Conservative classification applied, matching the SEQ-001 ambiguity rule
       - condition: A declassified source is included
         expected: Declassification evidence required; otherwise the original label stands
+      - condition: A provenance facet is missing
+        expected: The definition's unknown value is stamped, entitled to nobody, and the item is excluded from partitioned adapters
+      - condition: Training spans more than one project value
+        expected: The adapter TDF demands allOf every project value it saw; no umbrella value is invented
 
   - id: KP-007
     name: Select adapters from the session entitlement set
