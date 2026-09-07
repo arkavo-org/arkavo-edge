@@ -1293,7 +1293,10 @@ impl A2aServer {
             auth_backend: Arc::new(arkavo_protocol::auth::JwtAuthBackend::new(
                 "change-me-in-production",
             )),
-            registration_service: Arc::new(arkavo_agent::registration::RegistrationService::new()),
+            registration_service: Arc::new(
+                arkavo_agent::registration::RegistrationService::new()
+                    .with_delegation_config(&super::config_helpers::delegation_config_from_env()?)?,
+            ),
             conductor: self.conductor.read().await.clone(),
             router,
             learning_bus: learning_bus_for_rpc,
@@ -1308,11 +1311,20 @@ impl A2aServer {
             #[cfg(feature = "kas")]
             kas_handler: {
                 let agent_config = self.agent_config.read().await;
-                let kas_config = agent_config.kas.clone().map(|k| arkavo_tdf::KasA2aConfig {
-                    key_id: k.key_id.unwrap_or_else(|| "kas-key-1".to_string()),
-                    algorithm: k.algorithm.unwrap_or_else(|| "ec:secp256r1".to_string()),
-                });
-                let mut handler = KasA2aHandler::new(vec![], kas_config.unwrap_or_default());
+                let (kas_config, trusted_roots) = match agent_config.kas.as_ref() {
+                    Some(k) => (
+                        arkavo_tdf::KasA2aConfig {
+                            key_id: k.key_id.clone().unwrap_or_else(|| "kas-key-1".to_string()),
+                            algorithm: k
+                                .algorithm
+                                .clone()
+                                .unwrap_or_else(|| "ec:secp256r1".to_string()),
+                        },
+                        super::handlers::kas::trusted_roots_from_config(k),
+                    ),
+                    None => (arkavo_tdf::KasA2aConfig::default(), Vec::new()),
+                };
+                let mut handler = KasA2aHandler::new(trusted_roots, kas_config);
                 handler.set_keypair(arkavo_tdf::KasKeypair::generate());
                 Some(Arc::new(handler))
             },

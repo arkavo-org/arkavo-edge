@@ -44,7 +44,7 @@ arkavo-router = { path = "../arkavo-router", default-features = false }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-debugger = { path = "../arkavo-debugger" }
-arkavo-ui-generator = { path = "../arkavo-ui-generator" }
+arkavo-ui-generator = { path = "../arkavo-ui-generator", default-features = false }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-validation = { path = "../arkavo-validation" }

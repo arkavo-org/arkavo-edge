@@ -276,7 +276,7 @@ The current published spec drafts are `swarmkit-spec-draft-00` and `swarmkit-spe
 | `CompletionSpec.rules` (Vec<String>) | stable | Free-form completion conditions. |
 | `CompletionSpec.on_failure` (OnFailure) | stable | |
 | `CompletionSpec.max_retries` | stable | |
-| `OnFailure` (enum: Abort, Retry, Continue) | stable | |
+| `OnFailure` (enum: Retry, Abort, Escalate, Partial) | stable | |
 
 ## ProvenanceSpec / Signature / C2paAssertion
 

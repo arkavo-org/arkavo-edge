@@ -30,7 +30,7 @@ keypair_architecture:
   attestation_key:
     algorithm: P-256 / ES256 (ECDSA P-256 with SHA-256)
     residency: Secure Enclave (macOS) / TPM 2.0 (Linux, Windows), non-extractable
-    usage: signing only — attestation quotes, DPoP proof-of-possession (token-binding.spec.yaml), orchestrator registration signing
+    usage: signing only — attestation quotes, CWT/COSE cnf proof-of-possession (token-binding.spec.yaml), orchestrator registration signing
     did: did:key with P-256 multicodec 0x1200 (varint 0x80 0x24, prefix zDn)
     crate: arkavo-attestation (keygen + quote), arkavo-crypto (P256SigningKeypair operations)
     note: distinct from the TDF KAS-wrap key — sign vs key-agreement usages differ and Secure Enclave / TPM key-usage flags must not be conflated
@@ -354,7 +354,7 @@ security:
 
 # Composed and cross-referenced specs
 composed_specs:
-  - { spec: token-binding.spec.yaml, relation: the attested key is the DPoP/mTLS proof-of-possession key }
+  - { spec: token-binding.spec.yaml, relation: the attested key is the CWT cnf / mTLS proof-of-possession key }
   - { spec: agent-credentials.spec.yaml, relation: attestation expressed as a credential; key rotation drives revocation }
   - { spec: trusted-agent.spec.yaml, phases: [1, 2], relation: additive P-256 key in Phase 1; signed quote replaces metadata in Phase 2 }
   - { spec: attestation.spec.yaml, relation: this file is the hardware-bound successor; attestation.spec.yaml documents today's software-fingerprint behavior }

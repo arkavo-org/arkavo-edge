@@ -1,0 +1,21 @@
+[package]
+name = "arkavo-dispatch-gate"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Permit-bound dispatch gate: authn, policy, and budget checks over a permit and a proof-of-possession"
+
+[lints]
+workspace = true
+
+[dependencies]
+arkavo-permit = { path = "../arkavo-permit" }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-crypto = { path = "../arkavo-crypto" }
+# Tests re-encode a minted permit to prove the budget follows its signed
+# identity rather than its bytes.
+coset = { workspace = true }
