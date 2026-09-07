@@ -37,6 +37,29 @@ impl super::Router {
             model_hint,
             false,
             None,
+            None,
+        )
+        .await
+        .map(|r| r.response)
+    }
+
+    /// Route on behalf of one chat session, so a cloud approval its user gave
+    /// authorizes this call and no other session's.
+    pub async fn route_with_tools_for_session(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        session: &str,
+    ) -> Result<ProviderResponse> {
+        self.route_with_tools_internal(
+            task_description,
+            messages,
+            tool_registry,
+            None,
+            false,
+            None,
+            Some(session),
         )
         .await
         .map(|r| r.response)
@@ -58,6 +81,7 @@ impl super::Router {
             None,
             false,
             Some(budget),
+            None,
         )
         .await
     }
@@ -68,10 +92,21 @@ impl super::Router {
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<RoutedResponse> {
-        self.route_with_tools_internal(task_description, messages, tool_registry, None, false, None)
-            .await
+        self.route_with_tools_internal(
+            task_description,
+            messages,
+            tool_registry,
+            None,
+            false,
+            None,
+            None,
+        )
+        .await
     }
 
+    // Internal plumbing, not API surface: every public entry point above hands
+    // this one call its own shape (hint, execution profile, ledger, session).
+    #[allow(clippy::too_many_arguments)]
     async fn route_with_tools_internal(
         &self,
         task_description: &str,
@@ -80,6 +115,7 @@ impl super::Router {
         model_hint: Option<&crate::ModelChoice>,
         execution_mode: bool,
         budget: Option<CallBudget<'_>>,
+        session: Option<&str>,
     ) -> Result<RoutedResponse> {
         const MAX_RETRIES: u8 = 3;
         let budget = budget.or_else(|| self.call_budget());
@@ -282,8 +318,8 @@ impl super::Router {
             if let Some(budget) = budget {
                 budget.check(estimated_cost).await?;
             }
-            let approval_pending = self.cloud_confirmation_pending();
-            self.authorize_call(&actual_model, estimated_cost, caller_authorized)
+            let approval_pending = self.cloud_confirmation_pending(session);
+            self.authorize_call(&actual_model, estimated_cost, caller_authorized, session)
                 .await?;
             if actual_model.is_cloud() {
                 authorized_cloud = Some(actual_model.clone());
@@ -642,7 +678,7 @@ impl super::Router {
                         // the session-sticky flag exists to avoid. An explicit
                         // caller model is deliberately not enough — it approves
                         // that arm, not an upgrade to a different one.
-                        let confirmed = user_paid_for_cloud || self.cloud_confirmed();
+                        let confirmed = user_paid_for_cloud || self.cloud_confirmed(session);
                         match planes::authorize_upgrade(
                             self.cloud_policy(),
                             reason,

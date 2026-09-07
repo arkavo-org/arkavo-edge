@@ -156,7 +156,7 @@ impl ArchitectExecutor {
                 budget.check(estimated_cost).await?;
             }
             self.router
-                .authorize_call(&current_model, estimated_cost, false)
+                .authorize_call(&current_model, estimated_cost, false, None)
                 .await?;
 
             let (provider, _) = self.router.get_provider_attributed(&current_model).await?;

@@ -5,6 +5,7 @@
 pub mod architect;
 mod call_policy;
 pub mod classifier;
+pub mod cloud_consent;
 pub mod connectivity;
 pub mod decision;
 pub mod deliberation;
@@ -50,6 +51,7 @@ pub use architect::{
     ComplexityScorer, Subtask, SubtaskResult,
 };
 pub use classifier::{TaskCategory, TaskClassifier, classify_task_keywords};
+pub use cloud_consent::{CloudConsentLedger, CloudConsentPrompt, CloudConsentRequest};
 pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, PlannerTier, RoutingDecision};
 pub use deliberation::{DeliberationConfig, DeliberationResult, Deliberator};
@@ -284,12 +286,13 @@ pub struct Router {
     /// after the user approves a `CloudUpgradeOffered`; the loop consumes it
     /// when authorizing spend.
     cloud_confirmation: std::sync::atomic::AtomicBool,
-    /// Standing cloud approval for the whole session, set by
-    /// `confirm_cloud_for_session()`. Never consumed: a command that approves
-    /// cloud once (`arkavo agent`) makes many routing calls it does not itself
-    /// issue, so a one-shot flag is spent by the first internal call and every
-    /// later one re-asks.
-    cloud_session_confirmation: std::sync::atomic::AtomicBool,
+    /// Standing cloud approvals, keyed by whoever gave them. Never consumed: a
+    /// host that approves cloud once makes many routing calls it does not
+    /// itself issue, so a one-shot flag is spent by the first internal call and
+    /// every later one re-asks. Keyed rather than global so the answer one
+    /// chat session's user gives cannot authorize the next session this
+    /// process serves.
+    cloud_consent: Arc<cloud_consent::CloudConsentLedger>,
     /// Substitutes live provider construction when present. Lets callers drive
     /// routing, policy and accounting deterministically — no credentials, no
     /// model cache, no network. Installed via [`Router::with_provider_factory`].
@@ -355,7 +358,7 @@ impl Router {
                 arkavo_budget::provider_costs::ProviderPricing::new(),
             )),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
-            cloud_session_confirmation: std::sync::atomic::AtomicBool::new(false),
+            cloud_consent: Arc::new(cloud_consent::CloudConsentLedger::default()),
             provider_factory: None,
             budget_agent: None,
         })
@@ -415,7 +418,7 @@ impl Router {
                 arkavo_budget::provider_costs::ProviderPricing::new(),
             )),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
-            cloud_session_confirmation: std::sync::atomic::AtomicBool::new(false),
+            cloud_consent: Arc::new(cloud_consent::CloudConsentLedger::default()),
             provider_factory: None,
             budget_agent: None,
         })
@@ -465,36 +468,56 @@ impl Router {
             .swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Approve cloud spend for the rest of the session.
+    /// Approve cloud spend for one user session, for as long as it lasts.
     ///
-    /// Unlike [`Self::confirm_next_cloud_upgrade`] this is never consumed. A
-    /// command that approves cloud once fans out into many routing calls it
-    /// does not issue itself (intent analysis, per-subtask execution); a
-    /// one-shot flag is spent by the first of them and every later call re-asks.
-    /// The policy gate still applies: `LocalOnly`, offline mode and the
-    /// remaining spend cap all continue to refuse.
-    pub fn confirm_cloud_for_session(&self) {
-        self.cloud_session_confirmation
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+    /// Unlike [`Self::confirm_next_cloud_upgrade`] this is never consumed: the
+    /// turn the user approved fans out into routing calls the caller does not
+    /// issue itself, and a one-shot flag is spent by the first of them. It is
+    /// keyed by session, so it authorizes only the calls that name this
+    /// `session_id` — the next session this process serves is asked its own
+    /// question. The policy gate still applies: `LocalOnly`, offline mode and
+    /// the remaining spend cap all continue to refuse.
+    pub fn approve_cloud_for_session(&self, session_id: &str) {
+        self.cloud_consent.approve_session(session_id);
     }
 
-    pub fn cloud_session_confirmed(&self) -> bool {
-        self.cloud_session_confirmation
-            .load(std::sync::atomic::Ordering::SeqCst)
+    /// Approve cloud spend for the host process's own work — the routing calls
+    /// no user session owns (an agent's conductor, intent decomposition,
+    /// internal synthesis). Only the operator at the process's own terminal can
+    /// give this, and because every user session names itself when it routes,
+    /// it never authorizes one.
+    pub fn approve_cloud_for_host(&self) {
+        self.cloud_consent.approve_host();
     }
 
-    /// Whether the user has authorized this cloud call. A standing session
-    /// approval answers first, so it never burns the one-shot flag.
-    pub(crate) fn cloud_confirmed(&self) -> bool {
-        self.cloud_session_confirmed() || self.consume_cloud_confirmation()
+    /// Whether cloud spend is already approved for this caller. `None` asks
+    /// about the host's own work rather than "anyone at all".
+    pub fn cloud_approved(&self, session: Option<&str>) -> bool {
+        self.cloud_consent.is_approved(session)
+    }
+
+    /// Whether the user has authorized this cloud call. A standing approval
+    /// answers first, so it never burns the one-shot flag.
+    pub(crate) fn cloud_confirmed(&self, session: Option<&str>) -> bool {
+        self.cloud_approved(session) || self.consume_cloud_confirmation()
     }
 
     /// Whether a user approval is available without spending it.
-    pub(crate) fn cloud_confirmation_pending(&self) -> bool {
-        self.cloud_session_confirmed()
+    pub(crate) fn cloud_confirmation_pending(&self, session: Option<&str>) -> bool {
+        self.cloud_approved(session)
             || self
                 .cloud_confirmation
                 .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Whether any cloud arm is configured and feasible right now — "is there
+    /// anything for the operator to approve?". A host asks this before putting
+    /// the question, so an install with no cloud credentials is never prompted.
+    pub fn cloud_augmentation_available(&self) -> bool {
+        self.selector
+            .feasible_models()
+            .iter()
+            .any(ModelChoice::is_cloud)
     }
 
     /// Install a selector built from injected provider availability and local
@@ -675,9 +698,14 @@ impl Router {
     ///
     /// A caller that names a model is unaffected: hints are applied after
     /// classification, in `route_with_tools_internal`.
-    async fn selection_exclusions(&self) -> Vec<String> {
+    ///
+    /// `session` is the approval this draw may rely on; `None` is the host's
+    /// own work. An approval that does not cover this caller leaves the cloud
+    /// arms excluded, which under-uses the approval rather than over-spending
+    /// it — the dispatch gate is the authority either way.
+    async fn selection_exclusions(&self, session: Option<&str>) -> Vec<String> {
         let excluded = self.get_excluded_models().await;
-        if self.cloud_confirmation_pending() && self.approval_can_authorize_cloud().await {
+        if self.cloud_confirmation_pending(session) && self.approval_can_authorize_cloud().await {
             return excluded;
         }
         let local_arm_feasible = self
@@ -1173,7 +1201,10 @@ impl Router {
             "Task classified"
         );
 
-        let excluded = self.selection_exclusions().await;
+        // The classifier's draw is host-scoped: `classify` is a standalone
+        // public entry point with no session of its own, and a session-scoped
+        // caller still faces the dispatch gate, which does read its approval.
+        let excluded = self.selection_exclusions(None).await;
         let mut decision = self
             .selector
             .select_adaptive(&self.model_learning, &classification, 0.0, &excluded)
@@ -1452,7 +1483,8 @@ impl Router {
 
         let estimated = usage::estimate_request(&messages, None, 16_384);
         let estimated_cost = self.usage_cost(&model, &estimated);
-        self.authorize_call(&model, estimated_cost, false).await?;
+        self.authorize_call(&model, estimated_cost, false, None)
+            .await?;
         let budget = self.call_budget();
         if let Some(budget) = budget {
             budget.check(estimated_cost).await?;
@@ -1484,8 +1516,12 @@ impl Router {
 
     /// Route chat on its own semaphore, preferring cached local models.
     ///
-    /// Cloud-only installations select an available cloud arm under the configured
-    /// spend policy. Chat inference never blocks task/orchestrator work.
+    /// Automatic selection resolves to `default_chat_model()`, which is always
+    /// a local arm — cloud credentials augment local inference, they do not
+    /// replace it. A cloud arm is therefore reached here only when the caller
+    /// names one, which is itself the user's consent; the spend gate still
+    /// refuses `LocalOnly`, offline mode and an exhausted cap. Chat inference
+    /// never blocks task/orchestrator work.
     ///
     /// When a tool registry is provided, tools are passed to the LLM so it can
     /// produce structured tool calls (e.g. `get_time`) instead of hallucinating.
@@ -1498,16 +1534,21 @@ impl Router {
         model_override: Option<&ModelChoice>,
     ) -> Result<arkavo_llm::ProviderResponse> {
         let owned = model_override.cloned().map(ModelSpec::Named);
-        self.route_chat_spec(messages, tool_registry, owned.as_ref())
+        self.route_chat_spec(messages, tool_registry, owned.as_ref(), None)
             .await
     }
 
     /// Chat routing with a catalog model or an on-disk GGUF path.
+    ///
+    /// `session` names the chat session this turn belongs to, so a cloud
+    /// approval its user gave authorizes this call and no other session's.
+    /// `None` is the host's own work.
     pub async fn route_chat_spec(
         &self,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
         spec: Option<&ModelSpec>,
+        session: Option<&str>,
     ) -> Result<arkavo_llm::ProviderResponse> {
         let fallback_model;
         let named: Option<&ModelChoice> = match spec {
@@ -1518,27 +1559,6 @@ impl Router {
                 Some(&fallback_model)
             }
         };
-
-        let provider = if let Some(path) = spec.and_then(ModelSpec::as_gguf_path) {
-            let key = format!("gguf:{}", path.display());
-            tracing::debug!(model = %key, "Chat-path routing from GGUF path");
-            let use_spec = self.decide_spec_with_event(&key);
-            self.instantiate_gguf_path(path, use_spec).await?
-        } else {
-            let model = named.ok_or_else(|| {
-                Error::ModelExecution("catalog model required when spec is not a GGUF path".into())
-            })?;
-            tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
-            let use_spec = self.decide_spec_with_event(model.name());
-            self.instantiate_provider_exact_with_spec(model, use_spec)
-                .await?
-        };
-
-        let _permit = self
-            .chat_semaphore
-            .acquire()
-            .await
-            .map_err(|_| Error::ModelExecution("Chat semaphore closed".to_string()))?;
 
         // Build tool JSON from registry (same pattern as quality_gate.rs)
         let tools_json = match tool_registry {
@@ -1568,14 +1588,43 @@ impl Router {
 
         let estimated = usage::estimate_request(&messages, tools_json.as_ref(), 16_384);
         let budget = self.call_budget();
+        // Policy and cap are settled before the provider is built, so a refusal
+        // never opens a client — and a session with no way to ask its user gets
+        // the refusal back without a model ever being loaded.
         if let Some(model) = named {
             let cost = self.usage_cost(model, &estimated);
-            self.authorize_call(model, cost, spec.and_then(ModelSpec::as_named).is_some())
-                .await?;
+            self.authorize_call(
+                model,
+                cost,
+                spec.and_then(ModelSpec::as_named).is_some(),
+                session,
+            )
+            .await?;
             if let Some(budget) = budget {
                 budget.check(cost).await?;
             }
         }
+
+        let provider = if let Some(path) = spec.and_then(ModelSpec::as_gguf_path) {
+            let key = format!("gguf:{}", path.display());
+            tracing::debug!(model = %key, "Chat-path routing from GGUF path");
+            let use_spec = self.decide_spec_with_event(&key);
+            self.instantiate_gguf_path(path, use_spec).await?
+        } else {
+            let model = named.ok_or_else(|| {
+                Error::ModelExecution("catalog model required when spec is not a GGUF path".into())
+            })?;
+            tracing::debug!(model = %model.name(), "Chat-path routing (separate semaphore)");
+            let use_spec = self.decide_spec_with_event(model.name());
+            self.instantiate_provider_exact_with_spec(model, use_spec)
+                .await?
+        };
+
+        let _permit = self
+            .chat_semaphore
+            .acquire()
+            .await
+            .map_err(|_| Error::ModelExecution("Chat semaphore closed".to_string()))?;
         let result = provider
             .complete_with_tools(messages, tools_json, Some(16_384))
             .await;
@@ -1745,9 +1794,7 @@ impl Router {
             budget_tracker: self.budget_tracker.clone(),
             pricing: Arc::clone(&self.pricing),
             cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
-            cloud_session_confirmation: std::sync::atomic::AtomicBool::new(
-                self.cloud_session_confirmed(),
-            ),
+            cloud_consent: Arc::clone(&self.cloud_consent),
             provider_factory: self.provider_factory.clone(),
             budget_agent: self.budget_agent.clone(),
         })
@@ -2184,12 +2231,13 @@ mod tests {
         );
     }
 
-    /// The exclusion is unattended-only. A user who has approved cloud spend for
-    /// the session must still be able to reach a cloud arm, and the approval is
-    /// read without being consumed so the spend gate still sees it.
+    /// The exclusion is unattended-only. An operator who has approved cloud
+    /// spend for the host's own work must still be able to reach a cloud arm,
+    /// and the approval is read without being consumed so the spend gate still
+    /// sees it.
     #[spec("ASTRA-004")]
     #[tokio::test]
-    async fn a_session_approval_puts_the_cloud_arms_back_in_the_draw() {
+    async fn a_host_approval_puts_the_cloud_arms_back_in_the_draw() {
         use crate::selector::ModelSelector;
         use crate::test_support::{CountingProvider, only};
 
@@ -2215,26 +2263,35 @@ mod tests {
 
         assert!(
             router
-                .selection_exclusions()
+                .selection_exclusions(None)
                 .await
                 .iter()
                 .any(|name| cloud_arms.contains(name)),
             "unattended: cloud arms are excluded from the draw"
         );
 
-        router.confirm_cloud_for_session();
+        router.approve_cloud_for_host();
 
         assert!(
             !router
-                .selection_exclusions()
+                .selection_exclusions(None)
                 .await
                 .iter()
                 .any(|name| cloud_arms.contains(name)),
             "approved: cloud arms are back in the draw"
         );
         assert!(
-            router.cloud_confirmation_pending(),
+            router.cloud_confirmation_pending(None),
             "reading the exclusions must not consume the approval"
+        );
+
+        assert!(
+            router
+                .selection_exclusions(Some("some-chat-session"))
+                .await
+                .iter()
+                .any(|name| cloud_arms.contains(name)),
+            "the operator's approval is not a chat session's approval"
         );
     }
 
@@ -2292,12 +2349,12 @@ mod tests {
     }
 
     /// An approval is not authorization. `LocalOnly` refuses cloud spend before
-    /// it ever reads `user_confirmed`, so a session approval must not put the
+    /// it ever reads `user_confirmed`, so a standing approval must not put the
     /// cloud arms back in the draw — Thompson Sampling would then pick an arm
     /// the gate is certain to reject.
     #[spec("ASTRA-004")]
     #[tokio::test]
-    async fn a_session_approval_cannot_re_admit_cloud_under_local_only() {
+    async fn an_approval_cannot_re_admit_cloud_under_local_only() {
         use crate::selector::ModelSelector;
         use crate::test_support::{CountingProvider, only};
 
@@ -2329,11 +2386,11 @@ mod tests {
             .await
             .with_provider_factory(provider.factory());
 
-        router.confirm_cloud_for_session();
+        router.approve_cloud_for_host();
 
         assert!(
             router
-                .selection_exclusions()
+                .selection_exclusions(None)
                 .await
                 .iter()
                 .any(|name| cloud_arms.contains(name)),
@@ -2363,6 +2420,85 @@ mod tests {
             "LocalOnly must build no cloud provider: {:?}",
             provider.built_models()
         );
+    }
+
+    /// Regression: the approval used to be one atomic on the shared router, so
+    /// the first session to answer yes authorized every session the process
+    /// served. Routed end to end, an approval now serves exactly its own
+    /// session and the next one is still refused.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_session_approval_serves_only_that_session_through_routing() {
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        const TASK: &str = "summarize the diff";
+        let provider = CountingProvider::new("a complete answer for the request");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::AskBeforeCloud,
+            "openai",
+            &provider,
+        )
+        .await;
+        router.approve_cloud_for_session("session-a");
+
+        let response = router
+            .route_with_tools_for_session(
+                TASK,
+                vec![arkavo_llm::Message::user(TASK)],
+                None,
+                "session-a",
+            )
+            .await
+            .expect("the approving session must be served");
+        assert!(!response.content.is_empty());
+
+        let error = router
+            .route_with_tools_for_session(
+                TASK,
+                vec![arkavo_llm::Message::user(TASK)],
+                None,
+                "session-b",
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::CloudConfirmationRequired { .. }),
+            "another session must still be asked, got {error:?}"
+        );
+        assert_eq!(
+            provider.calls(),
+            1,
+            "only the approving session reached a model"
+        );
+    }
+
+    /// The chat path settles policy before it opens a client, so a refused turn
+    /// costs no model load. `LocalOnly` refuses even a caller-named cloud arm,
+    /// which is the one chat dispatch that reaches the gate on this fixture.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_refused_chat_turn_builds_no_provider() {
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("answer");
+        let router = cloud_router(arkavo_budget::CloudPolicy::LocalOnly, "openai", &provider).await;
+
+        let error = router
+            .route_chat_spec(
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                Some(&ModelSpec::Named(ModelChoice::Gpt6Astra)),
+                Some("session-a"),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, Error::ModerationBlocked { .. }),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert_eq!(provider.calls(), 0);
     }
 
     /// Helper: a minimal `DecisionTrace` for constructing test decisions.

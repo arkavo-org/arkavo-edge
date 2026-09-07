@@ -211,7 +211,7 @@ mod tests {
         let router = router_with(availability, true)
             .await
             .with_provider_factory(factory.handle());
-        router.confirm_cloud_for_session();
+        router.approve_cloud_for_host();
         let analyzer = LlmIntentAnalyzer::new(Arc::new(router));
         let analysis = analyzer
             .analyze("ship the release and write the notes")

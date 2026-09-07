@@ -2,7 +2,7 @@ use crate::a2a_mcp_bridge::{A2aMcpBridge, McpToolRequest, McpToolResponse};
 use crate::chat_session::ChatSessionManager;
 use crate::types::{MessageDelta, UserMessage};
 use arkavo_mcp_tools::ToolRegistry;
-use arkavo_router::Router;
+use arkavo_router::{CloudConsentPrompt, Router};
 use serde_json::Value;
 use std::sync::Arc;
 use thiserror::Error;
@@ -55,16 +55,22 @@ impl A2aClient {
 
     /// Create A2A client with router for chat sessions
     pub fn with_router(router: Arc<Router>, tool_registry: Option<Arc<ToolRegistry>>) -> Self {
-        Self::with_router_and_model(router, tool_registry, None)
+        Self::with_router_and_model(router, tool_registry, None, None)
     }
 
-    /// Create A2A client with router and optional model override
+    /// Create A2A client with router, optional model override and the host's
+    /// channel for asking the user about cloud spend. A host with no such
+    /// channel passes `None` and cloud refusals surface as errors.
     pub fn with_router_and_model(
         router: Arc<Router>,
         tool_registry: Option<Arc<ToolRegistry>>,
         model_name: Option<&str>,
+        cloud_consent_prompt: Option<Arc<dyn CloudConsentPrompt>>,
     ) -> Self {
         let mut session_manager = ChatSessionManager::with_router(router, tool_registry);
+        if let Some(prompt) = cloud_consent_prompt {
+            session_manager.set_cloud_consent_prompt(prompt);
+        }
         if let Some(name) = model_name {
             if let Some(spec) = arkavo_router::ModelSpec::parse(name) {
                 session_manager.set_model_spec(spec);

@@ -1,12 +1,12 @@
 use crate::auth::SessionAuth;
+use crate::chat_cloud_gate::{CloudConfirmation, cloud_confirmation, request_cloud_consent};
+use crate::chat_tool_turn::{executed_tool_turn, unregistered_tool_turn};
 use crate::config::{BufferConfig, ChatStreamingMode};
 use crate::error::{A2aError, Result};
 use crate::types::{
     ChatCapabilities, ChatSession, MessageDelta, MessageDeltaContent, StreamEndReason, UserMessage,
 };
-use arkavo_llm::{
-    DeltaType, LlmClientAdapter, Message, StreamLlmModel, ToolExecutionResult, ToolExecutor,
-};
+use arkavo_llm::{DeltaType, LlmClientAdapter, Message, StreamLlmModel, ToolExecutor};
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_observability::{
     metrics::MetricsCollector,
@@ -14,7 +14,7 @@ use arkavo_observability::{
     session_observability,
     task_tracker::{ObservableTaskTracker, SessionTaskManager},
 };
-use arkavo_router::Router;
+use arkavo_router::{CloudConsentPrompt, Router};
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,6 +64,12 @@ pub struct ChatSessionManager {
     /// Updated by the server from ToolMemory + conductor task store.
     /// Injected as a system message so chat can reference what the agent has been doing.
     task_context: Option<Arc<RwLock<String>>>,
+    /// The host's channel to the person who decides whether this process may
+    /// spend on cloud inference. Absent by default, which is what a server
+    /// answering remote clients must stay: with no prompter a refused cloud
+    /// call returns `CloudConfirmationRequired` at once rather than waiting on
+    /// a console nobody is watching.
+    cloud_consent_prompt: Option<Arc<dyn CloudConsentPrompt>>,
 }
 
 struct ChatSessionState {
@@ -168,6 +174,7 @@ impl ChatSessionManager {
             system_prompt: None,
             model_override: None,
             task_context: None,
+            cloud_consent_prompt: None,
         }
     }
 
@@ -198,6 +205,22 @@ impl ChatSessionManager {
     /// Override chat inference with a catalog model or an on-disk GGUF path.
     pub fn set_model_spec(&mut self, spec: arkavo_router::ModelSpec) {
         self.model_override = Some(spec);
+    }
+
+    /// Give this manager a way to ask the user before a session's request is
+    /// sent to paid cloud inference.
+    ///
+    /// Only a host that owns a channel to a person — an interactive CLI — may
+    /// install one. A process serving requests it did not originate installs
+    /// none, so a refusal is reported to the caller rather than parked on a
+    /// prompt nobody can answer.
+    pub fn set_cloud_consent_prompt(&mut self, prompt: Arc<dyn CloudConsentPrompt>) {
+        self.cloud_consent_prompt = Some(prompt);
+    }
+
+    /// Whether this manager can ask its user about cloud spend.
+    pub fn has_cloud_consent_prompt(&self) -> bool {
+        self.cloud_consent_prompt.is_some()
     }
 
     /// Set a shared task context that will be injected into chat sessions.
@@ -291,6 +314,7 @@ impl ChatSessionManager {
             let system_prompt = self.system_prompt.clone();
             let model_override = self.model_override.clone();
             let task_context = self.task_context.clone();
+            let cloud_consent_prompt = self.cloud_consent_prompt.clone();
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -308,6 +332,7 @@ impl ChatSessionManager {
                         system_prompt,
                         model_override,
                         task_context,
+                        cloud_consent_prompt,
                     )
                     .await;
                 });
@@ -927,7 +952,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with Router (quality gate + tools)
-    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt, model_override, task_context), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt, model_override, task_context, cloud_consent_prompt), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_with_router(
         session_id: String,
@@ -943,12 +968,13 @@ impl ChatSessionManager {
         system_prompt: Option<String>,
         model_override: Option<arkavo_router::ModelSpec>,
         task_context: Option<Arc<RwLock<String>>>,
+        cloud_consent_prompt: Option<Arc<dyn CloudConsentPrompt>>,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
-        // An approval is held by the router for the whole session, so the answer
-        // itself needs no mirror here. `cloud_asked` records only that the
-        // question was put at all, which makes a decline as final as an approval
-        // and keeps the user from being asked again on the next turn.
+        // An approval is held by the router against this session id, so the
+        // answer itself needs no mirror here. `cloud_asked` records only that
+        // the question was put at all, which makes a decline as final as an
+        // approval and keeps the user from being asked again on the next turn.
         let mut cloud_asked = false;
         info!("Router-based session handler started");
 
@@ -1142,7 +1168,7 @@ impl ChatSessionManager {
                     let mut continuation_context = windowed_context.clone();
                     let mut route_result = match tokio::time::timeout(
                         std::time::Duration::from_secs(chat_timeout_secs),
-                        router.route_chat_spec(windowed_context, tool_registry.as_deref(), model_override.as_ref()),
+                        router.route_chat_spec(windowed_context, tool_registry.as_deref(), model_override.as_ref(), Some(&session_id)),
                     )
                     .await
                     {
@@ -1156,28 +1182,33 @@ impl ChatSessionManager {
                     };
 
                     // Cloud augmentation needs authorization here; ask the
-                    // user once and re-dispatch the identical request.
+                    // user once, through the host's own channel, and
+                    // re-dispatch the identical request. A host with no channel
+                    // never reaches this branch, so the refusal is returned to
+                    // whoever sent the message instead of parked on a console.
                     if let Err(ref route_err) = route_result
                         && let CloudConfirmation::Ask { model, estimated_cost_usd } = cloud_confirmation(
                             route_err,
-                            std::io::IsTerminal::is_terminal(&std::io::stdin()),
+                            cloud_consent_prompt.is_some(),
                             cloud_asked,
                         )
+                        && let Some(prompt) = cloud_consent_prompt.as_ref()
                     {
                         // Asked counts whichever way it is answered; a decline is
                         // final for the session and must not be re-litigated.
                         cloud_asked = true;
-                        if ask_cloud_confirmation(&model, estimated_cost_usd).await {
-                            // Held by the router for the rest of the session, so
-                            // the calls this turn fans out into — and every later
-                            // turn — inherit the approval without re-asking.
-                            router.confirm_cloud_for_session();
+                        // An approval is recorded against this session id, so
+                        // the calls this turn fans out into — and every later
+                        // turn of this conversation — inherit it without
+                        // re-asking, and no other session inherits anything.
+                        if request_cloud_consent(prompt, &router, &session_id, &model, estimated_cost_usd).await {
                             route_result = match tokio::time::timeout(
                                 std::time::Duration::from_secs(chat_timeout_secs),
                                 router.route_chat_spec(
                                     continuation_context.clone(),
                                     tool_registry.as_deref(),
                                     model_override.as_ref(),
+                                    Some(&session_id),
                                 ),
                             )
                             .await
@@ -1310,7 +1341,7 @@ impl ChatSessionManager {
                                     // Route again with same model to synthesize final answer from tool results
                                     let retry_result = tokio::time::timeout(
                                         std::time::Duration::from_secs(chat_timeout_secs),
-                                        router.route_chat_spec(continuation_context, None, Some(&spec)),
+                                        router.route_chat_spec(continuation_context, None, Some(&spec), Some(&session_id)),
                                     )
                                     .await;
                                     let retry_result = match retry_result {
@@ -1424,10 +1455,11 @@ impl ChatSessionManager {
                                         // Retry with tool hints
                                         let hint_result = tokio::time::timeout(
                                             std::time::Duration::from_mins(2),
-                                            router.route_with_tools(
+                                            router.route_with_tools_for_session(
                                                 &user_message.content,
                                                 conversation_context.clone(),
                                                 tool_registry.as_deref(),
+                                                &session_id,
                                             ),
                                         )
                                         .await;
@@ -1646,219 +1678,6 @@ impl ChatSessionManager {
 
         info!("Chat session manager shutdown complete");
     }
-}
-
-/// What the chat loop does when routing refuses an unconfirmed cloud call.
-#[derive(Debug, Clone, PartialEq)]
-enum CloudConfirmation {
-    /// Surface the router error unchanged: it is not a confirmation refusal,
-    /// there is no terminal to ask on, or the user has already answered this
-    /// session — yes or no — and asking again would only repeat the question.
-    Propagate,
-    /// Ask once, then retry the identical request if the user agrees.
-    Ask {
-        model: String,
-        estimated_cost_usd: f64,
-    },
-}
-
-/// Cloud augmentation under `AskBeforeCloud` needs approval: the router
-/// refuses automatic cloud selection and has no channel to reach the user, so
-/// the chat loop asks on its behalf and re-dispatches the same request.
-///
-/// `already_asked` covers both answers. A user who declined has answered the
-/// question for this session, so repeating it every turn would be nagging, not
-/// recovery; the original error propagates instead.
-fn cloud_confirmation(
-    error: &arkavo_router::Error,
-    interactive: bool,
-    already_asked: bool,
-) -> CloudConfirmation {
-    match error {
-        arkavo_router::Error::CloudConfirmationRequired {
-            model,
-            estimated_cost_usd,
-        } if interactive && !already_asked => CloudConfirmation::Ask {
-            model: model.clone(),
-            estimated_cost_usd: *estimated_cost_usd,
-        },
-        _ => CloudConfirmation::Propagate,
-    }
-}
-
-/// Put the y/N question on the controlling terminal, keeping the blocking stdin
-/// read off the async runtime. Anything but an explicit yes declines.
-async fn ask_cloud_confirmation(model: &str, estimated_cost_usd: f64) -> bool {
-    let question = format!(
-        "\nCloud inference with {model} is estimated at ${estimated_cost_usd:.4} for this request.\nSend this session's requests to the cloud? [y/N]: "
-    );
-    tokio::task::spawn_blocking(move || {
-        use std::io::{BufRead, Write};
-        let mut stdout = std::io::stdout();
-        if stdout.write_all(question.as_bytes()).is_err() || stdout.flush().is_err() {
-            return false;
-        }
-        let mut answer = String::new();
-        if std::io::stdin().lock().read_line(&mut answer).is_err() {
-            return false;
-        }
-        matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
-    })
-    .await
-    .unwrap_or(false)
-}
-
-/// Every call the assistant turn obliges the next request to answer, as
-/// `(call_id, tool_name)`.
-///
-/// A Responses turn replays its provider state verbatim, so the native
-/// `function_call` records — not the parsed calls — decide which outputs the
-/// provider demands.
-/// Chat Completions turns carry only parsed calls, and a call the local parser
-/// pulled out of prose has no id of its own, so one is synthesized the same way
-/// the streamed tool-call deltas synthesize theirs.
-fn pending_call_ids(response: &arkavo_llm::ProviderResponse) -> Vec<(String, String)> {
-    let mut calls: Vec<(String, String)> = response
-        .provider_state
-        .native_calls()
-        .map(|(call_id, name)| (call_id.to_string(), name.to_string()))
-        .collect();
-    for (idx, call) in response.tool_calls.iter().enumerate() {
-        let call_id = call
-            .call_id
-            .clone()
-            .unwrap_or_else(|| format!("call_{idx}"));
-        if !calls.iter().any(|(known, _)| *known == call_id) {
-            calls.push((call_id, call.tool_name.clone()));
-        }
-    }
-    calls
-}
-
-/// Replay one turn's tool results in the role the provider's next request needs.
-///
-/// Providers that issued native calls reject a continuation that answers them
-/// with anything but a paired tool-role message, so each result becomes its own
-/// `Role::Tool` message keyed by the call id. Calls parsed out of a Responses
-/// turn's prose have no provider-side call to answer and stay a user summary.
-fn tool_result_messages(
-    response: &arkavo_llm::ProviderResponse,
-    results: &[ToolExecutionResult],
-) -> Vec<Message> {
-    if !response.tool_results_use_tool_role() {
-        return vec![Message::user(format_tool_results(results))];
-    }
-    let pending = pending_call_ids(response);
-    results
-        .iter()
-        .enumerate()
-        .map(|(idx, result)| {
-            let call_id = result
-                .call_id
-                .clone()
-                .or_else(|| pending.get(idx).map(|(id, _)| id.clone()))
-                .unwrap_or_else(|| format!("call_{idx}"));
-            Message::tool_result(
-                arkavo_llm::tool_result::bounded_tool_output(
-                    serde_json::json!({
-                        "result": result.result, "success": result.success, "error": result.error
-                    })
-                    .to_string(),
-                ),
-                call_id,
-                result.tool_name.clone(),
-            )
-        })
-        .collect()
-}
-
-/// Outputs for a turn whose calls this session cannot run.
-///
-/// Dropping them orphans the assistant's `function_call` items and the next
-/// request fails with "No tool output found", so the model is told the tool is
-/// unavailable instead of being left waiting for a result that never comes.
-fn unavailable_tool_results(response: &arkavo_llm::ProviderResponse) -> Vec<ToolExecutionResult> {
-    pending_call_ids(response)
-        .into_iter()
-        .map(|(call_id, tool_name)| ToolExecutionResult {
-            result: serde_json::json!({
-                "error": format!("Tool '{tool_name}' is unavailable: this session has no tool registry")
-            }),
-            error: Some(format!(
-                "Tool '{tool_name}' is unavailable: this session has no tool registry"
-            )),
-            tool_name,
-            call_id: Some(call_id),
-            success: false,
-            schema_hint: None,
-        })
-        .collect()
-}
-
-/// One assistant turn and the outputs answering it, in the order the next
-/// request must replay them. Every caller appends this whole slice so a turn's
-/// calls can never be committed to history without their results.
-fn executed_tool_turn(
-    response: &arkavo_llm::ProviderResponse,
-    results: &[ToolExecutionResult],
-) -> Vec<Message> {
-    let mut messages = vec![response.as_assistant_message()];
-    if !results.is_empty() {
-        messages.extend(tool_result_messages(response, results));
-    }
-    messages
-}
-
-/// The same turn when no tool registry is attached: the calls cannot run, so
-/// each one is answered with an "unavailable" output rather than left orphaned.
-fn unregistered_tool_turn(response: &arkavo_llm::ProviderResponse) -> Vec<Message> {
-    executed_tool_turn(response, &unavailable_tool_results(response))
-}
-
-/// Maximum characters per tool result to prevent exceeding LLM token limits
-const MAX_TOOL_RESULT_CHARS: usize = 200_000;
-
-/// Format tool execution results for adding to conversation context
-fn format_tool_results(results: &[ToolExecutionResult]) -> String {
-    use std::fmt::Write;
-
-    let mut formatted = String::from("Tool execution results:\n\n");
-
-    for result in results {
-        let _ = writeln!(formatted, "Tool: {}", result.tool_name);
-        if result.success {
-            let result_json =
-                serde_json::to_string_pretty(&result.result).unwrap_or_else(|_| "{}".to_string());
-
-            // Truncate large results to prevent exceeding LLM token limits
-            if result_json.len() > MAX_TOOL_RESULT_CHARS {
-                let mut end = MAX_TOOL_RESULT_CHARS;
-                while !result_json.is_char_boundary(end) {
-                    end -= 1;
-                }
-                let truncated = &result_json[..end];
-                let break_point = truncated
-                    .rfind('\n')
-                    .or_else(|| truncated.rfind(' '))
-                    .unwrap_or(end);
-                let _ = writeln!(
-                    formatted,
-                    "Result (truncated from {} to {} chars):\n{}...\n[OUTPUT TRUNCATED]",
-                    result_json.len(),
-                    break_point,
-                    &result_json[..break_point]
-                );
-            } else {
-                let _ = writeln!(formatted, "Result: {result_json}");
-            }
-        } else {
-            let error_msg = result.error.as_deref().unwrap_or("Unknown error");
-            let _ = writeln!(formatted, "Error: {error_msg}");
-        }
-        formatted.push('\n');
-    }
-
-    formatted
 }
 
 #[cfg(test)]
@@ -2469,285 +2288,227 @@ mod tests {
         manager.shutdown().await;
     }
 
-    fn function_call_item(call_id: &str, name: &str) -> serde_json::Value {
-        serde_json::json!({
-            "type": "function_call", "call_id": call_id, "name": name, "arguments": "{}"
+    /// Counts provider construction so "this turn was refused before a model
+    /// was ever loaded" is an assertion rather than an inference.
+    #[derive(Default)]
+    struct CountingFactory {
+        builds: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CountingFactory {
+        fn builds(&self) -> usize {
+            self.builds.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl arkavo_llm::Provider for CountingFactory {
+        async fn complete_with_options(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+            _max_tokens: Option<usize>,
+        ) -> arkavo_llm::Result<String> {
+            Ok("cloud answer".to_string())
+        }
+
+        async fn stream(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+        ) -> arkavo_llm::Result<
+            Box<
+                dyn futures::Stream<Item = arkavo_llm::Result<arkavo_llm::StreamResponse>>
+                    + Send
+                    + Unpin,
+            >,
+        > {
+            Ok(Box::new(futures::stream::empty()))
+        }
+
+        fn name(&self) -> &str {
+            "counting-factory"
+        }
+
+        async fn complete_with_tools(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+            _tools: Option<serde_json::Value>,
+            _max_tokens: Option<usize>,
+        ) -> arkavo_llm::Result<arkavo_llm::ProviderResponse> {
+            Ok(arkavo_llm::ProviderResponse {
+                content: "cloud answer".to_string(),
+                ..Default::default()
+            })
+        }
+    }
+
+    impl arkavo_router::ProviderFactory for CountingFactory {
+        fn build(
+            &self,
+            _model: &arkavo_router::ModelChoice,
+        ) -> arkavo_router::Result<Box<dyn arkavo_llm::Provider>> {
+            self.builds.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(CountingFactory::default()))
+        }
+    }
+
+    /// A prompter that answers a fixed way and records which sessions asked.
+    struct ScriptedConsent {
+        answer: bool,
+        asked: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl ScriptedConsent {
+        fn new(answer: bool) -> Self {
+            Self {
+                answer,
+                asked: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn times_asked(&self) -> usize {
+            self.asked.lock().expect("asked log").len()
+        }
+    }
+
+    #[async_trait]
+    impl arkavo_router::CloudConsentPrompt for ScriptedConsent {
+        async fn ask(&self, request: arkavo_router::CloudConsentRequest<'_>) -> bool {
+            let label = match request {
+                arkavo_router::CloudConsentRequest::Call { model, .. } => model.to_string(),
+                arkavo_router::CloudConsentRequest::Session => "session".to_string(),
+            };
+            self.asked.lock().expect("asked log").push(label);
+            self.answer
+        }
+    }
+
+    /// A router with one configured cloud provider and injected availability,
+    /// so the test never consults the host's model cache or the network.
+    async fn chat_router(
+        policy: arkavo_budget::CloudPolicy,
+        factory: Arc<CountingFactory>,
+    ) -> Arc<arkavo_router::Router> {
+        let availability = arkavo_router::ProviderAvailability {
+            gemini: true,
+            ..Default::default()
+        };
+        let mut router = arkavo_router::Router::new_offline().await.expect("router");
+        router.set_offline_mode(false);
+        Arc::new(
+            router
+                .with_cloud_policy(policy)
+                .with_connectivity(arkavo_router::ConnectivityChecker::assume(true))
+                .with_selector(arkavo_router::ModelSelector::with_availability(
+                    availability,
+                    false,
+                ))
+                .await
+                .with_provider_factory(factory),
+        )
+    }
+
+    /// Drive one turn and return the deltas it produced, giving up rather than
+    /// hanging if the session never terminates the stream.
+    async fn one_turn(manager: &ChatSessionManager, session_id: &str) -> Vec<MessageDelta> {
+        let mut rx = manager
+            .get_delta_stream(session_id)
+            .await
+            .expect("active session must expose a delta stream");
+        manager
+            .send_message(
+                session_id,
+                UserMessage {
+                    content: "summarize this".to_string(),
+                    attachments: None,
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("send must be accepted");
+
+        let mut deltas = Vec::new();
+        while let Ok(Some(delta)) =
+            tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await
+        {
+            let done = matches!(delta.delta, MessageDeltaContent::StreamEnd { .. });
+            deltas.push(delta);
+            if done {
+                break;
+            }
+        }
+        deltas
+    }
+
+    fn error_text(deltas: &[MessageDelta]) -> Option<String> {
+        deltas.iter().find_map(|delta| match &delta.delta {
+            MessageDeltaContent::Error { message, .. } => Some(message.clone()),
+            _ => None,
         })
     }
 
-    fn parsed_call(name: &str, call_id: Option<&str>) -> arkavo_llm::ParsedToolCall {
-        arkavo_llm::ParsedToolCall {
-            tool_name: name.to_string(),
-            arguments: serde_json::json!({}),
-            call_id: call_id.map(str::to_string),
-        }
-    }
-
-    fn executed(name: &str, call_id: Option<&str>) -> ToolExecutionResult {
-        ToolExecutionResult {
-            tool_name: name.to_string(),
-            call_id: call_id.map(str::to_string),
-            result: serde_json::json!({"ok": true}),
-            success: true,
-            error: None,
-            schema_hint: None,
-        }
-    }
-
-    /// Every native call the assistant issued must be answered by a message
-    /// carrying its call id, or the provider rejects the next turn.
-    fn assert_every_call_is_paired(assistant: &Message, followers: &[Message]) {
-        let mut ids: Vec<String> = assistant
-            .provider_state
-            .native_call_ids()
-            .map(str::to_string)
-            .collect();
-        ids.extend(
-            assistant
-                .tool_calls
-                .iter()
-                .filter_map(|call| call.id.clone()),
-        );
-        assert!(!ids.is_empty(), "test fixture must issue at least one call");
-        for id in ids {
-            assert!(
-                followers.iter().any(|message| {
-                    message.role == arkavo_llm::Role::Tool
-                        && message.tool_call_id.as_deref() == Some(id.as_str())
-                }),
-                "call {id} has no paired tool result"
-            );
-        }
-    }
-
-    #[test]
-    fn summary_tool_results_truncate_unicode_without_panicking() {
-        let mut result = executed("read_file", None);
-        result.result = serde_json::json!("界".repeat(200_000));
-        let summary = format_tool_results(&[result]);
-        assert!(summary.contains("OUTPUT TRUNCATED"));
-        assert!(summary.len() < 201_000);
-    }
-
-    #[test]
-    fn paired_tool_results_are_bounded() {
-        let response = arkavo_llm::ProviderResponse {
-            tool_calls: vec![arkavo_llm::tool_parser::ParsedToolCall {
-                tool_name: "read_file".into(),
-                arguments: serde_json::json!({}),
-                call_id: Some("call_large".into()),
-            }],
-            ..Default::default()
-        };
-        for success in [true, false] {
-            let mut result = executed("read_file", Some("call_large"));
-            result.result = serde_json::json!("界".repeat(200_000));
-            result.success = success;
-            result.error = Some("é".repeat(200_000));
-            let messages = tool_result_messages(&response, &[result]);
-            assert_eq!(messages[0].tool_call_id.as_deref(), Some("call_large"));
-            assert!(messages[0].content.len() <= arkavo_llm::tool_result::MAX_TOOL_RESULT_BYTES);
-            assert!(messages[0].content.contains("OUTPUT TRUNCATED"));
-        }
-    }
-
-    #[spec("ASTRA-002")]
-    #[test]
-    fn chat_completions_results_replay_as_tool_role_with_call_ids() {
-        let response = arkavo_llm::ProviderResponse {
-            tool_calls: vec![parsed_call("read_file", Some("call_a"))],
-            ..Default::default()
-        };
-        let messages = tool_result_messages(&response, &[executed("read_file", Some("call_a"))]);
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].role, arkavo_llm::Role::Tool);
-        assert_eq!(messages[0].tool_call_id.as_deref(), Some("call_a"));
-        assert_every_call_is_paired(&response.as_assistant_message(), &messages);
-    }
-
-    #[spec("ASTRA-002")]
-    #[test]
-    fn native_function_call_items_replay_as_tool_role_with_call_ids() {
-        let response = arkavo_llm::ProviderResponse {
-            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
-                function_call_item("fc_1", "read_file"),
-                function_call_item("fc_2", "list_dir"),
-            ]),
-            tool_calls: vec![
-                parsed_call("read_file", Some("fc_1")),
-                parsed_call("list_dir", Some("fc_2")),
-            ],
-            ..Default::default()
-        };
-        let messages = tool_result_messages(
-            &response,
-            &[
-                executed("read_file", Some("fc_1")),
-                executed("list_dir", Some("fc_2")),
-            ],
-        );
-        assert_eq!(messages.len(), 2);
-        assert_every_call_is_paired(&response.as_assistant_message(), &messages);
-    }
-
-    #[spec("ASTRA-002")]
-    #[test]
-    fn prose_extracted_results_stay_a_user_message() {
-        let response = arkavo_llm::ProviderResponse {
-            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
-                serde_json::json!({"type": "reasoning", "id": "rs_1"}),
-            ]),
-            tool_calls: vec![parsed_call("read_file", None)],
-            ..Default::default()
-        };
-        let messages = tool_result_messages(&response, &[executed("read_file", None)]);
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].role, arkavo_llm::Role::User);
-    }
-
-    #[spec("ASTRA-002")]
-    #[test]
-    fn no_tool_registry_branch_still_answers_every_native_call() {
-        let response = arkavo_llm::ProviderResponse {
-            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
-                function_call_item("fc_1", "read_file"),
-                function_call_item("fc_2", "list_dir"),
-            ]),
-            tool_calls: vec![
-                parsed_call("read_file", Some("fc_1")),
-                parsed_call("list_dir", Some("fc_2")),
-            ],
-            ..Default::default()
-        };
-        // Exactly what the no-registry branch appends to the context.
-        let context = unregistered_tool_turn(&response);
-
-        let (assistant, followers) = context.split_first().unwrap();
-        assert_eq!(assistant.role, arkavo_llm::Role::Assistant);
-        assert_every_call_is_paired(assistant, followers);
-        assert!(followers.iter().all(|m| m.content.contains("unavailable")));
-    }
-
-    #[spec("ASTRA-002")]
-    #[test]
-    fn hint_retry_branch_pushes_results_after_the_assistant_turn() {
-        let response = arkavo_llm::ProviderResponse {
-            provider_state: arkavo_llm::ProviderState::openai_responses(vec![function_call_item(
-                "fc_hint",
-                "read_file",
-            )]),
-            tool_calls: vec![parsed_call("read_file", Some("fc_hint"))],
-            ..Default::default()
-        };
-        // Exactly what the hint-retry branch appends to the context.
-        let results = vec![executed("read_file", Some("fc_hint"))];
-        let context = executed_tool_turn(&response, &results);
-
-        let (assistant, followers) = context.split_first().unwrap();
-        assert_eq!(assistant.role, arkavo_llm::Role::Assistant);
-        assert_every_call_is_paired(assistant, followers);
-    }
-
-    /// The hint-retry branch also runs for answers that called no tools; it must
-    /// still record the assistant turn and add nothing after it.
-    #[spec("ASTRA-002")]
-    #[test]
-    fn a_turn_without_tool_calls_is_recorded_alone() {
-        let response = arkavo_llm::ProviderResponse {
-            content: "no tools needed".to_string(),
-            ..Default::default()
-        };
-        let context = executed_tool_turn(&response, &[]);
-        assert_eq!(context.len(), 1);
-        assert_eq!(context[0].role, arkavo_llm::Role::Assistant);
-        assert_eq!(context[0].content, "no tools needed");
-    }
-
+    /// Regression: the consent prompt used to read stdin from inside this
+    /// crate, so a server started at a terminal blocked a remote client's
+    /// request on its own console. A manager is prompter-less unless a host
+    /// that owns a channel to a person installs one — which is what the A2A
+    /// server must stay.
     #[spec("ASTRA-004")]
-    #[test]
-    fn cloud_confirmation_asks_at_most_once_per_interactive_session() {
-        let needs_confirmation = needs_cloud_confirmation();
-        assert_eq!(
-            cloud_confirmation(&needs_confirmation, true, false),
-            CloudConfirmation::Ask {
-                model: "gpt-6-astra".to_string(),
-                estimated_cost_usd: 0.0123,
-            }
+    #[tokio::test]
+    async fn a_manager_cannot_prompt_until_a_host_installs_a_channel() {
+        let mut manager =
+            ChatSessionManager::with_config(None, None, None, 3600, BufferConfig::default());
+        assert!(
+            !manager.has_cloud_consent_prompt(),
+            "a manager is prompter-less until a host installs one"
         );
-        // Non-interactive keeps the existing error path.
-        assert_eq!(
-            cloud_confirmation(&needs_confirmation, false, false),
-            CloudConfirmation::Propagate
-        );
-        // Already asked this session: never ask twice, never loop. This holds
-        // for an approval (the router carries it) and for a decline.
-        assert_eq!(
-            cloud_confirmation(&needs_confirmation, true, true),
-            CloudConfirmation::Propagate
-        );
-        // Any other routing failure is untouched.
-        assert_eq!(
-            cloud_confirmation(
-                &arkavo_router::Error::ModelExecution("boom".into()),
-                true,
-                false
-            ),
-            CloudConfirmation::Propagate
-        );
+
+        manager.set_cloud_consent_prompt(Arc::new(ScriptedConsent::new(true)));
+        assert!(manager.has_cloud_consent_prompt());
+
+        manager.shutdown().await;
     }
 
-    fn needs_cloud_confirmation() -> arkavo_router::Error {
-        arkavo_router::Error::CloudConfirmationRequired {
-            model: "gpt-6-astra".to_string(),
-            estimated_cost_usd: 0.0123,
-        }
-    }
-
-    /// Replays the session flag across turns: ask, decline, then a second turn
-    /// that hits the same refusal must not put the question again.
+    /// A turn the spend policy refuses reaches the caller as an error delta —
+    /// promptly, without a model load, and without consulting the host: the
+    /// refusal is a policy denial, not a question anyone can answer.
     #[spec("ASTRA-004")]
-    #[test]
-    fn a_declined_session_is_never_asked_again() {
-        let error = needs_cloud_confirmation();
-        let mut cloud_asked = false;
-
-        assert!(matches!(
-            cloud_confirmation(&error, true, cloud_asked),
-            CloudConfirmation::Ask { .. }
+    #[tokio::test]
+    async fn a_policy_refusal_is_reported_rather_than_asked_about() {
+        let factory = Arc::new(CountingFactory::default());
+        let router = chat_router(arkavo_budget::CloudPolicy::LocalOnly, factory.clone()).await;
+        let consent = Arc::new(ScriptedConsent::new(true));
+        let mut manager = ChatSessionManager::with_config(
+            None,
+            Some(router),
+            None,
+            3600,
+            BufferConfig::default(),
+        );
+        manager.set_cloud_consent_prompt(consent.clone());
+        // Naming the arm is the only way a chat turn reaches a cloud model:
+        // automatic selection is always local.
+        manager.set_model_spec(arkavo_router::ModelSpec::Named(
+            arkavo_router::ModelChoice::GeminiPro,
         ));
-        // The loop marks the question as put before reading the answer, so a
-        // decline is recorded exactly as an approval is.
-        cloud_asked = true;
 
-        assert_eq!(
-            cloud_confirmation(&error, true, cloud_asked),
-            CloudConfirmation::Propagate,
-            "a declined session must not be re-prompted on the next turn"
+        let session = manager.create_session(None).await;
+        let deltas = one_turn(&manager, &session.session_id).await;
+
+        let message = error_text(&deltas).expect("the refusal must reach the caller");
+        assert!(
+            message.contains("denied"),
+            "expected a policy denial, got: {message}"
         );
-    }
-
-    /// After a yes the router holds the approval for the session, so later turns
-    /// should not refuse at all — but if one still does, the loop must surface
-    /// the error rather than putting the question a second or third time.
-    #[spec("ASTRA-004")]
-    #[test]
-    fn an_approved_session_is_never_asked_again_across_turns() {
-        let error = needs_cloud_confirmation();
-        let mut cloud_asked = false;
-
-        assert!(matches!(
-            cloud_confirmation(&error, true, cloud_asked),
-            CloudConfirmation::Ask { .. }
-        ));
-        cloud_asked = true;
-
-        for turn in 1..=2 {
-            assert_eq!(
-                cloud_confirmation(&error, true, cloud_asked),
-                CloudConfirmation::Propagate,
-                "turn {turn} after an approval must not re-prompt"
-            );
-        }
+        assert_eq!(
+            consent.times_asked(),
+            0,
+            "a denial is not a question for the user"
+        );
+        assert_eq!(
+            factory.builds(),
+            0,
+            "a refused turn must not construct a provider"
+        );
+        manager.shutdown().await;
     }
 
     /// Regression: closing a session must deliver a terminal StreamEnd to

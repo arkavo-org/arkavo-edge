@@ -1,3 +1,4 @@
+pub mod cloud_consent;
 pub mod commands;
 pub mod first_run;
 pub mod hardware;

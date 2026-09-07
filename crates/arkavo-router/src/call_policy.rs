@@ -6,11 +6,17 @@ use arkavo_budget::{
 
 impl Router {
     /// Enforce cloud policy and spend caps before dispatching a provider call.
+    ///
+    /// `session` names whose standing approval this call may draw on — the
+    /// chat session that asked, or `None` for work the host process does on
+    /// its own behalf. An approval given in one session is invisible here to
+    /// every other one.
     pub async fn authorize_call(
         &self,
         model: &ModelChoice,
         dollars: f64,
         explicit: bool,
+        session: Option<&str>,
     ) -> Result<()> {
         if model.is_local() {
             return Ok(());
@@ -20,7 +26,7 @@ impl Router {
             dollars,
             self.cloud_policy,
             self.offline_mode,
-            explicit || self.cloud_confirmed(),
+            explicit || self.cloud_confirmed(session),
             self.cloud_spend_caps().await,
         )
     }
@@ -137,6 +143,88 @@ mod tests {
                 caps()
             )
             .is_err()
+        );
+    }
+
+    /// Regression: the approval used to be one atomic on the shared router, so
+    /// the first session to say yes authorized every session the process
+    /// served. Each session now answers for itself.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn one_session_approval_does_not_authorize_another_session() {
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("ok");
+        let router = cloud_router(CloudPolicy::AskBeforeCloud, "openai", &provider).await;
+        router.approve_cloud_for_session("session-a");
+
+        assert!(
+            router
+                .authorize_call(&ModelChoice::Gpt6Astra, 0.2, false, Some("session-a"))
+                .await
+                .is_ok(),
+            "the session that approved must be authorized"
+        );
+        assert!(
+            matches!(
+                router
+                    .authorize_call(&ModelChoice::Gpt6Astra, 0.2, false, Some("session-b"))
+                    .await,
+                Err(Error::CloudConfirmationRequired { .. })
+            ),
+            "another session must still be asked"
+        );
+        assert!(
+            matches!(
+                router
+                    .authorize_call(&ModelChoice::Gpt6Astra, 0.2, false, None)
+                    .await,
+                Err(Error::CloudConfirmationRequired { .. })
+            ),
+            "the host's own work must still be asked"
+        );
+        assert_eq!(provider.calls(), 0, "authorization dispatches nothing");
+    }
+
+    /// The mirror: an operator's startup approval covers the host's own routing
+    /// calls and never reaches a chat session.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_host_approval_authorizes_only_the_host() {
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("ok");
+        let router = cloud_router(CloudPolicy::AskBeforeCloud, "openai", &provider).await;
+        router.approve_cloud_for_host();
+
+        assert!(
+            router
+                .authorize_call(&ModelChoice::Gpt6Astra, 0.2, false, None)
+                .await
+                .is_ok()
+        );
+        assert!(matches!(
+            router
+                .authorize_call(&ModelChoice::Gpt6Astra, 0.2, false, Some("session-a"))
+                .await,
+            Err(Error::CloudConfirmationRequired { .. })
+        ));
+    }
+
+    /// An explicit model choice — `--model` or a manifest `model:` hint — is
+    /// itself the user's consent, so it needs no separate approval.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn an_explicit_model_choice_is_its_own_consent() {
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("ok");
+        let router = cloud_router(CloudPolicy::AskBeforeCloud, "openai", &provider).await;
+        assert!(
+            router
+                .authorize_call(&ModelChoice::Gpt6Astra, 0.2, true, Some("session-a"))
+                .await
+                .is_ok()
         );
     }
 }

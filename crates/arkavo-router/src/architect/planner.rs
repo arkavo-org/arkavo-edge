@@ -77,7 +77,9 @@ impl ArchitectPlanner {
             if let Some(budget) = budget {
                 budget.check(estimated_cost).await?;
             }
-            router.authorize_call(&model, estimated_cost, false).await?;
+            router
+                .authorize_call(&model, estimated_cost, false, None)
+                .await?;
         }
 
         let provider = self.planning_client(&model).await?;

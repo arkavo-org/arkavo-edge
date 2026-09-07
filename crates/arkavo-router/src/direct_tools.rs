@@ -81,7 +81,7 @@ impl super::Router {
         if let Some(budget) = budget {
             budget.check(estimated_cost).await?;
         }
-        self.authorize_call(&model, estimated_cost, model_hint.is_some())
+        self.authorize_call(&model, estimated_cost, model_hint.is_some(), None)
             .await?;
         let (provider, model) = self.get_provider_attributed(&model).await?;
         let _permit = self
@@ -181,7 +181,8 @@ impl super::Router {
         if let Some(budget) = budget {
             budget.check(estimated_cost).await?;
         }
-        self.authorize_call(&model, estimated_cost, true).await?;
+        self.authorize_call(&model, estimated_cost, true, None)
+            .await?;
         let use_spec = self.decide_spec_with_event(model.name());
         let provider = self
             .instantiate_provider_exact_with_spec(&model, use_spec)
@@ -342,18 +343,18 @@ mod tests {
             .await
             .unwrap();
         assert!(routed.model.is_local());
-        assert!(router.cloud_confirmation_pending());
+        assert!(router.cloud_confirmation_pending(None));
         assert_eq!(provider.calls(), 1);
     }
 
     /// A standing approval remains available when the harness performs local work.
     #[spec("ASTRA-004")]
     #[tokio::test]
-    async fn session_confirmation_covers_every_later_call() {
+    async fn host_confirmation_covers_every_later_call() {
         let provider = CountingProvider::new("ok");
         let router = cloud_router(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
 
-        router.confirm_cloud_for_session();
+        router.approve_cloud_for_host();
         for _ in 0..2 {
             router
                 .route_with_tools_execution_attributed("summarize", prompt(), None, None)
@@ -366,17 +367,17 @@ mod tests {
             "no re-ask on the second auto-selected call"
         );
         assert!(
-            router.cloud_session_confirmed(),
-            "session approval is not consumed"
+            router.cloud_approved(None),
+            "a standing approval is not consumed"
         );
     }
 
     #[spec("ASTRA-004")]
     #[tokio::test]
-    async fn session_confirmation_still_obeys_local_only() {
+    async fn host_confirmation_still_obeys_local_only() {
         let provider = CountingProvider::new("ok");
         let router = cloud_router(CloudPolicy::LocalOnly, "xai", &provider).await;
-        router.confirm_cloud_for_session();
+        router.approve_cloud_for_host();
         let error = router
             .route_with_tools_execution_attributed(
                 "summarize",

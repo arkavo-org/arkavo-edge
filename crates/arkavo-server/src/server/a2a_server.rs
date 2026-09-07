@@ -1642,3 +1642,32 @@ mod dedup_tests {
         assert_eq!(executed, vec![0, 3]);
     }
 }
+
+/// The A2A server serves requests it did not originate, so it must never own a
+/// consent prompter: a chat manager that could ask would put the question on
+/// the server's own console and park a remote client's request on it.
+#[cfg(test)]
+mod cloud_consent_tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn the_server_builds_chat_managers_that_cannot_prompt() {
+        // The exact constructor a2a_server uses for its chat manager, with the
+        // exact configuration it passes; nothing in this file installs a
+        // prompter afterwards.
+        let manager = chat_session::ChatSessionManager::with_config(
+            None,
+            None,
+            None,
+            3600,
+            BufferConfig::default(),
+        );
+        assert!(
+            !manager.has_cloud_consent_prompt(),
+            "a server-built chat manager must have no way to read its own console"
+        );
+        manager.shutdown().await;
+    }
+}

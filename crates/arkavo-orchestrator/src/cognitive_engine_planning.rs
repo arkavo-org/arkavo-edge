@@ -118,6 +118,7 @@ impl Planner {
                 &actual_model,
                 self.router.usage_cost(&actual_model, &estimated),
                 false,
+                None,
             )
             .await
             .map_err(|e| Error::Other(e.into()))?;
@@ -248,6 +249,7 @@ impl Planner {
                 &actual_model,
                 self.router.usage_cost(&actual_model, &estimated),
                 false,
+                None,
             )
             .await
             .map_err(|e| Error::Other(e.into()))?;
