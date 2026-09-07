@@ -530,17 +530,16 @@ impl CostOrchestrator {
         if let Some(factory) = &self.provider_factory {
             router = router.with_provider_factory(factory.clone());
         }
-        // Carry the orchestrator's own selector (availability + local-weights
-        // answer source) onto the executor router, so an injected selector —
-        // e.g. a test fixing local weights instead of consulting the host's
-        // HuggingFace cache — actually reaches the planner instead of being
-        // discarded in favor of a freshly built default selector.
-        router = router
-            .with_selector(ModelSelector::with_parts(
-                self.selector.availability.clone(),
-                self.selector.local_weights(),
-            ))
-            .await;
+        // Carry the orchestrator's own selector onto the executor router, so
+        // an injected selector — e.g. a test fixing local weights instead of
+        // consulting the host's HuggingFace cache — actually reaches the
+        // planner instead of being discarded in favor of a freshly built
+        // default selector. A full snapshot, not `ModelSelector::with_parts`:
+        // the latter is a test-only seam that hardcodes `gpu_available: true`
+        // and an unconstrained memory budget, which in this production path
+        // would silently override the orchestrator's real GPU/memory state
+        // and could pick 8B+ models on a CPU-only host.
+        router = router.with_selector(self.selector.snapshot()).await;
         Ok(router)
     }
 
@@ -845,9 +844,15 @@ mod tests {
     /// favor of a fresh default one (`LocalWeights::HuggingFaceCache`) that
     /// consults the real cache directory. On a machine with the Qwen weights
     /// already cached that silently kept every subtask on the local model
-    /// instead of the configured cloud provider. Asserted structurally on the
-    /// executor router's own selector — not by faking a populated
-    /// `HF_HOME`/cache directory and observing the routing outcome — because
+    /// instead of the configured cloud provider. A first fix reconstructed a
+    /// selector via `ModelSelector::with_parts`, which only takes
+    /// availability and local-weights and hardcodes `gpu_available: true`
+    /// and an unconstrained memory budget — reintroducing the same class of
+    /// bug for hardware instead of cache, silently picking 8B+ models on a
+    /// CPU-only host. Fixed by carrying a full `ModelSelector::snapshot`
+    /// instead. Asserted structurally on the executor router's own selector
+    /// — not by faking a populated `HF_HOME`/cache directory and observing
+    /// the routing outcome — because
     /// `is_local_model_cached` only ever consults the cache when the
     /// `llama-cpp` feature is compiled in; a filesystem-based version of this
     /// test would pass in CI's `--no-default-features` router job whether or
@@ -860,11 +865,21 @@ mod tests {
     async fn create_router_for_executor_carries_the_orchestrators_selector() {
         use crate::test_support::only;
 
+        // A CPU-only, memory-constrained host: gpu_available and
+        // max_memory_bytes gate model-size selection (best_available_local_model),
+        // so a snapshot that drops them would silently reintroduce a
+        // GPU-assuming, unconstrained selector on the executor router — the
+        // same class of bug as the cache-consulting default, just for
+        // hardware instead of cache state.
+        let mut selector = ModelSelector::with_availability(only("openai"), false);
+        selector.gpu_available = false;
+        selector.set_memory_budget(4 * 1024 * 1024 * 1024);
+
         let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
         let orchestrator = CostOrchestrator::new(tracker)
             .await
             .unwrap()
-            .with_selector(ModelSelector::with_availability(only("openai"), false));
+            .with_selector(selector);
 
         let router = orchestrator
             .create_router_for_executor("github-orchestrator")
@@ -881,6 +896,21 @@ mod tests {
         assert!(
             router.selector.availability.openai,
             "the orchestrator's provider availability must reach the executor router"
+        );
+        assert!(
+            !router.selector.gpu_available,
+            "the orchestrator's real gpu_available answer must reach the executor \
+             router, not `with_parts`'s hardcoded true — a wrong true would pick \
+             8B+ models on a CPU-only device"
+        );
+        assert_eq!(
+            router
+                .selector
+                .max_memory_bytes
+                .load(std::sync::atomic::Ordering::Relaxed),
+            4 * 1024 * 1024 * 1024,
+            "the orchestrator's memory budget must reach the executor router, \
+             not `with_parts`'s hardcoded unconstrained (0) default"
         );
     }
 }

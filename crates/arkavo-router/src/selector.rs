@@ -100,11 +100,16 @@ impl ModelSelector {
         Self::with_parts(availability, LocalWeights::Fixed(local_cached))
     }
 
-    /// Build a selector from an explicit provider availability and an
-    /// explicit local-weights answer source, preserving whichever a caller
-    /// already holds (e.g. propagating an orchestrator's own selector to the
-    /// router it builds for the executor) instead of forcing it through a
-    /// fixed boolean.
+    /// Test-oriented seam: build a selector from an explicit provider
+    /// availability and an explicit local-weights answer source, so a test
+    /// can assert routing behaviour deterministically. Only `availability`
+    /// and `local_weights` are caller-controlled; `budget_threshold` is
+    /// fixed at `0.80`, `gpu_available` is fixed `true` (tests should not
+    /// depend on the runner's hardware), and `max_memory_bytes` is
+    /// unconstrained (`0`). A caller that needs to preserve an existing
+    /// selector's real hardware/memory state — e.g. propagating an
+    /// orchestrator's own selector to a router it builds internally — must
+    /// use [`ModelSelector::snapshot`] instead, not this constructor.
     pub fn with_parts(availability: ProviderAvailability, local_weights: LocalWeights) -> Self {
         Self {
             budget_threshold: 0.80,
@@ -112,6 +117,25 @@ impl ModelSelector {
             gpu_available: true,
             max_memory_bytes: std::sync::atomic::AtomicU64::new(0),
             local_weights,
+        }
+    }
+
+    /// Full copy of this selector, including its runtime-mutable memory
+    /// budget — every field, not just availability and local-weights. For
+    /// propagating an existing selector (e.g. an orchestrator's) to a
+    /// `Router` built internally, where reconstructing via [`Self::with_parts`]
+    /// would silently drop real GPU/memory state and reintroduce host-only
+    /// defaults.
+    pub fn snapshot(&self) -> Self {
+        Self {
+            budget_threshold: self.budget_threshold,
+            availability: self.availability.clone(),
+            gpu_available: self.gpu_available,
+            max_memory_bytes: std::sync::atomic::AtomicU64::new(
+                self.max_memory_bytes
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            local_weights: self.local_weights,
         }
     }
 
