@@ -290,13 +290,15 @@ Guidelines:
                 }
             }
         };
-        // Category preferences may name local weights on a cloud-only install.
+        // Cloud augmentation must not displace a provisioned local subtask model.
         let local_cached = self
             .router
             .as_ref()
             .is_some_and(|router| router.selector.is_local_model_cached(&preferred));
-        if preferred.is_local() && !local_cached {
-            planning_provider::choose_model(&self.availability).unwrap_or(preferred)
+        if preferred.is_local() && !local_cached && self.availability.has_cloud() {
+            crate::ModelSelector::with_availability(self.availability.clone(), false)
+                .cloud_augmentation_model()
+                .unwrap_or(preferred)
         } else {
             preferred
         }
@@ -338,7 +340,7 @@ Guidelines:
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 50.00;
                 input_cost + output_cost
             }
-            _ => 0.0, // Local models are free
+            _ => crate::RoutingDecision::estimate_cost(model, category),
         }
     }
 
@@ -439,15 +441,39 @@ mod tests {
                 TaskCategory::Documentation,
                 TaskCategory::CodeSearch,
             ] {
-                assert!(
-                    !planner.select_model_for_category(category).is_local(),
-                    "{other}: {category:?}"
+                let model = planner.select_model_for_category(category);
+                assert!(!model.is_local(), "{other}: {category:?}");
+                assert_ne!(
+                    model,
+                    ModelChoice::DeepSeekV32Speciale,
+                    "subtasks need an execution model with tool support"
                 );
+                assert!(planner.estimate_subtask_cost(&model, category) > 0.0);
             }
         }
     }
 
-    /// A cloud-only install where OpenAI is the single configured provider —
+    #[tokio::test]
+    async fn configured_cloud_preserves_cached_local_subtasks() {
+        let availability = only("openai");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(crate::ModelSelector::with_availability(
+                availability.clone(),
+                true,
+            ))
+            .await;
+        let planner = ArchitectPlanner::new()
+            .with_availability(availability)
+            .with_router(Arc::new(router));
+        assert_eq!(
+            planner.select_model_for_category(TaskCategory::CodeSearch),
+            ModelChoice::LocalQwen3
+        );
+    }
+
+    /// An isolated planner fixture where OpenAI is the configured cloud provider —
     /// the deployment shape that made every subtask pick Astra.
     fn astra_planner(router: Arc<Router>) -> ArchitectPlanner {
         ArchitectPlanner {
@@ -504,6 +530,7 @@ mod tests {
             "one planning call plus one per subtask"
         );
         assert!(result.actual_cost_usd > 0.0);
+        assert_eq!(provider.output_limits(), vec![4096; 3]);
 
         let history = tracker.get_spending_history(10).await;
         assert_eq!(history.len(), 3, "planning plus one entry per subtask");

@@ -1,9 +1,6 @@
-//! LLM-based intent analyzer. The arm is whatever the router resolved for this
-//! install — a cached local model where one is provisioned, the configured cloud
-//! model on a cloud-only install — so decomposition never provisions weights of
-//! its own.
+//! LLM intent decomposition stays on the local harness model. Cloud providers
+//! augment task execution without replacing local planning and orchestration.
 
-use arkavo_router::ModelChoice;
 use arkavo_tasks::intent_analyzer::{IntentAnalysis, IntentAnalyzer};
 use arkavo_tasks::task_planner::TaskPlanError;
 use async_trait::async_trait;
@@ -11,14 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, warn};
 
-/// Budget for one decomposition. It has to cover more than inference:
-/// `route_fast` first waits on the router's single-permit synthesis semaphore,
-/// so a decomposition queued behind another internal call spends part of this
-/// budget queueing. The old 20 s ceiling was the bare generation time of a
-/// sub-billion-parameter local model and left no room for that wait. A cloud
-/// reasoning arm is additionally an order of magnitude slower to first token.
-const LOCAL_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(60);
-const CLOUD_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(90);
+// Include time waiting for the shared synthesis semaphore before local inference.
+const ANALYSIS_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(super) struct LlmIntentAnalyzer {
     router: Arc<arkavo_router::Router>,
@@ -30,25 +21,11 @@ impl LlmIntentAnalyzer {
     }
 }
 
-fn analysis_timeout(model: &ModelChoice) -> Duration {
-    if model.is_local() {
-        LOCAL_ANALYSIS_TIMEOUT
-    } else {
-        CLOUD_ANALYSIS_TIMEOUT
-    }
-}
-
 #[async_trait]
 impl IntentAnalyzer for LlmIntentAnalyzer {
     async fn analyze(&self, intent: &str) -> Result<IntentAnalysis, TaskPlanError> {
-        // `default_chat_model` is the router's own resolution of the execution
-        // arm — a cached local model where one is provisioned, the configured
-        // cloud arm otherwise — so a cloud-only install never reaches for
-        // weights it would have to download. `route_fast` then dispatches that
-        // same arm under the spend policy and the synthesis semaphore instead
-        // of bypassing both with a raw provider.
+        // Share the router's local model and inference semaphore.
         let model = self.router.default_chat_model();
-
         let system_prompt = r#"You are a task decomposition engine. Given a user intent, break it into 1-6 subtasks.
 Respond with ONLY a JSON object in this exact format:
 {
@@ -75,7 +52,7 @@ Rules:
             arkavo_llm::Message::user(intent),
         ];
 
-        let budget = analysis_timeout(&model);
+        let budget = ANALYSIS_TIMEOUT;
         let stream =
             tokio::time::timeout(budget, self.router.route_fast("intent analysis", messages))
                 .await
@@ -137,7 +114,8 @@ mod tests {
     use super::*;
     use arkavo_llm::{Message, Provider, StreamResponse};
     use arkavo_router::{
-        ConnectivityChecker, ModelSelector, ProviderAvailability, ProviderFactory, Router,
+        ConnectivityChecker, ModelChoice, ModelSelector, ProviderAvailability, ProviderFactory,
+        Router,
     };
     use arkavo_test_macros::spec;
     use futures::Stream;
@@ -222,44 +200,27 @@ mod tests {
             .with_connectivity(ConnectivityChecker::assume(true))
     }
 
-    /// The regression: `analyze` used to call `get_provider(&LocalQwen3)` with a
-    /// `LocalMinistral3B` fallback, which on a cloud-only install with nothing
-    /// cached triggers a HuggingFace download. Restore that line and this test
-    /// fails on the `requested` assertions.
     #[tokio::test]
-    #[spec("ASTRA-004")]
-    async fn cloud_only_install_never_requests_a_local_provider() {
+    #[arkavo_test_macros::spec("ASTRA-004")]
+    async fn cloud_credentials_do_not_move_intent_analysis_off_device() {
         let availability = ProviderAvailability {
             openai: true,
-            ..ProviderAvailability::default()
+            ..Default::default()
         };
         let factory = RecordingFactory::new(STUB_DECOMPOSITION);
-        let router = router_with(availability, false)
+        let router = router_with(availability, true)
             .await
             .with_provider_factory(factory.handle());
         router.confirm_cloud_for_session();
-
         let analyzer = LlmIntentAnalyzer::new(Arc::new(router));
         let analysis = analyzer
             .analyze("ship the release and write the notes")
             .await
-            .expect("cloud-only analysis must succeed");
+            .unwrap();
         assert_eq!(analysis.subtask_specs.len(), 2);
-
         let requested = factory.requested();
-        assert!(!requested.is_empty(), "no provider was ever requested");
-        assert!(
-            requested.iter().all(|m| !m.is_local()),
-            "cloud-only install requested a local arm: {requested:?}"
-        );
-        assert!(
-            !requested.contains(&ModelChoice::LocalQwen3),
-            "{requested:?}"
-        );
-        assert!(
-            !requested.contains(&ModelChoice::LocalMinistral3B),
-            "{requested:?}"
-        );
+        assert!(!requested.is_empty());
+        assert!(requested.iter().all(ModelChoice::is_local), "{requested:?}");
     }
 
     /// Mirror: an install that has weights and no cloud credentials keeps
@@ -284,20 +245,6 @@ mod tests {
             requested.iter().all(ModelChoice::is_local),
             "install with cached weights and no cloud went off-device: {requested:?}"
         );
-    }
-
-    #[test]
-    #[spec("ASTRA-004")]
-    fn cloud_arm_gets_a_longer_budget_than_the_local_one() {
-        assert_eq!(
-            analysis_timeout(&ModelChoice::LocalQwen3),
-            LOCAL_ANALYSIS_TIMEOUT
-        );
-        assert_eq!(
-            analysis_timeout(&ModelChoice::Gpt6Astra),
-            CLOUD_ANALYSIS_TIMEOUT
-        );
-        assert!(CLOUD_ANALYSIS_TIMEOUT > LOCAL_ANALYSIS_TIMEOUT);
     }
 
     #[test]

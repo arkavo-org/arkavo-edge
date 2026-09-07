@@ -1155,7 +1155,7 @@ impl ChatSessionManager {
                         }
                     };
 
-                    // A cloud-only install would otherwise stop here; ask the
+                    // Cloud augmentation needs authorization here; ask the
                     // user once and re-dispatch the identical request.
                     if let Err(ref route_err) = route_result
                         && let CloudConfirmation::Ask { model, estimated_cost_usd } = cloud_confirmation(
@@ -1662,7 +1662,7 @@ enum CloudConfirmation {
     },
 }
 
-/// A cloud-only install under `AskBeforeCloud` otherwise dead-ends: the router
+/// Cloud augmentation under `AskBeforeCloud` needs approval: the router
 /// refuses automatic cloud selection and has no channel to reach the user, so
 /// the chat loop asks on its behalf and re-dispatches the same request.
 ///
@@ -2518,6 +2518,15 @@ mod tests {
                 "call {id} has no paired tool result"
             );
         }
+    }
+
+    #[test]
+    fn summary_tool_results_truncate_unicode_without_panicking() {
+        let mut result = executed("read_file", None);
+        result.result = serde_json::json!("界".repeat(200_000));
+        let summary = format_tool_results(&[result]);
+        assert!(summary.contains("OUTPUT TRUNCATED"));
+        assert!(summary.len() < 201_000);
     }
 
     #[test]

@@ -839,7 +839,7 @@ mod tests {
 
     #[cfg(not(feature = "llama-cpp"))]
     #[tokio::test]
-    async fn cloud_only_classifier_needs_no_local_backend() {
+    async fn keyword_classification_is_available_without_inference() {
         let classifier = TaskClassifier::new().await.unwrap();
         let classification = classifier
             .classify("Find the authentication endpoint")
@@ -850,7 +850,7 @@ mod tests {
 
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     #[tokio::test]
-    async fn cloud_only_classifier_can_skip_local_loading() {
+    async fn keyword_fallback_does_not_load_models() {
         let classifier = TaskClassifier::new_fallback().await.unwrap();
         assert!(classifier.provider.is_none());
         assert!(

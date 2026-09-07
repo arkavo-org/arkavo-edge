@@ -3,6 +3,7 @@ feature: GPT-6 Astra agent harness
 module: arkavo_llm::providers::openai_responses
 version: 0.93.0
 invariants:
+  - Local models are required and cloud models only augment the local harness
   - Astra tool calls use Responses and retain provider call IDs
   - Opaque reasoning state is replayed without being displayed as text
   - Existing release policy applies before tool execution or output delivery
@@ -44,16 +45,18 @@ scenarios:
     refs: [crates/arkavo-llm/src/providers/openai_responses/sse.rs]
     changed: "2026-09-05"
   - id: ASTRA-004
-    name: Route with cloud credentials and no local weights
+    name: Augment the local harness with cloud inference
     criticality: high
-    given: [An OpenAI-enabled build and configured OPENAI_API_KEY, No cached local model]
+    given: [An OpenAI-enabled build and configured OPENAI_API_KEY, A required local inference baseline]
     when: Chat starts with automatic selection or an explicit Astra model
     then:
-      - Startup does not require downloading local weights
+      - Cloud credentials never bypass local model provisioning
+      - Harness commands require a local inference backend
+      - Default conversation and intent decomposition remain local
       - The selected provider is available in the compiled feature set
       - Existing cloud-spend policy remains effective
     refs: [crates/arkavo-router/src/selector.rs, crates/arkavo-cli/src/startup_policy.rs]
-    changed: "2026-09-05"
+    changed: "2026-09-07"
   - id: ASTRA-005
     name: Account for execution spending
     criticality: critical

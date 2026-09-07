@@ -28,7 +28,8 @@ COPY --from=builder /app/target/release/arkavo /usr/local/bin/arkavo
 
 USER arkavo
 
-# Skip the interactive first-run model download; containers use remote LLMs only.
+# Skip interactive setup. This utility image cannot run the agent harness;
+# agents require a local-inference-enabled build and provisioned local models.
 ENV ARKAVO_SKIP_FIRST_RUN=1
 
 # The AG-UI gateway defaults to loopback-only; opt back in here because the

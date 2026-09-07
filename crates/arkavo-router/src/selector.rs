@@ -207,18 +207,16 @@ impl ModelSelector {
         Self::pick_fast_local_model(|m| self.is_local_model_cached(m))
     }
 
-    /// Execution stays local when a provisioned model is runnable; cloud-only installs
-    /// use their configured provider without initiating a GGUF download.
+    /// The harness's baseline execution model is always local. Cloud credentials
+    /// do not replace provisioning the device's local models.
     pub fn default_execution_model(&self) -> ModelChoice {
-        let local = self.fastest_local_model();
-        if self.is_local_model_cached(&local) || !self.availability.has_cloud() {
-            local
-        } else {
-            self.feasible_models()
-                .into_iter()
-                .find(|m| m.is_local() && self.is_local_model_cached(m))
-                .unwrap_or_else(|| self.best_cloud_model(false))
-        }
+        self.fastest_local_model()
+    }
+
+    pub(crate) fn cloud_augmentation_model(&self) -> Option<ModelChoice> {
+        self.availability
+            .has_cloud()
+            .then(|| self.best_cloud_model(false))
     }
 
     /// Policy half of [`Self::fastest_local_model`], split out so the preference order and
@@ -350,14 +348,11 @@ impl ModelSelector {
             _ => self.best_available_local_model(self.gpu_available),
         };
 
-        // A cloud-only install must never try downloading the category's local default.
         let model = model.downgrade_for_budget(mem_budget);
-        if model.is_local() && !self.is_local_model_cached(&model) && self.availability.has_cloud()
-        {
-            self.feasible_models()
-                .into_iter()
-                .find(|m| m.is_local() && self.is_local_model_cached(m))
-                .unwrap_or_else(|| self.best_cloud_model(false))
+        if model.is_local() && !self.is_local_model_cached(&model) {
+            // Reuse provisioned weights, or the first-run local default. A cloud
+            // key must not turn a missing preferred local model into cloud spend.
+            self.fastest_local_model().downgrade_for_budget(mem_budget)
         } else {
             model
         }
@@ -556,31 +551,32 @@ mod tests {
     }
 
     #[test]
-    fn astra_only_cloud_is_runnable_for_local_category_defaults() {
-        let selector = ModelSelector::with_availability(
-            ProviderAvailability {
-                openai: true,
-                ..ProviderAvailability::default()
-            },
-            false,
-        );
-        assert!(selector.availability.has_cloud());
-        assert!(selector.feasible_models().contains(&ModelChoice::Gpt6Astra));
-        assert_eq!(selector.best_cloud_model(false), ModelChoice::Gpt6Astra);
-        // No local backend means cached GGUF files cannot make an arm runnable.
-        if !cfg!(feature = "llama-cpp") {
+    fn cloud_credentials_do_not_replace_local_defaults() {
+        for cached in [false, true] {
+            let selector = ModelSelector::with_availability(
+                ProviderAvailability {
+                    openai: true,
+                    ..Default::default()
+                },
+                cached,
+            );
+            assert!(selector.default_execution_model().is_local());
+            assert_eq!(
+                selector.cloud_augmentation_model(),
+                Some(ModelChoice::Gpt6Astra)
+            );
             for category in [
                 TaskCategory::CodeSearch,
                 TaskCategory::BackendAPI,
                 TaskCategory::General,
             ] {
                 let classification = Classification::new(category, 0.9, "task".into());
-                assert_eq!(
-                    selector.select_model_by_category(&classification),
-                    ModelChoice::Gpt6Astra
+                assert!(
+                    selector
+                        .select_model_by_category(&classification)
+                        .is_local()
                 );
             }
-            assert_eq!(selector.default_execution_model(), ModelChoice::Gpt6Astra);
         }
     }
 
@@ -635,16 +631,8 @@ mod tests {
         let decision = selector
             .select(&classification, "Find all uses of")
             .unwrap();
-        if selector.is_local_model_cached(&ModelChoice::LocalQwen3) {
-            assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
-            assert_eq!(decision.estimated_cost_usd, 0.0);
-        } else if decision.recommended_model.is_local() {
-            assert!(selector.is_local_model_cached(&decision.recommended_model));
-            assert_eq!(decision.estimated_cost_usd, 0.0);
-        } else {
-            assert_eq!(decision.recommended_model, ModelChoice::Gemini35Flash);
-            assert!(decision.estimated_cost_usd > 0.0);
-        }
+        assert_eq!(decision.recommended_model, ModelChoice::LocalGemma4E2B);
+        assert_eq!(decision.estimated_cost_usd, 0.0);
     }
 
     #[spec("ROUTER-001")]
@@ -656,16 +644,8 @@ mod tests {
         let decision = selector
             .select(&classification, "Create a REST API endpoint")
             .unwrap();
-        if selector.is_local_model_cached(&ModelChoice::LocalQwen3) {
-            assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
-            assert_eq!(decision.estimated_cost_usd, 0.0);
-        } else if decision.recommended_model.is_local() {
-            assert!(selector.is_local_model_cached(&decision.recommended_model));
-            assert_eq!(decision.estimated_cost_usd, 0.0);
-        } else {
-            assert_eq!(decision.recommended_model, ModelChoice::Gemini35Flash);
-            assert!(decision.estimated_cost_usd > 0.0);
-        }
+        assert_eq!(decision.recommended_model, ModelChoice::LocalGemma4E2B);
+        assert_eq!(decision.estimated_cost_usd, 0.0);
     }
 
     #[spec("ROUTER-001")]

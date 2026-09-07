@@ -668,14 +668,10 @@ impl Router {
     /// it. Auto-selection therefore stays local whenever a local arm is
     /// feasible.
     ///
-    /// Two cases deliberately keep the cloud arms in play, because the refusal
-    /// is the point there rather than an accident:
-    /// - a user approval the spend plane can actually honour (see
-    ///   [`Self::approval_can_authorize_cloud`]), and
-    /// - no feasible local arm at all — a cloud-only install must still select
-    ///   cloud and reach the gate, which is where the confirmation prompt
-    ///   belongs. Excluding everything would instead push selection onto an
-    ///   uncached local model and trigger a download (ASTRA-004).
+    /// A valid user approval admits cloud augmentation. If a library caller
+    /// supplies no feasible local arm, retain the configured arms so dispatch
+    /// reports a policy refusal rather than silently bypassing authorization.
+    /// The CLI separately requires local inference before starting the harness.
     ///
     /// A caller that names a model is unaffected: hints are applied after
     /// classification, in `route_with_tools_internal`.
@@ -1611,7 +1607,7 @@ impl Router {
     }
 
     /// Get the fastest available local model choice (for callers that need to know)
-    /// Default conversation arm, respecting cloud-only installations.
+    /// Local baseline conversation arm; cloud models augment it.
     pub fn default_chat_model(&self) -> ModelChoice {
         self.selector.default_execution_model()
     }

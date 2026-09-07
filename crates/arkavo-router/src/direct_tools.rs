@@ -311,60 +311,42 @@ mod tests {
         assert_eq!(provider.calls(), 0);
     }
 
-    /// Naming the model is the authorization under `AskBeforeCloud`. The
-    /// contrast is what proves a gate is present at all: without one, the
-    /// auto-selected arm would have spent too.
     #[spec("ASTRA-004")]
     #[tokio::test]
-    async fn explicit_override_proceeds_where_auto_selection_is_refused() {
+    async fn explicit_cloud_override_augments_the_local_default() {
         let provider = CountingProvider::new("ok");
         let router = cloud_router(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
-        assert_eq!(router.default_chat_model(), ModelChoice::Grok46);
-
-        let refused = router
+        assert!(router.default_chat_model().is_local());
+        let local = router
             .route_with_tools_execution_attributed("summarize", prompt(), None, None)
             .await
-            .unwrap_err();
-        assert!(
-            matches!(&refused, Error::CloudConfirmationRequired { model, .. } if model == "grok-4.6"),
-            "got {refused:?}"
-        );
-        assert_eq!(provider.calls(), 0, "an unconfirmed arm must not spend");
-
-        let routed = router
+            .unwrap();
+        assert!(local.model.is_local());
+        assert_eq!(local.attempts[0].cost_usd, 0.0);
+        let cloud = router
             .route_with_tools_override_attributed("summarize", prompt(), None, &ModelChoice::Grok46)
             .await
             .unwrap();
-        assert_eq!(routed.model, ModelChoice::Grok46);
-        assert_eq!(provider.calls(), 1, "the named arm proceeds with no re-ask");
+        assert_eq!(cloud.model, ModelChoice::Grok46);
+        assert_eq!(provider.calls(), 2);
     }
 
     #[spec("ASTRA-004")]
     #[tokio::test]
-    async fn one_shot_confirmation_covers_one_call_then_clears() {
+    async fn local_execution_preserves_pending_cloud_augmentation_approval() {
         let provider = CountingProvider::new("ok");
         let router = cloud_router(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
-
         router.confirm_next_cloud_upgrade();
-        router
+        let routed = router
             .route_with_tools_execution_attributed("summarize", prompt(), None, None)
             .await
             .unwrap();
-        assert_eq!(provider.calls(), 1);
-
-        let error = router
-            .route_with_tools_execution_attributed("summarize", prompt(), None, None)
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(error, Error::CloudConfirmationRequired { .. }),
-            "the one-shot flag must not survive the call it authorized"
-        );
+        assert!(routed.model.is_local());
+        assert!(router.cloud_confirmation_pending());
         assert_eq!(provider.calls(), 1);
     }
 
-    /// `arkavo agent` approves cloud once and then fans out into many routing
-    /// calls it does not issue itself; a one-shot flag is spent by the first.
+    /// A standing approval remains available when the harness performs local work.
     #[spec("ASTRA-004")]
     #[tokio::test]
     async fn session_confirmation_covers_every_later_call() {
@@ -396,7 +378,12 @@ mod tests {
         let router = cloud_router(CloudPolicy::LocalOnly, "xai", &provider).await;
         router.confirm_cloud_for_session();
         let error = router
-            .route_with_tools_execution_attributed("summarize", prompt(), None, None)
+            .route_with_tools_execution_attributed(
+                "summarize",
+                prompt(),
+                None,
+                Some(&ModelChoice::Grok46),
+            )
             .await
             .unwrap_err();
         assert!(is_policy_error(&error), "got {error:?}");

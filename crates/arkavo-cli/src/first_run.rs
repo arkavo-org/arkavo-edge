@@ -381,11 +381,11 @@ pub fn prompt_download_both(caps: &SystemCapabilities, total_gb: f64) -> bool {
 pub enum FirstRunAction {
     /// Interactive terminal: run the guided setup flow
     Prompt,
-    /// `ARKAVO_SKIP_FIRST_RUN` set: skip the gate entirely
+    /// `ARKAVO_SKIP_FIRST_RUN` set: skip interactive setup, not the local model requirement
     Skip,
     /// Non-interactive stdin (container/CI): never prompt or download;
-    /// print a notice and let the command proceed without local model weights
-    ProceedWithoutModels,
+    /// require provisioning before an inference command can start
+    RequireLocalModels,
 }
 
 /// Decide how the first-run gate behaves for this invocation
@@ -404,17 +404,8 @@ fn first_run_action_for(skip_env: Option<String>, stdin_is_tty: bool) -> FirstRu
     } else if stdin_is_tty {
         FirstRunAction::Prompt
     } else {
-        FirstRunAction::ProceedWithoutModels
+        FirstRunAction::RequireLocalModels
     }
-}
-
-/// Explain (on stderr) why first-run setup was skipped in non-interactive mode
-pub fn print_non_interactive_notice() {
-    eprintln!("No local models found in the HuggingFace cache, and stdin is not a terminal:");
-    eprintln!("skipping interactive first-run setup (no download will be attempted).");
-    eprintln!("Continuing without local model weights.");
-    eprintln!("To install a model later:  arkavo model download");
-    eprintln!("To skip this check:        set ARKAVO_SKIP_FIRST_RUN=1");
 }
 
 // Re-export from welcome module for backwards compatibility
@@ -495,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_first_run_action_skip_env() {
-        // ARKAVO_SKIP_FIRST_RUN=1 (or "true") skips the gate entirely,
+        // ARKAVO_SKIP_FIRST_RUN=1 (or "true") skips interactive setup,
         // regardless of TTY state.
         for val in ["1", "true", "TRUE"] {
             assert_eq!(
@@ -518,13 +509,13 @@ mod tests {
         // unsolicited multi-GB download. Non-TTY stdin must never prompt.
         assert_eq!(
             first_run_action_for(None, false),
-            FirstRunAction::ProceedWithoutModels
+            FirstRunAction::RequireLocalModels
         );
         // Non-skip env values must not suppress the prompt on a real terminal
         for val in ["0", "false", ""] {
             assert_eq!(
                 first_run_action_for(Some(val.to_string()), false),
-                FirstRunAction::ProceedWithoutModels,
+                FirstRunAction::RequireLocalModels,
                 "value {val}"
             );
         }

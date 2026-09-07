@@ -11,9 +11,9 @@ monitoring section below for what is actually available.
 
 ## Prerequisites
 
-- Rust (stable) for building from source, or Docker for the container image
-- An API key for at least one remote LLM provider (Gemini, OpenAI-compatible,
-  DeepSeek, xAI) — container/self-host builds ship without local inference
+- Rust (stable), CMake, and ccache for building local inference from source
+- Provisioned local models and enough device memory to run them
+- Optional cloud credentials to augment local models
 - A reverse proxy (nginx, ingress, etc.) if you need TLS or authentication —
   the gateway itself is unauthenticated (see Security)
 
@@ -23,49 +23,24 @@ monitoring section below for what is actually available.
 
 ```bash
 # Clone the repository
-git clone https://github.com/arkavo-org/arkavo-edge.git
+git clone --recurse-submodules https://github.com/arkavo-org/arkavo-edge.git
 cd arkavo-edge
 
-# Build the binary with the web gateway and remote LLM providers
+# Build the local agent harness with optional cloud augmentation
 cargo build --release -p arkavo \
   --no-default-features \
-  --features memory,mdns,mcp-tools,llm-remote,web-ui
+  --features llama-cpp,memory,mdns,mcp-tools,openai,web-ui
 
 # Binary will be at target/release/arkavo
 ```
 
 ### Using Docker
 
-The repository ships a root `Dockerfile` (documented in
-[container.md](container.md)) that builds exactly this feature set. A minimal
-equivalent:
-
-```dockerfile
-FROM rust:1-bookworm AS builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release -p arkavo \
-    --no-default-features \
-    --features memory,mdns,mcp-tools,llm-remote,web-ui
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-ENV ARKAVO_SKIP_FIRST_RUN=1
-# The gateway defaults to loopback-only; the container's network namespace
-# is the real isolation boundary, so opt back in for the published port.
-ENV ARKAVO_AGUI_BIND=0.0.0.0
-COPY --from=builder /app/target/release/arkavo /usr/local/bin/arkavo
-EXPOSE 7700
-ENTRYPOINT ["arkavo"]
-CMD ["ui"]
-```
-
-`ARKAVO_SKIP_FIRST_RUN=1` is required in containers: it skips the interactive
-first-run flow that downloads a local model, which is meaningless in a
-no-inference image.
+The root [container image](container.md) is utility-only and does not support
+agent inference. Container examples below require an image built with local
+inference support and a mounted, provisioned model cache. Cloud credentials
+alone cannot start the harness. `ARKAVO_SKIP_FIRST_RUN=1` suppresses interactive
+setup; it never waives the local model requirement.
 
 ## Configuration
 
@@ -326,8 +301,9 @@ readinessProbe:
 - **Gateway unreachable externally**: it binds loopback only by default —
   set `ARKAVO_AGUI_BIND=0.0.0.0` (the shipped container image sets this
   already) before checking proxy, firewall, and port-mapping configuration.
-- **Agent requests fail**: verify the provider API key env var is set and
-  valid; run with `ARKAVO_DEBUG=1` for provider error detail.
+- **Agent requests fail**: verify that the build supports local inference and
+  that local models are provisioned. For cloud augmentation failures, verify
+  provider credentials and cloud policy.
 - **State lost after container restart**: the working directory was not a
   mounted volume — set `working_dir`/`workingDir` to a persistent mount.
 - **Interactive first-run prompt in a container**: set
@@ -335,8 +311,8 @@ readinessProbe:
 
 ## Scaling Guidelines
 
-- **Memory**: 256MB minimum, 512MB recommended per instance
-- **CPU**: 0.5 cores minimum, 1 core recommended
+- **Memory**: include the selected local models and their inference working sets
+- **CPU**: size for local inference throughput and latency
 - **Disk**: sized for the `.arkavo/` SQLite stores and model caches
 - **Horizontal scaling**: not currently meaningful for shared state — memory
   is workspace-local SQLite. Run one replica per workspace, or front

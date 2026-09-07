@@ -956,6 +956,15 @@ mod tests {
     }
 
     #[test]
+    fn summary_tool_results_truncate_unicode_without_panicking() {
+        let mut result = executed("read_file", None);
+        result.result = serde_json::json!("界".repeat(200_000));
+        let summary = format_tool_results(&[result]);
+        assert!(summary.contains("OUTPUT TRUNCATED"));
+        assert!(summary.len() < 201_000);
+    }
+
+    #[test]
     fn paired_tool_results_are_bounded() {
         let response = arkavo_llm::ProviderResponse {
             tool_calls: vec![arkavo_llm::tool_parser::ParsedToolCall {

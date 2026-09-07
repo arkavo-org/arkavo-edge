@@ -56,23 +56,19 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .first()
         .is_some_and(|a| matches!(a.as_str(), "-h" | "--help" | "help" | "-v" | "--version"));
 
-    // First-run experience: check if models are available
-    if !is_help_or_version
-        && startup_policy::needs_local_setup(
-            args,
-            arkavo_router::selector::ProviderAvailability::from_env().has_cloud(),
-        )
-        && first_run::is_first_run()
-    {
+    startup_policy::validate_local_backend(
+        args,
+        cfg!(any(feature = "llama-cpp", feature = "snpe")),
+    )?;
+    if !is_help_or_version && startup_policy::needs_local_setup(args) && first_run::is_first_run() {
         match first_run::first_run_action() {
             first_run::FirstRunAction::Prompt => {
                 let runtime = tokio::runtime::Runtime::new()?;
                 runtime.block_on(handle_first_run(verbose))?;
             }
-            first_run::FirstRunAction::ProceedWithoutModels => {
-                first_run::print_non_interactive_notice();
+            first_run::FirstRunAction::RequireLocalModels | first_run::FirstRunAction::Skip => {
+                return Err("The agent harness requires local models. Provision them with `arkavo model download` before starting; cloud credentials do not replace local inference.".into());
             }
-            first_run::FirstRunAction::Skip => {}
         }
     }
 
@@ -291,8 +287,6 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         println!("You can download models later with:");
         println!("  arkavo model download");
         println!();
-        println!("Or use a cloud provider with an API key:");
-        println!("  GEMINI_API_KEY=your-key arkavo chat --prompt \"Hello\"");
     }
 
     std::process::exit(0);

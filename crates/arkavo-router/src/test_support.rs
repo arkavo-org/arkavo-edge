@@ -18,6 +18,7 @@ pub(crate) struct CountingProvider {
     tool_call: Option<String>,
     calls: Arc<AtomicUsize>,
     builds: Arc<AtomicUsize>,
+    output_limits: Arc<Mutex<Vec<usize>>>,
     /// Every model the router asked this factory to build, in order — so a
     /// test can assert *which* arm was instantiated, not just how many.
     built_models: Arc<Mutex<Vec<ModelChoice>>>,
@@ -35,6 +36,7 @@ impl CountingProvider {
             tool_call: None,
             calls: Arc::new(AtomicUsize::new(0)),
             builds: Arc::new(AtomicUsize::new(0)),
+            output_limits: Arc::new(Mutex::new(Vec::new())),
             built_models: Arc::new(Mutex::new(Vec::new())),
             fail_from: None,
             blank_before: 0,
@@ -68,6 +70,10 @@ impl CountingProvider {
     /// Dispatches that reached a model.
     pub(crate) fn calls(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn output_limits(&self) -> Vec<usize> {
+        self.output_limits.lock().expect("output limits").clone()
     }
 
     /// Providers the router asked this factory to build.
@@ -125,10 +131,10 @@ impl Provider for CountingProvider {
         _: Vec<Message>,
         max_tokens: Option<usize>,
     ) -> arkavo_llm::Result<String> {
-        assert!(
-            max_tokens.is_some(),
-            "dispatch must carry its authorized output allowance"
-        );
+        self.output_limits
+            .lock()
+            .expect("output limits")
+            .push(max_tokens.expect("dispatch must carry its authorized output allowance"));
         self.respond().map(|response| response.content)
     }
 
@@ -155,10 +161,10 @@ impl Provider for CountingProvider {
         _: Option<serde_json::Value>,
         max_tokens: Option<usize>,
     ) -> arkavo_llm::Result<ProviderResponse> {
-        assert!(
-            max_tokens.is_some(),
-            "dispatch must carry its authorized output allowance"
-        );
+        self.output_limits
+            .lock()
+            .expect("output limits")
+            .push(max_tokens.expect("dispatch must carry its authorized output allowance"));
         self.respond()
     }
 
@@ -168,10 +174,10 @@ impl Provider for CountingProvider {
         _: Option<serde_json::Value>,
         max_tokens: Option<usize>,
     ) -> arkavo_llm::Result<ProviderResponse> {
-        assert!(
-            max_tokens.is_some(),
-            "dispatch must carry its authorized output allowance"
-        );
+        self.output_limits
+            .lock()
+            .expect("output limits")
+            .push(max_tokens.expect("dispatch must carry its authorized output allowance"));
         self.respond()
     }
 }
@@ -193,6 +199,9 @@ pub(crate) fn only(provider: &str) -> crate::ProviderAvailability {
     match provider {
         "openai" => availability.openai = true,
         "xai" => availability.xai = true,
+        "glm" => availability.glm = true,
+        "kimi" => availability.kimi = true,
+        "deepseek" => availability.deepseek = true,
         "gemini" => availability.gemini = true,
         "anthropic" => availability.anthropic = true,
         other => panic!("unsupported provider for test availability: {other}"),

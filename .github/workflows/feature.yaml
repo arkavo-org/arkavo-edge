@@ -285,25 +285,13 @@ jobs:
             # feature-off arms. Repeat with openai on to compile the Astra arm.
             cargo check --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui,cef-ui,openai
             cargo check --locked -p arkavo --no-default-features --features openai
-            # ASTRA-004: a cloud-only binary must not link the local inference
-            # stack. Feature unification through arkavo-server and
-            # arkavo-orchestrator's router dependency used to hand it
-            # llama-cpp regardless of the selected features. Match the feature
-            # node itself, not any line mentioning llama-cpp, so a renamed
-            # crate or a comment cannot make this pass or fail by accident.
-            router_llama=$(cargo tree --locked -p arkavo --no-default-features --features openai -e features -i arkavo-router | grep -c 'arkavo-router feature "llama-cpp"' || true)
-            if [ "$router_llama" != "0" ]; then
-              echo "cloud-only build enables arkavo-router/llama-cpp ($router_llama edges)"
+            # ASTRA-004: the agent harness keeps local inference alongside Astra.
+            router_llama=$(cargo tree --locked -p arkavo -e features -i arkavo-router | grep -c 'arkavo-router feature "llama-cpp"' || true)
+            if [ "$router_llama" = "0" ]; then
+              echo "default agent harness is missing local inference"
               exit 1
             fi
-            # arkavo-router is not the only way in: arkavo-ui-generator (a
-            # non-optional dependency of arkavo-agui) used to pin
-            # arkavo-llm/llama-cpp directly, bypassing the router entirely.
-            llm_llama=$(cargo tree --locked -p arkavo --no-default-features --features openai -e features -i arkavo-llm | grep -c 'arkavo-llm feature "llama-cpp"' || true)
-            if [ "$llm_llama" != "0" ]; then
-              echo "cloud-only build enables arkavo-llm/llama-cpp ($llm_llama edges)"
-              exit 1
-            fi
+            cargo test --locked -p arkavo-cli --lib startup_policy
           elif [ "${{ matrix.group }}" = "dlp" ]; then
             # `taint` and `sentinel` are off by default, so no other group
             # compiles them and nothing else would notice them breaking.
