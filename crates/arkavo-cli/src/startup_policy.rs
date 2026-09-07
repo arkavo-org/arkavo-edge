@@ -7,6 +7,11 @@ use arkavo_router::ModelSpec;
 /// `--model`/`--gguf` answers for itself; otherwise only an install with no
 /// cloud credentials needs local weights to do anything at all.
 pub fn needs_local_setup(args: &[String], has_cloud: bool) -> bool {
+    // The Codex worker delegates inference to the Codex CLI, so local weights
+    // are never involved regardless of credentials.
+    if cfg!(feature = "codex-agent") && args.first().is_some_and(|a| a == "codex") {
+        return false;
+    }
     let selected = args.windows(2).find_map(|pair| {
         matches!(pair[0].as_str(), "--model" | "--gguf")
             .then(|| ModelSpec::parse(&pair[1]))
@@ -25,6 +30,12 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|v| (*v).to_owned()).collect()
+    }
+
+    #[test]
+    #[cfg(feature = "codex-agent")]
+    fn codex_worker_never_needs_local_weights() {
+        assert!(!needs_local_setup(&args(&["codex", "run"]), false));
     }
 
     #[test]

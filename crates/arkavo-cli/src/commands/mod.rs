@@ -1,5 +1,7 @@
 pub mod agent;
 pub mod chat;
+#[cfg(feature = "codex-agent")]
+pub mod codex;
 pub mod dataflow;
 pub mod login;
 pub mod mesh;

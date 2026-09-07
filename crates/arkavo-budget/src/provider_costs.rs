@@ -36,7 +36,8 @@ pub struct PricingEntry {
     /// Cached input cost in cents per 1M tokens (None = no caching)
     #[serde(default)]
     pub cached_input_cents_per_mtok: Option<u64>,
-    /// Cache write cost in cents per 1M tokens (None = no write surcharge)
+    /// Total per-MTok rate for cache-write tokens, in cents. Not a surcharge
+    /// over the input rate; `None` prices them as ordinary input.
     #[serde(default)]
     pub cache_write_cents_per_mtok: Option<u64>,
     #[serde(default)]

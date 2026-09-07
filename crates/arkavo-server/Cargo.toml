@@ -114,6 +114,7 @@ arkavo-orchestrator = { path = "../arkavo-orchestrator", optional = true }
 
 # Claude Agent SDK integration (optional, requires non-musl target for OAuth)
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
+arkavo-mcp-codex = { path = "../arkavo-mcp-codex", default-features = false, features = ["mcp-tools"], optional = true }
 
 # Demo dependencies
 clap = { workspace = true, optional = true }
@@ -151,6 +152,7 @@ xai = ["arkavo-router/xai", "arkavo-orchestrator?/xai"]
 openai = ["arkavo-router/openai", "arkavo-orchestrator?/openai"]
 llm-remote = ["arkavo-router/llm-remote", "arkavo-orchestrator?/llm-remote"]
 claude-agent = ["dep:arkavo-mcp-claude"]
+codex-agent = ["dep:arkavo-mcp-codex"]
 # Taint-aware egress enforcement in the conductor's tool loop (SEQ-003, SEQ-014,
 # SEQ-015). Off until the sequence-integrity work reaches GA.
 taint = ["arkavo-protocol/taint", "arkavo-arp-runtime/taint"]

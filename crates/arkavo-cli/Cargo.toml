@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "development-tools"]
 openai = ["arkavo-llm/llm-remote", "arkavo-router/openai", "arkavo-ui-core/openai", "arkavo-server/openai", "arkavo-orchestrator/openai"]
 cloud = ["llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
 # Full defaults with all providers (cross-platform)
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "kas", "iroh"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "codex-agent", "kas", "iroh"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
@@ -26,6 +26,10 @@ mcp-tools = ["dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
 mcp-macos = ["dep:arkavo-mcp-macos"]
 # Claude Agent SDK integration (requires non-musl target for OAuth)
 claude-agent = ["dep:arkavo-mcp-claude", "arkavo-server/claude-agent"]
+# Codex worker bridge. The dependency carries `mcp-tools` so the worker's MCP
+# surface is compiled in, and the server feature so the registries built there
+# register it too.
+codex-agent = ["dep:arkavo-mcp-codex", "arkavo-server/codex-agent"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns", "arkavo-orchestrator/mdns"]
@@ -129,6 +133,7 @@ libc = { workspace = true }
 
 # Claude Agent SDK integration (optional, requires non-musl target for OAuth)
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
+arkavo-mcp-codex = { path = "../arkavo-mcp-codex", default-features = false, features = ["mcp-tools"], optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

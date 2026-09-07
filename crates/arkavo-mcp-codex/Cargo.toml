@@ -1,0 +1,41 @@
+[package]
+name = "arkavo-mcp-codex"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Permission-bound resumable Codex workers for Arkavo Edge"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "sync", "time"] }
+uuid.workspace = true
+arkavo-budget = { path = "../arkavo-budget" }
+# The MCP schema type and the async tool trait are used only by `tools.rs`, so
+# they follow that module behind its feature rather than reaching every build
+# of the worker.
+arkavo-mcp = { path = "../arkavo-mcp", optional = true }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools", default-features = false, optional = true }
+async-trait = { workspace = true, optional = true }
+
+[features]
+default = ["mcp-tools"]
+mcp-tools = ["dep:arkavo-mcp", "dep:arkavo-mcp-tools", "dep:async-trait"]
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+# Integration tests link only the crate and its dev-dependencies, and each
+# fixture needs a fresh Codex thread identifier to hold its own thread lock.
+uuid.workspace = true
+
+[lints]
+workspace = true

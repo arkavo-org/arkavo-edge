@@ -8,10 +8,15 @@
 //! This crate provides the JSON-RPC server, handlers, and supporting infrastructure
 //! for A2A protocol communication.
 
+#[cfg(feature = "codex-agent")]
+pub mod codex;
 pub mod server;
 pub mod spend_plane;
 
-pub use spend_plane::{cloud_policy_from_agents_md, cloud_policy_from_config};
+pub use spend_plane::{
+    budget_config_from_agents_md, budget_config_from_yaml, budget_tracker_from_agents_md,
+    cloud_policy_from_agents_md, cloud_policy_from_config,
+};
 
 // Re-export commonly used types
 pub use server::{

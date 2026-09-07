@@ -459,7 +459,7 @@ impl A2aServer {
         // Build the budget manager up front so the router can both enforce the
         // live remaining cap (spend plane) and adopt the configured cloud policy.
         let budget_manager = if let Some(ref budget_yaml) = agent_config.budget {
-            let budget_config = build_budget_config(budget_yaml);
+            let budget_config = crate::spend_plane::budget_config_from_yaml(budget_yaml);
             match arkavo_budget::BudgetManager::new(budget_config).await {
                 Ok(manager) => Some(Arc::new(manager)),
                 Err(e) => {
@@ -725,6 +725,32 @@ impl A2aServer {
             }
             Err(e) => {
                 warn!("UCP tools disabled: failed to create budget tracker: {e}");
+            }
+        }
+
+        // Register Codex worker tools (feature-gated). The worker spends against
+        // the same tracker and cloud policy the router was built with, so a
+        // delegated coding run shares one ledger and one posture with inference.
+        #[cfg(feature = "codex-agent")]
+        {
+            let tracker = match self.budget_manager.read().await.as_ref() {
+                Some(manager) => Ok(manager.tracker()),
+                None => arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
+                    .await
+                    .map(Arc::new),
+            };
+            let policy = self.router.read().await.as_ref().map(|r| r.cloud_policy());
+            match (tracker, policy) {
+                (Ok(tracker), Some(policy)) => {
+                    crate::codex::register_tools(
+                        &mut tool_registry,
+                        tracker,
+                        policy,
+                        "arkavo-server",
+                    );
+                }
+                (Err(e), _) => warn!("Codex tools disabled: no budget tracker: {e}"),
+                (_, None) => debug!("Codex tools skipped: router is not initialized"),
             }
         }
 
@@ -1491,26 +1517,6 @@ impl A2aServer {
 }
 
 /// Convert AGENTS.md budget YAML to BudgetConfig for the budget manager
-fn build_budget_config(yaml: &arkavo_router::BudgetYamlConfig) -> arkavo_budget::BudgetConfig {
-    let mut config = arkavo_budget::BudgetConfig::default();
-
-    if let Some(session_cost) = yaml.max_cost_per_session {
-        config.limits.session_limit = Some(arkavo_budget::TokenCost::from_dollars(session_cost));
-    }
-    if let Some(daily_cost) = yaml.max_cost_per_day {
-        config.limits.daily_limit = Some(arkavo_budget::TokenCost::from_dollars(daily_cost));
-    }
-    if let Some(policy) = yaml
-        .cloud_policy
-        .as_deref()
-        .and_then(arkavo_budget::CloudPolicy::parse)
-    {
-        config.cloud_policy = policy;
-    }
-
-    config
-}
-
 #[cfg(test)]
 mod dedup_tests {
     use arkavo_test_macros::spec;

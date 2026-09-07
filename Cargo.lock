@@ -820,6 +820,7 @@ dependencies = [
  "arkavo-llm",
  "arkavo-mcp",
  "arkavo-mcp-claude",
+ "arkavo-mcp-codex",
  "arkavo-mcp-macos",
  "arkavo-mcp-mesh",
  "arkavo-mcp-runtime",
@@ -1461,6 +1462,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-mcp-codex"
+version = "0.93.0"
+dependencies = [
+ "anyhow",
+ "arkavo-budget",
+ "arkavo-mcp",
+ "arkavo-mcp-tools",
+ "async-trait",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "arkavo-mcp-identity"
 version = "0.93.0"
 dependencies = [
@@ -1985,6 +2004,7 @@ dependencies = [
  "arkavo-llm",
  "arkavo-mcp",
  "arkavo-mcp-claude",
+ "arkavo-mcp-codex",
  "arkavo-mcp-mesh",
  "arkavo-mcp-tools",
  "arkavo-memory",

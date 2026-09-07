@@ -1,5 +1,5 @@
 use std::sync::Arc;
-#[cfg(feature = "claude-agent")]
+#[cfg(any(feature = "claude-agent", feature = "codex-agent"))]
 use tracing::debug;
 use tracing::{info, warn};
 
@@ -100,7 +100,7 @@ impl LocalEngine {
 
         // UCP payment tools — reuse the router's budget tracker so spend
         // accounting is unified; fall back to a fresh default tracker.
-        let ucp_budget_tracker = match budget_tracker {
+        let shared_tracker = match budget_tracker {
             Some(tracker) => Some(tracker),
             None => arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
                 .await
@@ -108,7 +108,23 @@ impl LocalEngine {
                 .map_err(|e| warn!("UCP tools disabled: {e}"))
                 .ok(),
         };
-        if let Some(tracker) = ucp_budget_tracker {
+
+        // Codex worker tools (feature-gated) — the same tracker and the same
+        // cloud policy the router runs under, so a delegated coding run spends
+        // against one ledger and one posture.
+        #[cfg(feature = "codex-agent")]
+        if let Some(ref tracker) = shared_tracker {
+            crate::codex::register_tools(
+                &mut registry,
+                tracker.clone(),
+                router.cloud_policy(),
+                "arkavo-local",
+            );
+        } else {
+            debug!("Codex tools skipped: no budget tracker");
+        }
+
+        if let Some(tracker) = shared_tracker {
             let ucp_state = Arc::new(tokio::sync::RwLock::new(arkavo_ucp::UcpState::new(tracker)));
             arkavo_ucp::register_tools(&mut registry, ucp_state);
         }

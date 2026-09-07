@@ -88,15 +88,15 @@ pub async fn process_with_tools(
         arkavo_router::preflight::PreflightModerator::new()
     });
 
-    // Spend plane: adopt the AGENTS.md cloud policy (resolved by the shared
-    // server-crate helper) and share one budget tracker between the router
-    // (live-cap enforcement) and UCP below.
+    // Spend plane: adopt the AGENTS.md cloud policy and caps (resolved by the
+    // shared server-crate helpers) and share one budget tracker between the
+    // router (live-cap enforcement), UCP and the Codex worker below. The
+    // defaults were a second, looser set of caps for everything reached through
+    // this loop, so `codex_run` here admitted runs `arkavo codex` would refuse.
     let cloud_policy = arkavo_server::cloud_policy_from_agents_md();
-    let ucp_budget_tracker = std::sync::Arc::new(
-        arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
-            .await
-            .map_err(|e| format!("Failed to create budget tracker: {e}"))?,
-    );
+    let ucp_budget_tracker = arkavo_server::budget_tracker_from_agents_md()
+        .await
+        .map_err(|e| format!("Failed to create budget tracker: {e}"))?;
     let router = Arc::new(
         Router::new()
             .await?
@@ -127,10 +127,23 @@ pub async fn process_with_tools(
     // Register UCP payment tools for AI agent commerce.
     // Reuses the same budget tracker wired into the router above so spend
     // accounting is unified.
+    #[cfg(feature = "codex-agent")]
+    let codex_budget_tracker = ucp_budget_tracker.clone();
     let ucp_state = std::sync::Arc::new(tokio::sync::RwLock::new(arkavo_ucp::UcpState::new(
         ucp_budget_tracker,
     )));
     arkavo_ucp::register_tools(&mut tool_registry, ucp_state);
+
+    // Register Codex worker tools (feature-gated). Same tracker and same cloud
+    // policy as the router above, so a delegated coding run spends against one
+    // ledger and one posture.
+    #[cfg(feature = "codex-agent")]
+    arkavo_server::codex::register_tools(
+        &mut tool_registry,
+        codex_budget_tracker,
+        cloud_policy,
+        "arkavo-cli",
+    );
 
     // Register Claude Agent SDK tools (entitlement-gated, requires OAuth)
     #[cfg(feature = "claude-agent")]

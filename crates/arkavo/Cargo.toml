@@ -14,7 +14,7 @@ categories = ["command-line-utilities", "development-tools"]
 openai = ["arkavo-cli/openai"]
 cloud = ["llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
 # Full defaults with all LLM providers
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "codex-agent"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows: every cloud provider the router's own
@@ -37,6 +37,7 @@ kas = ["arkavo-cli/kas"]
 cef-ui = ["arkavo-cli/cef-ui"]
 web-ui = ["arkavo-cli/web-ui"]
 claude-agent = ["arkavo-cli/claude-agent"]
+codex-agent = ["arkavo-cli/codex-agent"]
 # Taint-aware egress enforcement (SEQ-003, SEQ-014, SEQ-015). Off until the
 # sequence-integrity work reaches GA; the security suite builds a binary with it.
 taint = ["arkavo-cli/taint"]

@@ -22,6 +22,7 @@ members = [
     "crates/arkavo-dataflow",
     "crates/anthropic-agent-sdk",
     "crates/arkavo-mcp-claude",  # Requires non-musl target for OAuth (uses native-tls)
+    "crates/arkavo-mcp-codex",
     "crates/arkavo-agui",
     "crates/arkavo-agui-protocol",
     "crates/arkavo-observability",
@@ -112,6 +113,7 @@ default-members = [
     "crates/arkavo-dataflow",
     "crates/anthropic-agent-sdk",
     "crates/arkavo-mcp-claude",  # Requires non-musl target for OAuth (uses native-tls)
+    "crates/arkavo-mcp-codex",
     "crates/arkavo-agui",
     "crates/arkavo-agui-protocol",
     "crates/arkavo-observability",
@@ -206,6 +208,8 @@ semver = { version = "1.0", features = ["serde"] }
 bytemuck = "1.20"
 cfg-if = "1.0"
 libc = "0.2"
+# Windows process containment (job objects) for the Codex worker bridge.
+windows-sys = "0.61"
 notify = "8.0"
 sha2 = "0.10"
 dirs = "6.0"

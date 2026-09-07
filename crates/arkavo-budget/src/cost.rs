@@ -136,7 +136,9 @@ pub struct TokenUsage {
     /// Tokens read from the prompt cache (billed at discounted rate)
     #[serde(default)]
     pub cached_input_tokens: u32,
-    /// Tokens written into the prompt cache (billed at write surcharge rate)
+    /// Tokens written into the prompt cache. Disjoint from `input_tokens` and
+    /// `cached_input_tokens`, and billed at the total per-MTok rate for
+    /// cache-write tokens — not at a surcharge over the input rate.
     #[serde(default)]
     pub cache_write_tokens: u32,
     /// Hidden chain-of-thought tokens (Gemini 3.5's `thoughtsTokenCount`).
