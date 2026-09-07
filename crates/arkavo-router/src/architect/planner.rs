@@ -488,13 +488,17 @@ mod tests {
     ) -> Arc<Router> {
         let mut router = Router::new_offline().await.unwrap();
         router.set_offline_mode(false);
-        Arc::new(
-            router
-                .with_cloud_policy(arkavo_budget::CloudPolicy::CloudWithinCap)
-                .with_connectivity(crate::ConnectivityChecker::assume(true))
-                .with_budget_tracker(tracker.clone())
-                .with_provider_factory(provider.factory()),
-        )
+        let router = router
+            .with_cloud_policy(arkavo_budget::CloudPolicy::CloudWithinCap)
+            .with_connectivity(crate::ConnectivityChecker::assume(true))
+            .with_budget_tracker(tracker.clone())
+            .with_provider_factory(provider.factory())
+            .with_selector(crate::ModelSelector::with_availability(
+                only("openai"),
+                false,
+            ))
+            .await;
+        Arc::new(router)
     }
 
     async fn astra_plan(router: &Arc<Router>) -> Result<ArchitectPlan> {

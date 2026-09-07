@@ -1012,8 +1012,8 @@ components:
       - Untrusted input is bounded before it is parsed, hashed, or buffered
 
 stats:
-  total_specs: 85
-  total_scenarios: 819
+  total_specs: 86
+  total_scenarios: 825
   critical_scenarios: 255
   coverage_areas:
     - authentication

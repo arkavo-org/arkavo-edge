@@ -530,6 +530,17 @@ impl CostOrchestrator {
         if let Some(factory) = &self.provider_factory {
             router = router.with_provider_factory(factory.clone());
         }
+        // Carry the orchestrator's own selector (availability + local-weights
+        // answer source) onto the executor router, so an injected selector —
+        // e.g. a test fixing local weights instead of consulting the host's
+        // HuggingFace cache — actually reaches the planner instead of being
+        // discarded in favor of a freshly built default selector.
+        router = router
+            .with_selector(ModelSelector::with_parts(
+                self.selector.availability.clone(),
+                self.selector.local_weights(),
+            ))
+            .await;
         Ok(router)
     }
 
@@ -826,6 +837,50 @@ mod tests {
                 .iter()
                 .all(|entry| entry.model == "gpt-6-astra" && entry.provider == "openai"),
             "attribution follows the serving model, not a hardcoded guess: {history:?}"
+        );
+    }
+
+    /// `create_router_for_executor` used to build the executor's `Router` from
+    /// scratch, discarding the orchestrator's own injected `ModelSelector` in
+    /// favor of a fresh default one (`LocalWeights::HuggingFaceCache`) that
+    /// consults the real cache directory. On a machine with the Qwen weights
+    /// already cached that silently kept every subtask on the local model
+    /// instead of the configured cloud provider. Asserted structurally on the
+    /// executor router's own selector — not by faking a populated
+    /// `HF_HOME`/cache directory and observing the routing outcome — because
+    /// `is_local_model_cached` only ever consults the cache when the
+    /// `llama-cpp` feature is compiled in; a filesystem-based version of this
+    /// test would pass in CI's `--no-default-features` router job whether or
+    /// not the propagation bug were present, giving no real coverage, and
+    /// mutating the process-wide `HF_HOME` environment variable would race
+    /// every other test's `std::env::var` reads under `cargo test`'s default
+    /// multi-threaded runner.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn create_router_for_executor_carries_the_orchestrators_selector() {
+        use crate::test_support::only;
+
+        let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+        let orchestrator = CostOrchestrator::new(tracker)
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(only("openai"), false));
+
+        let router = orchestrator
+            .create_router_for_executor("github-orchestrator")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            router.selector.local_weights(),
+            crate::selector::LocalWeights::Fixed(false),
+            "the orchestrator's fixed local-weights answer must reach the \
+             executor router instead of being replaced by a fresh selector \
+             that would consult the real HuggingFace cache"
+        );
+        assert!(
+            router.selector.availability.openai,
+            "the orchestrator's provider availability must reach the executor router"
         );
     }
 }

@@ -97,12 +97,21 @@ impl ModelSelector {
     /// environment or HuggingFace cache. Install it with
     /// [`crate::Router::with_selector`].
     pub fn with_availability(availability: ProviderAvailability, local_cached: bool) -> Self {
+        Self::with_parts(availability, LocalWeights::Fixed(local_cached))
+    }
+
+    /// Build a selector from an explicit provider availability and an
+    /// explicit local-weights answer source, preserving whichever a caller
+    /// already holds (e.g. propagating an orchestrator's own selector to the
+    /// router it builds for the executor) instead of forcing it through a
+    /// fixed boolean.
+    pub fn with_parts(availability: ProviderAvailability, local_weights: LocalWeights) -> Self {
         Self {
             budget_threshold: 0.80,
             availability,
             gpu_available: true,
             max_memory_bytes: std::sync::atomic::AtomicU64::new(0),
-            local_weights: LocalWeights::Fixed(local_cached),
+            local_weights,
         }
     }
 
