@@ -1,8 +1,11 @@
+use super::anthropic_blocks::{
+    ApiMessage, MessageResponse, ResponseContentBlock, convert_messages,
+};
 use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
 use crate::common::{ProviderError, ProviderResult};
 use crate::provider::ProviderResponse;
 use crate::tool_parser::ParsedToolCall;
-use crate::{Message, Provider, Role, StreamResponse};
+use crate::{Message, Provider, StreamResponse};
 use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -104,52 +107,11 @@ struct CreateMessageRequest {
     tools: Option<Vec<ToolDefinition>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ApiMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct MessageResponse {
-    id: String,
-    content: Vec<ResponseContentBlock>,
-    model: String,
-    stop_reason: Option<String>,
-    usage: Usage,
-}
-
-/// Content block in response - can be text, tool_use, or thinking
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type")]
-enum ResponseContentBlock {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "tool_use")]
-    ToolUse {
-        id: String,
-        name: String,
-        input: Value,
-    },
-    #[serde(rename = "thinking")]
-    Thinking { thinking: String },
-    #[serde(other)]
-    Other,
-}
-
 /// Token usage reported by a completion, for caller-side cost accounting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompletionUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct Usage {
-    input_tokens: u32,
-    output_tokens: u32,
 }
 
 /// Streaming response structures
@@ -169,10 +131,7 @@ enum StreamEvent {
     #[serde(rename = "content_block_stop")]
     ContentBlockStop { index: usize },
     #[serde(rename = "message_delta")]
-    MessageDelta {
-        delta: MessageDeltaData,
-        usage: Usage,
-    },
+    MessageDelta { delta: MessageDeltaData },
     #[serde(rename = "message_stop")]
     MessageStop,
     #[serde(rename = "ping")]
@@ -186,7 +145,6 @@ enum StreamEvent {
 struct MessageStartData {
     id: String,
     model: String,
-    usage: Usage,
 }
 
 /// Content block start data for streaming
@@ -340,97 +298,6 @@ impl AnthropicProvider {
         }
     }
 
-    /// Convert messages to Anthropic's 3-role format.
-    ///
-    /// Anthropic accepts only `user` and `assistant`; the tool role is carried
-    /// by content blocks this converter does not model, so tool results are
-    /// attributed in user text instead (see the `Role::Tool` arm).
-    fn convert_messages(&self, messages: Vec<Message>) -> (Option<String>, Vec<ApiMessage>) {
-        let mut system_content = None;
-        let mut api_messages = Vec::new();
-
-        for msg in messages {
-            // Skip empty messages (except we'll handle final assistant specially later)
-            let content = msg.content.trim();
-
-            match msg.role {
-                Role::System => {
-                    // Anthropic handles system messages separately
-                    if !content.is_empty() {
-                        if system_content.is_none() {
-                            system_content = Some(content.to_string());
-                        } else {
-                            // If multiple system messages, concatenate them
-                            system_content =
-                                Some(format!("{}\n\n{}", system_content.unwrap(), content));
-                        }
-                    }
-                }
-                Role::User => {
-                    // Skip empty user messages
-                    if !content.is_empty() {
-                        api_messages.push(ApiMessage {
-                            role: "user".to_string(),
-                            content: content.to_string(),
-                        });
-                    }
-                }
-                Role::Assistant => {
-                    // Skip empty assistant messages (unless it's the last one)
-                    if !content.is_empty() {
-                        api_messages.push(ApiMessage {
-                            role: "assistant".to_string(),
-                            content: content.to_string(),
-                        });
-                    }
-                }
-                Role::Tool => {
-                    // `ApiMessage` carries plain text, not tool_use/tool_result
-                    // blocks, so the result cannot travel as a tool turn. It
-                    // must not travel as an assistant turn either: Anthropic
-                    // continues a trailing assistant message as prefill, so the
-                    // model would finish its own tool output instead of
-                    // answering. Attribute it in user text, as Gemini does.
-                    // Never skipped when empty — a dropped result would leave
-                    // the request ending on the assistant turn that called it.
-                    api_messages.push(ApiMessage {
-                        role: "user".to_string(),
-                        content: msg.tool_result_as_user_text(),
-                    });
-                }
-            }
-        }
-
-        // Ensure conversation starts with user message
-        if api_messages.is_empty() || api_messages[0].role != "user" {
-            api_messages.insert(
-                0,
-                ApiMessage {
-                    role: "user".to_string(),
-                    content: "Hello".to_string(),
-                },
-            );
-        }
-
-        // Ensure alternating user/assistant messages
-        let mut cleaned_messages: Vec<ApiMessage> = Vec::new();
-        let mut last_role = None;
-
-        for msg in api_messages {
-            if last_role.as_ref() == Some(&msg.role) {
-                // Same role as previous, merge content
-                if let Some(last_msg) = cleaned_messages.last_mut() {
-                    last_msg.content = format!("{}\n\n{}", last_msg.content, msg.content);
-                }
-            } else {
-                cleaned_messages.push(msg.clone());
-                last_role = Some(msg.role);
-            }
-        }
-
-        (system_content, cleaned_messages)
-    }
-
     /// Convert tools JSON to Anthropic format
     fn convert_tools_to_definitions(
         tools_json: &Value,
@@ -550,7 +417,7 @@ impl AnthropicProvider {
         &self,
         messages: Vec<Message>,
     ) -> Result<(String, CompletionUsage), crate::Error> {
-        let (system_content, api_messages) = self.convert_messages(messages);
+        let (system_content, api_messages) = convert_messages(messages);
         let request = self.build_request(api_messages, system_content, false, None, None);
         let url = format!("{}/v1/messages", self.config.base_url);
 
@@ -614,7 +481,7 @@ impl Provider for AnthropicProvider {
         messages: Vec<Message>,
         _max_tokens: Option<usize>,
     ) -> Result<String, crate::Error> {
-        let (system_content, api_messages) = self.convert_messages(messages);
+        let (system_content, api_messages) = convert_messages(messages);
 
         let request = self.build_request(api_messages, system_content, false, None, None);
 
@@ -676,7 +543,7 @@ impl Provider for AnthropicProvider {
         Box<dyn tokio_stream::Stream<Item = Result<StreamResponse, crate::Error>> + Send + Unpin>,
         crate::Error,
     > {
-        let (system_content, api_messages) = self.convert_messages(messages);
+        let (system_content, api_messages) = convert_messages(messages);
 
         let request = self.build_request(api_messages, system_content, true, None, None);
 
@@ -788,7 +655,7 @@ impl Provider for AnthropicProvider {
         tools: Option<Value>,
         max_tokens: Option<usize>,
     ) -> Result<ProviderResponse, crate::Error> {
-        let (system_content, api_messages) = self.convert_messages(messages);
+        let (system_content, api_messages) = convert_messages(messages);
 
         let tool_definitions = tools
             .as_ref()
@@ -871,105 +738,6 @@ impl Provider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_test_macros::spec;
-
-    #[test]
-    fn test_message_conversion() {
-        let config = AnthropicConfig::default();
-        let provider = AnthropicProvider::new(config).unwrap();
-
-        let messages = vec![
-            Message::system("You are a helpful assistant"),
-            Message::user("Hello"),
-            Message::assistant("Hi there!"),
-            Message::user("How are you?"),
-        ];
-
-        let (system, api_messages) = provider.convert_messages(messages);
-
-        assert_eq!(system, Some("You are a helpful assistant".to_string()));
-        assert_eq!(api_messages.len(), 3);
-        assert_eq!(api_messages[0].role, "user");
-        assert_eq!(api_messages[1].role, "assistant");
-        assert_eq!(api_messages[2].role, "user");
-    }
-
-    /// Anthropic reads a trailing assistant message as prefill and continues
-    /// it, so a tool result replayed under that role makes the model finish
-    /// its own tool output instead of answering. It must arrive as user text.
-    #[spec("ASTRA-002")]
-    #[test]
-    fn tool_result_is_not_sent_as_an_assistant_turn() {
-        let provider = AnthropicProvider::new(AnthropicConfig::default()).unwrap();
-
-        let messages = vec![
-            Message::user("what is the weather in Dublin"),
-            Message::assistant_with_tool_calls(
-                "Checking the forecast.",
-                vec![crate::ToolCall {
-                    name: "get_weather".to_string(),
-                    arguments: r#"{"location":"Dublin"}"#.to_string(),
-                    id: Some("call_1".to_string()),
-                }],
-            ),
-            Message::tool_result("sunny, 21C", "call_1", "get_weather"),
-        ];
-
-        let (_, api_messages) = provider.convert_messages(messages);
-
-        let last = api_messages.last().expect("conversation is not empty");
-        assert_ne!(last.role, "assistant");
-        assert_eq!(last.role, "user");
-        assert!(last.content.contains("sunny, 21C"), "{last:?}");
-        assert!(last.content.contains("get_weather"), "{last:?}");
-    }
-
-    /// The tool-calling assistant turn often carries no text. Dropping it
-    /// leaves two adjacent user turns, which Anthropic rejects unless the
-    /// converter merges them — and the tool output must survive that merge.
-    #[spec("ASTRA-002")]
-    #[test]
-    fn tool_result_after_a_silent_assistant_turn_merges_into_one_user_turn() {
-        let provider = AnthropicProvider::new(AnthropicConfig::default()).unwrap();
-
-        let messages = vec![
-            Message::user("what is the weather in Dublin"),
-            Message::assistant_with_tool_calls(
-                "",
-                vec![crate::ToolCall {
-                    name: "get_weather".to_string(),
-                    arguments: r#"{"location":"Dublin"}"#.to_string(),
-                    id: Some("call_1".to_string()),
-                }],
-            ),
-            Message::tool_result("sunny, 21C", "call_1", "get_weather"),
-        ];
-
-        let (_, api_messages) = provider.convert_messages(messages);
-
-        assert_eq!(api_messages.len(), 1, "{api_messages:?}");
-        assert_eq!(api_messages[0].role, "user");
-        assert!(api_messages[0].content.contains("Dublin"));
-        assert!(api_messages[0].content.contains("sunny, 21C"));
-    }
-
-    #[test]
-    fn test_message_deduplication() {
-        let config = AnthropicConfig::default();
-        let provider = AnthropicProvider::new(config).unwrap();
-
-        let messages = vec![
-            Message::user("First message"),
-            Message::user("Second message"),
-            Message::assistant("Response"),
-        ];
-
-        let (_, api_messages) = provider.convert_messages(messages);
-
-        assert_eq!(api_messages.len(), 2);
-        assert_eq!(api_messages[0].content, "First message\n\nSecond message");
-        assert_eq!(api_messages[1].role, "assistant");
-    }
 
     #[test]
     fn test_tool_conversion_direct_format() {
@@ -1075,10 +843,7 @@ mod tests {
         let provider = AnthropicProvider::new(config).unwrap();
 
         let request = provider.build_request(
-            vec![ApiMessage {
-                role: "user".to_string(),
-                content: "Hello".to_string(),
-            }],
+            vec![ApiMessage::user_text("Hello")],
             None,
             false,
             None,
@@ -1098,10 +863,7 @@ mod tests {
         let provider = AnthropicProvider::new(config).unwrap();
 
         let request = provider.build_request(
-            vec![ApiMessage {
-                role: "user".to_string(),
-                content: "Hello".to_string(),
-            }],
+            vec![ApiMessage::user_text("Hello")],
             None,
             false,
             None,

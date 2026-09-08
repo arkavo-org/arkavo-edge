@@ -8,7 +8,7 @@ use crate::tool_parser::ParsedToolCall;
 use crate::{Message, Result, StreamResponse};
 
 /// Response from a provider that may include tool calls
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ProviderResponse {
     /// Exact provider output items for stateless continuation; never display these.
     pub provider_state: ProviderState,
@@ -209,20 +209,6 @@ pub trait Provider: Send + Sync {
             content,
             ..Default::default()
         })
-    }
-}
-
-impl std::fmt::Debug for ProviderResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProviderResponse")
-            .field("content", &self.content)
-            .field("reasoning_content", &self.reasoning_content)
-            .field("tool_calls", &self.tool_calls)
-            .field("finish_reason", &self.finish_reason)
-            .field("inference_timing", &self.inference_timing)
-            .field("quality_gate_retries", &self.quality_gate_retries)
-            .field("provider_state", &self.provider_state)
-            .finish()
     }
 }
 

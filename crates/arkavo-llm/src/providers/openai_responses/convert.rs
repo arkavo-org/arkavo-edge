@@ -27,21 +27,24 @@ pub(super) fn request(
             input.extend(items);
             continue;
         }
-        if message.role == Role::Tool {
-            let call_id = message
-                .tool_call_id
-                .filter(|id| !id.is_empty())
-                .ok_or_else(|| Error::Config("Responses tool result requires a call ID".into()))?;
-            input.push(
-                json!({"type":"function_call_output", "call_id":call_id, "output":message.content}),
-            );
-            continue;
-        }
         let role = match message.role {
             Role::System => "system",
             Role::User => "user",
             Role::Assistant => "assistant",
-            Role::Tool => unreachable!(),
+            // A tool result is an input item of its own, not a role: it answers
+            // the call the provider recorded, by that call's id.
+            Role::Tool => {
+                let call_id = message
+                    .tool_call_id
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| {
+                        Error::Config("Responses tool result requires a call ID".into())
+                    })?;
+                input.push(
+                    json!({"type":"function_call_output", "call_id":call_id, "output":message.content}),
+                );
+                continue;
+            }
         };
         if !message.content.is_empty() || message.images.as_ref().is_some_and(|v| !v.is_empty()) {
             let mut content = vec![json!({"type":"input_text", "text":message.content})];
@@ -98,24 +101,28 @@ pub(super) fn request(
     Ok(body)
 }
 
+/// A tool this build cannot declare is an error, not a silent omission: the
+/// model would be asked to work without a capability the caller believes it has.
 fn convert_tools(tools: Value) -> Result<Vec<Value>> {
     let tools = tools
         .as_array()
         .ok_or_else(|| Error::Config("Responses tools must be an array".into()))?;
-    tools.iter().map(|tool| {
-        if tool.get("type").is_some_and(|kind| kind != "function") {
-            return Err(Error::Config("This harness supports Responses function tools only".into()));
-        }
-        let function = tool.get("function").unwrap_or(tool);
-        let name = function["name"].as_str().filter(|v| !v.is_empty())
-            .ok_or_else(|| Error::Config("Function tool requires a name".into()))?;
-        // Explicitly opt out of Responses' implicit strictification: MCP schemas
-        // may have optional parameters. Structured output remains strict separately.
-        Ok(json!({"type":"function", "name":name,
-            "description":function["description"].as_str().unwrap_or(""),
-            "parameters":function.get("parameters").or_else(|| function.get("input_schema")).cloned().unwrap_or_else(|| json!({"type":"object","properties":{}})),
-            "strict":false}))
-    }).collect()
+    tools
+        .iter()
+        .map(|tool| {
+            if tool.get("type").is_some_and(|kind| kind != "function") {
+                return Err(Error::Config(
+                    "This harness supports Responses function tools only".into(),
+                ));
+            }
+            let mut tool = crate::common::responses::function_tool(tool)
+                .ok_or_else(|| Error::Config("Function tool requires a name".into()))?;
+            // Explicitly opt out of Responses' implicit strictification: MCP schemas
+            // may have optional parameters. Structured output remains strict separately.
+            tool["strict"] = Value::Bool(false);
+            Ok(tool)
+        })
+        .collect()
 }
 
 pub(super) fn response(value: Value) -> Result<ProviderResponse> {
@@ -226,43 +233,19 @@ fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| Error::Provider(format!("Responses item is missing {key}")))
 }
 
+/// Read the billed usage, refusing a report that cannot be priced.
+///
+/// A subset larger than its total would either over-bill the caller or hide
+/// spend, and this provider serves the budgeted cloud path: failing the turn is
+/// the honest answer, and the caller still receives the counts with the error.
 fn timing(usage: &Value) -> Result<InferenceTiming> {
-    let count = |value: &Value| -> Result<u32> {
-        value
-            .as_u64()
-            .and_then(|n| u32::try_from(n).ok())
-            .ok_or_else(|| Error::Provider("Invalid Responses usage count".into()))
-    };
-    let input = count(&usage["input_tokens"])?;
-    let output = count(&usage["output_tokens"])?;
-    let cached = usage
-        .pointer("/input_tokens_details/cached_tokens")
-        .map(count)
-        .transpose()?
-        .unwrap_or(0);
-    let thinking = usage
-        .pointer("/output_tokens_details/reasoning_tokens")
-        .map(count)
-        .transpose()?
-        .unwrap_or(0);
-    let cache_write = usage
-        .pointer("/input_tokens_details/cache_write_tokens")
-        .map(count)
-        .transpose()?
-        .unwrap_or(0);
-    if cached > input || cache_write > input.saturating_sub(cached) || thinking > output {
+    let usage = crate::common::responses::Usage::parse(usage)?;
+    if !usage.is_consistent() {
         return Err(Error::Provider(
             "Inconsistent Responses usage counts".into(),
         ));
     }
-    Ok(InferenceTiming {
-        n_prompt_eval: input,
-        n_cached_prompt_eval: Some(cached),
-        n_cache_write_prompt_eval: Some(cache_write),
-        n_eval: output - thinking,
-        n_thinking_eval: Some(thinking),
-        ..Default::default()
-    })
+    Ok(usage.timing())
 }
 
 #[cfg(test)]

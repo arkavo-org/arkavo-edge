@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Reasoning effort for Grok models.
 ///
@@ -49,6 +50,21 @@ impl ReasoningEffort {
             Self::High => 1800,
             Self::Xhigh => 3600,
         }
+    }
+
+    /// How long a stream may deliver nothing before it counts as stalled.
+    ///
+    /// Deliberately far below [`Self::request_timeout_secs`] so a dead
+    /// connection fails on its own evidence instead of consuming the entire
+    /// request budget, and scaled with effort because deeper reasoning
+    /// legitimately produces longer silences between tokens.
+    pub fn stream_idle_timeout(self) -> Duration {
+        Duration::from_secs(match self {
+            Self::Low => 120,
+            Self::Medium => 180,
+            Self::High => 300,
+            Self::Xhigh => 420,
+        })
     }
 
     /// Retry budget for this effort. `xhigh` already waits up to an hour;

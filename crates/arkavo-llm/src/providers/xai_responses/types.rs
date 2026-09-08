@@ -1,3 +1,4 @@
+use crate::common::responses::Usage;
 use crate::provider::InferenceTiming;
 use crate::tool_parser::ParsedToolCall;
 use serde::{Deserialize, Serialize};
@@ -47,74 +48,37 @@ pub(super) struct ResponsesApiResponse {
     pub id: Option<String>,
     pub status: Option<String>,
     pub output: Option<Vec<Value>>,
-    pub usage: Option<ResponsesUsage>,
+    /// Reported `usage` block, read through [`timing_from_usage`].
+    pub usage: Option<Value>,
     pub error: Option<Value>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct ResponsesUsage {
-    pub input_tokens: Option<u32>,
-    pub output_tokens: Option<u32>,
-    #[serde(default)]
-    pub output_tokens_details: Option<OutputTokenDetails>,
-    #[serde(default)]
-    pub input_tokens_details: Option<InputTokenDetails>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct OutputTokenDetails {
-    pub reasoning_tokens: Option<u32>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct InputTokenDetails {
-    pub cached_tokens: Option<u32>,
-}
-
-/// Map xAI Responses `usage` into [`InferenceTiming`].
+/// Map a Responses `usage` block into [`InferenceTiming`].
 ///
-/// xAI reports `output_tokens` as the **total** generated tokens (including
-/// reasoning). [`InferenceTiming`] keeps `n_eval` and `n_thinking_eval`
-/// disjoint so downstream cost paths can sum them without double-counting.
-/// Cached input tokens are a subset of `input_tokens`, billed at the cache
-/// rate, so they are reported rather than dropped.
-pub(super) fn timing_from_usage(usage: &ResponsesUsage) -> InferenceTiming {
-    let reasoning = usage
-        .output_tokens_details
-        .as_ref()
-        .and_then(|d| d.reasoning_tokens);
-    let input = usage.input_tokens.unwrap_or(0);
-    let total_output = usage.output_tokens.unwrap_or(0);
-    InferenceTiming {
-        n_prompt_eval: input,
-        n_cached_prompt_eval: usage
-            .input_tokens_details
-            .as_ref()
-            .and_then(|d| d.cached_tokens)
-            .map(|cached| cached.min(input)),
-        n_eval: total_output.saturating_sub(reasoning.unwrap_or(0)),
-        n_thinking_eval: reasoning,
-        ..Default::default()
-    }
+/// `None` when the block is missing or unreadable: a usage report this crate
+/// cannot parse is no reason to fail a completion the caller already paid for.
+/// xAI reports `output_tokens` as the total generated (reasoning included), and
+/// [`Usage::timing`] keeps the buckets disjoint so cost paths can sum them.
+/// A subset larger than its total is clamped rather than rejected, so a bad
+/// cache figure cannot read downstream as additional input.
+pub(super) fn timing_from_usage(usage: &Value) -> Option<InferenceTiming> {
+    Some(Usage::parse(usage).ok()?.clamped().timing())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn timing_excludes_reasoning_from_n_eval() {
-        let usage = ResponsesUsage {
-            input_tokens: Some(100),
-            output_tokens: Some(50),
-            output_tokens_details: Some(OutputTokenDetails {
-                reasoning_tokens: Some(30),
-            }),
-            input_tokens_details: Some(InputTokenDetails {
-                cached_tokens: Some(80),
-            }),
-        };
-        let timing = timing_from_usage(&usage);
+        let timing = timing_from_usage(&json!({
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "output_tokens_details": {"reasoning_tokens": 30},
+            "input_tokens_details": {"cached_tokens": 80}
+        }))
+        .expect("a readable usage block maps to timing");
         assert_eq!(timing.n_prompt_eval, 100);
         assert_eq!(timing.n_eval, 20, "visible output must exclude reasoning");
         assert_eq!(timing.n_thinking_eval, Some(30));
@@ -135,28 +99,27 @@ mod tests {
     /// tokens look like additional input downstream.
     #[test]
     fn cached_tokens_stay_a_subset_of_the_reported_input() {
-        let usage = ResponsesUsage {
-            input_tokens: Some(40),
-            output_tokens: Some(5),
-            output_tokens_details: None,
-            input_tokens_details: Some(InputTokenDetails {
-                cached_tokens: Some(100),
-            }),
-        };
-        assert_eq!(timing_from_usage(&usage).n_cached_prompt_eval, Some(40));
+        let timing = timing_from_usage(&json!({
+            "input_tokens": 40,
+            "output_tokens": 5,
+            "input_tokens_details": {"cached_tokens": 100}
+        }))
+        .unwrap();
+        assert_eq!(timing.n_cached_prompt_eval, Some(40));
     }
 
     #[test]
     fn timing_without_reasoning_details() {
-        let usage = ResponsesUsage {
-            input_tokens: Some(10),
-            output_tokens: Some(5),
-            output_tokens_details: None,
-            input_tokens_details: None,
-        };
-        let timing = timing_from_usage(&usage);
+        let timing = timing_from_usage(&json!({"input_tokens": 10, "output_tokens": 5})).unwrap();
         assert_eq!(timing.n_eval, 5);
         assert_eq!(timing.n_thinking_eval, None);
         assert_eq!(timing.n_cached_prompt_eval, None);
+    }
+
+    /// A completion is not worth failing over an unreadable usage report.
+    #[test]
+    fn an_unreadable_usage_block_reports_no_timing() {
+        assert!(timing_from_usage(&json!({"input_tokens": "many"})).is_none());
+        assert!(timing_from_usage(&json!(null)).is_none());
     }
 }

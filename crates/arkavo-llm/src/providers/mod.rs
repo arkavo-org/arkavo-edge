@@ -1,6 +1,8 @@
 #[cfg(feature = "llm-remote")]
 pub mod anthropic;
 #[cfg(feature = "llm-remote")]
+mod anthropic_blocks;
+#[cfg(feature = "llm-remote")]
 pub mod factory;
 #[cfg(feature = "llm-remote")]
 pub mod health;

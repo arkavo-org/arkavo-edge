@@ -1,15 +1,11 @@
 use super::config::ResponsesConfig;
 use super::convert::{convert_input, convert_tools, parse_output};
-use super::sse::{
-    SseAction, action_sets_terminal, append_utf8_chunk, drain_complete_sse_lines,
-    handle_sse_data_line, should_stop_after,
-};
+use super::sse;
 use super::types::{ResponsesApiResponse, ResponsesRequest, ResponsesResult, timing_from_usage};
 use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
 use crate::provider::ProviderResponse;
 use crate::{Message, Provider, StreamResponse};
 use async_trait::async_trait;
-use futures::StreamExt;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -155,7 +151,7 @@ impl ResponsesProvider {
 
         let output = api_response.output.unwrap_or_default();
         let (content, reasoning_content, tool_calls) = parse_output(&output);
-        let inference_timing = api_response.usage.as_ref().map(timing_from_usage);
+        let inference_timing = api_response.usage.as_ref().and_then(timing_from_usage);
 
         Ok(ResponsesResult {
             response_id,
@@ -255,14 +251,12 @@ impl Provider for ResponsesProvider {
         let input = convert_input(&messages);
         let request = self.build_request(input, None, None, true, None);
         let url = self.responses_url();
-        let api_key = self.config.api_key.clone();
-        let last_response_id = Arc::clone(&self.last_response_id);
 
         let response = self
             .client
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
             .json(&request)
             .send()
             .await
@@ -279,65 +273,11 @@ impl Provider for ResponsesProvider {
             )));
         }
 
-        let (tx, rx) = tokio::sync::mpsc::channel(1024);
-
-        tokio::spawn(async move {
-            // Byte pending retains incomplete multi-byte UTF-8 sequences that
-            // straddle TCP chunks; text buffer only grows with valid UTF-8.
-            let mut pending_utf8 = Vec::new();
-            let mut buffer = String::new();
-            let mut stream = response.bytes_stream();
-            let mut terminal_sent = false;
-
-            while let Some(chunk_result) = stream.next().await {
-                match chunk_result {
-                    Ok(bytes) => {
-                        append_utf8_chunk(&mut pending_utf8, &mut buffer, &bytes);
-                        let Some(complete) = drain_complete_sse_lines(&mut buffer) else {
-                            continue;
-                        };
-
-                        for line in complete.lines() {
-                            let Some(data) = line.strip_prefix("data: ") else {
-                                continue;
-                            };
-                            let action = handle_sse_data_line(data, terminal_sent, &mut |id| {
-                                if let Ok(mut g) = last_response_id.lock() {
-                                    *g = Some(id);
-                                }
-                            });
-
-                            let stop = should_stop_after(&action, data);
-                            if action_sets_terminal(&action) {
-                                terminal_sent = true;
-                            }
-                            match action {
-                                SseAction::Emit(chunk) => {
-                                    if tx.send(Ok(chunk)).await.is_err() {
-                                        return;
-                                    }
-                                }
-                                SseAction::Fail(msg) => {
-                                    let _ = tx.send(Err(crate::Error::Provider(msg))).await;
-                                    return;
-                                }
-                                SseAction::Finished | SseAction::Ignore => {}
-                            }
-
-                            if stop {
-                                return;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(crate::Error::Provider(e.to_string()))).await;
-                        break;
-                    }
-                }
-            }
-        });
-
-        Ok(Box::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
+        Ok(sse::stream(
+            response,
+            self.config.reasoning_effort.stream_idle_timeout(),
+            Arc::clone(&self.last_response_id),
+        ))
     }
 
     fn name(&self) -> &'static str {

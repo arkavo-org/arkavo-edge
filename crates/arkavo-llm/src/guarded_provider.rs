@@ -217,3 +217,159 @@ impl Provider for GuardedProvider {
         self.inner.supports_structured_output()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool_parser::ParsedToolCall;
+    use arkavo_test_macros::spec;
+    use std::sync::Mutex;
+
+    /// Blocks any completion whose inspected text names the canary.
+    struct BlockCanary;
+
+    impl ReleaseGate for BlockCanary {
+        fn admit(&self, chunk: &str) -> GateOutcome {
+            if chunk.contains("canary") {
+                GateOutcome::Blocked
+            } else {
+                GateOutcome::Release(chunk.to_string())
+            }
+        }
+        fn finish(&self) -> GateOutcome {
+            GateOutcome::Release(String::new())
+        }
+        fn discard(&self) {}
+    }
+
+    struct Policy;
+
+    impl ReleaseGateFactory for Policy {
+        fn create(&self, _model: &str) -> Arc<dyn ReleaseGate> {
+            Arc::new(BlockCanary)
+        }
+    }
+
+    /// A provider with native tools: its `complete_with_tools` is the only path
+    /// that reports reasoning and tool calls.
+    struct NativeTools {
+        seen: Arc<Mutex<Vec<(bool, Option<usize>)>>>,
+    }
+
+    #[async_trait]
+    impl Provider for NativeTools {
+        async fn complete_with_options(
+            &self,
+            _messages: Vec<Message>,
+            _max_tokens: Option<usize>,
+        ) -> Result<String> {
+            Ok("text-only path".into())
+        }
+        async fn complete_with_tools(
+            &self,
+            _messages: Vec<Message>,
+            tools: Option<Value>,
+            max_tokens: Option<usize>,
+        ) -> Result<ProviderResponse> {
+            self.seen
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((tools.is_none(), max_tokens));
+            Ok(ProviderResponse {
+                content: "the visible answer".into(),
+                reasoning_content: Some("a canary in the reasoning".into()),
+                tool_calls: vec![ParsedToolCall {
+                    tool_name: "read".into(),
+                    arguments: serde_json::json!({}),
+                    call_id: Some("call_1".into()),
+                }],
+                ..Default::default()
+            })
+        }
+        async fn stream(
+            &self,
+            _messages: Vec<Message>,
+        ) -> Result<Box<dyn futures::Stream<Item = Result<StreamResponse>> + Send + Unpin>>
+        {
+            unimplemented!("this fixture never streams")
+        }
+        fn name(&self) -> &str {
+            "native-tools"
+        }
+        fn supports_tools(&self) -> bool {
+            true
+        }
+    }
+
+    /// A provider without native tools: it implements only the text path and
+    /// inherits the trait's default `complete_with_tools`.
+    struct TextOnly;
+
+    #[async_trait]
+    impl Provider for TextOnly {
+        async fn complete_with_options(
+            &self,
+            _messages: Vec<Message>,
+            _max_tokens: Option<usize>,
+        ) -> Result<String> {
+            Ok("plain completion".into())
+        }
+        async fn stream(
+            &self,
+            _messages: Vec<Message>,
+        ) -> Result<Box<dyn futures::Stream<Item = Result<StreamResponse>> + Send + Unpin>>
+        {
+            unimplemented!("this fixture never streams")
+        }
+        fn name(&self) -> &str {
+            "text-only"
+        }
+    }
+
+    /// Text completions route through `complete_with_tools` so the gate sees the
+    /// whole turn — reasoning included. Reaching for `complete_with_options`
+    /// instead would hand the caller text whose reasoning was never inspected.
+    ///
+    /// The dispatch also means a provider that answers the two paths
+    /// differently answers on the tool path here: on Anthropic that honours
+    /// `max_tokens` (its text path ignores it) and forgoes that path's retries.
+    #[spec("SENT-007")]
+    #[tokio::test]
+    async fn a_text_completion_is_gated_on_the_whole_turn() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let guarded = GuardedProvider::new(
+            Box::new(NativeTools {
+                seen: Arc::clone(&seen),
+            }),
+            Arc::new(Policy) as Arc<dyn ReleaseGateFactory>,
+        );
+
+        let error = guarded
+            .complete_with_options(vec![Message::user("hello")], Some(256))
+            .await
+            .expect_err("reasoning naming the canary must not be released as clean text");
+        assert!(error.to_string().contains(GATE_BLOCKED), "{error}");
+        // The wrapped provider was asked for a completion, not for tool use,
+        // and the caller's ceiling reached it.
+        assert_eq!(
+            *seen.lock().unwrap_or_else(|e| e.into_inner()),
+            vec![(true, Some(256))]
+        );
+    }
+
+    /// A provider without native tools has no separate tool path, so the
+    /// dispatch reaches its text completion through the trait's default.
+    #[spec("SENT-007")]
+    #[tokio::test]
+    async fn a_provider_without_native_tools_still_completes() {
+        let guarded = GuardedProvider::new(
+            Box::new(TextOnly),
+            Arc::new(Policy) as Arc<dyn ReleaseGateFactory>,
+        );
+        let content = guarded
+            .complete_with_options(vec![Message::user("hello")], None)
+            .await
+            .unwrap();
+        assert_eq!(content, "plain completion");
+    }
+}

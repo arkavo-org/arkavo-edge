@@ -82,30 +82,12 @@ pub(super) fn convert_tools(tools_json: &Value) -> Vec<Value> {
 }
 
 fn convert_one_tool(tool: &Value) -> Option<Value> {
-    // Responses-native function: {type:"function", name, ...}
+    // Responses-native function: {type:"function", name, ...}. Passed through
+    // with whatever else the caller set on it.
     if tool.get("type").and_then(Value::as_str) == Some("function")
         && tool.get("name").and_then(Value::as_str).is_some()
     {
         return Some(tool.clone());
-    }
-
-    // OpenAI chat-completions shape: {type:"function", function:{name,...}}
-    if let Some(func) = tool.get("function").filter(|f| f.is_object()) {
-        let name = func.get("name")?.as_str()?;
-        let description = func
-            .get("description")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let parameters = func
-            .get("parameters")
-            .cloned()
-            .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
-        return Some(json!({
-            "type": "function",
-            "name": name,
-            "description": description,
-            "parameters": parameters,
-        }));
     }
 
     // Built-in tool types (web_search, etc.) — no top-level name.
@@ -116,23 +98,8 @@ fn convert_one_tool(tool: &Value) -> Option<Value> {
         return Some(tool.clone());
     }
 
-    // Router / Anthropic shape: {name, description, input_schema|parameters}
-    let name = tool.get("name")?.as_str()?;
-    let description = tool
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let parameters = tool
-        .get("parameters")
-        .or_else(|| tool.get("input_schema"))
-        .cloned()
-        .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
-    Some(json!({
-        "type": "function",
-        "name": name,
-        "description": description,
-        "parameters": parameters,
-    }))
+    // OpenAI-nested and router/Anthropic shapes normalize to one function entry.
+    crate::common::responses::function_tool(tool)
 }
 
 pub(super) fn parse_output(output: &[Value]) -> (String, Option<String>, Vec<ParsedToolCall>) {

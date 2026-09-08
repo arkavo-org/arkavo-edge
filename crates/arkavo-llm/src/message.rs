@@ -26,7 +26,7 @@ pub struct ToolCall {
     pub id: Option<String>,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Message {
     /// Provider-owned conversation items, replayed only by the wire family that
     /// produced them. These are opaque state, never user-facing reasoning text.
@@ -137,35 +137,22 @@ impl Message {
 
     /// Render a tool result as user text that still names the tool it came from.
     ///
-    /// Several request formats have no usable tool role: Anthropic's converter
-    /// carries plain strings rather than `tool_result` blocks, Gemini's
-    /// `contents` array knows only user and model, and the Kimi and DeepSeek
-    /// wire crates expose no tool variant that this adapter could pair with an
-    /// assistant `tool_calls` block. None of them may fall back to the
-    /// assistant role: those APIs continue a trailing assistant message as
-    /// prefill, so the model finishes its own tool output instead of answering
-    /// it. Sending the result as user text keeps the turn well-formed, and the
-    /// tool name preserves the provenance the role would otherwise have
-    /// carried. One implementation so the four adapters cannot drift apart.
+    /// Several request formats have no usable tool role: Gemini's `contents`
+    /// array knows only user and model, the Kimi and DeepSeek wire crates
+    /// expose no tool variant that this adapter could pair with an assistant
+    /// `tool_calls` block, and the Qwen template renders one turn of text.
+    /// Anthropic pairs its calls natively and only falls back here for a call
+    /// it cannot pair. None of them may use the assistant role: those APIs
+    /// continue a trailing assistant message as prefill, so the model finishes
+    /// its own tool output instead of answering it. Sending the result as user
+    /// text keeps the turn well-formed, and the tool name preserves the
+    /// provenance the role would otherwise have carried. One implementation so
+    /// the adapters cannot drift apart.
     pub fn tool_result_as_user_text(&self) -> String {
         match &self.tool_name {
             Some(name) => format!("[Tool result from {name}]: {}", self.content),
             None => self.content.clone(),
         }
-    }
-}
-
-impl std::fmt::Debug for Message {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Message")
-            .field("role", &self.role)
-            .field("content", &self.content)
-            .field("images", &self.images)
-            .field("tool_call_id", &self.tool_call_id)
-            .field("tool_name", &self.tool_name)
-            .field("tool_calls", &self.tool_calls)
-            .field("provider_state", &self.provider_state)
-            .finish()
     }
 }
 

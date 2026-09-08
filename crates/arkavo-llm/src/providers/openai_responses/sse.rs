@@ -1,61 +1,14 @@
 use super::convert;
+use crate::common::sse::EventStream;
 use crate::{Error, Result, StreamResponse};
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use serde_json::Value;
-use std::collections::VecDeque;
-use std::pin::Pin;
 use std::time::{Duration, Instant};
 
-const MAX_EVENT_BYTES: usize = 8 * 1024 * 1024;
-
-/// Decode complete events rather than individual network chunks, so fragmented
-/// UTF-8, CRLF and multi-line data fields retain their exact meaning.
-#[derive(Default)]
-struct Decoder {
-    pending: Vec<u8>,
-    data: String,
-    events: VecDeque<String>,
-}
-
-impl Decoder {
-    fn push(&mut self, bytes: &[u8]) -> Result<()> {
-        self.pending.extend_from_slice(bytes);
-        let mut consumed = 0;
-        while let Some(offset) = self.pending[consumed..].iter().position(|b| *b == b'\n') {
-            let end = consumed + offset;
-            let line = std::str::from_utf8(&self.pending[consumed..end])
-                .map_err(|_| Error::Stream("Invalid UTF-8 in Responses event".into()))?
-                .trim_end_matches('\r');
-            if line.is_empty() {
-                if !self.data.is_empty() {
-                    self.events.push_back(std::mem::take(&mut self.data));
-                }
-            } else if let Some(data) = line.strip_prefix("data:") {
-                let data = data.strip_prefix(' ').unwrap_or(data);
-                if !self.data.is_empty() {
-                    self.data.push('\n');
-                }
-                self.data.push_str(data);
-                if self.data.len() > MAX_EVENT_BYTES {
-                    return Err(Error::Stream("Responses event exceeds size limit".into()));
-                }
-            }
-            consumed = end + 1;
-        }
-        self.pending.drain(..consumed);
-        if self.pending.len() > MAX_EVENT_BYTES {
-            return Err(Error::Stream("Responses event exceeds size limit".into()));
-        }
-        Ok(())
-    }
-}
-
 struct State {
-    source: Pin<Box<dyn Stream<Item = std::result::Result<bytes::Bytes, reqwest::Error>> + Send>>,
-    decoder: Decoder,
+    events: EventStream,
     emitted: String,
     terminal: bool,
-    idle: Duration,
     started: Instant,
     /// When the first visible token arrived: the boundary between the model's
     /// deliberation and its generation.
@@ -67,52 +20,41 @@ pub(super) fn stream(
     idle: Duration,
 ) -> Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin> {
     let state = State {
-        source: Box::pin(response.bytes_stream()),
-        decoder: Decoder::default(),
+        events: EventStream::new(response.bytes_stream(), idle),
         emitted: String::new(),
         terminal: false,
-        idle,
         started: Instant::now(),
         first_output: None,
     };
     // Pull-based ownership means dropping the consumer immediately drops the HTTP
     // body; there is no detached task continuing to generate billable output.
-    Box::new(Box::pin(futures::stream::try_unfold(
-        state,
-        |mut state| async move {
-            if state.terminal {
-                return Ok(None);
+    Box::new(Box::pin(futures::stream::try_unfold(state, step)))
+}
+
+/// Read events until one of them produces a chunk for the caller.
+///
+/// A body that ends without `response.completed` never delivered the answer the
+/// caller was billed for, so it is a failure rather than an end of turn.
+async fn step(mut state: State) -> Result<Option<(StreamResponse, State)>> {
+    if state.terminal {
+        return Ok(None);
+    }
+    loop {
+        let Some(data) = state.events.next_event().await? else {
+            return Err(Error::Stream(
+                "Responses stream ended before completion".into(),
+            ));
+        };
+        if let Some(mut chunk) = event(&data, &mut state.emitted)? {
+            state.terminal = chunk.done;
+            if chunk.done {
+                attribute(&mut chunk, &state);
+            } else if state.first_output.is_none() {
+                state.first_output = Some(Instant::now());
             }
-            loop {
-                if let Some(data) = state.decoder.events.pop_front() {
-                    if let Some(mut chunk) = event(&data, &mut state.emitted)? {
-                        state.terminal = chunk.done;
-                        if chunk.done {
-                            attribute(&mut chunk, &state);
-                        } else if state.first_output.is_none() {
-                            state.first_output = Some(Instant::now());
-                        }
-                        return Ok(Some((chunk, state)));
-                    }
-                    continue;
-                }
-                // A stalled connection has to fail on its own evidence rather
-                // than hold the caller for the whole request budget.
-                let next = tokio::time::timeout(state.idle, state.source.next())
-                    .await
-                    .map_err(|_| Error::Stream("Responses stream stalled".into()))?;
-                match next {
-                    Some(Ok(bytes)) => state.decoder.push(&bytes)?,
-                    Some(Err(error)) => return Err(Error::Request(error.without_url())),
-                    None => {
-                        return Err(Error::Stream(
-                            "Responses stream ended before completion".into(),
-                        ));
-                    }
-                }
-            }
-        },
-    )))
+            return Ok(Some((chunk, state)));
+        }
+    }
 }
 
 /// Split the measured wall time at the first visible token.
@@ -197,18 +139,21 @@ fn event(data: &str, emitted: &mut String) -> Result<Option<StreamResponse>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use serde_json::json;
 
+    /// The shared decoder frames the events; this pins that the provider's
+    /// stream still reads them byte-for-byte through it.
     #[arkavo_test_macros::spec("ASTRA-003")]
     #[test]
-    fn fragmented_utf8_crlf_and_multiline_data_are_lossless() {
+    fn fragmented_utf8_crlf_and_multiline_data_reach_the_event_handler() {
         let input = "data: {\r\ndata: \"type\":\"response.output_text.delta\",\r\ndata: \"delta\":\"🌍\"}\r\n\r\n";
-        let mut decoder = Decoder::default();
+        let mut decoder = crate::common::sse::Decoder::default();
         for byte in input.as_bytes() {
             decoder.push(&[*byte]).unwrap();
         }
         let mut text = String::new();
-        let chunk = event(&decoder.events.pop_front().unwrap(), &mut text)
+        let chunk = event(&decoder.next_event().unwrap(), &mut text)
             .unwrap()
             .unwrap();
         assert_eq!(chunk.content, "🌍");
@@ -239,10 +184,30 @@ mod tests {
         }
     }
 
+    /// A body that stops before `response.completed` never delivered the text
+    /// the caller was billed for, and must not read as a clean end of turn.
     #[arkavo_test_macros::spec("ASTRA-003")]
-    #[test]
-    fn invalid_utf8_is_not_replaced() {
-        assert!(Decoder::default().push(b"data: \xff\n\n").is_err());
+    #[tokio::test]
+    async fn a_body_that_ends_before_completion_fails() {
+        let state = State {
+            events: EventStream::new(
+                futures::stream::iter(vec![Ok(bytes::Bytes::from_static(
+                    b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
+                ))]),
+                Duration::from_secs(1),
+            ),
+            emitted: String::new(),
+            terminal: false,
+            started: Instant::now(),
+            first_output: None,
+        };
+        let mut stream = Box::pin(futures::stream::try_unfold(state, step));
+        assert_eq!(stream.next().await.unwrap().unwrap().content, "hi");
+        let error = stream.next().await.unwrap().unwrap_err();
+        assert!(
+            error.to_string().contains("ended before completion"),
+            "{error}"
+        );
     }
 }
 
@@ -303,11 +268,9 @@ mod failure_tests {
     #[test]
     fn terminal_timing_splits_wall_time_at_the_first_token() {
         let mut state = State {
-            source: Box::pin(futures::stream::empty()),
-            decoder: Decoder::default(),
+            events: EventStream::new(futures::stream::empty(), Duration::from_secs(1)),
             emitted: String::new(),
             terminal: false,
-            idle: Duration::from_secs(1),
             started: Instant::now()
                 .checked_sub(Duration::from_millis(80))
                 .expect("fixture clock"),

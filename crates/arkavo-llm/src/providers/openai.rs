@@ -115,6 +115,9 @@ struct Choice {
 struct Usage {
     prompt_tokens: u32,
     completion_tokens: u32,
+    /// Never read: the cost path prices the prompt and completion buckets
+    /// separately, and a sum of them would double-count. Declared so the field
+    /// is visible where the wire format is, rather than looking unsupported.
     total_tokens: u32,
 }
 
