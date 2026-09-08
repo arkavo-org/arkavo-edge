@@ -99,7 +99,7 @@ impl ArchitectExecutor {
         // Synthesize final response
         let final_response = self.synthesize_results(plan, &results).await?;
 
-        let actual_savings = plan.opus_only_estimate_usd - total_cost;
+        let actual_savings = plan.single_arm_estimate_usd - total_cost;
         let was_cost_effective = actual_savings > 0.0;
 
         Ok(ArchitectResult {
@@ -346,19 +346,24 @@ impl ArchitectExecutor {
             );
         }
 
-        // Add cost summary
+        // Add cost summary. The comparison names the arm that planned, because
+        // that is the only single-model run the plan can be measured against;
+        // a plan with no planning arm reports its cost and nothing else.
         let total_cost: f64 = results.iter().map(|r| r.actual_cost_usd).sum();
-        let savings = plan.opus_only_estimate_usd - total_cost;
-        let savings_pct = if plan.opus_only_estimate_usd > 0.0 {
-            (savings / plan.opus_only_estimate_usd) * 100.0
-        } else {
-            0.0
-        };
-
-        let _ = write!(
-            summary,
-            "---\n**Cost**: ${total_cost:.4} (saved ${savings:.4}, {savings_pct:.1}% vs Opus-only)\n"
-        );
+        match (&plan.planning_model, plan.single_arm_estimate_usd) {
+            (Some(model), baseline) if baseline > 0.0 => {
+                let savings = baseline - total_cost;
+                let savings_pct = (savings / baseline) * 100.0;
+                let name = model.name();
+                let _ = write!(
+                    summary,
+                    "---\n**Cost**: ${total_cost:.4} (saved ${savings:.4}, {savings_pct:.1}% vs {name} alone)\n"
+                );
+            }
+            _ => {
+                let _ = write!(summary, "---\n**Cost**: ${total_cost:.4}\n");
+            }
+        }
 
         Ok(summary)
     }

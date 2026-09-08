@@ -33,6 +33,7 @@ pub mod response;
 pub mod response_policy;
 pub mod rlm;
 pub mod selector;
+pub mod selector_local;
 pub mod selector_quality;
 pub mod spec_stats;
 pub mod stream;
@@ -1656,6 +1657,13 @@ impl Router {
         self.selector.fastest_local_model()
     }
 
+    /// The cloud arm that augments local inference on this install, or `None`
+    /// when no cloud provider is configured. Callers still have to face
+    /// `authorize_call` before dispatching it.
+    pub fn cloud_augmentation_model(&self) -> Option<ModelChoice> {
+        self.selector.cloud_augmentation_model()
+    }
+
     /// Minimum context size across all currently-loaded local models.
     /// Returns conservative default (4096) if no models are loaded.
     /// Used by ConversationWindow to compute the history token budget.
@@ -2642,6 +2650,41 @@ mod tests {
         assert_eq!(response.content, "answer");
         assert!(response.model.is_local());
         assert_eq!(provider.builds(), 1);
+    }
+
+    /// Regression: the cloud gate used to run before the ledger, so an
+    /// exhausted cap under `LocalOnly` surfaced as a policy denial and hid the
+    /// fact that the money was already gone. The ledger answers first, even for
+    /// an arm the user named.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn an_exhausted_cap_outranks_the_cloud_policy_on_chat() {
+        use crate::test_support::{CountingProvider, cloud_router};
+        use arkavo_budget::{BudgetConfig, BudgetTracker, TokenCost};
+
+        let mut config = BudgetConfig::default();
+        config.limits.session_limit = Some(TokenCost::from_cents(1));
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+        let provider = CountingProvider::new("answer");
+        let router = cloud_router(arkavo_budget::CloudPolicy::LocalOnly, "openai", &provider)
+            .await
+            .with_budget_tracker(tracker.clone());
+
+        let error = router
+            .route_chat_spec(
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                Some(&ModelSpec::Named(ModelChoice::Gpt6Astra)),
+                Some("session-a"),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::BudgetExceeded(_)),
+            "the ledger must answer before the policy: got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert!(tracker.get_spending_history(10).await.is_empty());
     }
 
     /// The automatic chat arm is local, and an unprovisioned one used to reach

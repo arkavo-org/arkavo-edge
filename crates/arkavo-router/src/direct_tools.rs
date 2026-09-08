@@ -47,6 +47,12 @@ impl super::Router {
         let model = model_hint
             .cloned()
             .unwrap_or_else(|| self.default_chat_model());
+        // Naming an arm is the caller's own choice to reach for it; falling
+        // back to the device default is not, so an unprovisioned default
+        // refuses here rather than pulling weights inside the tool loop.
+        if model_hint.is_none() {
+            self.require_provisioned(&model)?;
+        }
 
         let tools_json = match tool_registry {
             Some(registry) => {
@@ -251,7 +257,7 @@ impl super::Router {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_support::{CountingProvider, cloud_router};
+    use crate::test_support::{CountingProvider, cloud_router, cloud_router_provisioned};
     use crate::{Error, ModelChoice};
     use arkavo_budget::CloudPolicy;
     use arkavo_llm::Message;
@@ -266,6 +272,28 @@ mod tests {
             error,
             Error::ModerationBlocked { .. } | Error::CloudConfirmationRequired { .. }
         )
+    }
+
+    /// Regression: the execution path took `default_chat_model()` whenever no
+    /// hint named an arm and handed it straight to provider construction, so
+    /// an unprovisioned device started a multi-gigabyte download inside the
+    /// tool loop instead of refusing.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn the_execution_path_refuses_an_unprovisioned_default() {
+        let provider = CountingProvider::new("ok");
+        let router = cloud_router(CloudPolicy::CloudWithinCap, "openai", &provider).await;
+
+        let error = router
+            .route_with_tools_execution_attributed("summarize", prompt(), None, None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModelNotAvailable { .. }),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert_eq!(provider.calls(), 0);
     }
 
     #[spec("ASTRA-004")]
@@ -316,7 +344,7 @@ mod tests {
     #[tokio::test]
     async fn explicit_cloud_override_augments_the_local_default() {
         let provider = CountingProvider::new("ok");
-        let router = cloud_router(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
+        let router = cloud_router_provisioned(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
         assert!(router.default_chat_model().is_local());
         let local = router
             .route_with_tools_execution_attributed("summarize", prompt(), None, None)
@@ -336,7 +364,7 @@ mod tests {
     #[tokio::test]
     async fn a_standing_approval_does_not_pull_local_execution_into_the_cloud() {
         let provider = CountingProvider::new("ok");
-        let router = cloud_router(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
+        let router = cloud_router_provisioned(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
         router.approve_cloud_for_host();
         let routed = router
             .route_with_tools_execution_attributed("summarize", prompt(), None, None)
@@ -352,7 +380,7 @@ mod tests {
     #[tokio::test]
     async fn host_confirmation_covers_every_later_call() {
         let provider = CountingProvider::new("ok");
-        let router = cloud_router(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
+        let router = cloud_router_provisioned(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
 
         router.approve_cloud_for_host();
         for _ in 0..2 {

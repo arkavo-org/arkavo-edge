@@ -1,3 +1,4 @@
+use arkavo_router::decision::ModelChoice;
 use std::path::PathBuf;
 
 /// Configuration for task execution
@@ -121,6 +122,22 @@ impl ModelInfo {
             size_gb: Some(size_gb),
             path: Some(path),
         }
+    }
+
+    /// The routed arm this discovered model corresponds to, for use as a
+    /// planner route hint.
+    ///
+    /// Local weights only, matched by GGUF filename against the model
+    /// registry. A cloud selection deliberately yields `None`: the router
+    /// treats an applied hint as the caller's own consent to spend on that
+    /// arm, and a model this crate picked off the environment is nobody's
+    /// consent — the router's own gate has to authorize it.
+    pub fn routing_hint(&self) -> Option<ModelChoice> {
+        let file = self.path.as_ref()?.file_name()?.to_str()?;
+        ModelChoice::ALL_LOCAL
+            .iter()
+            .find(|model| model.gguf_filename() == Some(file))
+            .cloned()
     }
 }
 

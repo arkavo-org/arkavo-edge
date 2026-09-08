@@ -215,25 +215,17 @@ impl LocalTaskStrategy {
         }
     }
 
-    /// Select appropriate models for task roles
+    /// Select models for the task's roles, local first.
     ///
-    /// Returns SelectedModels with:
-    /// - gather_model: Local model for info gathering
-    /// - planning_model: Cloud model (preferred) or large local
-    /// - verify_model: Same as gather_model
+    /// A provisioned local model runs the work whenever the device has one:
+    /// cloud augments local inference, it does not replace it, and a
+    /// discovered API key is not a reason to send the repository's contents
+    /// off the machine. Cloud is selected only when nothing is cached locally,
+    /// and even then the router's cloud policy still has to authorize the call.
     pub fn select_models(
         local_models: &[ModelInfo],
         cloud_models: &[ModelInfo],
     ) -> Option<SelectedModels> {
-        // Select cloud model: Gemini > Anthropic > OpenAI > DeepSeek
-        let cloud = cloud_models
-            .iter()
-            .find(|m| m.provider == "gemini")
-            .or_else(|| cloud_models.iter().find(|m| m.provider == "anthropic"))
-            .or_else(|| cloud_models.iter().find(|m| m.provider == "openai"))
-            .or_else(|| cloud_models.iter().find(|m| m.provider == "deepseek"))
-            .cloned();
-
         // Select local model: prefer Medium > Large > Small
         // Medium (4B) is ideal: fast + capable for tool use
         let local = local_models
@@ -257,9 +249,19 @@ impl LocalTaskStrategy {
             .or(local_models.first())
             .cloned();
 
-        // Need at least one model for planning
-        let planning_model = cloud.clone().or_else(|| local.clone())?;
-        let gather_model = local.clone().unwrap_or_else(|| planning_model.clone());
+        // Cloud is the fallback for a device with no weights on disk, in the
+        // same preference order as before: Gemini > Anthropic > OpenAI > DeepSeek.
+        let planning_model = match local.clone() {
+            Some(local) => local,
+            None => cloud_models
+                .iter()
+                .find(|m| m.provider == "gemini")
+                .or_else(|| cloud_models.iter().find(|m| m.provider == "anthropic"))
+                .or_else(|| cloud_models.iter().find(|m| m.provider == "openai"))
+                .or_else(|| cloud_models.iter().find(|m| m.provider == "deepseek"))
+                .cloned()?,
+        };
+        let gather_model = local.unwrap_or_else(|| planning_model.clone());
         let verify_model = gather_model.clone();
 
         Some(SelectedModels {
@@ -346,13 +348,15 @@ impl TaskStrategy for LocalTaskStrategy {
                 Self::select_models(&local_models, &cloud_models).ok_or_else(|| {
                     ui.error("No models available");
                     ui.error("Please either:");
-                    ui.error("  - Set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY");
                     ui.error(&format!(
                         "  - Download a local model with: {}",
                         arkavo_router::decision::ModelChoice::LocalQwen3
                             .download_hint()
                             .unwrap_or_default()
                     ));
+                    ui.error(
+                        "  - Or configure a cloud provider to augment it: set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY",
+                    );
                     Error::Model {
                         operation: "select models for task".to_string(),
                         details: "no local or cloud models available".to_string(),
@@ -605,8 +609,12 @@ mod tests {
         );
     }
 
+    /// Regression: selection preferred a cloud arm for planning whenever an
+    /// API key happened to be set, so a device with weights on disk still sent
+    /// the repository's contents off the machine.
+    #[spec("ASTRA-004")]
     #[test]
-    fn test_select_models_cloud_preferred() {
+    fn a_provisioned_device_plans_locally_even_with_a_cloud_key() {
         let local = vec![ModelInfo::local(
             "test.gguf",
             PathBuf::from("/test"),
@@ -617,8 +625,20 @@ mod tests {
 
         let selected = LocalTaskStrategy::select_models(&local, &cloud).unwrap();
 
-        assert_eq!(selected.planning_model.provider, "gemini");
+        assert_eq!(selected.planning_model.provider, "local");
         assert_eq!(selected.gather_model.provider, "local");
+    }
+
+    /// Cloud is still the fallback when the device has nothing on disk.
+    #[spec("ASTRA-004")]
+    #[test]
+    fn a_bare_device_falls_back_to_cloud() {
+        let cloud = vec![ModelInfo::cloud("Gemini", "gemini", "gemini-3.5-flash")];
+
+        let selected = LocalTaskStrategy::select_models(&[], &cloud).unwrap();
+
+        assert_eq!(selected.planning_model.provider, "gemini");
+        assert_eq!(selected.gather_model.provider, "gemini");
     }
 
     #[test]
@@ -736,9 +756,14 @@ mod tests {
     }
 
     fn local_only_selection() -> SelectedModels {
+        // Named after a real registry weight, so the selection can be carried
+        // into the router as a hint rather than being decorative.
+        let file = arkavo_router::decision::ModelChoice::LocalMinistral3B
+            .gguf_filename()
+            .expect("a registered local arm has a weight file");
         let model = ModelInfo::local(
-            "medium.gguf",
-            PathBuf::from("/medium"),
+            file,
+            PathBuf::from("/models").join(file),
             4.0,
             ModelCapability::Medium,
         );
@@ -791,6 +816,17 @@ mod tests {
                 .all(|name| arkavo_router::decision::ModelChoice::from_name(name)
                     .is_some_and(|model| model.is_local())),
             "no credentials are configured, so no cloud arm may be built: {built:?}"
+        );
+        // Regression: `with_models` used to be decorative — the planner threw
+        // the selection away and let the router pick per round, so the models
+        // the UI announced were not the models that ran.
+        assert!(
+            built.contains(
+                &arkavo_router::decision::ModelChoice::LocalMinistral3B
+                    .name()
+                    .to_string()
+            ),
+            "the selected arm must be the arm that serves the planning rounds: {built:?}"
         );
     }
 }

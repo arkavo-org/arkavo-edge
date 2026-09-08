@@ -70,15 +70,20 @@ impl ArchitectPlanner {
         let preflight = crate::usage::estimate_request(&messages, None, 4096);
         let settled = crate::usage::estimate_request(&messages, None, 0);
         let budget = self.router.as_ref().and_then(|r| r.call_budget());
+        // What the planning call itself is expected to cost. Without a router
+        // there is no pricing to ask for, and the plan carries no planning cost.
+        let planning_cost = self
+            .router
+            .as_ref()
+            .map_or(0.0, |router| router.usage_cost(&model, &preflight));
         if let Some(router) = self.router.as_ref() {
             // The planning arm is chosen from the configured providers, never
             // named by the caller, so the cloud gate gets no authorization.
-            let estimated_cost = router.usage_cost(&model, &preflight);
             if let Some(budget) = budget {
-                budget.check(estimated_cost).await?;
+                budget.check(planning_cost).await?;
             }
             router
-                .authorize_call(&model, estimated_cost, false, None)
+                .authorize_call(&model, planning_cost, false, None)
                 .await?;
         }
 
@@ -108,10 +113,9 @@ impl ArchitectPlanner {
 
         // Capture reasoning from thinking models (e.g., DeepSeek V3.2-Speciale)
         plan.planning_reasoning = response.reasoning_content;
-        plan.planning_model = Some(model);
+        plan.planning_model = Some(model.clone());
 
-        // Calculate cost estimates
-        self.estimate_costs(&mut plan);
+        Self::estimate_costs(&mut plan, &model, planning_cost);
 
         Ok(plan)
     }
@@ -225,22 +229,21 @@ Guidelines:
         subtask_model::select_model_for_category(&self.availability, self.router.as_ref(), category)
     }
 
-    fn estimate_costs(&self, plan: &mut ArchitectPlan) {
-        // Calculate architect mode total cost
-        let planning_cost = 0.005; // ~200 output tokens from Opus at $25/1M
+    /// Price the plan, and the single-arm baseline it is measured against.
+    ///
+    /// The baseline is every subtask run on the arm that actually planned —
+    /// the only comparison the plan can support. Pricing it through
+    /// [`subtask_model::estimate_subtask_cost`], the same function the
+    /// subtasks are priced with, keeps the two sides of the subtraction on one
+    /// scale.
+    fn estimate_costs(plan: &mut ArchitectPlan, planning_model: &ModelChoice, planning_cost: f64) {
         let execution_cost: f64 = plan.subtasks.iter().map(|s| s.estimated_cost_usd).sum();
         plan.architect_estimate_usd = planning_cost + execution_cost;
-
-        // Calculate Opus-only estimate (Opus 4.8: $5/$25 per MTok)
-        let total_output_tokens: u32 = plan
+        plan.single_arm_estimate_usd = plan
             .subtasks
             .iter()
-            .map(|s| s.category.estimated_tokens().output)
+            .map(|s| subtask_model::estimate_subtask_cost(planning_model, s.category))
             .sum();
-        let total_input_tokens = total_output_tokens / 3;
-        let input_cost = (total_input_tokens as f64 / 1_000_000.0) * 5.00;
-        let output_cost = (total_output_tokens as f64 / 1_000_000.0) * 25.00;
-        plan.opus_only_estimate_usd = input_cost + output_cost;
     }
 }
 
@@ -509,6 +512,66 @@ mod tests {
         assert_eq!(provider.builds(), 0, "a denied plan must not open a client");
         assert_eq!(provider.calls(), 0);
         assert!(tracker.get_spending_history(10).await.is_empty());
+    }
+
+    /// Regression: the planner used to face the cloud policy before the
+    /// ledger, so an exhausted cap under `LocalOnly` was reported as a policy
+    /// denial. Planning asks the ledger first, like every other path.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn an_exhausted_cap_outranks_the_cloud_policy_on_planning() {
+        let mut config = BudgetConfig::default();
+        config.limits.session_limit = Some(TokenCost::from_cents(1));
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+        let provider = CountingProvider::new(TWO_STEP_PLAN);
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = Arc::new(
+            router
+                .with_cloud_policy(arkavo_budget::CloudPolicy::LocalOnly)
+                .with_connectivity(crate::ConnectivityChecker::assume(true))
+                .with_budget_tracker(tracker.clone())
+                .with_provider_factory(provider.factory()),
+        );
+
+        let error = astra_plan(&router).await.unwrap_err();
+        assert!(
+            matches!(&error, Error::BudgetExceeded(_)),
+            "the ledger must answer before the policy: got {error:?}"
+        );
+        assert_eq!(
+            provider.builds(),
+            0,
+            "a refused plan must not open a client"
+        );
+        assert!(tracker.get_spending_history(10).await.is_empty());
+    }
+
+    /// The plan is measured against the arm that actually planned it, not a
+    /// fixed Opus rate for a model the plan never touches.
+    #[spec("ROUTER-010")]
+    #[tokio::test]
+    async fn the_savings_baseline_is_the_planning_arm() {
+        let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+        let provider = CountingProvider::new(TWO_STEP_PLAN);
+        let router = astra_router(&tracker, &provider).await;
+
+        let plan = astra_plan(&router).await.unwrap();
+        let expected: f64 = plan
+            .subtasks
+            .iter()
+            .map(|s| subtask_model::estimate_subtask_cost(&ModelChoice::Gpt6Astra, s.category))
+            .sum();
+        assert!(expected > 0.0);
+        assert!(
+            (plan.single_arm_estimate_usd - expected).abs() < 1e-12,
+            "baseline {} should price the planning arm ({expected})",
+            plan.single_arm_estimate_usd
+        );
+        assert!(
+            plan.architect_estimate_usd > 0.0,
+            "the planning call carries its own priced cost"
+        );
     }
 
     /// Architect subtasks spend like any other cloud call, so the executor's

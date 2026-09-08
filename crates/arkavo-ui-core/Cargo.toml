@@ -42,4 +42,5 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+arkavo-budget = { path = "../arkavo-budget" }
 tokio = { workspace = true, features = ["full"] }

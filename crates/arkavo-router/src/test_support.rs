@@ -216,6 +216,25 @@ pub(crate) async fn cloud_router(
     provider_name: &str,
     provider: &CountingProvider,
 ) -> crate::Router {
+    cloud_router_with_weights(policy, provider_name, provider, false).await
+}
+
+/// The same fixture with the device's local weights on disk, for the paths
+/// that must actually dispatch a local arm.
+pub(crate) async fn cloud_router_provisioned(
+    policy: arkavo_budget::CloudPolicy,
+    provider_name: &str,
+    provider: &CountingProvider,
+) -> crate::Router {
+    cloud_router_with_weights(policy, provider_name, provider, true).await
+}
+
+async fn cloud_router_with_weights(
+    policy: arkavo_budget::CloudPolicy,
+    provider_name: &str,
+    provider: &CountingProvider,
+    local_cached: bool,
+) -> crate::Router {
     let mut router = crate::Router::new_offline().await.unwrap();
     router.set_offline_mode(false);
     router
@@ -223,7 +242,7 @@ pub(crate) async fn cloud_router(
         .with_connectivity(crate::ConnectivityChecker::assume(true))
         .with_selector(crate::ModelSelector::with_availability(
             only(provider_name),
-            false,
+            local_cached,
         ))
         .await
         .with_provider_factory(provider.factory())

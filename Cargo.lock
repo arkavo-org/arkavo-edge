@@ -764,12 +764,10 @@ dependencies = [
  "arkavo-dataflow",
  "arkavo-test-macros",
  "async-stream",
- "async-trait",
  "chrono",
  "serde",
  "serde_json",
  "tokio",
- "tokio-stream",
  "tracing",
  "uuid",
 ]
@@ -2386,6 +2384,7 @@ version = "0.93.0"
 dependencies = [
  "anyhow",
  "arkavo-agui",
+ "arkavo-budget",
  "arkavo-llm",
  "arkavo-router",
  "async-trait",
@@ -2401,6 +2400,7 @@ version = "0.93.0"
 dependencies = [
  "anyhow",
  "arkavo-browser",
+ "arkavo-budget",
  "arkavo-gemini",
  "arkavo-llm",
  "arkavo-observability",

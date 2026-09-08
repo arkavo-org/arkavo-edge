@@ -374,62 +374,87 @@ mod tests {
         }
     }
 
+    fn assignment() -> AgentAssignment {
+        serde_json::from_value(serde_json::json!({
+            "issue_number": 1, "repository": "test/repo", "issue_title": "Fix a bug",
+            "issue_body": "Private issue content", "assigned_agent_id": null,
+            "assignment_rationale": "test",
+            "routing_decision": {
+                "strategy": "plan_first", "rationale": "test", "should_notify_human": false,
+                "priority": "medium", "analysis": {
+                    "issue_type": "bug", "complexity": "simple", "technologies": [],
+                    "required_capabilities": [], "estimated_tokens": 1000
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    fn step() -> PlanStep {
+        PlanStep {
+            step_number: 1,
+            description: "Fix a bug".into(),
+            commands: vec![],
+            verification: vec![],
+            confidence: 0.5,
+        }
+    }
+
+    fn failures() -> [VerificationResult; 1] {
+        [VerificationResult {
+            check: crate::cognitive_engine_core::VerificationCheck::TestsPassing,
+            passed: false,
+            details: "Private failure details".into(),
+        }]
+    }
+
+    /// A planner with one configured cloud provider, no local weights on disk,
+    /// and every provider substituted — so nothing here reads credentials, the
+    /// model cache or the network.
+    async fn planner_with(
+        policy: CloudPolicy,
+        config: BudgetConfig,
+    ) -> (Planner, DispatchCounter, Arc<BudgetTracker>) {
+        let counter = DispatchCounter::default();
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+        let availability = arkavo_router::ProviderAvailability {
+            openai: true,
+            ..Default::default()
+        };
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = router
+            .with_selector(arkavo_router::ModelSelector::with_availability(
+                availability,
+                false,
+            ))
+            .await
+            .with_connectivity(arkavo_router::ConnectivityChecker::assume(true))
+            .with_cloud_policy(policy)
+            .with_provider_factory(Arc::new(counter.clone()));
+        let planner = Planner::new(tracker.clone(), Arc::new(router), None);
+        (planner, counter, tracker)
+    }
+
+    fn router_error(error: Error) -> anyhow::Error {
+        let Error::Other(error) = error else {
+            panic!("unexpected error")
+        };
+        error
+    }
+
     #[tokio::test]
     async fn cloud_policy_blocks_planning_and_adjustment_before_dispatch() {
         for policy in [CloudPolicy::LocalOnly, CloudPolicy::AskBeforeCloud] {
-            let counter = DispatchCounter::default();
-            let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
-            let availability = arkavo_router::ProviderAvailability {
-                openai: true,
-                ..Default::default()
-            };
-            let mut router = Router::new_offline().await.unwrap();
-            router.set_offline_mode(false);
-            let router = router
-                .with_selector(arkavo_router::ModelSelector::with_availability(
-                    availability,
-                    false,
-                ))
-                .await
-                .with_connectivity(arkavo_router::ConnectivityChecker::assume(true))
-                .with_cloud_policy(policy)
-                .with_provider_factory(Arc::new(counter.clone()));
-            let planner = Planner::new(tracker.clone(), Arc::new(router), None);
-            let assignment: AgentAssignment = serde_json::from_value(serde_json::json!({
-                "issue_number": 1, "repository": "test/repo", "issue_title": "Fix a bug",
-                "issue_body": "Private issue content", "assigned_agent_id": null,
-                "assignment_rationale": "test",
-                "routing_decision": {
-                    "strategy": "plan_first", "rationale": "test", "should_notify_human": false,
-                    "priority": "medium", "analysis": {
-                        "issue_type": "bug", "complexity": "simple", "technologies": [],
-                        "required_capabilities": [], "estimated_tokens": 1000
-                    }
-                }
-            }))
-            .unwrap();
-            let step = PlanStep {
-                step_number: 1,
-                description: "Fix a bug".into(),
-                commands: vec![],
-                verification: vec![],
-                confidence: 0.5,
-            };
-            let failures = [VerificationResult {
-                check: crate::cognitive_engine_core::VerificationCheck::TestsPassing,
-                passed: false,
-                details: "Private failure details".into(),
-            }];
+            let (planner, counter, tracker) = planner_with(policy, BudgetConfig::default()).await;
             for error in [
-                planner.plan(&assignment).await.unwrap_err(),
-                planner.adjust(&step, &failures).await.unwrap_err(),
+                planner.plan(&assignment()).await.unwrap_err(),
+                planner.adjust(&step(), &failures()).await.unwrap_err(),
             ] {
-                let Error::Other(error) = error else {
-                    panic!("unexpected error")
-                };
+                let error = router_error(error);
                 let error = error
                     .downcast_ref::<arkavo_router::Error>()
-                    .expect("router policy error");
+                    .expect("router error");
                 assert!(
                     matches!(
                         error,
@@ -447,5 +472,36 @@ mod tests {
             assert_eq!(counter.calls.load(Ordering::SeqCst), 0);
             assert!(tracker.get_spending_history(10).await.is_empty());
         }
+    }
+
+    /// Regression: the ledger answers before the cloud policy, so an exhausted
+    /// cap reports the money being gone rather than a policy denial — which
+    /// would have sent the operator looking for the wrong setting.
+    #[tokio::test]
+    async fn an_exhausted_cap_outranks_the_cloud_policy() {
+        let mut config = BudgetConfig::default();
+        config.limits.session_limit = Some(arkavo_budget::TokenCost::from_cents(1));
+        let (planner, counter, tracker) = planner_with(CloudPolicy::LocalOnly, config).await;
+
+        for error in [
+            planner.plan(&assignment()).await.unwrap_err(),
+            planner.adjust(&step(), &failures()).await.unwrap_err(),
+        ] {
+            let error = router_error(error);
+            let error = error
+                .downcast_ref::<arkavo_router::Error>()
+                .expect("router error");
+            assert!(
+                matches!(error, arkavo_router::Error::BudgetExceeded(_)),
+                "the ledger must answer before the policy: {error}"
+            );
+        }
+        assert_eq!(
+            counter.builds.load(Ordering::SeqCst),
+            0,
+            "a refused plan must not open a client"
+        );
+        assert_eq!(counter.calls.load(Ordering::SeqCst), 0);
+        assert!(tracker.get_spending_history(10).await.is_empty());
     }
 }

@@ -377,24 +377,12 @@ impl CostOrchestrator {
         Ok(0.0)
     }
 
-    /// Record engine-time actual spending for a routed call.
+    /// Append an engine-time spending record for a routed call.
     ///
-    /// `route_with_budget` now *reserves* the estimated cost up front (see the
-    /// `try_spend` reservation there), so this must reconcile the reservation
-    /// against the real usage — record the delta (`actual - estimated`), not a
-    /// fresh add — or the call is billed twice. Wiring the live engine caller
-    /// that performs that reconciliation is tracked by issue #587; until then
-    /// this entry point has no production caller.
-    ///
-    /// Reconciliation is required because the reservation is **not** refunded
-    /// on its own: a route whose downstream call fails, costs less than
-    /// estimated, or never runs leaves the estimate reserved. The
-    /// `route_with_budget` path (and `BudgetMiddleware`'s own actual-recording)
-    /// are currently dormant — `CostOrchestrator` is constructed only in tests
-    /// and `route_with_architect` has no production caller — so this cannot
-    /// over-count or double-count today. Before wiring the path live (#587),
-    /// the reconcile here must replace, not stack on, any middleware
-    /// actual-recording for the same call.
+    /// `route_with_budget` *reserves* the estimated cost up front (the
+    /// `try_spend` reservation there), so this adds to that reservation rather
+    /// than replacing it. Nothing reconciles the two today, which is why no
+    /// production path calls both for the same call.
     pub async fn record_actual_spending(
         &self,
         agent_id: String,
@@ -541,13 +529,6 @@ impl CostOrchestrator {
         // and could pick 8B+ models on a CPU-only host.
         router = router.with_selector(self.selector.snapshot()).await;
         Ok(router)
-    }
-
-    /// Get architect savings summary from budget tracker
-    pub async fn get_architect_savings_summary(
-        &self,
-    ) -> arkavo_budget::tracker::ArchitectUsageSummary {
-        self.budget_tracker.get_architect_summary().await
     }
 }
 

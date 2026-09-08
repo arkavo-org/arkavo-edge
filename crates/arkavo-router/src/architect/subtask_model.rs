@@ -34,8 +34,7 @@ pub(super) fn select_model_for_category(
     }
     // Cloud augmentation must not displace a provisioned local subtask model,
     // so it is only reached once the preferred local arm is known missing.
-    crate::ModelSelector::with_availability(availability.clone(), false)
-        .cloud_augmentation_model()
+    crate::selector::cloud_augmentation_model(availability)
         .or_else(|| router.and_then(|router| router.selector.fastest_cached_local_model()))
         .unwrap_or(preferred)
 }
@@ -192,6 +191,31 @@ mod tests {
         assert_eq!(
             select_model_for_category(&availability, Some(&router), TaskCategory::CodeSearch),
             ModelChoice::LocalQwen3
+        );
+    }
+
+    /// With no cloud to fall back on, an unprovisioned preference gives way to
+    /// whichever local weight the device *does* hold — the branch a uniform
+    /// "everything is cached / nothing is cached" fixture cannot reach.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn an_unprovisioned_preference_falls_back_to_the_cached_local_arm() {
+        let availability = ProviderAvailability::default();
+        let router = Arc::new(
+            Router::new_offline()
+                .await
+                .unwrap()
+                .with_selector(crate::ModelSelector::with_parts(
+                    availability.clone(),
+                    crate::LocalWeights::Only(&[ModelChoice::LocalGemma4E2B]),
+                ))
+                .await,
+        );
+
+        // CodeSearch prefers LocalQwen3, which this device never downloaded.
+        assert_eq!(
+            select_model_for_category(&availability, Some(&router), TaskCategory::CodeSearch),
+            ModelChoice::LocalGemma4E2B
         );
     }
 

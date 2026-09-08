@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::classifier::{Classification, TaskCategory};
 use crate::decision::{ModelChoice, RoutingDecision};
-use crate::model_discovery;
+pub use crate::selector_local::LocalWeights;
 
 /// Provider availability status
 #[derive(Debug, Clone, Default)]
@@ -46,19 +46,6 @@ impl ProviderAvailability {
     }
 }
 
-/// Where "is this local weight already on disk" is answered from.
-///
-/// Production reads the HuggingFace cache; callers that must be deterministic —
-/// tests, and downstream crates asserting selection without touching the
-/// machine — inject a fixed answer instead.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LocalWeights {
-    /// Ask the on-disk HuggingFace cache.
-    HuggingFaceCache,
-    /// Answer every cache question with this value.
-    Fixed(bool),
-}
-
 pub struct ModelSelector {
     pub(crate) budget_threshold: f64,
     pub(crate) availability: ProviderAvailability,
@@ -66,7 +53,7 @@ pub struct ModelSelector {
     /// Per-agent memory budget in bytes. Models exceeding this are excluded from
     /// feasible set. 0 means unconstrained (backward compat).
     pub(crate) max_memory_bytes: std::sync::atomic::AtomicU64,
-    local_weights: LocalWeights,
+    pub(crate) local_weights: LocalWeights,
 }
 
 impl ModelSelector {
@@ -144,18 +131,6 @@ impl ModelSelector {
         self.local_weights
     }
 
-    /// Check GPU acceleration status via arkavo-llm
-    fn check_gpu_status() -> bool {
-        #[cfg(feature = "llama-cpp")]
-        {
-            arkavo_llm::is_gpu_accelerated()
-        }
-        #[cfg(not(feature = "llama-cpp"))]
-        {
-            false
-        }
-    }
-
     pub fn select(
         &self,
         classification: &Classification,
@@ -172,168 +147,70 @@ impl ModelSelector {
         ))
     }
 
-    /// Get the best available local model, checking cache availability and GPU status
+    /// Select the best available cloud model, preferring Anthropic > Gemini.
     ///
-    /// When GPU is unavailable, skips large models (8B+) to avoid slow CPU-only inference.
-    /// This prevents 20+ second waits on CPU-only devices.
-    /// GLM-4.7-Flash requires 32GB+ RAM (unified memory on Apple Silicon).
-    fn best_available_local_model(&self, prefer_larger: bool) -> ModelChoice {
-        let mem_budget = self
-            .max_memory_bytes
-            .load(std::sync::atomic::Ordering::Relaxed);
-
-        let fits_budget = |m: &ModelChoice| mem_budget == 0 || m.size_bytes() <= mem_budget;
-
-        // If no GPU, skip large models to avoid slow CPU-only inference
-        if !self.gpu_available {
-            if self.is_local_model_cached(&ModelChoice::LocalMinistral3B)
-                && fits_budget(&ModelChoice::LocalMinistral3B)
-            {
-                return ModelChoice::LocalMinistral3B;
-            }
-            return ModelChoice::LocalQwen3;
-        }
-
-        if prefer_larger {
-            // GLM-4.7-Flash: 30B MoE, highest quality local model
-            if self.is_local_model_cached(&ModelChoice::LocalGlm47Flash)
-                && Self::has_sufficient_ram(32)
-                && fits_budget(&ModelChoice::LocalGlm47Flash)
-            {
-                ModelChoice::LocalGlm47Flash
-            } else if self.is_local_model_cached(&ModelChoice::LocalQwen35_27B)
-                && Self::has_sufficient_ram(48)
-                && fits_budget(&ModelChoice::LocalQwen35_27B)
-            {
-                ModelChoice::LocalQwen35_27B
-            } else if self.is_local_model_cached(&ModelChoice::LocalMinistral8B)
-                && fits_budget(&ModelChoice::LocalMinistral8B)
-            {
-                ModelChoice::LocalMinistral8B
-            } else if self.is_local_model_cached(&ModelChoice::LocalMinistral3B)
-                && fits_budget(&ModelChoice::LocalMinistral3B)
-            {
-                ModelChoice::LocalMinistral3B
-            } else {
-                ModelChoice::LocalQwen3
-            }
-        } else {
-            ModelChoice::LocalQwen3
-        }
-    }
-
-    /// Preference order for the fast internal model (judging, synthesis, classification),
-    /// most-preferred first. Gemma 4 E2B leads because first-run setup provisions it as the
-    /// "Small (fast routing)" model; the legacy entries keep older installs working without a
-    /// download. The fallback when none are cached MUST stay a setup-provisioned model.
-    const FAST_LOCAL_PREFERENCE: [ModelChoice; 3] = [
-        ModelChoice::LocalGemma4E2B,
-        ModelChoice::LocalMinistral3B,
-        ModelChoice::LocalQwen3,
-    ];
-
-    /// Fastest available local model for internal tasks (judging, synthesis, classification).
-    /// Prefers a cached model from [`Self::FAST_LOCAL_PREFERENCE`]; falls back to Gemma 4 E2B —
-    /// the model first-run setup downloads — so chat never silently pulls an un-provisioned
-    /// model the user never opted into.
-    ///
-    /// The fallback names an arm the device may not have. Callers that are
-    /// about to *dispatch* must ask [`Self::fastest_cached_local_model`] (or
-    /// `Router::require_provisioned`) instead, so an unprovisioned install
-    /// refuses rather than downloading weights mid-request.
-    pub fn fastest_local_model(&self) -> ModelChoice {
-        self.fastest_cached_local_model()
-            .unwrap_or(ModelChoice::LocalGemma4E2B)
-    }
-
-    /// Fastest local arm whose weights are already on disk, or `None` when the
-    /// device has provisioned none of them.
-    pub(crate) fn fastest_cached_local_model(&self) -> Option<ModelChoice> {
-        Self::pick_fast_local_model(|m| self.is_local_model_cached(m))
-    }
-
-    /// The harness's baseline execution model is always local. Cloud credentials
-    /// do not replace provisioning the device's local models.
-    pub fn default_execution_model(&self) -> ModelChoice {
-        self.fastest_local_model()
-    }
-
-    pub(crate) fn cloud_augmentation_model(&self) -> Option<ModelChoice> {
-        self.availability
-            .has_cloud()
-            .then(|| self.best_cloud_model(false))
-    }
-
-    /// Policy half of [`Self::fastest_cached_local_model`], split out so the preference order
-    /// can be unit-tested without touching the on-disk model cache.
-    fn pick_fast_local_model(is_cached: impl Fn(&ModelChoice) -> bool) -> Option<ModelChoice> {
-        Self::FAST_LOCAL_PREFERENCE
-            .into_iter()
-            .find(|m| is_cached(m))
-    }
-
-    /// Check if system has at least `min_gb` of RAM
-    fn has_sufficient_ram(min_gb: u64) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            use std::process::Command;
-            if let Ok(output) = Command::new("sysctl").arg("-n").arg("hw.memsize").output()
-                && let Ok(mem_str) = String::from_utf8(output.stdout)
-                && let Ok(bytes) = mem_str.trim().parse::<u64>()
-            {
-                return bytes >= min_gb * 1024 * 1024 * 1024;
-            }
-            false
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = min_gb;
-            true
-        }
-    }
-
-    /// Check if a local model is cached (static helper)
-    pub(crate) fn is_local_model_cached(&self, model: &ModelChoice) -> bool {
-        if let LocalWeights::Fixed(cached) = self.local_weights {
-            return cached;
-        }
-        if !cfg!(feature = "llama-cpp") {
-            return false;
-        }
-        match (model.repo_id(), model.gguf_filename()) {
-            (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
-            _ => false,
-        }
-    }
-
-    /// Select the best available cloud model, preferring Anthropic > Gemini
+    /// Falls back to the best arm this device can run locally when no cloud
+    /// provider is configured.
     fn best_cloud_model(&self, prefer_pro: bool) -> ModelChoice {
-        if self.availability.anthropic {
-            if prefer_pro {
-                ModelChoice::ClaudeOpus
-            } else {
-                ModelChoice::ClaudeSonnet
-            }
-        } else if self.availability.gemini {
-            if prefer_pro {
-                ModelChoice::GeminiPro
-            } else {
-                ModelChoice::Gemini35Flash
-            }
-        } else if self.availability.deepseek {
-            ModelChoice::DeepSeekV32
-        } else if self.availability.kimi {
-            ModelChoice::KimiK2
-        } else if self.availability.glm {
-            ModelChoice::Glm52
-        } else if self.availability.xai {
-            ModelChoice::Grok46
-        } else if self.availability.openai {
-            ModelChoice::Gpt6Astra
-        } else {
-            // No cloud available, use local (with availability check)
-            self.best_available_local_model(prefer_pro)
+        best_configured_cloud_model(&self.availability, prefer_pro)
+            .unwrap_or_else(|| self.best_available_local_model(prefer_pro))
+    }
+
+    /// The cloud arm that augments local inference, or `None` when no cloud
+    /// provider is configured.
+    pub(crate) fn cloud_augmentation_model(&self) -> Option<ModelChoice> {
+        cloud_augmentation_model(&self.availability)
+    }
+
+    /// Cloud arms this selector's credentials make feasible. Unconstrained by
+    /// the memory budget: nothing runs on this device.
+    pub(crate) fn feasible_cloud_models(&self) -> Vec<ModelChoice> {
+        let mut models = Vec::new();
+        if self.availability.gemini {
+            // Gemini 3.5 Flash (May 2026) ships as four distinct Thompson
+            // Sampling arms — one per thinking tier — so the learning
+            // module can converge on the right cost/quality point per
+            // task category. `Gemini35Flash` (low tier) is the production
+            // default; the others are opt-in via learning.
+            models.push(ModelChoice::Gemini35Flash);
+            models.push(ModelChoice::Gemini35FlashMinimal);
+            models.push(ModelChoice::Gemini35FlashMedium);
+            models.push(ModelChoice::Gemini35FlashHigh);
+            // Legacy Flash alias kept around for cost-tier fallback.
+            models.push(ModelChoice::GeminiFlash);
         }
+        if self.availability.anthropic {
+            models.push(ModelChoice::ClaudeSonnet);
+            models.push(ModelChoice::ClaudeOpus);
+            // Fable 5 is 2x Opus pricing; exposed as a Thompson Sampling arm
+            // so the learning module can converge on the task categories
+            // where the capability gain justifies the premium. It is never a
+            // category default — it's reached via learning, escalation, or an
+            // explicit AGENTS.md `model:` hint.
+            models.push(ModelChoice::ClaudeFable5);
+        }
+        if self.availability.deepseek {
+            models.push(ModelChoice::DeepSeekV32);
+        }
+        if self.availability.kimi {
+            models.push(ModelChoice::KimiK2);
+        }
+        if self.availability.glm {
+            // GLM-5.2 enters as a single Thompson Sampling arm (cold-start
+            // cap). The learning module decides where its quality/cost point
+            // beats the other low-cost cloud arms (DeepSeek, Gemini Flash).
+            models.push(ModelChoice::Glm52);
+        }
+        if self.availability.openai {
+            models.push(ModelChoice::Gpt6Astra);
+        }
+        if self.availability.xai {
+            // Grok 4.6 base arm (low effort) plus the xhigh companion so
+            // Thompson Sampling can learn when max-depth reasoning pays off.
+            models.push(ModelChoice::Grok46);
+            models.push(ModelChoice::Grok46Xhigh);
+        }
+        models
     }
 
     pub(crate) fn select_model_by_category(&self, classification: &Classification) -> ModelChoice {
@@ -401,125 +278,48 @@ impl ModelSelector {
             model
         }
     }
+}
 
-    /// All models currently feasible (cached local + API keys for cloud).
-    ///
-    /// When `max_memory_bytes` is set (> 0), local models whose weight files
-    /// exceed the budget are excluded so Thompson Sampling never selects a
-    /// model that would blow the agent's memory allocation.
-    pub fn feasible_models(&self) -> Vec<ModelChoice> {
-        let mut models = Vec::new();
-        let mem_budget = self
-            .max_memory_bytes
-            .load(std::sync::atomic::Ordering::Relaxed);
-
-        // Local models (smallest first)
-        if self.is_local_model_cached(&ModelChoice::LocalQwen3) {
-            models.push(ModelChoice::LocalQwen3);
-        }
-        if self.is_local_model_cached(&ModelChoice::LocalGemma4E2B) {
-            models.push(ModelChoice::LocalGemma4E2B);
-        }
-        if self.gpu_available {
-            if self.is_local_model_cached(&ModelChoice::LocalMinistral3B) {
-                models.push(ModelChoice::LocalMinistral3B);
-            }
-            // Gemma-4-E4B excluded: 1/8 tool accuracy (benchmark), needs grammar-constrained
-            // generation. Re-enable when PEG output parser lands.
-            // if self.is_local_model_cached(&ModelChoice::LocalGemma4E4B) {
-            //     models.push(ModelChoice::LocalGemma4E4B);
-            // }
-            if self.is_local_model_cached(&ModelChoice::LocalMinistral8B) {
-                models.push(ModelChoice::LocalMinistral8B);
-            }
-            if self.is_local_model_cached(&ModelChoice::LocalGemma4_26B) {
-                models.push(ModelChoice::LocalGemma4_26B);
-            }
-            if self.is_local_model_cached(&ModelChoice::LocalGemma4_31B) {
-                models.push(ModelChoice::LocalGemma4_31B);
-            }
-            if self.is_local_model_cached(&ModelChoice::LocalGemma4_12B) {
-                models.push(ModelChoice::LocalGemma4_12B);
-            }
-            if self.is_local_model_cached(&ModelChoice::LocalQwen35_27B)
-                && Self::has_sufficient_ram(48)
-            {
-                models.push(ModelChoice::LocalQwen35_27B);
-            }
-            if self.is_local_model_cached(&ModelChoice::LocalGlm47Flash)
-                && Self::has_sufficient_ram(32)
-            {
-                models.push(ModelChoice::LocalGlm47Flash);
-            }
-        }
-
-        // Per-agent memory budget: exclude local models that exceed the allocation
-        if mem_budget > 0 {
-            let before = models.len();
-            models.retain(|m| m.size_bytes() == 0 || m.size_bytes() <= mem_budget);
-            if models.len() < before {
-                tracing::info!(
-                    budget_mb = mem_budget / (1024 * 1024),
-                    kept = models.len(),
-                    excluded = before - models.len(),
-                    "Memory budget: excluded models exceeding per-agent allocation"
-                );
-            }
-        }
-
-        // Cloud models (unconstrained by memory)
-        if self.availability.gemini {
-            // Gemini 3.5 Flash (May 2026) ships as four distinct Thompson
-            // Sampling arms — one per thinking tier — so the learning
-            // module can converge on the right cost/quality point per
-            // task category. `Gemini35Flash` (low tier) is the production
-            // default; the others are opt-in via learning.
-            models.push(ModelChoice::Gemini35Flash);
-            models.push(ModelChoice::Gemini35FlashMinimal);
-            models.push(ModelChoice::Gemini35FlashMedium);
-            models.push(ModelChoice::Gemini35FlashHigh);
-            // Legacy Flash alias kept around for cost-tier fallback.
-            models.push(ModelChoice::GeminiFlash);
-        }
-        if self.availability.anthropic {
-            models.push(ModelChoice::ClaudeSonnet);
-            models.push(ModelChoice::ClaudeOpus);
-            // Fable 5 is 2x Opus pricing; exposed as a Thompson Sampling arm
-            // so the learning module can converge on the task categories
-            // where the capability gain justifies the premium. It is never a
-            // category default — it's reached via learning, escalation, or an
-            // explicit AGENTS.md `model:` hint.
-            models.push(ModelChoice::ClaudeFable5);
-        }
-        if self.availability.deepseek {
-            models.push(ModelChoice::DeepSeekV32);
-        }
-        if self.availability.kimi {
-            models.push(ModelChoice::KimiK2);
-        }
-        if self.availability.glm {
-            // GLM-5.2 enters as a single Thompson Sampling arm (cold-start
-            // cap). The learning module decides where its quality/cost point
-            // beats the other low-cost cloud arms (DeepSeek, Gemini Flash).
-            models.push(ModelChoice::Glm52);
-        }
-        if self.availability.openai {
-            models.push(ModelChoice::Gpt6Astra);
-        }
-        if self.availability.xai {
-            // Grok 4.6 base arm (low effort) plus the xhigh companion so
-            // Thompson Sampling can learn when max-depth reasoning pays off.
-            models.push(ModelChoice::Grok46);
-            models.push(ModelChoice::Grok46Xhigh);
-        }
-
-        // Fallback: always include Qwen3 as baseline
-        if models.is_empty() {
-            models.push(ModelChoice::LocalQwen3);
-        }
-
-        models
+/// Best cloud arm for the configured providers, or `None` when none is
+/// configured.
+///
+/// A free function of availability alone: a caller that holds its own
+/// provider set — the architect planner, which can be configured explicitly —
+/// asks it directly instead of constructing a throwaway selector.
+pub(crate) fn best_configured_cloud_model(
+    availability: &ProviderAvailability,
+    prefer_pro: bool,
+) -> Option<ModelChoice> {
+    if availability.anthropic {
+        Some(if prefer_pro {
+            ModelChoice::ClaudeOpus
+        } else {
+            ModelChoice::ClaudeSonnet
+        })
+    } else if availability.gemini {
+        Some(if prefer_pro {
+            ModelChoice::GeminiPro
+        } else {
+            ModelChoice::Gemini35Flash
+        })
+    } else if availability.deepseek {
+        Some(ModelChoice::DeepSeekV32)
+    } else if availability.kimi {
+        Some(ModelChoice::KimiK2)
+    } else if availability.glm {
+        Some(ModelChoice::Glm52)
+    } else if availability.xai {
+        Some(ModelChoice::Grok46)
+    } else if availability.openai {
+        Some(ModelChoice::Gpt6Astra)
+    } else {
+        None
     }
+}
+
+/// The cloud arm that augments local inference for these providers.
+pub(crate) fn cloud_augmentation_model(availability: &ProviderAvailability) -> Option<ModelChoice> {
+    best_configured_cloud_model(availability, false)
 }
 
 impl Default for ModelSelector {
@@ -768,66 +568,5 @@ mod tests {
         let selector = ModelSelector::with_availability(ProviderAvailability::default(), false);
         let feasible = selector.feasible_models();
         assert!(!feasible.is_empty());
-    }
-
-    // Regression: a fresh install provisions Gemma 4 E2B + Gemma 4 12B (no Ministral/Qwen).
-    // The fast-model selector must not fall through to a hardcoded Ministral 3B, which made
-    // `arkavo chat` silently download an un-provisioned model on first use.
-    #[spec("ROUTER-003")]
-    #[test]
-    fn test_fast_local_model_falls_back_to_provisioned_gemma() {
-        let nothing_cached = |_: &ModelChoice| false;
-        // Nothing on disk is reported as such, so a dispatching caller can
-        // refuse; only the naming helper substitutes the setup model.
-        assert_eq!(ModelSelector::pick_fast_local_model(nothing_cached), None);
-        assert_eq!(
-            ModelSelector::with_availability(ProviderAvailability::default(), false)
-                .fastest_local_model(),
-            ModelChoice::LocalGemma4E2B,
-        );
-    }
-
-    /// Regression: `fastest_local_model` names Gemma 4 E2B even on a device
-    /// that has never downloaded it, so `route_fast` used to hand that name
-    /// straight to the loader and start a multi-gigabyte fetch inside the
-    /// caller's timeout. The cached-only accessor is what a dispatch asks.
-    #[spec("ROUTER-003")]
-    #[test]
-    fn an_unprovisioned_device_reports_no_cached_fast_model() {
-        let selector = ModelSelector::with_availability(ProviderAvailability::default(), false);
-        assert_eq!(selector.fastest_cached_local_model(), None);
-
-        let provisioned = ModelSelector::with_availability(ProviderAvailability::default(), true);
-        assert_eq!(
-            provisioned.fastest_cached_local_model(),
-            Some(ModelChoice::LocalGemma4E2B)
-        );
-    }
-
-    #[spec("ROUTER-003")]
-    #[test]
-    fn test_fast_local_model_uses_cached_gemma_e2b() {
-        // Fresh install: only the two setup models are present.
-        let gemma_cached = |m: &ModelChoice| {
-            matches!(
-                m,
-                ModelChoice::LocalGemma4E2B | ModelChoice::LocalGemma4_12B
-            )
-        };
-        assert_eq!(
-            ModelSelector::pick_fast_local_model(gemma_cached),
-            Some(ModelChoice::LocalGemma4E2B),
-        );
-    }
-
-    #[spec("ROUTER-003")]
-    #[test]
-    fn test_fast_local_model_honors_legacy_ministral_install() {
-        // Older install with only Ministral 3B cached still resolves to it (no download).
-        let ministral_cached = |m: &ModelChoice| matches!(m, ModelChoice::LocalMinistral3B);
-        assert_eq!(
-            ModelSelector::pick_fast_local_model(ministral_cached),
-            Some(ModelChoice::LocalMinistral3B),
-        );
     }
 }

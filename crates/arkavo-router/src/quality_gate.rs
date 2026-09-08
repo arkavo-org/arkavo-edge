@@ -35,7 +35,6 @@ impl super::Router {
             messages,
             tool_registry,
             model_hint,
-            false,
             None,
             None,
         )
@@ -57,7 +56,6 @@ impl super::Router {
             messages,
             tool_registry,
             None,
-            false,
             None,
             Some(session),
         )
@@ -79,7 +77,6 @@ impl super::Router {
             messages,
             tool_registry,
             None,
-            false,
             Some(budget),
             None,
         )
@@ -92,28 +89,18 @@ impl super::Router {
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<RoutedResponse> {
-        self.route_with_tools_internal(
-            task_description,
-            messages,
-            tool_registry,
-            None,
-            false,
-            None,
-            None,
-        )
-        .await
+        self.route_with_tools_internal(task_description, messages, tool_registry, None, None, None)
+            .await
     }
 
     // Internal plumbing, not API surface: every public entry point above hands
-    // this one call its own shape (hint, execution profile, ledger, session).
-    #[allow(clippy::too_many_arguments)]
+    // this one call its own shape (hint, ledger, session).
     async fn route_with_tools_internal(
         &self,
         task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
         model_hint: Option<&crate::ModelChoice>,
-        execution_mode: bool,
         budget: Option<CallBudget<'_>>,
         session: Option<&str>,
     ) -> Result<RoutedResponse> {
@@ -121,23 +108,7 @@ impl super::Router {
         let budget = budget.or_else(|| self.call_budget());
         let mut current_decision = self.classify_for_session(task_description, session).await?;
 
-        // Execution iterations: when a model hint is provided (from AGENTS.md),
-        // use it with execution-mode sampling (temp 0.1, thinking off, max 200 tokens).
-        // Without a hint, fall back to the fastest local model for mechanical tool calls.
-        let fast_model = self.selector.fastest_local_model();
-        let effective_hint =
-            if execution_mode && model_hint.is_none() && self.is_model_available(&fast_model) {
-                tracing::debug!(
-                    fast_model = fast_model.name(),
-                    "Execution mode: using fastest local model (no hint)"
-                );
-                current_decision.recommended_model = fast_model;
-                None
-            } else {
-                model_hint
-            };
-
-        if let Some(hint) = effective_hint {
+        if let Some(hint) = model_hint {
             let consecutive = self.get_cooldown_consecutive(hint.name()).await;
             let reward_failures = self.get_reward_failure_count(hint.name()).await;
             // Hinted models get 3 chances to learn from feedback before
@@ -186,13 +157,9 @@ impl super::Router {
             // A registry that returns zero matches must NOT count as attached.
             let (tools_json, tools_were_attached) = match tool_registry {
                 Some(registry) => {
-                    // Execution mode uses NameAndDescription to keep Jinja template
-                    // expansion compact — the model already saw full schemas in round 0.
-                    let detail_level = if execution_mode {
-                        arkavo_mcp_tools::DetailLevel::NameAndDescription
-                    } else {
-                        tool_extraction::detail_level_for_model(&current_decision.recommended_model)
-                    };
+                    let detail_level = tool_extraction::detail_level_for_model(
+                        &current_decision.recommended_model,
+                    );
                     let keywords = tool_extraction::extract_keywords(task_description);
 
                     let tool_infos = tool_extraction::search_tools_hybrid(
@@ -297,7 +264,7 @@ impl super::Router {
             }
 
             let actual_model = current_decision.recommended_model.clone();
-            let max_tokens = if execution_mode { 200usize } else { 4096 };
+            let max_tokens = 4096usize;
             let estimated_usage = crate::usage::estimate_request(
                 &advised_messages,
                 tools_json.as_ref(),
@@ -309,7 +276,7 @@ impl super::Router {
             // "Explicit" means the caller named this model (an applied hint) or
             // it was already authorized for this dispatch.
             let caller_authorized = authorized_cloud.as_ref() == Some(&actual_model)
-                || effective_hint.is_some_and(|hint| *hint == actual_model);
+                || model_hint.is_some_and(|hint| *hint == actual_model);
             if let Some(budget) = budget {
                 budget.check(estimated_cost).await?;
             }
@@ -318,32 +285,19 @@ impl super::Router {
             if actual_model.is_cloud() {
                 authorized_cloud = Some(actual_model.clone());
             }
-            let provider = if execution_mode {
-                self.instantiate_provider_execution(&actual_model).await?
-            } else {
-                self.instantiate_provider_exact_with_spec(
+            let provider = self
+                .instantiate_provider_exact_with_spec(
                     &actual_model,
                     current_decision.use_spec_decoding,
                 )
-                .await?
-            };
+                .await?;
 
-            // Execution iterations use the chat semaphore — they're fast, sub-second
-            // inferences that shouldn't queue behind heavy planning work.
-            let semaphore = if execution_mode {
-                &self.chat_semaphore
-            } else {
-                &self.inference_semaphore
-            };
-            let _permit = semaphore
+            let _permit = self
+                .inference_semaphore
                 .acquire()
                 .await
                 .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
-            tracing::debug!(
-                execution_mode,
-                semaphore = if execution_mode { "chat" } else { "inference" },
-                "Semaphore acquired"
-            );
+            tracing::debug!("Inference semaphore acquired");
 
             // Feasibility plane (pre-dispatch): assess whether the local model
             // can run this prompt now, surfacing a reshape/unavailable signal
@@ -438,7 +392,6 @@ impl super::Router {
                 tracing::info!(
                     attempt = attempt + 1,
                     attempt_ms,
-                    execution_mode,
                     model = %current_decision.recommended_model.name(),
                     "Quality gate retry inference completed"
                 );
@@ -534,10 +487,8 @@ impl super::Router {
                     });
                 }
 
-                // Skip Judge validation in execution mode — fast syntax check is sufficient
-                // for mechanical tool calls (send_task, list_agents, get_task_status).
                 #[cfg(feature = "llama-cpp")]
-                if !execution_mode {
+                {
                     use crate::judge::IssueType;
 
                     match judge::ResponseJudge::new_local().await {
@@ -626,7 +577,7 @@ impl super::Router {
             // final-answer turn. A collapse may trigger a retry/offer, but per
             // the plane separation it never silently spends: cloud becomes a
             // retry candidate only when the policy authorizes silent spend.
-            if !execution_mode && response.tool_calls.is_empty() && attempt + 1 < MAX_RETRIES {
+            if response.tool_calls.is_empty() && attempt + 1 < MAX_RETRIES {
                 use crate::planes::{self, CollapseSignal, CollapseVerdict, UpgradeOffer};
                 let collapse = planes::detect_collapse(&planes::AnswerObservation {
                     text: &response.content,

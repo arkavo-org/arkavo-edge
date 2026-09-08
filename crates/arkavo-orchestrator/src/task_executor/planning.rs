@@ -3,7 +3,7 @@ use super::ui::TaskUI;
 use crate::error::{Error, Result};
 use arkavo_llm::Message;
 use arkavo_mcp_tools::ToolRegistry;
-use arkavo_router::Router;
+use arkavo_router::{ModelChoice, Router};
 use std::sync::Arc;
 
 /// Collaborative planner implementing 3-round planning pattern
@@ -28,25 +28,37 @@ impl CollaborativePlanner {
     pub async fn create_plan(
         &self,
         task: &str,
-        _models: &SelectedModels,
+        models: &SelectedModels,
         ui: &dyn TaskUI,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<TaskPlan> {
         ui.section("Step 1: Collaborative Planning");
 
+        // The selection reaches the router as a hint per round, so the roles
+        // the UI just displayed are the arms that actually serve. Only local
+        // arms hint (see `ModelInfo::routing_hint`); a cloud selection leaves
+        // the choice to the router, which authorizes its own spend.
+        let gather_hint = models.gather_model.routing_hint();
+        let plan_hint = models.planning_model.routing_hint();
+        let verify_hint = models.verify_model.routing_hint();
+
         // Round 1: Local model gathers information
         ui.progress("Local Agent gathering information...", Some(33));
-        let gather_result = self.round_gather(task, ui, tool_registry).await?;
+        let gather_result = self
+            .round_gather(task, ui, tool_registry, gather_hint.as_ref())
+            .await?;
 
-        // Round 2: Cloud model creates plan
+        // Round 2: Planning model creates the plan
         ui.progress("Planning Agent creating plan...", Some(66));
         let plan_content = self
-            .round_plan(task, &gather_result, ui, tool_registry)
+            .round_plan(task, &gather_result, ui, tool_registry, plan_hint.as_ref())
             .await?;
 
         // Round 3: Local model verifies
         ui.progress("Local Agent verifying plan...", Some(100));
-        let verified = self.round_verify(&plan_content, ui, tool_registry).await?;
+        let verified = self
+            .round_verify(&plan_content, ui, tool_registry, verify_hint.as_ref())
+            .await?;
 
         Ok(TaskPlan {
             task: task.to_string(),
@@ -62,6 +74,7 @@ impl CollaborativePlanner {
         task: &str,
         ui: &dyn TaskUI,
         tool_registry: Option<&ToolRegistry>,
+        model_hint: Option<&ModelChoice>,
     ) -> Result<String> {
         ui.status(&format!(
             "[Local Agent] Gathering information for: {}",
@@ -73,10 +86,11 @@ impl CollaborativePlanner {
 
         let response = self
             .router
-            .route_with_tools(
+            .route_with_tools_hinted(
                 &format!("gather context for: {}", task),
                 messages,
                 tool_registry,
+                model_hint,
             )
             .await
             .map_err(|e| Error::TaskExecution {
@@ -94,6 +108,7 @@ impl CollaborativePlanner {
         gather_result: &str,
         ui: &dyn TaskUI,
         tool_registry: Option<&ToolRegistry>,
+        model_hint: Option<&ModelChoice>,
     ) -> Result<String> {
         ui.status("[Planning Agent] Creating detailed plan...");
 
@@ -102,10 +117,11 @@ impl CollaborativePlanner {
 
         let response = self
             .router
-            .route_with_tools(
+            .route_with_tools_hinted(
                 &format!("create plan for: {}", task),
                 messages,
                 tool_registry,
+                model_hint,
             )
             .await
             .map_err(|e| Error::TaskExecution {
@@ -122,6 +138,7 @@ impl CollaborativePlanner {
         plan_content: &str,
         ui: &dyn TaskUI,
         tool_registry: Option<&ToolRegistry>,
+        model_hint: Option<&ModelChoice>,
     ) -> Result<String> {
         ui.status("[Local Agent] Verifying plan...");
 
@@ -130,7 +147,12 @@ impl CollaborativePlanner {
 
         let response = self
             .router
-            .route_with_tools("verify plan correctness", messages, tool_registry)
+            .route_with_tools_hinted(
+                "verify plan correctness",
+                messages,
+                tool_registry,
+                model_hint,
+            )
             .await
             .map_err(|e| Error::TaskExecution {
                 operation: "verify plan correctness".to_string(),
