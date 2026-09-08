@@ -421,12 +421,6 @@ impl ConversationManager {
             .filter(|msg| msg.session_id == session_id)
             .collect();
 
-        for message in &mut messages {
-            if let Some(state) = self.memory_storage.load_replay_state(message.id).await? {
-                message.provider_message = Some(serde_json::from_slice(&state)?);
-            }
-        }
-
         // Sort by timestamp
         messages.sort_by_key(|m| m.timestamp);
 
@@ -470,6 +464,11 @@ impl ConversationManager {
             MAX_CONTEXT_TOKENS.saturating_sub(total_tokens),
         );
 
+        // Only the window is replayed, and one statement covers all of it: a
+        // query per message turns restoring a session into an N+1.
+        let window_ids: Vec<Uuid> = recent_messages.iter().map(|msg| msg.id).collect();
+        let replay_states = self.memory_storage.load_replay_states(&window_ids).await?;
+
         for (idx, msg) in recent_messages.iter().enumerate() {
             let msg_tokens = msg.token_count;
             let sanitized_content = if idx == recent_messages.len() - 1 {
@@ -478,8 +477,12 @@ impl ConversationManager {
                 msg.content.clone()
             };
 
-            let message = if let Some(message) = &msg.provider_message {
-                message.clone()
+            let provider_message = replay_states
+                .get(&msg.id)
+                .map(|state| serde_json::from_slice::<Message>(state))
+                .transpose()?;
+            let message = if let Some(message) = provider_message {
+                message
             } else {
                 match msg.role.as_str() {
                     "user" => Message::user(&sanitized_content),
@@ -1071,6 +1074,65 @@ mod tests {
         assert_eq!(context[0].tool_calls[0].id.as_deref(), Some("call_1"));
         assert_eq!(context[1].tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(context[1].role, arkavo_llm::Role::Tool);
+    }
+
+    /// What `arkavo-cli`'s terminal loop writes after a turn, read back the way
+    /// a later process start reads it: the second turn must replay the first
+    /// turn's provider state, not a plain-text transcript of it.
+    #[tokio::test]
+    #[spec("ASTRA-002")]
+    async fn a_persisted_terminal_turn_replays_on_the_next_session_start() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+
+        let mut first_run = ConversationManager::new(storage.clone()).unwrap();
+        first_run.start_session("gpt-6-astra").await.unwrap();
+        let response = arkavo_llm::ProviderResponse {
+            content: "checked the clock".to_string(),
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                json!({"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"}),
+                json!({
+                    "type": "function_call", "call_id": "call_1",
+                    "name": "clock", "arguments": "{}"
+                }),
+            ]),
+            tool_calls: vec![arkavo_llm::ParsedToolCall {
+                tool_name: "clock".into(),
+                arguments: json!({}),
+                call_id: Some("call_1".into()),
+            }],
+            ..Default::default()
+        };
+        first_run
+            .add_message(&Message::user("what time is it?"))
+            .await
+            .unwrap();
+        first_run
+            .add_message(&response.as_assistant_message())
+            .await
+            .unwrap();
+
+        // A fresh process: restore the session and rebuild the context window.
+        let mut second_run = ConversationManager::new(storage).unwrap();
+        assert_eq!(
+            second_run.restore_last_session().await.unwrap(),
+            first_run.current_session_id()
+        );
+        let context = second_run
+            .get_context_messages_with_limits(None, Some(10))
+            .await
+            .unwrap();
+
+        let assistant = context
+            .iter()
+            .find(|message| message.role == arkavo_llm::Role::Assistant)
+            .expect("the first turn's assistant message is replayed");
+        assert_eq!(assistant.provider_state, response.provider_state);
+        assert_eq!(assistant.tool_calls[0].id.as_deref(), Some("call_1"));
+        assert!(
+            context
+                .iter()
+                .any(|message| message.content == "what time is it?")
+        );
     }
 
     #[tokio::test]

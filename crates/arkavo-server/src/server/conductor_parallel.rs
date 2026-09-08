@@ -381,7 +381,7 @@ async fn planner_track(
         result.tool_call_count += call_count;
         info!("Planner round {plan_round}: produced {call_count} tool calls");
 
-        let native_tool_role = super::conductor_history::use_tool_role(&response);
+        let native_tool_role = response.tool_results_use_tool_role();
         messages.push(response.as_assistant_message());
 
         if plan_tx
@@ -410,7 +410,7 @@ async fn planner_track(
                 // Push tool results with proper role so Jinja templates
                 // (especially Gemma 4) render <|tool_response> tokens.
                 for tr in &feedback.tool_results {
-                    messages.push(super::conductor_history::tool_feedback(
+                    messages.push(arkavo_llm::tool_feedback_message(
                         &tr.content,
                         &tr.call_id,
                         &tr.tool_name,
@@ -760,11 +760,7 @@ async fn judge_track(
             )
         };
 
-        let content = if distilled.len() > 800 {
-            format!("{}...", &distilled[..800])
-        } else {
-            distilled
-        };
+        let content = super::conductor_history::preview(&distilled, 800);
 
         batch_results.push(CondensedToolResult {
             tool_name: exec_result.tool_name,

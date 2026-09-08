@@ -399,17 +399,13 @@ pub(super) async fn run_tool_loop(
             );
             eprintln!(
                 "{}",
-                &response.content[..std::cmp::min(1000, response.content.len())]
+                arkavo_llm::char_boundary_prefix(&response.content, 1000)
             );
         }
 
         debug!(
             "LLM response content: {}",
-            if response.content.len() > 500 {
-                format!("{}...", &response.content[..500])
-            } else {
-                response.content.clone()
-            }
+            super::conductor_history::preview(&response.content, 500)
         );
 
         if !response.content.is_empty() {
@@ -564,14 +560,14 @@ pub(super) async fn run_tool_loop(
         // Push tool results as proper tool-role messages so Jinja templates
         // (especially Gemma 4) generate the correct token structure.
         // Falls back to user-role for models without native tool response support.
-        let native_tool_role = super::conductor_history::use_tool_role(&response);
+        let native_tool_role = response.tool_results_use_tool_role();
         if response.tool_calls.len() == 1 {
             let tc = &response.tool_calls[0];
             let call_id = tc
                 .call_id
                 .clone()
                 .unwrap_or_else(|| format!("call_{total_step_idx}"));
-            messages.push(super::conductor_history::tool_feedback(
+            messages.push(arkavo_llm::tool_feedback_message(
                 format!("{result_to_append}{exploration_nudge}"),
                 call_id,
                 &tc.tool_name,
@@ -588,7 +584,7 @@ pub(super) async fn run_tool_loop(
                     .get(i)
                     .cloned()
                     .unwrap_or_else(|| "ok".to_string());
-                messages.push(super::conductor_history::tool_feedback(
+                messages.push(arkavo_llm::tool_feedback_message(
                     part,
                     call_id,
                     &tc.tool_name,
@@ -601,17 +597,10 @@ pub(super) async fn run_tool_loop(
         }
     }
 
-    // Synthesize a minimal summary when the LLM's last turn was a tool call
-    // (not a text response). Without this, compute_response_quality("", ...) returns
-    // 0.0, keeping Thompson Sampling avg_quality stuck at 0%.
     if final_result.is_empty() && total_step_idx > 0 {
-        final_result = format!(
-            "Completed {} tool call(s). Last result: {}",
+        final_result = super::conductor_history::tool_only_summary(
             total_step_idx,
-            messages
-                .last()
-                .map(|m| &m.content[..m.content.len().min(200)])
-                .unwrap_or("ok")
+            messages.last().map(|m| m.content.as_str()),
         );
     }
 

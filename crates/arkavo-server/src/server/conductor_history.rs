@@ -48,26 +48,28 @@ pub(super) fn summary_line(message: &Message) -> String {
     )
 }
 
-/// Local templates use tool roles even for text-parsed calls. Responses requires
-/// an actual function_call item before a function_call_output can be submitted.
-/// The rule is shared with the chat and CLI tool loops, so it lives on the response.
-pub(super) fn use_tool_role(response: &arkavo_llm::ProviderResponse) -> bool {
-    response.tool_results_use_tool_role()
+/// A byte-bounded excerpt of model or tool text, marked when it was cut.
+///
+/// Every one of these limits is a byte budget, and the text can end anywhere in
+/// a UTF-8 scalar, so the cut has to land on a character boundary.
+pub(super) fn preview(text: &str, max_bytes: usize) -> String {
+    let kept = arkavo_llm::char_boundary_prefix(text, max_bytes);
+    if kept.len() < text.len() {
+        format!("{kept}...")
+    } else {
+        text.to_string()
+    }
 }
 
-pub(super) fn tool_feedback(
-    content: impl Into<String>,
-    call_id: impl Into<String>,
-    name: impl Into<String>,
-    native_role: bool,
-) -> Message {
-    let content = content.into();
-    let name = name.into();
-    if native_role {
-        Message::tool_result(content, call_id, name)
-    } else {
-        Message::user(format!("[Tool result {name}]: {content}"))
-    }
+/// Close a loop whose last turn was a tool call rather than text.
+///
+/// `compute_response_quality("", ..)` returns 0.0, which pins the Thompson
+/// Sampling average at 0% for models that answer purely through tools.
+pub(super) fn tool_only_summary(steps: usize, last_result: Option<&str>) -> String {
+    let last = last_result
+        .map(|content| arkavo_llm::char_boundary_prefix(content, 200))
+        .unwrap_or("ok");
+    format!("Completed {steps} tool call(s). Last result: {last}")
 }
 
 #[cfg(test)]
@@ -141,30 +143,44 @@ mod tests {
         let summary = summary_line(&Message::assistant("界".repeat(501)));
         assert_eq!(summary.matches('界').count(), 500);
     }
-    #[spec("ASTRA-002")]
+    /// conductor_tool_loop's raw-response eprintln (1000 bytes, no ellipsis).
     #[test]
-    fn text_extracted_response_tools_use_user_feedback() {
-        let response = arkavo_llm::ProviderResponse {
-            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
-                json!({"type":"message", "content":[]}),
-            ]),
-            tool_calls: vec![arkavo_llm::ParsedToolCall {
-                tool_name: "read".into(),
-                arguments: json!({}),
-                call_id: None,
-            }],
-            ..Default::default()
-        };
-        let feedback = tool_feedback("result", "synthetic", "read", use_tool_role(&response));
-        assert_eq!(feedback.role, Role::User);
-        assert!(feedback.tool_call_id.is_none());
-        assert!(use_tool_role(&arkavo_llm::ProviderResponse::default()));
-        let response = arkavo_llm::ProviderResponse {
-            provider_state: batch(&["native"]).provider_state,
-            ..Default::default()
-        };
-        let feedback = tool_feedback("result", "native", "read", use_tool_role(&response));
-        assert_eq!(feedback.role, Role::Tool);
-        assert_eq!(feedback.tool_call_id.as_deref(), Some("native"));
+    fn raw_response_preview_is_safe_for_multibyte_text() {
+        let content = "界".repeat(400);
+        assert_eq!(
+            arkavo_llm::char_boundary_prefix(&content, 1000)
+                .matches('界')
+                .count(),
+            333
+        );
+    }
+
+    /// conductor_tool_loop's `debug!("LLM response content: ...")` (500 bytes).
+    #[test]
+    fn response_content_preview_is_safe_for_multibyte_text() {
+        let excerpt = preview(&"界".repeat(400), 500);
+        assert_eq!(excerpt.matches('界').count(), 166);
+        assert!(excerpt.ends_with("..."));
+        assert_eq!(preview("short", 500), "short");
+    }
+
+    /// conductor_parallel's condensed tool result (800 bytes).
+    #[test]
+    fn condensed_result_preview_is_safe_for_multibyte_text() {
+        let excerpt = preview(&"界".repeat(400), 800);
+        assert_eq!(excerpt.matches('界').count(), 266);
+        assert!(excerpt.ends_with("..."));
+    }
+
+    #[test]
+    fn tool_only_summary_is_safe_for_multibyte_results() {
+        let summary = tool_only_summary(3, Some(&"界".repeat(201)));
+        assert!(summary.starts_with("Completed 3 tool call(s). Last result: "));
+        // 200 bytes cannot hold 66 whole three-byte scalars plus a partial one.
+        assert_eq!(summary.matches('界').count(), 66);
+        assert_eq!(
+            tool_only_summary(0, None),
+            "Completed 0 tool call(s). Last result: ok"
+        );
     }
 }

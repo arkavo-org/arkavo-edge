@@ -211,7 +211,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         (router, registry)
     };
 
-    // Spawn LLM processing task with router quality gate integration
+    // Spawn LLM processing task with router quality gate integration. It takes
+    // the conversation manager from here: every completed turn is written back
+    // so the next process start replays this session's provider state.
     let llm_handle = runtime.spawn(async move {
         if SHOW_DEBUG.load(Ordering::Relaxed) {
             eprintln!("[LLM Task] Started with router quality gate...");
@@ -222,7 +224,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
             // Process the user input with LLM
             let user_message = Message::user(user_input.clone());
-            messages_clone.push(user_message);
+            messages_clone.push(user_message.clone());
+            // Persisted only once the turn produced an answer, so an abandoned
+            // turn cannot leave a dangling user message in the session.
+            let mut assistant_turn: Option<Message> = None;
 
             // Try router-based routing with Thompson Sampling (Unix + mcp-tools)
             // Router provides: cost optimization, quality validation, TS learning
@@ -279,7 +284,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
 
                     // Add assistant response to messages
-                    messages_clone.push(response.as_assistant_message());
+                    let assistant = response.as_assistant_message();
+                    messages_clone.push(assistant.clone());
+                    assistant_turn = Some(assistant);
                 }
             } else {
                 // Fallback to direct LLM streaming
@@ -323,7 +330,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
                         let mut assistant = Message::assistant(full_response);
                         assistant.provider_state = provider_state;
-                        messages_clone.push(assistant);
+                        messages_clone.push(assistant.clone());
+                        assistant_turn = Some(assistant);
 
                         if SHOW_DEBUG.load(Ordering::Relaxed) {
                             eprintln!(
@@ -337,6 +345,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         let _ = llm_tx.send(format!("Error: {e}")).await;
                     }
                 }
+            }
+            if let Some(assistant) = assistant_turn {
+                persist_turn(&conversation_manager, &user_message, &assistant).await;
             }
             if SHOW_DEBUG.load(Ordering::Relaxed) {
                 eprintln!("[LLM Task] Waiting for next message...");
@@ -355,6 +366,19 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     llm_handle.abort();
 
     tui_result.map_err(std::convert::Into::into)
+}
+
+/// Commit one finished exchange to the session store.
+///
+/// The assistant message carries the turn's provider state and native tool
+/// calls, which is what a later process restores to continue the conversation
+/// rather than restart it. A storage failure must not end the session.
+async fn persist_turn(manager: &ConversationManager, user: &Message, assistant: &Message) {
+    for message in [user, assistant] {
+        if let Err(error) = manager.add_message(message).await {
+            eprintln!("[LLM Task] Failed to persist message: {error}");
+        }
+    }
 }
 
 async fn initialize_llm_client(

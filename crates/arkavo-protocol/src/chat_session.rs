@@ -1,6 +1,10 @@
+// Owned by this module: the chat loop is its only caller, so the turn helpers
+// stay private to it rather than becoming crate API.
+#[path = "chat_tool_turn.rs"]
+mod chat_tool_turn;
+
 use crate::auth::SessionAuth;
 use crate::chat_cloud_gate::{CloudConfirmation, cloud_confirmation, request_cloud_consent};
-use crate::chat_tool_turn::{executed_tool_turn, unregistered_tool_turn};
 use crate::config::{BufferConfig, ChatStreamingMode};
 use crate::error::{A2aError, Result};
 use crate::types::{
@@ -15,6 +19,7 @@ use arkavo_observability::{
     task_tracker::{ObservableTaskTracker, SessionTaskManager},
 };
 use arkavo_router::{CloudConsentPrompt, Router};
+use chat_tool_turn::{executed_tool_turn, unregistered_tool_turn};
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1352,16 +1357,14 @@ impl ChatSessionManager {
                                     };
                                     match retry_result {
                                         Ok(final_resp) => {
-                                            // Strip think blocks from final response (second inference
-                                            // may use a larger model that produces <think> tags)
-                                            let clean_content = arkavo_router::strip_think_blocks(&final_resp.content);
-                                            final_response = clean_content.clone();
+                                            // route_chat_spec already strips <think> blocks.
+                                            final_response = final_resp.content.clone();
 
                                             // Emit telemetry for second inference
                                             let mut tool_loop_value = serde_json::json!({
                                                 "phase": "tool_result_synthesis",
                                                 "latency_ms": inference_start.elapsed().as_millis() as u64,
-                                                "response_len": clean_content.len(),
+                                                "response_len": final_resp.content.len(),
                                             });
                                             if let Some(ref timing) = final_resp.inference_timing {
                                                 tool_loop_value["prompt_tokens"] = serde_json::json!(timing.n_prompt_eval);
@@ -1385,7 +1388,7 @@ impl ChatSessionManager {
                                                 message_id: message_id.clone(),
                                                 sequence: (response.tool_calls.len() + tool_results.len() + 4) as u64,
                                                 delta: MessageDeltaContent::Text {
-                                                    text: clean_content.clone(),
+                                                    text: final_resp.content.clone(),
                                                 },
                                                 timestamp: chrono::Utc::now(),
                                             };
