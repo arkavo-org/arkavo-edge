@@ -350,10 +350,15 @@ impl ArchitectExecutor {
         // that is the only single-model run the plan can be measured against;
         // a plan with no planning arm reports its cost and nothing else.
         let total_cost: f64 = results.iter().map(|r| r.actual_cost_usd).sum();
-        match (&plan.planning_model, plan.single_arm_estimate_usd) {
-            (Some(model), baseline) if baseline > 0.0 => {
-                let savings = baseline - total_cost;
-                let savings_pct = (savings / baseline) * 100.0;
+        // Nothing was saved unless the run actually came in under the
+        // baseline, so a plan that cost more than the single arm reports its
+        // cost and makes no claim.
+        match (
+            &plan.planning_model,
+            plan.single_arm_estimate_usd - total_cost,
+        ) {
+            (Some(model), savings) if savings > 0.0 && plan.single_arm_estimate_usd > 0.0 => {
+                let savings_pct = (savings / plan.single_arm_estimate_usd) * 100.0;
                 let name = model.name();
                 let _ = write!(
                     summary,

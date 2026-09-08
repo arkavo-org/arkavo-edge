@@ -275,8 +275,14 @@ impl super::Router {
             // and before the provider is built so a denial never opens a client.
             // "Explicit" means the caller named this model (an applied hint) or
             // it was already authorized for this dispatch.
-            let caller_authorized = authorized_cloud.as_ref() == Some(&actual_model)
-                || model_hint.is_some_and(|hint| *hint == actual_model);
+            let hinted = model_hint.is_some_and(|hint| *hint == actual_model);
+            let caller_authorized = authorized_cloud.as_ref() == Some(&actual_model) || hinted;
+            // An arm Thompson Sampling picked is not a request to download it.
+            // A hinted one is: naming an arm is the caller's own choice to
+            // reach for it, exactly as on the chat and execution paths.
+            if !hinted {
+                self.require_provisioned(&actual_model)?;
+            }
             if let Some(budget) = budget {
                 budget.check(estimated_cost).await?;
             }
@@ -816,6 +822,78 @@ mod tests {
     use crate::tool_extraction;
     use arkavo_mcp_tools::{DetailLevel, ToolRegistry};
     use arkavo_test_macros::spec;
+
+    /// Regression: the tool loop resolved its arm from classification and went
+    /// straight to provider construction, so a device with no weights on disk
+    /// and no cloud keys reached `load_local_model` and started a
+    /// multi-gigabyte fetch inside the caller's turn. The guard sits at the
+    /// dispatch site, not in `classify`: the hint is applied *after*
+    /// classification, so a check inside `classify` would test an arm the loop
+    /// is not going to run — and classification is also used for previews and
+    /// metrics that never dispatch.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn the_tool_loop_refuses_an_unprovisioned_automatic_arm() {
+        use crate::test_support::CountingProvider;
+        use crate::{Error, ModelSelector, ProviderAvailability, Router};
+
+        let provider = CountingProvider::new("answer");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability::default(),
+                false,
+            ))
+            .await
+            .with_provider_factory(provider.factory());
+
+        let error = router
+            .route_with_tools(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModelNotAvailable { .. }),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert_eq!(provider.calls(), 0);
+    }
+
+    /// The mirror: with the weights on disk the same call is served, so the
+    /// guard refuses a missing weight and nothing else.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn the_tool_loop_serves_a_provisioned_automatic_arm() {
+        use crate::test_support::CountingProvider;
+        use crate::{ModelSelector, ProviderAvailability, Router};
+
+        let provider = CountingProvider::new("answer");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability::default(),
+                true,
+            ))
+            .await
+            .with_provider_factory(provider.factory());
+
+        let response = router
+            .route_with_tools(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+            )
+            .await
+            .expect("a provisioned device serves the tool loop");
+        assert_eq!(response.content, "answer");
+        assert_eq!(provider.builds(), 1);
+    }
 
     /// Regression for the bug surfaced by gitar-bot on PR #598: an empty
     /// `ToolRegistry` (or a registry whose keyword search yields zero hits)

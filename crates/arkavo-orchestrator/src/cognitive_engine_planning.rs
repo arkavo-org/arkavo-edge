@@ -109,6 +109,11 @@ impl Planner {
         let preflight_cost = self
             .router
             .usage_cost(&decision.recommended_model, &preflight);
+        // The arm is routed, never named, so an unprovisioned local weight is a
+        // refusal rather than a multi-gigabyte download inside the plan.
+        self.router
+            .require_provisioned(&decision.recommended_model)
+            .map_err(|e| Error::Other(e.into()))?;
         budget
             .check(preflight_cost)
             .await
@@ -246,6 +251,9 @@ impl Planner {
         let estimated_cost = self
             .router
             .usage_cost(&decision.recommended_model, &estimated);
+        self.router
+            .require_provisioned(&decision.recommended_model)
+            .map_err(|e| Error::Other(e.into()))?;
         budget
             .check(estimated_cost)
             .await
@@ -415,12 +423,24 @@ mod tests {
         policy: CloudPolicy,
         config: BudgetConfig,
     ) -> (Planner, DispatchCounter, Arc<BudgetTracker>) {
+        planner_for(
+            policy,
+            config,
+            arkavo_router::ProviderAvailability {
+                openai: true,
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    async fn planner_for(
+        policy: CloudPolicy,
+        config: BudgetConfig,
+        availability: arkavo_router::ProviderAvailability,
+    ) -> (Planner, DispatchCounter, Arc<BudgetTracker>) {
         let counter = DispatchCounter::default();
         let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
-        let availability = arkavo_router::ProviderAvailability {
-            openai: true,
-            ..Default::default()
-        };
         let mut router = Router::new_offline().await.unwrap();
         router.set_offline_mode(false);
         let router = router
@@ -494,6 +514,43 @@ mod tests {
             assert!(
                 matches!(error, arkavo_router::Error::BudgetExceeded(_)),
                 "the ledger must answer before the policy: {error}"
+            );
+        }
+        assert_eq!(
+            counter.builds.load(Ordering::SeqCst),
+            0,
+            "a refused plan must not open a client"
+        );
+        assert_eq!(counter.calls.load(Ordering::SeqCst), 0);
+        assert!(tracker.get_spending_history(10).await.is_empty());
+    }
+
+    /// Regression: `plan` and `adjust` took their arm from classification and
+    /// went straight to provider construction. With no cloud keys the routed
+    /// arm is local, and on a device holding no weights that reached the
+    /// loader and started a multi-gigabyte download mid-plan. The
+    /// cloud-policy test above cannot see this: it configures OpenAI, so the
+    /// routed arm is never local.
+    #[tokio::test]
+    async fn an_unprovisioned_device_refuses_planning_and_adjustment() {
+        let (planner, counter, tracker) = planner_for(
+            CloudPolicy::CloudWithinCap,
+            BudgetConfig::default(),
+            arkavo_router::ProviderAvailability::default(),
+        )
+        .await;
+
+        for error in [
+            planner.plan(&assignment()).await.unwrap_err(),
+            planner.adjust(&step(), &failures()).await.unwrap_err(),
+        ] {
+            let error = router_error(error);
+            let error = error
+                .downcast_ref::<arkavo_router::Error>()
+                .expect("router error");
+            assert!(
+                matches!(error, arkavo_router::Error::ModelNotAvailable { .. }),
+                "{error}"
             );
         }
         assert_eq!(

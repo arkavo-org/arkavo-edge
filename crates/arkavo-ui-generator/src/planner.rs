@@ -205,6 +205,58 @@ mod tests {
         assert_eq!(parts[0].priority, 1);
     }
 
+    /// A router with no local weights and one configured cloud provider: the
+    /// deployment where the ungated path used to reach the network.
+    async fn unprovisioned_router(
+        policy: arkavo_budget::CloudPolicy,
+        factory: Arc<CountingFactory>,
+    ) -> Router {
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        router
+            .with_cloud_policy(policy)
+            .with_connectivity(ConnectivityChecker::assume(true))
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability {
+                    gemini: true,
+                    ..ProviderAvailability::default()
+                },
+                false,
+            ))
+            .await
+            .with_provider_factory(factory)
+    }
+
+    /// Under `AskBeforeCloud` the planning call is not denied outright — it
+    /// needs the user's answer, and nobody has given one. The refusal names
+    /// that, and still opens no client.
+    #[tokio::test]
+    async fn ask_before_cloud_needs_confirmation_before_the_planning_call() {
+        let factory = Arc::new(CountingFactory::default());
+        let router =
+            unprovisioned_router(arkavo_budget::CloudPolicy::AskBeforeCloud, factory.clone()).await;
+
+        let error = UiPlanner::new(Arc::new(router))
+            .plan("a dashboard with charts")
+            .await
+            .expect_err("an unapproved cloud planning call must be refused");
+        let router_error = error
+            .downcast_ref::<arkavo_router::Error>()
+            .expect("router error");
+        assert!(
+            matches!(
+                router_error,
+                arkavo_router::Error::CloudConfirmationRequired { .. }
+            ),
+            "got {router_error:?}"
+        );
+        assert_eq!(
+            factory.builds.load(Ordering::SeqCst),
+            0,
+            "a call awaiting confirmation must not open a client"
+        );
+    }
+
     /// Regression: the planner reached for a raw Gemini client through
     /// `Router::get_planning_provider`, which never consulted the cloud
     /// policy — so a `LocalOnly` install still sent the prompt to Gemini.
