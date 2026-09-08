@@ -211,7 +211,6 @@ anthropic-agent-sdk = { path = "crates/anthropic-agent-sdk" }
 async-stream = "0.3"
 tower = "0.5"
 semver = { version = "1.0", features = ["serde"] }
-bytemuck = "1.20"
 cfg-if = "1.0"
 libc = "0.2"
 notify = "8.0"

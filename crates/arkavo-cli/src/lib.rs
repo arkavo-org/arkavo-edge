@@ -62,12 +62,12 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         cfg!(any(feature = "llama-cpp", feature = "snpe")),
     )?;
     if !is_help_or_version && startup_policy::needs_local_setup(args) && first_run::is_first_run() {
-        match first_run::first_run_action() {
-            first_run::FirstRunAction::Prompt => {
+        match startup_policy::first_run_action() {
+            startup_policy::FirstRunAction::Prompt => {
                 let runtime = tokio::runtime::Runtime::new()?;
                 runtime.block_on(handle_first_run(verbose))?;
             }
-            first_run::FirstRunAction::RequireLocalModels | first_run::FirstRunAction::Skip => {
+            startup_policy::FirstRunAction::Skip => {
                 return Err("The agent harness requires local models. Provision them with `arkavo model download` before starting; cloud credentials do not replace local inference.".into());
             }
         }

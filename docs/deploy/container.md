@@ -10,7 +10,7 @@ CA certificates, and a non-root user.
 ## Build
 
 ```bash
-docker build -t arkavo-edge .
+docker build -t arkavo-edge-utility .
 ```
 
 The build runs:
@@ -18,27 +18,31 @@ The build runs:
 ```bash
 cargo build --release -p arkavo \
   --no-default-features \
-  --features memory,mdns,mcp-tools,llm-remote,web-ui
+  --features cloud
 ```
 
-`.dockerignore` excludes `target/`, `vendor/`, and `.git/` from the build
-context. `llama-cpp` is feature-gated end to end for this feature set (see
-below), so the builder never compiles `arkavo-llama-cpp-sys` — the build
-needs neither `vendor/llama.cpp` nor cmake.
+`cloud` (declared in `crates/arkavo/Cargo.toml` and `crates/arkavo-cli/Cargo.toml`)
+currently expands to `memory,mdns,mcp-tools,llm-remote,web-ui` — it is the
+one place that list is named, so the Dockerfile and this doc cannot drift
+from each other. `.dockerignore` excludes `target/`, `vendor/`, and `.git/`
+from the build context. `llama-cpp` is feature-gated end to end for this
+feature set (see below), so the builder never compiles
+`arkavo-llama-cpp-sys` — the build needs neither `vendor/llama.cpp` nor
+cmake.
 
 ## Run
 
 ```bash
 # CLI usage
-docker run --rm arkavo-edge --help
+docker run --rm arkavo-edge-utility --help
 
 # Inspect local model commands
-docker run --rm arkavo-edge model --help
+docker run --rm arkavo-edge-utility model --help
 ```
 
 ## Feature-set rationale
 
-The image ships `memory,mdns,mcp-tools,llm-remote,web-ui`:
+The image ships the `cloud` feature: `memory,mdns,mcp-tools,llm-remote,web-ui`:
 
 - `llama-cpp` is **excluded** from the feature list. This limits the image to utility commands; a cloud provider does not
   make it an agent harness. `llama-cpp` is feature-gated end to end (`arkavo-ui-generator`,
@@ -51,7 +55,14 @@ The image ships `memory,mdns,mcp-tools,llm-remote,web-ui`:
   from the musl CI variant at `.github/workflows/feature.yaml:606`, which
   builds with `memory,mdns,mcp-tools` only and therefore has no remote LLM
   support. That variant targets fully offline/embedded use; provider access alone is insufficient to run the local agent harness.
-- `web-ui` enables the AG-UI gateway served from the container.
+- `web-ui` compiles the AG-UI gateway (`arkavo ui`) into the binary, but this
+  image still cannot serve it: `arkavo ui` is a harness command, and with no
+  `llama-cpp`/`snpe` backend `startup_policy::validate_local_backend` refuses
+  it before it can bind a port (see Health probes and Known limitations
+  below). The feature is included anyway so this build recipe is also the
+  base for a local-enabled variant (rebuild with `llama-cpp` added) without
+  a separate no-web-ui/web-ui split, and so `arkavo model list`/`--help`
+  reflect the same command surface a local-enabled build has.
 - `cef-ui`, `claude-agent`, `kas`, `iroh`, and the per-provider shorthands
   are off to minimize build surface and image size.
 
@@ -78,9 +89,14 @@ the container build:
 
 ## Environment variables
 
-- `ARKAVO_SKIP_FIRST_RUN=1` — **required in containers.** Skips the
-  interactive first-run flow that downloads a local model, which is
-  meaningless in a no-inference image. Set by default in the Dockerfile.
+- `ARKAVO_SKIP_FIRST_RUN=1` — set by default in the Dockerfile, but a no-op
+  in *this* image: `startup_policy::validate_local_backend` already refuses
+  every harness command before the first-run gate runs, because this image
+  has no local inference backend. It matters for a local-enabled rebuild of
+  this recipe (`llama-cpp` added to the feature list): there, it skips the
+  interactive downloader on a TTY-less `docker run` without waiving the
+  local model requirement — a harness command still fails until weights are
+  provisioned. See `docs/deploy/self-host.md` for that build.
 - `GEMINI_API_KEY` — Gemini provider access.
 - `OPENAI_API_KEY` — OpenAI-compatible provider access.
 - `DEEPSEEK_API_KEY` — DeepSeek provider access.
@@ -89,6 +105,24 @@ the container build:
 
 Pass secrets with `docker run -e ...` or an orchestrator secret mechanism;
 never bake them into the image.
+
+## Opt-in: running the gateway
+
+This image cannot run `arkavo ui` — see Known limitations. To serve the
+AG-UI gateway from a container:
+
+1. Build a local-enabled variant: same recipe, `--features cloud,llama-cpp`
+   instead of `--features cloud` (this needs cmake and the vendored
+   `vendor/llama.cpp` tree, so it cannot reuse this Dockerfile's
+   `.dockerignore` as-is — see the "From Source" build in
+   `docs/deploy/self-host.md`).
+2. Mount a pre-provisioned model cache and point `HF_HOME` at it. This
+   image (built from this Dockerfile) can do the provisioning step itself,
+   since `arkavo model download` is a utility command: run it once against
+   the mounted volume before the local-enabled image starts.
+3. Set `ARKAVO_AGUI_BIND=0.0.0.0` explicitly and publish the port — neither
+   is set by this Dockerfile (see Known limitations). `docs/deploy/self-host.md`
+   has worked compose and Kubernetes examples.
 
 ## Health probes
 
@@ -100,16 +134,17 @@ Readiness: `GET /readyz` returns `200` while the health registry reports healthy
 
 ## Known limitations
 
-- **Gateway authentication in local-enabled images**: the AG-UI gateway
-  defaults to loopback-only (`ARKAVO_AGUI_BIND` opts out; see
-  `crates/arkavo-agui/src/gateway_bind.rs`), but the Dockerfile sets
-  `ARKAVO_AGUI_BIND=0.0.0.0` in the runtime stage, because the container's
-  network namespace — not the process's own bind address — is the actual
-  isolation boundary: the port is reachable only where the operator
-  publishes it (`-p 7700:7700`). The gateway still has no authentication, so
-  anyone who can reach the published port can drive the agent. Run behind a
-  reverse proxy with auth, or never publish the port beyond a trusted
-  network, until gateway authentication lands.
+- **No gateway port in this image**: `arkavo ui` fails at startup here (no
+  local backend), so the Dockerfile sets neither `ARKAVO_AGUI_BIND` nor
+  `EXPOSE` — there is nothing to publish. A local-enabled image that adds
+  one must set `ARKAVO_AGUI_BIND=0.0.0.0` itself: the AG-UI gateway
+  defaults to loopback-only (see `crates/arkavo-agui/src/gateway_bind.rs`),
+  and the container's network namespace — not the process's own bind
+  address — is the actual isolation boundary: the port is reachable only
+  where the operator publishes it (`-p 7700:7700`). The gateway still has
+  no authentication, so anyone who can reach the published port can drive
+  the agent. Run behind a reverse proxy with auth, or never publish the
+  port beyond a trusted network, until gateway authentication lands.
 - No agent inference in this utility image: cloud credentials cannot replace
   the missing local backend. Use a local-enabled build and provision models.
 - glibc runtime only; a fully static musl container variant can be added

@@ -12,7 +12,11 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 openai = ["arkavo-cli/openai"]
-cloud = ["llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
+# The container/deploy feature set: no local inference backend (no
+# `llama-cpp`/`snpe`), remote providers only. This is what the root
+# `Dockerfile` and `docs/deploy/container.md` build; keep them in sync with
+# this list rather than repeating it.
+cloud = ["memory", "mdns", "mcp-tools", "llm-remote", "web-ui"]
 # Full defaults with all LLM providers
 default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent"]
 # Minimal feature set for non-typical use cases

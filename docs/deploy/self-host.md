@@ -47,13 +47,21 @@ setup; it never waives the local model requirement.
 All configuration is via environment variables. There is no config file.
 
 ```bash
-# LLM provider credentials (at least one required)
+# Local model cache (required) — where provisioned GGUF weights live.
+# get_hf_cache_dir() reads HF_HOME/hub; set it explicitly rather than
+# relying on $HOME, especially in containers.
+export HF_HOME=/data/hf-cache
+
+# LLM provider credentials (optional — augment local inference, never replace it)
 export GEMINI_API_KEY="..."       # Gemini
 export OPENAI_API_KEY="..."       # OpenAI-compatible providers
 export DEEPSEEK_API_KEY="..."     # DeepSeek
 
 # Container / unattended operation
-export ARKAVO_SKIP_FIRST_RUN=1    # Skip interactive first-run model download
+export ARKAVO_SKIP_FIRST_RUN=1    # Skip the interactive first-run prompt/downloader.
+                                   # Local models are still required: with no weights
+                                   # under HF_HOME/hub, `arkavo ui` still fails with
+                                   # "The agent harness requires local models."
 
 # Logging
 export ARKAVO_DEBUG=1             # General debug logging
@@ -87,26 +95,60 @@ The API routes are rate-limited per source IP; static assets are not.
 
 ### Single Instance
 
-Suitable for development and small deployments:
+Suitable for development and small deployments. Provision the model cache
+once, then start the gateway against it — `GEMINI_API_KEY` augments local
+inference but does not replace it:
 
 ```bash
-GEMINI_API_KEY=... ARKAVO_SKIP_FIRST_RUN=1 arkavo ui --port 7700
+# One-time: download the recommended model into the cache.
+HF_HOME=/data/hf-cache arkavo model download
+
+# Then run the gateway.
+HF_HOME=/data/hf-cache GEMINI_API_KEY=... ARKAVO_SKIP_FIRST_RUN=1 arkavo ui --port 7700
 ```
 
 ### Docker Compose
 
+`arkavo-edge:latest` here is a locally built **local-enabled** image — the
+recipe in "From Source" above, containerized — not the root repo's utility
+[container image](container.md), which has no `llama-cpp` backend and
+cannot start `ui`. `model-provision` reuses that utility image, since
+`model download` is a utility command that needs no local backend, only the
+shared cache volume:
+
 ```yaml
 # docker-compose.yml
 services:
+  # One-time: populate the model cache before `arkavo` starts. Uses the root
+  # repo's utility image (container.md) since `model download` needs no
+  # local backend.
+  model-provision:
+    image: arkavo-edge-utility:latest
+    command: ["model", "download"]
+    environment:
+      - HF_HOME=/hf-cache
+    volumes:
+      - arkavo-hf-cache:/hf-cache
+
   arkavo:
     image: arkavo-edge:latest
     command: ["ui", "--port", "7700"]
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - HF_HOME=/hf-cache
+      - GEMINI_API_KEY=${GEMINI_API_KEY}  # optional: augments local inference
       - ARKAVO_SKIP_FIRST_RUN=1
+      # Not set by the image (see container.md); the AG-UI gateway defaults
+      # to loopback-only. The container's network namespace, not the
+      # process's own bind address, is the real isolation boundary — the
+      # port is reachable only where it's published (below).
+      - ARKAVO_AGUI_BIND=0.0.0.0
     volumes:
+      - arkavo-hf-cache:/hf-cache
       - arkavo-data:/data
     working_dir: /data
+    depends_on:
+      model-provision:
+        condition: service_completed_successfully
     networks:
       - arkavo-net
 
@@ -123,6 +165,7 @@ services:
       - arkavo-net
 
 volumes:
+  arkavo-hf-cache:
   arkavo-data:
 
 networks:
@@ -131,9 +174,21 @@ networks:
 
 The `working_dir` matters: persistent state (SQLite memory/event stores) lives
 under `.arkavo/` relative to the process working directory, so point it at a
-mounted volume to survive container replacement.
+mounted volume to survive container replacement. `arkavo-hf-cache` is a
+separate volume so the (larger, mostly read-only) model cache and the
+(small, frequently written) SQLite state don't share a backup/restore unit.
+Both images run as the non-root `arkavo` user (uid 10001); a freshly
+created named volume is root-owned, so if `model-provision` fails with a
+permission error, `chown -R 10001 <volume mountpoint>` once (e.g. via a
+throwaway root container) or set the volume's ownership through your
+storage driver.
 
 ### Kubernetes Deployment
+
+`arkavo-edge:latest` is the same locally built local-enabled image as the
+compose example. The init container reuses the root repo's utility image
+(`arkavo-edge-utility:latest`) to provision the shared model cache —
+`model download` needs no local backend, only the PVC:
 
 ```yaml
 apiVersion: apps/v1
@@ -150,6 +205,23 @@ spec:
       labels:
         app: arkavo-edge
     spec:
+      # Both images run as the non-root `arkavo` user (uid 10001, no primary
+      # group of its own — see the Dockerfile's `useradd`); fsGroup makes a
+      # freshly provisioned PVC group-writable by that uid so the init
+      # container's `model download` and the main container's reads agree
+      # on ownership.
+      securityContext:
+        fsGroup: 10001
+      initContainers:
+      - name: model-provision
+        image: arkavo-edge-utility:latest
+        args: ["model", "download"]
+        env:
+        - name: HF_HOME
+          value: /hf-cache
+        volumeMounts:
+        - name: hf-cache
+          mountPath: /hf-cache
       containers:
       - name: arkavo
         image: arkavo-edge:latest
@@ -157,25 +229,57 @@ spec:
         ports:
         - containerPort: 7700
         env:
-        - name: GEMINI_API_KEY
+        - name: HF_HOME
+          value: /hf-cache
+        # Not set by the image (see container.md); the pod's network
+        # namespace, not the process's own bind address, is the real
+        # isolation boundary — the Service below is the actual access
+        # control point.
+        - name: ARKAVO_AGUI_BIND
+          value: "0.0.0.0"
+        - name: ARKAVO_SKIP_FIRST_RUN
+          value: "1"
+        - name: GEMINI_API_KEY  # optional: augments local inference
           valueFrom:
             secretKeyRef:
               name: arkavo-secrets
               key: gemini-api-key
-        - name: ARKAVO_SKIP_FIRST_RUN
-          value: "1"
         volumeMounts:
+        - name: hf-cache
+          mountPath: /hf-cache
         - name: data
           mountPath: /data
         workingDir: /data
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 7700
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 7700
+          initialDelaySeconds: 5
+          periodSeconds: 15
         resources:
+          # Sized for the default recommended model (Gemma 4 12B, ~7GB GGUF)
+          # plus its inference working set; scale to whatever
+          # `arkavo model download` actually provisions above. The no-arg
+          # form picks a model from the *node's* detected RAM, not the pod's
+          # memory limit, but the auto-detected default never exceeds
+          # Gemma 4 12B (larger models require an explicit name), so these
+          # values are a safe ceiling for it regardless of host size.
           requests:
-            memory: "256Mi"
-            cpu: "250m"
+            memory: "10Gi"
+            cpu: "2"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "16Gi"
+            cpu: "4"
       volumes:
+      - name: hf-cache
+        persistentVolumeClaim:
+          claimName: arkavo-hf-cache
       - name: data
         persistentVolumeClaim:
           claimName: arkavo-data
@@ -201,9 +305,11 @@ ingress.
 
 The AG-UI gateway defaults to loopback-only binding
 (`crates/arkavo-agui/src/gateway_bind.rs`); set `ARKAVO_AGUI_BIND` (e.g. to
-`0.0.0.0`) to opt out and listen on another interface. The container image
-sets `ARKAVO_AGUI_BIND=0.0.0.0` so the port you publish is actually
-reachable — the container's network namespace is the real isolation
+`0.0.0.0`) to opt out and listen on another interface. The root repo's
+[container image](container.md) does **not** set this — it cannot run `ui`
+at all — so the compose and Kubernetes examples above set
+`ARKAVO_AGUI_BIND=0.0.0.0` themselves so the port they publish is actually
+reachable: the container's network namespace is the real isolation
 boundary, not the gateway's own bind address. Either way the gateway has
 **no authentication**: anyone who can reach the listening interface
 (loopback, a published container port, or a wider bind on bare metal) can
@@ -273,9 +379,12 @@ copy the whole `.arkavo/` directory; upload to object storage as needed.
 
 ## Monitoring
 
-There is no Prometheus `/metrics` endpoint and no HTTP health endpoint. What
-exists today:
+There is no Prometheus `/metrics` endpoint, but the gateway does serve
+liveness and readiness probes:
 
+- `GET /healthz` — returns `200 ok` once the listener is bound.
+- `GET /readyz` — returns `200` while the health registry reports healthy
+  or degraded, `503` otherwise.
 - **Logs**: the gateway logs to stdout; increase verbosity with
   `ARKAVO_DEBUG=1` and `ARKAVO_DEBUG_CHAT=1`. Collect stdout with your
   container/platform log pipeline.
@@ -283,31 +392,30 @@ exists today:
   from the web UI.
 - **Health reporters**: internal component health (router connectivity,
   learning pipeline, UI generator) is surfaced as AG-UI events over the
-  WebSocket, not as an HTTP endpoint.
+  WebSocket, in addition to the coarser `/readyz` verdict.
 
-For container orchestration health checks, use a TCP check against the
-gateway port:
-
-```yaml
-readinessProbe:
-  tcpSocket:
-    port: 7700
-  initialDelaySeconds: 5
-  periodSeconds: 10
-```
+For container orchestration health checks, use `/readyz` and `/healthz`
+directly (see the Kubernetes example above), rather than a bare TCP check —
+a bound listener does not mean the gateway is actually healthy.
 
 ## Troubleshooting
 
 - **Gateway unreachable externally**: it binds loopback only by default —
-  set `ARKAVO_AGUI_BIND=0.0.0.0` (the shipped container image sets this
-  already) before checking proxy, firewall, and port-mapping configuration.
+  set `ARKAVO_AGUI_BIND=0.0.0.0` yourself (the root repo's [container
+  image](container.md) does not set this — it cannot run `ui` at all; see
+  the compose/Kubernetes examples above) before checking proxy, firewall,
+  and port-mapping configuration.
 - **Agent requests fail**: verify that the build supports local inference and
   that local models are provisioned. For cloud augmentation failures, verify
   provider credentials and cloud policy.
 - **State lost after container restart**: the working directory was not a
   mounted volume — set `working_dir`/`workingDir` to a persistent mount.
 - **Interactive first-run prompt in a container**: set
-  `ARKAVO_SKIP_FIRST_RUN=1`.
+  `ARKAVO_SKIP_FIRST_RUN=1`. This only suppresses the prompt/downloader —
+  it does not provision models. With no weights under `HF_HOME/hub`,
+  `arkavo ui` still fails with "The agent harness requires local models."
+  until the cache is populated (see Configuration and the deployment
+  examples above).
 
 ## Scaling Guidelines
 

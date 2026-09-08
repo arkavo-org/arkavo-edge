@@ -240,3 +240,12 @@ through verification but the gate never resolves it, so it does not check
 that the parent exists, is still valid, or has budget left. A delegated
 permit is admitted on its own merits alone.
 
+Only `arkavo mcp proxy` calls `DispatchGate::evaluate` — that is the one
+place `PermitPolicy` (`arkavo-mcp-proxy::permit_hook`) runs. Every other
+path that executes a tool never checks a permit or proof-of-possession at
+all: the CLI's in-process tool loop (`arkavo-cli::tool_integration`),
+chat-session MCP calls, the server conductor's tool dispatch, and Astra
+cloud dispatch all call tools directly. A permit minted for one of these
+paths is not enforced there; the gate exists, but nothing on that path asks
+it anything.
+

@@ -51,7 +51,6 @@ uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
 openai = ["llm-remote"]
-cloud = ["llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
 default = ["llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
 critic = []
 sentinel = []

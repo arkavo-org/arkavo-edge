@@ -36,6 +36,44 @@ pub fn needs_local_setup(args: &[String]) -> bool {
         })
 }
 
+/// How the first-run gate behaves for this invocation.
+///
+/// This only matters when [`needs_local_setup`] is true and no local weights
+/// are cached yet — a harness command with nothing to run on. Utility
+/// commands (`model`, `mcp proxy`, `agent init`, ...) never reach this
+/// decision at all, in either variant, because `requires_local_runtime`
+/// excludes them upstream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirstRunAction {
+    /// Interactive terminal, no skip requested: run the guided setup flow
+    /// (detect capabilities, offer to download, verify with a test query).
+    Prompt,
+    /// `ARKAVO_SKIP_FIRST_RUN` is set, or stdin is not a TTY (container/CI):
+    /// never prompt or auto-download. This does not waive the local model
+    /// requirement — a harness command still fails with the "requires local
+    /// models" error until weights are provisioned some other way (a
+    /// pre-provisioned cache, `arkavo model download`, or `--gguf`).
+    Skip,
+}
+
+/// Decide how the first-run gate behaves for this invocation.
+pub fn first_run_action() -> FirstRunAction {
+    use std::io::IsTerminal;
+    first_run_action_for(
+        std::env::var("ARKAVO_SKIP_FIRST_RUN").ok(),
+        std::io::stdin().is_terminal(),
+    )
+}
+
+fn first_run_action_for(skip_env: Option<String>, stdin_is_tty: bool) -> FirstRunAction {
+    let skip_requested = skip_env.is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    if skip_requested || !stdin_is_tty {
+        FirstRunAction::Skip
+    } else {
+        FirstRunAction::Prompt
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +138,54 @@ mod tests {
         ] {
             assert!(!needs_local_setup(&command));
             assert!(validate_local_backend(&command, false).is_ok());
+        }
+    }
+
+    #[test]
+    fn first_run_action_skip_env() {
+        // ARKAVO_SKIP_FIRST_RUN=1 (or "true") skips interactive setup,
+        // regardless of TTY state.
+        for val in ["1", "true", "TRUE"] {
+            assert_eq!(
+                first_run_action_for(Some(val.to_string()), true),
+                FirstRunAction::Skip,
+                "skip value {val}"
+            );
+            assert_eq!(
+                first_run_action_for(Some(val.to_string()), false),
+                FirstRunAction::Skip,
+                "skip value {val}"
+            );
+        }
+    }
+
+    #[test]
+    fn first_run_action_non_tty_never_prompts() {
+        // Regression: in a container stdin is at EOF, which read_line reports
+        // as empty input; the old code treated that as "yes" and started an
+        // unsolicited multi-GB download. Non-TTY stdin must never prompt,
+        // whether or not the skip env var is also set.
+        assert_eq!(first_run_action_for(None, false), FirstRunAction::Skip);
+        // Non-skip env values must not suppress this on non-TTY stdin either.
+        for val in ["0", "false", ""] {
+            assert_eq!(
+                first_run_action_for(Some(val.to_string()), false),
+                FirstRunAction::Skip,
+                "value {val}"
+            );
+        }
+    }
+
+    #[test]
+    fn first_run_action_tty_prompts_unless_skipped() {
+        assert_eq!(first_run_action_for(None, true), FirstRunAction::Prompt);
+        // A falsy/unset skip env value on a real terminal still prompts.
+        for val in ["0", "false", ""] {
+            assert_eq!(
+                first_run_action_for(Some(val.to_string()), true),
+                FirstRunAction::Prompt,
+                "value {val}"
+            );
         }
     }
 }

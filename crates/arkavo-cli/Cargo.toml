@@ -13,13 +13,17 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 openai = ["arkavo-llm/llm-remote", "arkavo-router/openai", "arkavo-ui-core/openai", "arkavo-server/openai", "arkavo-orchestrator/openai"]
-cloud = ["llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
+# The container/deploy feature set: no local inference backend (no
+# `llama-cpp`/`snpe`), remote providers only. This is what the root
+# `Dockerfile` and `docs/deploy/container.md` build; keep them in sync with
+# this list rather than repeating it.
+cloud = ["memory", "mdns", "mcp-tools", "llm-remote", "web-ui"]
 # Full defaults with all providers (cross-platform)
 default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "kas", "iroh"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows (no C++ dependencies)
-windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
+windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui", "openai"]
 # MCP mesh networking and router integration
 mcp-tools = ["dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
 # macOS-specific MCP integration (auto-enabled on macOS when mcp-tools is enabled)

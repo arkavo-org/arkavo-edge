@@ -106,11 +106,23 @@ pub struct SubsystemTimingRegistry {
     pub conductor_orchestration: LatencyTracker,
     pub mcp_tools: LatencyTracker,
     pub inference: LatencyTracker,
-    /// Rolling window over dispatch-gate stage latencies. Four writers share
-    /// it: preflight, budget, critic, and the permit gate the MCP proxy runs
-    /// on every `tools/call` (`arkavo_mcp_proxy::permit_hook`). Samples are
-    /// recorded in milliseconds; sub-millisecond stages read as 0 — use the
-    /// gate_latency bench for sub-ms precision.
+    /// Rolling window over dispatch-gate stage latencies. Named after the
+    /// permit gate (`docs/dispatch-gate.md`), but most writers here are not
+    /// it: preflight moderation (`Router::route`), budget reservation
+    /// (`CostOrchestrator::route_with_budget`), and the critic verification
+    /// pass (`arkavo-cli::tool_integration::verify_response_with_critic`)
+    /// all record here and none of them evaluates a permit. Only `arkavo
+    /// mcp proxy`'s `PermitPolicy` (`arkavo_mcp_proxy::permit_hook`) is the
+    /// actual permit gate. `global_timing()` is a process-wide
+    /// `LazyLock`, so which of these four a given sample came from depends
+    /// on what runs in this process: a standalone `arkavo mcp proxy`
+    /// subprocess only ever records the permit gate here, while a router/CLI
+    /// process that never spawns or embeds that proxy only ever records
+    /// preflight/budget/critic — an embedder that hosts the proxy in-process
+    /// would record both into the one shared registry, but none of the
+    /// paths documented as unwired to the gate in `docs/dispatch-gate.md`
+    /// do that. Samples are recorded in milliseconds; sub-millisecond
+    /// stages read as 0 — use the gate_latency bench for sub-ms precision.
     pub dispatch_gate: LatencyTracker,
 }
 
