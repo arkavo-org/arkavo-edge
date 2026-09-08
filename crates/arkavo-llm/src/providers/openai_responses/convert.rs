@@ -150,7 +150,11 @@ fn refusal(value: &Value) -> Error {
         Some("incomplete") => "response_incomplete",
         _ => "response_not_completed",
     };
-    Error::provider_refusal(reason.or(code).or(kind), kind, fallback)
+    Error::provider_refusal(
+        crate::error::first_wire_code(&[reason, code, kind]),
+        kind,
+        fallback,
+    )
 }
 
 fn parse_response(value: &Value) -> Result<ProviderResponse> {

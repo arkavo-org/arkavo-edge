@@ -565,18 +565,26 @@ async fn measured_wall_time_populates_the_perf_fields() {
     task.await.unwrap();
 }
 
-/// A refusal is still a refusal when its body never arrives: the diagnostic is
-/// worth a few seconds, not the whole request budget.
+/// A refusal is still a refusal when its body never arrives — and saying so
+/// must not cost the whole request budget. The code alone does not prove that:
+/// without the error-body budget the transport eventually gives up too and the
+/// status still yields `http_503`. Only the elapsed time discriminates, so this
+/// pins the effort tier whose budget the wait has to beat.
 #[arkavo_test_macros::spec("ASTRA-003")]
 #[tokio::test]
-async fn a_stalled_error_body_still_reports_the_status() {
+async fn a_stalled_error_body_gives_up_long_before_the_request_budget() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let provider = OpenAIResponsesProvider::new(OpenAIResponsesConfig {
+    let config = OpenAIResponsesConfig {
         api_key: Some("fixture-token".into()),
         base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
         ..Default::default()
-    })
-    .unwrap();
+    };
+    assert_eq!(
+        config.reasoning_effort,
+        arkavo_llm::providers::OpenAIReasoningEffort::Medium
+    );
+    let budget = Duration::from_secs(config.reasoning_effort.request_timeout_secs());
+    let provider = OpenAIResponsesProvider::new(config).unwrap();
     let task = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         read_request(&mut socket).await;
@@ -588,12 +596,16 @@ async fn a_stalled_error_body_still_reports_the_status() {
         let mut byte = [0];
         let _ = socket.read(&mut byte).await;
     });
+    let started = std::time::Instant::now();
     let error = provider
         .complete(vec![Message::user("test")])
         .await
         .unwrap_err();
-    // The refusal itself is the proof: had the body read waited for the whole
-    // request budget, this would be a transport timeout with no code at all.
+    let waited = started.elapsed();
     assert_eq!(error.provider_code(), Some("http_503"));
+    assert!(
+        waited < Duration::from_mins(1) && waited < budget,
+        "waited {waited:?}: the error-body budget did not cut the wait short of the {budget:?} request budget"
+    );
     task.await.unwrap();
 }

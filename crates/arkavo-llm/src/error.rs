@@ -165,12 +165,29 @@ impl Error {
 /// through the one field that is allowed to be reported.
 fn wire_identifier(value: Option<&str>) -> Option<String> {
     let value = value?.trim();
-    let identifier = !value.is_empty()
+    is_wire_identifier(value).then(|| value.to_string())
+}
+
+fn is_wire_identifier(value: &str) -> bool {
+    !value.is_empty()
         && value.len() <= 64
         && value
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
-    identifier.then(|| value.to_string())
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
+/// The first candidate that is a usable identifier.
+///
+/// Providers fill these fields inconsistently: a truncation may describe itself
+/// in prose under `incomplete_details.reason` while the `error.code` beside it
+/// is clean. Judging each candidate on its own keeps the clean one instead of
+/// letting the first unusable value collapse the whole chain to a fallback.
+pub(crate) fn first_wire_code<'a>(candidates: &[Option<&'a str>]) -> Option<&'a str> {
+    candidates
+        .iter()
+        .flatten()
+        .copied()
+        .find(|value| is_wire_identifier(value.trim()))
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -283,6 +300,29 @@ mod tests {
             "http_429",
         );
         assert_eq!(same.to_string(), "Provider refused: insufficient_quota");
+    }
+
+    /// A provider that describes a truncation in prose still reports a clean
+    /// code beside it; the prose must not cost us the code.
+    #[test]
+    fn a_prose_candidate_does_not_discard_the_clean_one_behind_it() {
+        assert_eq!(
+            first_wire_code(&[
+                Some("The response was cut off after 'secret value'"),
+                Some("max_output_tokens"),
+                Some("invalid_request_error"),
+            ]),
+            Some("max_output_tokens")
+        );
+        assert_eq!(
+            first_wire_code(&[None, Some("  content_filter  ")]),
+            Some("  content_filter  "),
+            "trimming belongs to the constructor, not the selection"
+        );
+        assert_eq!(
+            first_wire_code(&[None, Some("a sentence, not a code")]),
+            None
+        );
     }
 
     /// Every fallible call in the crate returns `Result<_, Error>`, and clippy

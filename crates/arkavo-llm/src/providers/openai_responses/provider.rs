@@ -99,7 +99,11 @@ async fn refusal(response: Response) -> Error {
     let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     let code = value.pointer("/error/code").and_then(Value::as_str);
     let kind = value.pointer("/error/type").and_then(Value::as_str);
-    Error::provider_refusal(code.or(kind), kind, &fallback)
+    Error::provider_refusal(
+        crate::error::first_wire_code(&[code, kind]),
+        kind,
+        &fallback,
+    )
 }
 
 async fn error_body(response: Response) -> Vec<u8> {

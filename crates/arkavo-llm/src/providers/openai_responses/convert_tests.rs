@@ -284,6 +284,16 @@ fn incomplete_and_failed_responses_name_their_code_without_the_message() {
     assert_eq!(error.provider_code(), Some("server_error"));
     assert!(!error.to_string().contains("prompt-canary"));
 
+    // Prose in `incomplete_details.reason` must not cost us the clean code
+    // sitting beside it.
+    let mut described = completed(json!([]));
+    described["status"] = json!("incomplete");
+    described["incomplete_details"] = json!({"reason":"ran out of room after 'prompt-canary'"});
+    described["error"] = json!({"code":"max_output_tokens"});
+    let error = response(described).unwrap_err();
+    assert_eq!(error.provider_code(), Some("max_output_tokens"));
+    assert!(!error.to_string().contains("prompt-canary"));
+
     // A status this build does not know still fails, under its own name.
     let mut unknown = completed(json!([]));
     unknown["status"] = json!("cancelled");

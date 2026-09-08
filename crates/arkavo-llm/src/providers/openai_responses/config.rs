@@ -93,9 +93,9 @@ impl Default for OpenAIResponsesConfig {
 /// caller-supplied cap cannot bypass the limit the configuration enforces.
 pub(super) fn check_max_tokens(max_tokens: usize) -> Result<()> {
     if max_tokens == 0 || max_tokens > MAX_OUTPUT_TOKENS {
-        return Err(Error::Config(
-            "Astra output token limit must be 1..=128000".into(),
-        ));
+        return Err(Error::Config(format!(
+            "Astra output token limit must be 1..={MAX_OUTPUT_TOKENS}"
+        )));
     }
     Ok(())
 }
