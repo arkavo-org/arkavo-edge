@@ -1651,13 +1651,38 @@ mod cloud_consent_tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    /// Both shapes this file builds: the router-backed manager that serves real
+    /// client requests, and the no-router fallback. `with_config` is the only
+    /// constructor either uses, and a prompter can only arrive afterwards
+    /// through `set_cloud_consent_prompt`, which appears nowhere in this crate.
     #[spec("ASTRA-004")]
     #[tokio::test]
     async fn the_server_builds_chat_managers_that_cannot_prompt() {
-        // The exact constructor a2a_server uses for its chat manager, with the
-        // exact configuration it passes; nothing in this file installs a
-        // prompter afterwards.
-        let manager = chat_session::ChatSessionManager::with_config(
+        // Injected availability keeps the fixture off the host's model cache.
+        let router = arkavo_router::Router::new_offline()
+            .await
+            .expect("an offline router needs no credentials")
+            .with_selector(arkavo_router::ModelSelector::with_availability(
+                arkavo_router::ProviderAvailability::default(),
+                false,
+            ))
+            .await;
+        let registry = Arc::new(arkavo_mcp_tools::ToolRegistry::empty());
+
+        let with_router = chat_session::ChatSessionManager::with_config(
+            None,
+            Some(Arc::new(router)),
+            Some(registry),
+            3600,
+            BufferConfig::default(),
+        );
+        assert!(
+            !with_router.has_cloud_consent_prompt(),
+            "the manager that serves A2A clients must have no way to read the server's console"
+        );
+        with_router.shutdown().await;
+
+        let fallback = chat_session::ChatSessionManager::with_config(
             None,
             None,
             None,
@@ -1665,9 +1690,9 @@ mod cloud_consent_tests {
             BufferConfig::default(),
         );
         assert!(
-            !manager.has_cloud_consent_prompt(),
-            "a server-built chat manager must have no way to read its own console"
+            !fallback.has_cloud_consent_prompt(),
+            "the no-router fallback must not read the server's console either"
         );
-        manager.shutdown().await;
+        fallback.shutdown().await;
     }
 }

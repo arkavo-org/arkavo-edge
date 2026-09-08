@@ -334,16 +334,16 @@ mod tests {
 
     #[spec("ASTRA-004")]
     #[tokio::test]
-    async fn local_execution_preserves_pending_cloud_augmentation_approval() {
+    async fn a_standing_approval_does_not_pull_local_execution_into_the_cloud() {
         let provider = CountingProvider::new("ok");
         let router = cloud_router(CloudPolicy::AskBeforeCloud, "xai", &provider).await;
-        router.confirm_next_cloud_upgrade();
+        router.approve_cloud_for_host();
         let routed = router
             .route_with_tools_execution_attributed("summarize", prompt(), None, None)
             .await
             .unwrap();
         assert!(routed.model.is_local());
-        assert!(router.cloud_confirmation_pending(None));
+        assert!(router.cloud_approved(None));
         assert_eq!(provider.calls(), 1);
     }
 

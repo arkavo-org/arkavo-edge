@@ -26,7 +26,7 @@ impl Router {
             dollars,
             self.cloud_policy,
             self.offline_mode,
-            explicit || self.cloud_confirmed(session),
+            explicit || self.cloud_approved(session),
             self.cloud_spend_caps().await,
         )
     }

@@ -1287,10 +1287,11 @@ pub async fn start_agent_server(
     // Set API keys in the server
     server.set_api_keys(config.api_keys.clone()).await;
 
-    // The router is live now that metadata and keys are set, so whether cloud
-    // augmentation is even available is known before any task runs. Ask once,
-    // here, while nothing else is running: the conductor issues routing calls
-    // this command does not, and it has no second chance to reach the operator.
+    // The router is on the bus by now, and its feasible arm set is fixed when it
+    // is built (`set_api_keys` above only records metadata), so whether cloud
+    // augmentation is available at all is already answerable. Ask once, here,
+    // while nothing else is running: the conductor issues routing calls this
+    // command does not, and it has no second chance to reach the operator.
     // Cloned out of the guard first — the prompt below awaits an answer and the
     // read lock must not be held while it waits.
     let startup_router = learning_bus.router().read().await.clone();

@@ -151,7 +151,8 @@ pub enum RouterEvent {
     /// A local answer collapsed and the cloud policy *permits* cloud but
     /// requires confirmation (`AskBeforeCloud`). The router stayed local and
     /// surfaced this offer so the caller (CLI / UI) can prompt the user, then
-    /// `confirm_next_cloud_upgrade()` + re-dispatch to escalate. This is the
+    /// record the answer with `approve_cloud_for_session()` (or
+    /// `approve_cloud_for_host()`) and re-dispatch to escalate. This is the
     /// "ask before cloud" handshake made observable.
     CloudUpgradeOffered {
         /// Why the upgrade is offered, e.g. `LocalCollapsed`.
@@ -281,11 +282,6 @@ pub struct Router {
     /// std `RwLock` (not tokio) so `projected_cloud_cost` can read it without
     /// `.await` on the (rare) collapse-driven upgrade path.
     pricing: Arc<std::sync::RwLock<arkavo_budget::provider_costs::ProviderPricing>>,
-    /// One-shot user confirmation for the next cloud upgrade under
-    /// `AskBeforeCloud`. The caller sets it via `confirm_next_cloud_upgrade()`
-    /// after the user approves a `CloudUpgradeOffered`; the loop consumes it
-    /// when authorizing spend.
-    cloud_confirmation: std::sync::atomic::AtomicBool,
     /// Standing cloud approvals, keyed by whoever gave them. Never consumed: a
     /// host that approves cloud once makes many routing calls it does not
     /// itself issue, so a one-shot flag is spent by the first internal call and
@@ -357,7 +353,6 @@ impl Router {
             pricing: Arc::new(std::sync::RwLock::new(
                 arkavo_budget::provider_costs::ProviderPricing::new(),
             )),
-            cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
             cloud_consent: Arc::new(cloud_consent::CloudConsentLedger::default()),
             provider_factory: None,
             budget_agent: None,
@@ -417,7 +412,6 @@ impl Router {
             pricing: Arc::new(std::sync::RwLock::new(
                 arkavo_budget::provider_costs::ProviderPricing::new(),
             )),
-            cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
             cloud_consent: Arc::new(cloud_consent::CloudConsentLedger::default()),
             provider_factory: None,
             budget_agent: None,
@@ -451,30 +445,13 @@ impl Router {
         self.cloud_policy
     }
 
-    /// Grant one-shot user confirmation for the next cloud upgrade.
-    ///
-    /// Call this after the user approves a `CloudUpgradeOffered` event, then
-    /// re-dispatch the request: under `AskBeforeCloud` the next collapse-driven
-    /// escalation will be authorized (within the budget cap). The flag is
-    /// consumed by the first routing decision that consults it.
-    pub fn confirm_next_cloud_upgrade(&self) {
-        self.cloud_confirmation
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    /// Consume the one-shot cloud confirmation (read-and-clear).
-    fn consume_cloud_confirmation(&self) -> bool {
-        self.cloud_confirmation
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
-    }
-
     /// Approve cloud spend for one user session, for as long as it lasts.
     ///
-    /// Unlike [`Self::confirm_next_cloud_upgrade`] this is never consumed: the
-    /// turn the user approved fans out into routing calls the caller does not
-    /// issue itself, and a one-shot flag is spent by the first of them. It is
-    /// keyed by session, so it authorizes only the calls that name this
-    /// `session_id` — the next session this process serves is asked its own
+    /// The approval is never consumed: the turn the user approved fans out into
+    /// routing calls the caller does not issue itself, so anything read-and-
+    /// cleared would be spent by the first of them and every later call would
+    /// re-ask. It is keyed by session, so it authorizes only the calls that name
+    /// this `session_id` — the next session this process serves is asked its own
     /// question. The policy gate still applies: `LocalOnly`, offline mode and
     /// the remaining spend cap all continue to refuse.
     pub fn approve_cloud_for_session(&self, session_id: &str) {
@@ -492,22 +469,13 @@ impl Router {
 
     /// Whether cloud spend is already approved for this caller. `None` asks
     /// about the host's own work rather than "anyone at all".
+    ///
+    /// This is the single authorization predicate: the arm draw
+    /// (`selection_exclusions`) and the dispatch gate
+    /// ([`Self::authorize_call`]) both read it with the same key, so an arm is
+    /// never admitted on an approval the gate will not accept.
     pub fn cloud_approved(&self, session: Option<&str>) -> bool {
         self.cloud_consent.is_approved(session)
-    }
-
-    /// Whether the user has authorized this cloud call. A standing approval
-    /// answers first, so it never burns the one-shot flag.
-    pub(crate) fn cloud_confirmed(&self, session: Option<&str>) -> bool {
-        self.cloud_approved(session) || self.consume_cloud_confirmation()
-    }
-
-    /// Whether a user approval is available without spending it.
-    pub(crate) fn cloud_confirmation_pending(&self, session: Option<&str>) -> bool {
-        self.cloud_approved(session)
-            || self
-                .cloud_confirmation
-                .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Whether any cloud arm is configured and feasible right now — "is there
@@ -705,7 +673,7 @@ impl Router {
     /// it — the dispatch gate is the authority either way.
     async fn selection_exclusions(&self, session: Option<&str>) -> Vec<String> {
         let excluded = self.get_excluded_models().await;
-        if self.cloud_confirmation_pending(session) && self.approval_can_authorize_cloud().await {
+        if self.cloud_approved(session) && self.approval_can_authorize_cloud().await {
             return excluded;
         }
         let local_arm_feasible = self
@@ -1191,8 +1159,26 @@ impl Router {
         self.connectivity.is_online().await
     }
 
-    /// Get routing decision without executing (for callers that just need model selection)
+    /// Get routing decision without executing (for callers that just need
+    /// model selection). The draw is host-scoped: this entry point owns no
+    /// session, so it may rely only on an approval the host itself gave.
     pub async fn classify(&self, task_description: &str) -> Result<RoutingDecision> {
+        self.classify_for_session(task_description, None).await
+    }
+
+    /// Classification and arm selection for a caller that owns a session.
+    ///
+    /// The draw and the dispatch gate must read the *same* approval, or they
+    /// disagree in both directions: an arm the draw admits on someone else's
+    /// approval is refused at the gate (a turn that used to be served now
+    /// fails), and an arm the draw excludes for want of an approval the caller
+    /// actually holds is never offered. `session` is therefore threaded from
+    /// the dispatch entry point down to `selection_exclusions` unchanged.
+    pub(crate) async fn classify_for_session(
+        &self,
+        task_description: &str,
+        session: Option<&str>,
+    ) -> Result<RoutingDecision> {
         let classification = self.classifier.classify(task_description).await?;
 
         tracing::info!(
@@ -1201,10 +1187,7 @@ impl Router {
             "Task classified"
         );
 
-        // The classifier's draw is host-scoped: `classify` is a standalone
-        // public entry point with no session of its own, and a session-scoped
-        // caller still faces the dispatch gate, which does read its approval.
-        let excluded = self.selection_exclusions(None).await;
+        let excluded = self.selection_exclusions(session).await;
         let mut decision = self
             .selector
             .select_adaptive(&self.model_learning, &classification, 0.0, &excluded)
@@ -1793,7 +1776,6 @@ impl Router {
             feasibility_baseline: self.feasibility_baseline.clone(),
             budget_tracker: self.budget_tracker.clone(),
             pricing: Arc::clone(&self.pricing),
-            cloud_confirmation: std::sync::atomic::AtomicBool::new(false),
             cloud_consent: Arc::clone(&self.cloud_consent),
             provider_factory: self.provider_factory.clone(),
             budget_agent: self.budget_agent.clone(),
@@ -2238,28 +2220,10 @@ mod tests {
     #[spec("ASTRA-004")]
     #[tokio::test]
     async fn a_host_approval_puts_the_cloud_arms_back_in_the_draw() {
-        use crate::selector::ModelSelector;
-        use crate::test_support::{CountingProvider, only};
-
-        let selector = ModelSelector::with_availability(only("gemini"), true);
-        selector.set_memory_budget(600_000_000);
-        let cloud_arms: Vec<String> = selector
-            .feasible_models()
-            .iter()
-            .filter(|model| model.is_cloud())
-            .map(|model| model.name().to_string())
-            .collect();
-        assert!(!cloud_arms.is_empty(), "the fixture must offer a cloud arm");
+        use crate::test_support::CountingProvider;
 
         let provider = CountingProvider::new("answer");
-        let mut router = Router::new_offline().await.unwrap();
-        router.set_offline_mode(false);
-        let router = router
-            .with_cloud_policy(arkavo_budget::CloudPolicy::AskBeforeCloud)
-            .with_connectivity(ConnectivityChecker::assume(true))
-            .with_selector(selector)
-            .await
-            .with_provider_factory(provider.factory());
+        let (router, cloud_arms) = mixed_arm_router(&provider).await;
 
         assert!(
             router
@@ -2281,7 +2245,7 @@ mod tests {
             "approved: cloud arms are back in the draw"
         );
         assert!(
-            router.cloud_confirmation_pending(None),
+            router.cloud_approved(None),
             "reading the exclusions must not consume the approval"
         );
 
@@ -2293,6 +2257,113 @@ mod tests {
                 .any(|name| cloud_arms.contains(name)),
             "the operator's approval is not a chat session's approval"
         );
+    }
+
+    /// A fixture with both a cached local arm and a configured cloud arm — the
+    /// only shape in which the draw and the gate can disagree, because a
+    /// feasible local arm is what makes the policy exclusion bite.
+    async fn mixed_arm_router(
+        provider: &crate::test_support::CountingProvider,
+    ) -> (Router, Vec<String>) {
+        use crate::selector::ModelSelector;
+        use crate::test_support::only;
+
+        let selector = ModelSelector::with_availability(only("gemini"), true);
+        selector.set_memory_budget(600_000_000);
+        let cloud_arms: Vec<String> = selector
+            .feasible_models()
+            .iter()
+            .filter(|model| model.is_cloud())
+            .map(|model| model.name().to_string())
+            .collect();
+        assert!(!cloud_arms.is_empty(), "the fixture must offer a cloud arm");
+
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = router
+            .with_cloud_policy(arkavo_budget::CloudPolicy::AskBeforeCloud)
+            .with_connectivity(ConnectivityChecker::assume(true))
+            .with_selector(selector)
+            .await
+            .with_provider_factory(provider.factory());
+        (router, cloud_arms)
+    }
+
+    /// Regression: the draw and the gate must read the same approval.
+    ///
+    /// An operator approves cloud at `arkavo agent` startup, then a chat
+    /// session takes the tool loop. If the draw still consulted the host's
+    /// approval it would re-admit the cloud arms, Thompson Sampling could pick
+    /// one, and the gate — which reads the *session's* approval — would refuse
+    /// it, failing a turn that was served before consent was scoped. Ten turns
+    /// so a random draw cannot hide the fault.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_host_approval_never_draws_a_cloud_arm_for_a_chat_session() {
+        use crate::test_support::CountingProvider;
+
+        const TASK: &str = "summarize the diff";
+        let provider = CountingProvider::new("a complete answer for the request");
+        let (router, cloud_arms) = mixed_arm_router(&provider).await;
+        router.approve_cloud_for_host();
+
+        assert!(
+            router
+                .selection_exclusions(Some("session-a"))
+                .await
+                .iter()
+                .any(|name| cloud_arms.contains(name)),
+            "an unapproved session must not inherit the operator's approval in the draw"
+        );
+
+        for turn in 0..10 {
+            router
+                .route_with_tools_for_session(
+                    TASK,
+                    vec![arkavo_llm::Message::user(TASK)],
+                    None,
+                    "session-a",
+                )
+                .await
+                .unwrap_or_else(|e| panic!("turn {turn} must be served locally, got {e:?}"));
+        }
+        assert!(
+            provider.built_models().iter().all(ModelChoice::is_local),
+            "an unapproved session must never be handed a cloud arm: {:?}",
+            provider.built_models()
+        );
+    }
+
+    /// The mirror: a session that *did* approve must have the cloud arms back
+    /// in its own draw, and in nobody else's. Admissibility is a property of
+    /// the exclusion set, not of the random draw, so that is what is asserted.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_session_approval_admits_cloud_arms_for_that_session_only() {
+        use crate::test_support::CountingProvider;
+
+        let provider = CountingProvider::new("a complete answer for the request");
+        let (router, cloud_arms) = mixed_arm_router(&provider).await;
+        router.approve_cloud_for_session("session-a");
+
+        assert!(
+            !router
+                .selection_exclusions(Some("session-a"))
+                .await
+                .iter()
+                .any(|name| cloud_arms.contains(name)),
+            "the approving session must be able to draw the arm it paid for"
+        );
+        for other in [Some("session-b"), None] {
+            assert!(
+                router
+                    .selection_exclusions(other)
+                    .await
+                    .iter()
+                    .any(|name| cloud_arms.contains(name)),
+                "one session's approval must not widen anyone else's draw: {other:?}"
+            );
+        }
     }
 
     /// The default first run: cached local weights and no API keys at all.

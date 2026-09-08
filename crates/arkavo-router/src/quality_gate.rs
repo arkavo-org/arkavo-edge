@@ -119,7 +119,7 @@ impl super::Router {
     ) -> Result<RoutedResponse> {
         const MAX_RETRIES: u8 = 3;
         let budget = budget.or_else(|| self.call_budget());
-        let mut current_decision = self.classify(task_description).await?;
+        let mut current_decision = self.classify_for_session(task_description, session).await?;
 
         // Execution iterations: when a model hint is provided (from AGENTS.md),
         // use it with execution-mode sampling (temp 0.1, thinking off, max 200 tokens).
@@ -170,15 +170,10 @@ impl super::Router {
 
         let mut feedback_messages: Vec<Message> = Vec::new();
         let mut attempts = Vec::new();
-        // Cloud arm already authorized for this dispatch. The user's one-shot
-        // confirmation is consumed once — by the collapse upgrade or by the
-        // first attempt — so retries against that same model must not re-ask,
-        // while a switch to a different cloud arm still does.
+        // Cloud arm already authorized for this dispatch, so a retry against the
+        // same model is not re-asked while a switch to a different cloud arm
+        // still is.
         let mut authorized_cloud: Option<crate::ModelChoice> = None;
-        // Set only when a *user* approval (one-shot or session) paid for this
-        // dispatch. A caller naming a model authorizes that model, not a later
-        // upgrade to a different, possibly dearer arm — so it must not count.
-        let mut user_paid_for_cloud = false;
 
         let input_tokens = tool_extraction::estimate_tokens(task_description);
         let is_simple = prompt_advisor::is_simple_query(&task_description.to_lowercase());
@@ -318,15 +313,10 @@ impl super::Router {
             if let Some(budget) = budget {
                 budget.check(estimated_cost).await?;
             }
-            let approval_pending = self.cloud_confirmation_pending(session);
             self.authorize_call(&actual_model, estimated_cost, caller_authorized, session)
                 .await?;
             if actual_model.is_cloud() {
                 authorized_cloud = Some(actual_model.clone());
-                // A cloud arm the caller did not name can only have cleared the
-                // gate on the user's approval, which `authorize_call` has now
-                // spent.
-                user_paid_for_cloud |= !caller_authorized && approval_pending;
             }
             let provider = if execution_mode {
                 self.instantiate_provider_execution(&actual_model).await?
@@ -665,20 +655,18 @@ impl super::Router {
                     );
                     // Spend plane: a collapse only *requests* cloud. Authorize
                     // it through the budget plane — policy AND the live remaining
-                    // cap — never on the quality signal alone. A one-shot user
-                    // confirmation (set via confirm_next_cloud_upgrade after a
+                    // cap — never on the quality signal alone. A standing
+                    // approval from this caller (recorded after a
                     // CloudUpgradeOffered) satisfies AskBeforeCloud; otherwise the
                     // decision tells us whether to offer (ask) or refuse.
                     let allow_cloud = if let UpgradeOffer::Offer(reason) = offer {
                         let caps = self.cloud_spend_caps().await;
                         let projected = self.projected_cloud_cost(&current_decision);
-                        // A user approval spent by this dispatch's own first
-                        // attempt still counts: the one-shot flag is gone, but
-                        // asking the same user twice for one request is the bug
-                        // the session-sticky flag exists to avoid. An explicit
-                        // caller model is deliberately not enough — it approves
-                        // that arm, not an upgrade to a different one.
-                        let confirmed = user_paid_for_cloud || self.cloud_confirmed(session);
+                        // Only a *user* approval authorizes the upgrade. A
+                        // caller naming a model authorizes that model, not a
+                        // later switch to a different, possibly dearer arm, so
+                        // `authorized_cloud` deliberately does not count here.
+                        let confirmed = self.cloud_approved(session);
                         match planes::authorize_upgrade(
                             self.cloud_policy(),
                             reason,
@@ -1027,7 +1015,7 @@ mod tests {
             &provider,
         )
         .await;
-        router.confirm_next_cloud_upgrade();
+        router.approve_cloud_for_host();
 
         let registry = ToolRegistry::empty();
         let routed = router
@@ -1080,7 +1068,7 @@ mod tests {
             .await
             .with_provider_factory(provider.factory());
         let _ = router.drain_events();
-        router.confirm_next_cloud_upgrade();
+        router.approve_cloud_for_host();
 
         let routed = router
             .route_with_tools_attributed(
