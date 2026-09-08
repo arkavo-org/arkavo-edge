@@ -5,6 +5,7 @@ use arkavo_llm::providers::{OpenAIResponsesConfig, OpenAIResponsesProvider};
 use arkavo_llm::{Message, Provider, ProviderStateTag};
 use futures::StreamExt;
 use serde_json::{Value, json};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -441,5 +442,158 @@ async fn final_stream_policy_denial_retains_usage_and_withholds_state() {
     assert_eq!(error.inference_timing().unwrap().n_eval, 10);
     assert!(stream.next().await.is_none());
     request.await.unwrap();
+    task.await.unwrap();
+}
+
+/// A caller must be able to tell a retryable cap from a policy refusal, a spent
+/// quota or a bad credential — and the body that names them may also quote the
+/// prompt back, so nothing but the code is reported.
+#[arkavo_test_macros::spec("ASTRA-003")]
+#[tokio::test]
+async fn http_refusals_report_their_code_and_never_the_body() {
+    for (status, body, expected) in [
+        (
+            401,
+            json!({"error":{"message":"prompt-canary","type":"invalid_request_error","code":"invalid_api_key"}})
+                .to_string(),
+            "invalid_api_key",
+        ),
+        (
+            429,
+            json!({"error":{"message":"prompt-canary","type":"insufficient_quota","code":null}})
+                .to_string(),
+            "insufficient_quota",
+        ),
+        (
+            429,
+            json!({"error":{"message":"prompt-canary","type":"requests","code":"rate_limit_exceeded"}})
+                .to_string(),
+            "rate_limit_exceeded",
+        ),
+        (
+            400,
+            json!({"error":{"message":"prompt-canary","code":"content_filter"}}).to_string(),
+            "content_filter",
+        ),
+        (500, "prompt-canary gateway failure".into(), "http_500"),
+    ] {
+        let (provider, request, task) = fixture(status, body, false).await;
+        let error = provider
+            .complete(vec![Message::user("test")])
+            .await
+            .unwrap_err();
+        assert_eq!(error.provider_code(), Some(expected), "HTTP {status}");
+        assert!(!error.to_string().contains("prompt-canary"), "HTTP {status}");
+        request.await.unwrap();
+        task.await.unwrap();
+    }
+}
+
+/// A connection that accepts the request and then goes quiet must fail on its
+/// own evidence instead of holding the agent for the whole request budget.
+#[arkavo_test_macros::spec("ASTRA-003")]
+#[tokio::test]
+async fn a_silent_stream_fails_on_the_idle_budget() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let provider = OpenAIResponsesProvider::new(OpenAIResponsesConfig {
+        api_key: Some("fixture-token".into()),
+        base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+        stream_idle_timeout: Some(Duration::from_millis(200)),
+        ..Default::default()
+    })
+    .unwrap();
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        read_request(&mut socket).await;
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+            .await
+            .unwrap();
+        // Send no event at all, and hold the connection open.
+        let mut byte = [0];
+        let _ = socket.read(&mut byte).await;
+    });
+    let mut stream = provider.stream(vec![Message::user("test")]).await.unwrap();
+    let error = stream.next().await.unwrap().unwrap_err();
+    assert!(error.to_string().contains("stalled"), "{error}");
+    drop(stream);
+    task.await.unwrap();
+}
+
+/// The perf line reported `0ms` for both phases because the provider reports
+/// token counts and no latencies. Measured wall time fills them in.
+#[arkavo_test_macros::spec("ASTRA-003")]
+#[tokio::test]
+async fn measured_wall_time_populates_the_perf_fields() {
+    let (provider, request, task) = fixture(200, completed("done").to_string(), false).await;
+    let timing = provider
+        .complete_with_tools(vec![Message::user("hi")], None, None)
+        .await
+        .unwrap()
+        .inference_timing
+        .expect("usage must survive");
+    assert!(
+        timing.generation_ms > 0.0,
+        "a non-streamed reply attributes its whole wall time to generation: {timing:?}"
+    );
+    assert!(
+        timing.prompt_eval_ms < f64::EPSILON,
+        "a non-streamed reply exposes no first-token boundary to split on: {timing:?}"
+    );
+    request.await.unwrap();
+    task.await.unwrap();
+
+    let delta = json!({"type":"response.output_text.delta","delta":"do"});
+    let done = json!({"type":"response.completed","response":completed("done")});
+    let (provider, request, task) =
+        fixture(200, format!("data: {delta}\n\ndata: {done}\n\n"), true).await;
+    let mut stream = provider.stream(vec![Message::user("hi")]).await.unwrap();
+    let mut terminal = None;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.unwrap();
+        if chunk.done {
+            terminal = chunk.inference_timing.clone();
+        }
+    }
+    let timing = terminal.expect("terminal chunk must carry usage");
+    assert!(
+        timing.prompt_eval_ms > 0.0,
+        "time to the first token is the only honest prefill figure: {timing:?}"
+    );
+    assert!(timing.generation_ms > 0.0, "{timing:?}");
+    request.await.unwrap();
+    task.await.unwrap();
+}
+
+/// A refusal is still a refusal when its body never arrives: the diagnostic is
+/// worth a few seconds, not the whole request budget.
+#[arkavo_test_macros::spec("ASTRA-003")]
+#[tokio::test]
+async fn a_stalled_error_body_still_reports_the_status() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let provider = OpenAIResponsesProvider::new(OpenAIResponsesConfig {
+        api_key: Some("fixture-token".into()),
+        base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        read_request(&mut socket).await;
+        // Promise a body, then never send it.
+        socket
+            .write_all(b"HTTP/1.1 503 Test\r\nContent-Type: application/json\r\nContent-Length: 4096\r\n\r\n")
+            .await
+            .unwrap();
+        let mut byte = [0];
+        let _ = socket.read(&mut byte).await;
+    });
+    let error = provider
+        .complete(vec![Message::user("test")])
+        .await
+        .unwrap_err();
+    // The refusal itself is the proof: had the body read waited for the whole
+    // request budget, this would be a transport timeout with no code at all.
+    assert_eq!(error.provider_code(), Some("http_503"));
     task.await.unwrap();
 }

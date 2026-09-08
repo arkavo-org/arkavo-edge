@@ -260,3 +260,80 @@ fn raw_png_images_retain_their_actual_media_type() {
         format!("data:image/png;base64,{encoded}")
     );
 }
+
+/// A caller has to tell a retryable truncation from a policy refusal, and the
+/// provider's own `message` may quote the prompt back, so only the identifier
+/// travels.
+#[arkavo_test_macros::spec("ASTRA-001")]
+#[test]
+fn incomplete_and_failed_responses_name_their_code_without_the_message() {
+    let mut truncated = completed(json!([]));
+    truncated["status"] = json!("incomplete");
+    truncated["incomplete_details"] =
+        json!({"reason":"max_output_tokens","message":"prompt-canary was too long"});
+    let error = response(truncated).unwrap_err();
+    assert_eq!(error.provider_code(), Some("max_output_tokens"));
+    assert!(!error.to_string().contains("prompt-canary"));
+    assert_eq!(error.inference_timing().unwrap().n_prompt_eval, 100);
+
+    let mut failed = completed(json!([]));
+    failed["status"] = json!("failed");
+    failed["error"] =
+        json!({"code":"server_error","type":"server_error","message":"prompt-canary failed"});
+    let error = response(failed).unwrap_err();
+    assert_eq!(error.provider_code(), Some("server_error"));
+    assert!(!error.to_string().contains("prompt-canary"));
+
+    // A status this build does not know still fails, under its own name.
+    let mut unknown = completed(json!([]));
+    unknown["status"] = json!("cancelled");
+    assert_eq!(
+        response(unknown).unwrap_err().provider_code(),
+        Some("response_not_completed")
+    );
+
+    let refused =
+        completed(json!([{"type":"message","content":[{"type":"refusal","refusal":"no"}]}]));
+    assert_eq!(
+        response(refused).unwrap_err().provider_code(),
+        Some("refusal")
+    );
+}
+
+/// Astra may add output items and content parts at any time. They replay
+/// verbatim through `provider_state`, so ignoring them costs nothing while
+/// failing the turn would take the whole session down.
+#[arkavo_test_macros::spec("ASTRA-002")]
+#[test]
+fn unknown_output_items_and_parts_are_ignored_but_still_replayed() {
+    let output = json!([
+        {"type":"web_search_call","id":"ws_1","status":"completed"},
+        {"type":"message","content":[
+            {"type":"output_text","text":"answer"},
+            {"type":"output_audio","transcript":"unrendered"}
+        ]},
+        {"type":"function_call","call_id":"call_1","name":"read","arguments":"{}"}
+    ]);
+    let result = response(completed(output.clone())).unwrap();
+    assert_eq!(result.content, "answer");
+    assert_eq!(result.tool_calls[0].call_id.as_deref(), Some("call_1"));
+    let replayed = result
+        .provider_state
+        .replay_items_for(crate::ProviderStateTag::OpenAiResponses)
+        .expect("state must replay");
+    assert_eq!(replayed, output.as_array().unwrap().as_slice());
+}
+
+/// A half-formed call is not an unknown item: acting on it, or dropping it
+/// while the model waits for its result, is worse than failing the turn.
+#[arkavo_test_macros::spec("ASTRA-002")]
+#[test]
+fn malformed_function_calls_still_fail_hard() {
+    for item in [
+        json!({"type":"function_call","name":"read","arguments":"{}"}),
+        json!({"type":"function_call","call_id":"call_1","arguments":"{}"}),
+        json!({"type":"function_call","call_id":"call_1","name":"read"}),
+    ] {
+        assert!(response(completed(json!([item]))).is_err());
+    }
+}

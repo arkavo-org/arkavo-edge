@@ -1,10 +1,17 @@
 use super::{OpenAIResponsesConfig, convert, sse};
 use crate::{Error, Message, Provider, ProviderResponse, Result, StreamResponse};
 use async_trait::async_trait;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use reqwest::{Client, Response};
 use serde_json::Value;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// An error body is a diagnostic, not a payload: read a bounded prefix so a
+/// broken or hostile endpoint cannot make the client buffer an unbounded reply.
+const MAX_ERROR_BODY: usize = 64 * 1024;
+
+/// How long an error body has to arrive before the status alone has to do.
+const ERROR_BODY_BUDGET: Duration = Duration::from_secs(5);
 
 pub struct OpenAIResponsesProvider {
     config: OpenAIResponsesConfig,
@@ -24,7 +31,9 @@ impl OpenAIResponsesProvider {
             .ok_or_else(|| Error::Config("OPENAI_API_KEY is required for GPT-6 Astra".into()))?;
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(30))
-            .timeout(Duration::from_mins(15))
+            // Deeper reasoning legitimately takes longer; a low-effort call
+            // must not inherit the deepest tier's patience.
+            .timeout(config.request_timeout())
             // Never forward credentials through an unexpected redirect.
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
@@ -47,11 +56,7 @@ impl OpenAIResponsesProvider {
             .await
             .map_err(|e| Error::Request(e.without_url()))?;
         if !response.status().is_success() {
-            // API bodies can echo prompts or credentials; status is safe to report.
-            return Err(Error::Provider(format!(
-                "OpenAI Responses HTTP {}",
-                response.status().as_u16()
-            )));
+            return Err(refusal(response).await);
         }
         Ok(response)
     }
@@ -64,13 +69,52 @@ impl OpenAIResponsesProvider {
         max_tokens: Option<usize>,
     ) -> Result<ProviderResponse> {
         let body = convert::request(&self.config, messages, tools, schema, max_tokens, false)?;
+        let started = Instant::now();
         let response = self.send(body).await?;
         let value = response
             .json()
             .await
             .map_err(|e| Error::Request(e.without_url()))?;
-        convert::response(value)
+        let mut response = convert::response(value)?;
+        if let Some(timing) = response.inference_timing.as_mut() {
+            // A non-streamed reply exposes no first-token boundary, so the whole
+            // wall time is attributed to generation rather than split on a guess.
+            timing.generation_ms = started.elapsed().as_secs_f64() * 1000.0;
+        }
+        Ok(response)
     }
+}
+
+/// Turn a failed HTTP response into a refusal that names the provider's code.
+///
+/// The body's `message` is never read: it can quote the prompt or a credential.
+/// `error.code`, then `error.type`, then the HTTP status supply the identifier.
+async fn refusal(response: Response) -> Error {
+    let fallback = format!("http_{}", response.status().as_u16());
+    // A diagnostic is not worth waiting on: if the body stalls, the status
+    // already names the failure, and the caller is already in an error path.
+    let body = tokio::time::timeout(ERROR_BODY_BUDGET, error_body(response))
+        .await
+        .unwrap_or_default();
+    let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let code = value.pointer("/error/code").and_then(Value::as_str);
+    let kind = value.pointer("/error/type").and_then(Value::as_str);
+    Error::provider_refusal(code.or(kind), kind, &fallback)
+}
+
+async fn error_body(response: Response) -> Vec<u8> {
+    let mut body = Vec::new();
+    let mut chunks = response.bytes_stream();
+    while body.len() < MAX_ERROR_BODY {
+        match chunks.next().await {
+            Some(Ok(chunk)) => {
+                let room = MAX_ERROR_BODY - body.len();
+                body.extend_from_slice(&chunk[..chunk.len().min(room)]);
+            }
+            _ => break,
+        }
+    }
+    body
 }
 
 #[async_trait]
@@ -134,6 +178,6 @@ impl Provider for OpenAIResponsesProvider {
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
         let body = convert::request(&self.config, messages, None, None, None, true)?;
         let response = self.send(body).await?;
-        Ok(sse::stream(response))
+        Ok(sse::stream(response, self.config.stream_idle_timeout()))
     }
 }

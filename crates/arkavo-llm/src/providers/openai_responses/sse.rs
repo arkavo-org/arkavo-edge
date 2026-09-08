@@ -4,6 +4,7 @@ use futures::{Stream, StreamExt};
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::pin::Pin;
+use std::time::{Duration, Instant};
 
 const MAX_EVENT_BYTES: usize = 8 * 1024 * 1024;
 
@@ -54,16 +55,25 @@ struct State {
     decoder: Decoder,
     emitted: String,
     terminal: bool,
+    idle: Duration,
+    started: Instant,
+    /// When the first visible token arrived: the boundary between the model's
+    /// deliberation and its generation.
+    first_output: Option<Instant>,
 }
 
 pub(super) fn stream(
     response: reqwest::Response,
+    idle: Duration,
 ) -> Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin> {
     let state = State {
         source: Box::pin(response.bytes_stream()),
         decoder: Decoder::default(),
         emitted: String::new(),
         terminal: false,
+        idle,
+        started: Instant::now(),
+        first_output: None,
     };
     // Pull-based ownership means dropping the consumer immediately drops the HTTP
     // body; there is no detached task continuing to generate billable output.
@@ -75,13 +85,23 @@ pub(super) fn stream(
             }
             loop {
                 if let Some(data) = state.decoder.events.pop_front() {
-                    if let Some(chunk) = event(&data, &mut state.emitted)? {
+                    if let Some(mut chunk) = event(&data, &mut state.emitted)? {
                         state.terminal = chunk.done;
+                        if chunk.done {
+                            attribute(&mut chunk, &state);
+                        } else if state.first_output.is_none() {
+                            state.first_output = Some(Instant::now());
+                        }
                         return Ok(Some((chunk, state)));
                     }
                     continue;
                 }
-                match state.source.next().await {
+                // A stalled connection has to fail on its own evidence rather
+                // than hold the caller for the whole request budget.
+                let next = tokio::time::timeout(state.idle, state.source.next())
+                    .await
+                    .map_err(|_| Error::Stream("Responses stream stalled".into()))?;
+                match next {
                     Some(Ok(bytes)) => state.decoder.push(&bytes)?,
                     Some(Err(error)) => return Err(Error::Request(error.without_url())),
                     None => {
@@ -93,6 +113,21 @@ pub(super) fn stream(
             }
         },
     )))
+}
+
+/// Split the measured wall time at the first visible token.
+///
+/// The provider reports token counts but no latencies, so the only honest
+/// prefill figure is the time the caller actually waited for the first token;
+/// everything after it is generation. With no visible token at all the whole
+/// wait was prefill.
+fn attribute(chunk: &mut StreamResponse, state: &State) {
+    let Some(timing) = chunk.inference_timing.as_mut() else {
+        return;
+    };
+    let first = state.first_output.unwrap_or_else(Instant::now);
+    timing.prompt_eval_ms = first.duration_since(state.started).as_secs_f64() * 1000.0;
+    timing.generation_ms = first.elapsed().as_secs_f64() * 1000.0;
 }
 
 fn event(data: &str, emitted: &mut String) -> Result<Option<StreamResponse>> {
@@ -145,7 +180,13 @@ fn event(data: &str, emitted: &mut String) -> Result<Option<StreamResponse>> {
                 )),
             }
         }
-        Some("error") => Err(Error::Stream("OpenAI Responses stream failed".into())),
+        // The event's own `type` is just "error"; its `code` is the reason. The
+        // message text beside it is never read.
+        Some("error") => Err(Error::provider_refusal(
+            value["code"].as_str(),
+            None,
+            "stream_error",
+        )),
         // Wait for the terminal response so refusals retain their billed usage.
         Some("response.refusal.delta" | "response.refusal.done") => Ok(None),
         Some(_) => Ok(None),
@@ -221,11 +262,81 @@ mod failure_tests {
             .unwrap()
             .is_none()
         );
-        let data = json!({"type":"response.incomplete","response":{"status":"incomplete","output":[],"usage":{"input_tokens":4,"output_tokens":10,"output_tokens_details":{"reasoning_tokens":8}}}}).to_string();
+        let data = json!({"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[],"usage":{"input_tokens":4,"output_tokens":10,"output_tokens_details":{"reasoning_tokens":8}}}}).to_string();
         let error = event(&data, &mut String::new()).unwrap_err();
         let timing = error.inference_timing().unwrap();
         assert_eq!(timing.n_prompt_eval, 4);
         assert_eq!(timing.n_eval, 2);
         assert_eq!(timing.n_thinking_eval, Some(8));
+        assert_eq!(
+            error.provider_code(),
+            Some("max_output_tokens"),
+            "a truncation must stay distinguishable from a policy refusal"
+        );
+    }
+
+    /// The stream's own error event is the only report of a mid-stream failure;
+    /// its code has to survive, and the message beside it must not.
+    #[arkavo_test_macros::spec("ASTRA-003")]
+    #[test]
+    fn stream_error_event_reports_its_code_only() {
+        let error = event(
+            r#"{"type":"error","code":"rate_limit_exceeded","message":"prompt-canary"}"#,
+            &mut String::new(),
+        )
+        .unwrap_err();
+        assert_eq!(error.provider_code(), Some("rate_limit_exceeded"));
+        assert!(!error.to_string().contains("prompt-canary"));
+
+        let error = event(
+            r#"{"type":"error","message":"prompt-canary"}"#,
+            &mut String::new(),
+        )
+        .unwrap_err();
+        assert_eq!(error.provider_code(), Some("stream_error"));
+        assert!(!error.to_string().contains("prompt-canary"));
+    }
+
+    /// The perf line reports what the caller waited for: everything up to the
+    /// first token is prefill, the rest is generation.
+    #[arkavo_test_macros::spec("ASTRA-003")]
+    #[test]
+    fn terminal_timing_splits_wall_time_at_the_first_token() {
+        let mut state = State {
+            source: Box::pin(futures::stream::empty()),
+            decoder: Decoder::default(),
+            emitted: String::new(),
+            terminal: false,
+            idle: Duration::from_secs(1),
+            started: Instant::now()
+                .checked_sub(Duration::from_millis(80))
+                .expect("fixture clock"),
+            first_output: Some(
+                Instant::now()
+                    .checked_sub(Duration::from_millis(30))
+                    .expect("fixture clock"),
+            ),
+        };
+        let mut chunk = StreamResponse {
+            done: true,
+            inference_timing: Some(crate::InferenceTiming::default()),
+            ..Default::default()
+        };
+        attribute(&mut chunk, &state);
+        let timing = chunk.inference_timing.clone().unwrap();
+        assert!(timing.prompt_eval_ms >= 40.0, "{timing:?}");
+        assert!(timing.generation_ms >= 25.0, "{timing:?}");
+
+        // With no visible token the whole wait was deliberation.
+        state.first_output = None;
+        let mut chunk = StreamResponse {
+            done: true,
+            inference_timing: Some(crate::InferenceTiming::default()),
+            ..Default::default()
+        };
+        attribute(&mut chunk, &state);
+        let timing = chunk.inference_timing.unwrap();
+        assert!(timing.prompt_eval_ms >= 75.0, "{timing:?}");
+        assert!(timing.generation_ms < 5.0, "{timing:?}");
     }
 }

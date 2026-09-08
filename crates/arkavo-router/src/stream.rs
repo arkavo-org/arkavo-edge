@@ -23,12 +23,19 @@ pub struct RouteStream {
 }
 
 /// A single chunk in the response stream.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StreamChunk {
     /// The content of this chunk
     pub content: String,
     /// Whether this is the final chunk
     pub done: bool,
+    /// Opaque provider continuation state, carried on the terminal chunk.
+    ///
+    /// Providers that keep reasoning across a tool loop (OpenAI Responses)
+    /// hand this back only when the response completes. Without a slot here a
+    /// streamed turn would reach [`RouteStream::complete`] with nothing to
+    /// replay, and the next turn would drop the model's own reasoning.
+    pub provider_state: ProviderState,
 }
 
 /// Metadata available before streaming completes.
@@ -91,9 +98,12 @@ impl RouteStream {
             estimated_cost_usd: response.cost_usd,
         };
 
+        // The state already lives on the stream itself; repeating it on the
+        // chunk would only give `complete` the same value twice.
         let chunk = StreamChunk {
             content,
             done: true,
+            provider_state: ProviderState::default(),
         };
 
         let stream = futures::stream::once(async move { Ok(chunk) });
@@ -126,6 +136,12 @@ impl RouteStream {
         while let Some(chunk_result) = self.inner.next().await {
             let chunk = chunk_result?;
             self.accumulated.push_str(&chunk.content);
+            // A streamed turn learns its continuation state only at the end.
+            // Empty chunks leave an earlier value alone, so a provider that
+            // sends state once keeps it.
+            if !chunk.provider_state.is_empty() {
+                self.provider_state = chunk.provider_state;
+            }
         }
 
         Ok(RouteResponse {
@@ -185,6 +201,51 @@ mod tests {
         assert_eq!(result.reasoning_content.as_deref(), Some("Summary"));
     }
 
+    /// A streamed turn must keep the provider's continuation state: Astra
+    /// returns its encrypted reasoning only on the terminal event, and a tool
+    /// loop that loses it replays a turn the model no longer recognizes.
+    #[spec("ROUTER-005")]
+    #[tokio::test]
+    async fn streamed_terminal_state_reaches_the_completed_response() {
+        let responses = vec![
+            arkavo_llm::StreamResponse {
+                content: "hello".into(),
+                ..Default::default()
+            },
+            arkavo_llm::StreamResponse {
+                content: " world".into(),
+                done: true,
+                provider_state: ProviderState::openai_responses(vec![
+                    serde_json::json!({"type":"reasoning", "encrypted_content":"opaque"}),
+                ]),
+                ..Default::default()
+            },
+        ];
+        let inner = futures::stream::iter(responses.into_iter().map(|response| {
+            Ok(StreamChunk {
+                content: response.content,
+                done: response.done,
+                provider_state: response.provider_state,
+            })
+        }));
+        let stream = RouteStream::new(
+            Box::pin(inner),
+            RouteMetadata {
+                model: ModelChoice::LocalGemma270M,
+                used_architect_mode: false,
+                estimated_cost_usd: 0.0,
+            },
+        );
+
+        let result = stream.complete().await.unwrap();
+        assert_eq!(result.content, "hello world");
+        let items = result
+            .provider_state
+            .replay_items_for(arkavo_llm::ProviderStateTag::OpenAiResponses)
+            .expect("terminal state must survive the stream");
+        assert_eq!(items[0]["encrypted_content"], "opaque");
+    }
+
     /// Backpressure: a bounded channel with capacity 100 blocks the producer
     /// when the consumer cannot keep up, so the buffer never grows without bound.
     /// This exercises ROUTER-005 from the slow-consumer angle.
@@ -213,7 +274,7 @@ mod tests {
         for i in 0..BUFFER {
             tx.send(Ok(StreamChunk {
                 content: format!("chunk-{i}"),
-                done: false,
+                ..Default::default()
             }))
             .await
             .unwrap();
@@ -224,7 +285,7 @@ mod tests {
             matches!(
                 tx.try_send(Ok(StreamChunk {
                     content: "overflow-chunk".to_string(),
-                    done: false,
+                    ..Default::default()
                 })),
                 Err(tokio::sync::mpsc::error::TrySendError::Full(_))
             ),
@@ -249,7 +310,7 @@ mod tests {
 
         tx.send(Ok(StreamChunk {
             content: "overflow-chunk".to_string(),
-            done: false,
+            ..Default::default()
         }))
         .await
         .unwrap();

@@ -14,11 +14,7 @@ pub(super) fn request(
     stream: bool,
 ) -> Result<Value> {
     let max_tokens = max_tokens.unwrap_or(config.max_output_tokens);
-    if max_tokens == 0 || max_tokens > 128_000 {
-        return Err(Error::Config(
-            "Astra output token limit must be 1..=128000".into(),
-        ));
-    }
+    super::config::check_max_tokens(max_tokens)?;
     let mut input = Vec::new();
     for message in messages {
         if message.role == Role::Assistant
@@ -133,17 +129,33 @@ pub(super) fn response(value: Value) -> Result<ProviderResponse> {
             response.inference_timing.clone_from(&usage);
             response
         })
-        .map_err(|error| Error::ProviderResponseFailure {
-            message: error.to_string(),
-            inference_timing: usage,
-        })
+        // Attach the billed usage without flattening the failure: a structured
+        // refusal has to reach the caller with its code intact.
+        .map_err(|error| error.with_inference_timing(usage))
+}
+
+/// Name the reason a response did not complete.
+///
+/// A truncation reports `incomplete_details.reason` (`max_output_tokens`,
+/// `content_filter`); a failure reports `error.code`/`error.type`. Either is a
+/// better answer than the bare status, and none of them is the `message` text.
+fn refusal(value: &Value) -> Error {
+    let reason = value
+        .pointer("/incomplete_details/reason")
+        .and_then(Value::as_str);
+    let code = value.pointer("/error/code").and_then(Value::as_str);
+    let kind = value.pointer("/error/type").and_then(Value::as_str);
+    let fallback = match value["status"].as_str() {
+        Some("failed") => "response_failed",
+        Some("incomplete") => "response_incomplete",
+        _ => "response_not_completed",
+    };
+    Error::provider_refusal(reason.or(code).or(kind), kind, fallback)
 }
 
 fn parse_response(value: &Value) -> Result<ProviderResponse> {
     if value["status"] != "completed" {
-        return Err(Error::Provider(
-            "OpenAI Responses did not complete successfully".into(),
-        ));
+        return Err(refusal(value));
     }
     let output = value["output"]
         .as_array()
@@ -159,13 +171,13 @@ fn parse_response(value: &Value) -> Result<ProviderResponse> {
                     match part["type"].as_str() {
                         Some("output_text") => result.content.push_str(required_str(part, "text")?),
                         Some("refusal") => {
-                            return Err(Error::Provider("OpenAI refused the request".into()));
+                            return Err(Error::provider_refusal(None, None, "refusal"));
                         }
-                        _ => {
-                            return Err(Error::Provider(
-                                "Unsupported Responses message content".into(),
-                            ));
-                        }
+                        // A part this build does not render is still replayed
+                        // verbatim through `provider_state`, so ignoring it
+                        // loses nothing while a new part type would otherwise
+                        // break every turn.
+                        _ => {}
                     }
                 }
             }
@@ -183,11 +195,11 @@ fn parse_response(value: &Value) -> Result<ProviderResponse> {
                 });
             }
             Some("reasoning") => {} // Opaque encrypted content must never become visible text.
-            _ => {
-                return Err(Error::Provider(
-                    "Unsupported OpenAI Responses output item".into(),
-                ));
-            }
+            // Unknown item types (a built-in tool, a future annotation) carry
+            // nothing this build can act on, and replay preserves them exactly.
+            // A malformed `function_call` above still fails: acting on half a
+            // call is worse than refusing the turn.
+            _ => {}
         }
     }
     result.provider_state = ProviderState::openai_responses(output.clone());
@@ -199,11 +211,8 @@ fn parse_response(value: &Value) -> Result<ProviderResponse> {
         }
         .into(),
     );
-    result.inference_timing = value
-        .get("usage")
-        .filter(|u| !u.is_null())
-        .map(timing)
-        .transpose()?;
+    // Usage is read once, by the caller, and applied to both the success and
+    // the failure path.
     Ok(result)
 }
 

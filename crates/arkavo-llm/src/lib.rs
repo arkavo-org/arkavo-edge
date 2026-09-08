@@ -35,7 +35,7 @@ pub mod tool_parser;
 pub use chat::ChatRequest;
 pub use client::LlmClient;
 pub use config::LlmConfig;
-pub use error::{Error, Result};
+pub use error::{Error, ProviderRefusal, Result};
 pub use image::{ImageFormat, decode_image, encode_image_bytes, encode_image_file};
 pub use mcp_converter::{LocalToolFormat, McpConverter};
 pub use message::{Message, Role, ToolCall};

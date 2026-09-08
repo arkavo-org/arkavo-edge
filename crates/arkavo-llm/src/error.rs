@@ -8,6 +8,12 @@ pub enum Error {
         message: String,
         inference_timing: Option<crate::provider::InferenceTiming>,
     },
+    /// A provider refused, filtered or truncated the request and named a
+    /// machine-readable reason. Boxed: every `Result` in the crate pays for the
+    /// largest variant.
+    #[error("{0}")]
+    ProviderRefusal(Box<ProviderRefusal>),
+
     #[cfg(feature = "llm-remote")]
     #[error("HTTP request failed: {0}")]
     Request(#[from] reqwest::Error),
@@ -49,15 +55,85 @@ pub enum Error {
     GpuFault { kind: String, message: String },
 }
 
+/// Why a provider refused, in the provider's own vocabulary.
+///
+/// Only identifiers are kept: a provider's `message` text can quote the prompt
+/// or a credential, so it never reaches an error string or a log line. Callers
+/// key retries off [`Self::code`] — a `max_output_tokens` truncation is worth
+/// another attempt with a larger cap, `content_filter` and `invalid_api_key`
+/// never are.
+#[derive(Debug)]
+pub struct ProviderRefusal {
+    code: String,
+    kind: Option<String>,
+    inference_timing: Option<crate::provider::InferenceTiming>,
+}
+
+impl ProviderRefusal {
+    /// The reason, e.g. `max_output_tokens`, `content_filter`,
+    /// `insufficient_quota`, `rate_limit_exceeded`, `invalid_api_key`.
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    /// The provider's broader class for the refusal, when it names one that
+    /// the code does not already say.
+    pub fn kind(&self) -> Option<&str> {
+        self.kind.as_deref()
+    }
+}
+
+impl std::fmt::Display for ProviderRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Provider refused: {}", self.code)?;
+        match &self.kind {
+            Some(kind) => write!(f, " ({kind})"),
+            None => Ok(()),
+        }
+    }
+}
+
 impl Error {
+    /// Build a refusal from wire fields, keeping the structured reason and
+    /// discarding everything else the provider sent.
+    ///
+    /// `code` and `kind` are the provider's own identifiers (OpenAI's
+    /// `error.code` and `error.type`, or an `incomplete_details.reason`);
+    /// `fallback` is the caller's own identifier for the case where the
+    /// provider named none. Values that are not short identifiers are prose or
+    /// an echoed prompt, so they are dropped rather than surfaced.
+    pub fn provider_refusal(code: Option<&str>, kind: Option<&str>, fallback: &str) -> Self {
+        let code = wire_identifier(code).unwrap_or_else(|| fallback.to_string());
+        Self::ProviderRefusal(Box::new(ProviderRefusal {
+            kind: wire_identifier(kind).filter(|kind| *kind != code),
+            code,
+            inference_timing: None,
+        }))
+    }
+
+    /// The provider's machine-readable refusal reason, when it named one.
+    pub fn provider_code(&self) -> Option<&str> {
+        match self {
+            Self::ProviderRefusal(refusal) => Some(refusal.code()),
+            _ => None,
+        }
+    }
+
     /// Retain known billing metadata when a later validation or release check fails.
     pub fn with_inference_timing(self, timing: Option<crate::provider::InferenceTiming>) -> Self {
         if self.inference_timing().is_some() || timing.is_none() {
             return self;
         }
-        Self::ProviderResponseFailure {
-            message: self.to_string(),
-            inference_timing: timing,
+        match self {
+            // A refusal keeps its structured reason; only the usage was missing.
+            Self::ProviderRefusal(mut refusal) => {
+                refusal.inference_timing = timing;
+                Self::ProviderRefusal(refusal)
+            }
+            other => Self::ProviderResponseFailure {
+                message: other.to_string(),
+                inference_timing: timing,
+            },
         }
     }
 
@@ -66,6 +142,7 @@ impl Error {
             Self::ProviderResponseFailure {
                 inference_timing, ..
             } => inference_timing.as_ref(),
+            Self::ProviderRefusal(refusal) => refusal.inference_timing.as_ref(),
             _ => None,
         }
     }
@@ -79,6 +156,21 @@ impl Error {
     pub fn is_retryable(&self) -> bool {
         self.is_gpu_fault()
     }
+}
+
+/// Accept a wire code only when it is a short identifier.
+///
+/// Providers are not obliged to keep these fields machine-readable, and a body
+/// that puts prose — or an echoed prompt — where a code belongs must not leak
+/// through the one field that is allowed to be reported.
+fn wire_identifier(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    let identifier = !value.is_empty()
+        && value.len() <= 64
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+    identifier.then(|| value.to_string())
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -159,6 +251,59 @@ mod tests {
         };
         assert!(gpu.is_gpu_fault());
         assert!(gpu.is_retryable());
+    }
+
+    #[test]
+    fn refusal_keeps_identifiers_and_drops_prose() {
+        let refusal =
+            Error::provider_refusal(Some("rate_limit_exceeded"), Some("requests"), "http_429");
+        assert_eq!(refusal.provider_code(), Some("rate_limit_exceeded"));
+        assert_eq!(
+            refusal.to_string(),
+            "Provider refused: rate_limit_exceeded (requests)"
+        );
+        let Error::ProviderRefusal(detail) = &refusal else {
+            panic!("provider_refusal must build a refusal");
+        };
+        assert_eq!(detail.kind(), Some("requests"));
+
+        // Prose in a code field is an echoed prompt risk, not a code.
+        let prose = Error::provider_refusal(
+            Some("Your prompt 'secret value' was rejected"),
+            None,
+            "http_400",
+        );
+        assert_eq!(prose.provider_code(), Some("http_400"));
+        assert!(!prose.to_string().contains("secret"));
+
+        // A repeated type adds nothing to the code it already names.
+        let same = Error::provider_refusal(
+            Some("insufficient_quota"),
+            Some("insufficient_quota"),
+            "http_429",
+        );
+        assert_eq!(same.to_string(), "Provider refused: insufficient_quota");
+    }
+
+    /// Every fallible call in the crate returns `Result<_, Error>`, and clippy
+    /// rejects an error type over 128 bytes. A refusal carries its detail
+    /// behind a box so adding one does not widen every result in the crate.
+    #[test]
+    fn error_stays_within_the_result_size_budget() {
+        let size = std::mem::size_of::<Error>();
+        assert!(size <= 128, "Error grew to {size} bytes");
+    }
+
+    #[test]
+    fn refusal_retains_its_code_when_usage_is_attached_later() {
+        let timing = crate::provider::InferenceTiming {
+            n_prompt_eval: 7,
+            ..Default::default()
+        };
+        let refusal = Error::provider_refusal(Some("content_filter"), None, "incomplete")
+            .with_inference_timing(Some(timing));
+        assert_eq!(refusal.provider_code(), Some("content_filter"));
+        assert_eq!(refusal.inference_timing().unwrap().n_prompt_eval, 7);
     }
 
     #[test]
