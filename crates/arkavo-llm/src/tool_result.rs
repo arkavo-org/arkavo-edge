@@ -33,7 +33,7 @@ pub fn char_boundary_prefix(text: &str, max: usize) -> &str {
 
 /// Tool output is untrusted and may exceed the next provider's context window.
 /// The marker is included in the byte allowance, with UTF-8 boundaries preserved.
-pub fn bounded_tool_output(mut output: String) -> String {
+pub(crate) fn bounded_tool_output(mut output: String) -> String {
     if output.len() > MAX_TOOL_RESULT_BYTES {
         let end = char_boundary_prefix(&output, MAX_TOOL_RESULT_BYTES - MARKER.len()).len();
         output.truncate(end);
@@ -49,11 +49,12 @@ pub fn bounded_tool_output(mut output: String) -> String {
 /// still learn whether the call succeeded and whether it is seeing all of the
 /// output. A truncated body is deliberately not closed — it is no longer valid
 /// JSON, and pretending otherwise would hide the cut.
-pub fn bounded_tool_result_json(result: &ToolExecutionResult) -> String {
-    let error = result
-        .error
-        .as_deref()
-        .map(|error| char_boundary_prefix(error, MAX_TOOL_ERROR_BYTES));
+pub(crate) fn bounded_tool_result_json(result: &ToolExecutionResult) -> String {
+    let raw_error = result.error.as_deref();
+    let error = raw_error.map(|error| char_boundary_prefix(error, MAX_TOOL_ERROR_BYTES));
+    // Cutting the error is itself a truncation: the flag must never read false
+    // while part of the message is missing.
+    let error_cut = raw_error.is_some_and(|error| error.len() > MAX_TOOL_ERROR_BYTES);
     let error_json = serde_json::to_string(&error).unwrap_or_else(|_| "null".to_string());
     let payload = serde_json::to_string(&result.result).unwrap_or_else(|_| "null".to_string());
     let head = |truncated: bool| {
@@ -62,10 +63,12 @@ pub fn bounded_tool_result_json(result: &ToolExecutionResult) -> String {
             result.success
         )
     };
+    // `<` rather than `<= MAX - 1`: the spare byte is the closing brace.
+    let closed_fits = |head: &str| head.len() + payload.len() < MAX_TOOL_RESULT_BYTES;
 
-    let intact = format!("{}{payload}}}", head(false));
-    if intact.len() <= MAX_TOOL_RESULT_BYTES {
-        return intact;
+    let flagged = head(error_cut);
+    if closed_fits(&flagged) {
+        return format!("{flagged}{payload}}}");
     }
     let head = head(true);
     let room = MAX_TOOL_RESULT_BYTES.saturating_sub(head.len() + MARKER.len());
@@ -120,6 +123,43 @@ impl ProviderResponse {
             }
         }
         calls
+    }
+
+    /// Outputs telling the model that every call this turn issued could not be run.
+    ///
+    /// Dropping the calls instead orphans them: a Responses continuation replays
+    /// the assistant's items verbatim, so the next request carries a
+    /// `function_call` with no `function_call_output` and the API rejects it with
+    /// "No tool output found". `reason` completes the sentence "Tool 'x' is
+    /// unavailable: ...".
+    pub fn unanswered_tool_results(&self, reason: &str) -> Vec<ToolExecutionResult> {
+        self.pending_call_ids()
+            .into_iter()
+            .map(|(call_id, tool_name)| {
+                let message = format!("Tool '{tool_name}' is unavailable: {reason}");
+                ToolExecutionResult {
+                    result: serde_json::json!({"error": message}),
+                    error: Some(message),
+                    tool_name,
+                    call_id: Some(call_id),
+                    success: false,
+                    schema_hint: None,
+                }
+            })
+            .collect()
+    }
+
+    /// This turn as history must hold it: the assistant message followed by the
+    /// outputs answering its calls, in the order the next request replays them.
+    ///
+    /// Callers append the whole slice, so a call can never be committed to
+    /// history — or persisted to a session — without its answer.
+    pub fn recorded_turn(&self, results: &[ToolExecutionResult]) -> Vec<Message> {
+        let mut messages = vec![self.as_assistant_message()];
+        if !results.is_empty() {
+            messages.extend(self.tool_result_messages(results));
+        }
+        messages
     }
 
     /// Replay this turn's tool results in the role the next request needs.
@@ -258,6 +298,114 @@ mod tests {
                     .starts_with(&format!("{{\"success\":{success},\"truncated\":true"))
             );
         }
+    }
+
+    /// Every native call the assistant issued must be answered by a message
+    /// carrying its call id, or the provider rejects the next turn.
+    fn assert_every_call_is_paired(turn: &[Message]) {
+        let (assistant, followers) = turn.split_first().expect("turn records the assistant");
+        assert_eq!(assistant.role, Role::Assistant);
+        let mut ids: Vec<String> = assistant
+            .provider_state
+            .native_call_ids()
+            .map(str::to_string)
+            .collect();
+        ids.extend(
+            assistant
+                .tool_calls
+                .iter()
+                .filter_map(|call| call.id.clone()),
+        );
+        assert!(!ids.is_empty(), "test fixture must issue at least one call");
+        for id in ids {
+            assert!(
+                followers.iter().any(|message| {
+                    message.role == Role::Tool && message.tool_call_id.as_deref() == Some(&id)
+                }),
+                "call {id} has no paired tool result"
+            );
+        }
+    }
+
+    /// A session with no way to run the calls must still answer them: dropping
+    /// them orphans the provider's `function_call` items.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn unanswered_calls_are_each_reported_unavailable() {
+        let response = ProviderResponse {
+            provider_state: ProviderState::openai_responses(vec![
+                function_call_item("fc_1", "read_file"),
+                function_call_item("fc_2", "list_dir"),
+            ]),
+            tool_calls: vec![
+                parsed_call("read_file", Some("fc_1")),
+                parsed_call("list_dir", Some("fc_2")),
+            ],
+            ..Default::default()
+        };
+        let results = response.unanswered_tool_results("this session has no tool registry");
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|result| !result.success));
+
+        let turn = response.recorded_turn(&results);
+        assert_every_call_is_paired(&turn);
+        assert!(turn[1..].iter().all(|m| m.content.contains("unavailable")));
+    }
+
+    #[spec("ASTRA-002")]
+    #[test]
+    fn an_executed_turn_pairs_results_after_the_assistant_message() {
+        let response = ProviderResponse {
+            provider_state: ProviderState::openai_responses(vec![function_call_item(
+                "fc_hint",
+                "read_file",
+            )]),
+            tool_calls: vec![parsed_call("read_file", Some("fc_hint"))],
+            ..Default::default()
+        };
+        let turn = response.recorded_turn(&[executed("read_file", Some("fc_hint"))]);
+        assert_every_call_is_paired(&turn);
+    }
+
+    /// A turn that called nothing is recorded alone, with nothing after it.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn a_turn_without_tool_calls_is_recorded_alone() {
+        let response = ProviderResponse {
+            content: "no tools needed".to_string(),
+            ..Default::default()
+        };
+        assert!(response.unanswered_tool_results("unused").is_empty());
+        let turn = response.recorded_turn(&[]);
+        assert_eq!(turn.len(), 1);
+        assert_eq!(turn[0].role, Role::Assistant);
+        assert_eq!(turn[0].content, "no tools needed");
+    }
+
+    /// An error long enough to be cut is itself a truncation; a reader must not
+    /// see `truncated:false` while part of the message is missing.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn a_cut_error_is_flagged_as_truncated() {
+        let mut result = executed("read_file", None);
+        result.success = false;
+        result.error = Some("é".repeat(MAX_TOOL_ERROR_BYTES));
+        let body = bounded_tool_result_json(&result);
+        assert!(body.starts_with(r#"{"success":false,"truncated":true"#));
+        // The payload still fits, so the object is closed and parseable.
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("closed body is JSON");
+        assert_eq!(parsed["truncated"], serde_json::json!(true));
+        assert!(parsed["error"].as_str().unwrap().len() <= MAX_TOOL_ERROR_BYTES);
+    }
+
+    #[test]
+    fn an_error_that_fits_is_not_flagged_as_truncated() {
+        let mut result = executed("read_file", None);
+        result.success = false;
+        result.error = Some("é".repeat(16));
+        let body = bounded_tool_result_json(&result);
+        assert!(body.starts_with(r#"{"success":false,"truncated":false"#));
+        assert!(serde_json::from_str::<serde_json::Value>(&body).is_ok());
     }
 
     #[spec("ASTRA-002")]

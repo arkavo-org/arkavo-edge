@@ -227,7 +227,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             messages_clone.push(user_message.clone());
             // Persisted only once the turn produced an answer, so an abandoned
             // turn cannot leave a dangling user message in the session.
-            let mut assistant_turn: Option<Message> = None;
+            let mut assistant_turn: Option<Vec<Message>> = None;
 
             // Try router-based routing with Thompson Sampling (Unix + mcp-tools)
             // Router provides: cost optimization, quality validation, TS learning
@@ -284,9 +284,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
 
                     // Add assistant response to messages
-                    let assistant = response.as_assistant_message();
-                    messages_clone.push(assistant.clone());
-                    assistant_turn = Some(assistant);
+                    let turn = complete_turn(&response);
+                    messages_clone.extend(turn.iter().cloned());
+                    assistant_turn = Some(turn);
                 }
             } else {
                 // Fallback to direct LLM streaming
@@ -328,10 +328,16 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
                         let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
 
-                        let mut assistant = Message::assistant(full_response);
-                        assistant.provider_state = provider_state;
-                        messages_clone.push(assistant.clone());
-                        assistant_turn = Some(assistant);
+                        // A streamed turn can carry native calls in its provider
+                        // state just as a routed one can, so it is completed the
+                        // same way before it reaches history.
+                        let turn = complete_turn(&arkavo_llm::ProviderResponse {
+                            content: full_response,
+                            provider_state,
+                            ..Default::default()
+                        });
+                        messages_clone.extend(turn.iter().cloned());
+                        assistant_turn = Some(turn);
 
                         if SHOW_DEBUG.load(Ordering::Relaxed) {
                             eprintln!(
@@ -346,8 +352,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            if let Some(assistant) = assistant_turn {
-                persist_turn(&conversation_manager, &user_message, &assistant).await;
+            if let Some(turn) = assistant_turn {
+                persist_turn(&conversation_manager, &user_message, &turn).await;
             }
             if SHOW_DEBUG.load(Ordering::Relaxed) {
                 eprintln!("[LLM Task] Waiting for next message...");
@@ -368,13 +374,28 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     tui_result.map_err(std::convert::Into::into)
 }
 
+/// One turn as history must hold it: the assistant message plus an output for
+/// every tool call it issued.
+///
+/// This session has no tool executor — `route_with_tools` only attaches tool
+/// descriptions to the request, it never runs anything — so a turn that ends in
+/// a tool call ends unanswered. The Responses wire format replays an assistant
+/// turn's items verbatim, so an unanswered `function_call` makes the *next*
+/// request fail with "No tool output found"; persisting it would make that
+/// failure outlive the process. Each call is therefore answered as unavailable.
+fn complete_turn(response: &arkavo_llm::ProviderResponse) -> Vec<Message> {
+    response.recorded_turn(
+        &response.unanswered_tool_results("this session cannot run tools, only describe them"),
+    )
+}
+
 /// Commit one finished exchange to the session store.
 ///
-/// The assistant message carries the turn's provider state and native tool
-/// calls, which is what a later process restores to continue the conversation
+/// The assistant message carries the turn's provider state and native tool call
+/// ids, which is what a later process restores to continue the conversation
 /// rather than restart it. A storage failure must not end the session.
-async fn persist_turn(manager: &ConversationManager, user: &Message, assistant: &Message) {
-    for message in [user, assistant] {
+async fn persist_turn(manager: &ConversationManager, user: &Message, turn: &[Message]) {
+    for message in std::iter::once(user).chain(turn) {
         if let Err(error) = manager.add_message(message).await {
             eprintln!("[LLM Task] Failed to persist message: {error}");
         }
@@ -475,5 +496,48 @@ async fn initialize_llm_client(
             "No LLM provider available. Please install Ollama or enable the 'llama-cpp' feature."
                 .into(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn function_call_response() -> arkavo_llm::ProviderResponse {
+        arkavo_llm::ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![serde_json::json!({
+                "type": "function_call", "call_id": "call_1",
+                "name": "clock", "arguments": "{}"
+            })]),
+            tool_calls: vec![arkavo_llm::ParsedToolCall {
+                tool_name: "clock".into(),
+                arguments: serde_json::json!({}),
+                call_id: Some("call_1".into()),
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// This session cannot run tools, so a turn ending in a call must reach
+    /// history — and the session store — with that call already answered.
+    /// Otherwise the next request replays a `function_call` with no output.
+    #[test]
+    fn a_tool_call_turn_is_recorded_with_its_answer() {
+        let turn = complete_turn(&function_call_response());
+        assert_eq!(turn.len(), 2);
+        assert_eq!(turn[0].role, arkavo_llm::Role::Assistant);
+        assert_eq!(turn[1].role, arkavo_llm::Role::Tool);
+        assert_eq!(turn[1].tool_call_id.as_deref(), Some("call_1"));
+        assert!(turn[1].content.contains("unavailable"));
+    }
+
+    #[test]
+    fn a_text_turn_is_recorded_alone() {
+        let turn = complete_turn(&arkavo_llm::ProviderResponse {
+            content: "just text".to_string(),
+            ..Default::default()
+        });
+        assert_eq!(turn.len(), 1);
+        assert_eq!(turn[0].content, "just text");
     }
 }

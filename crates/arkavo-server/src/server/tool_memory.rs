@@ -220,7 +220,7 @@ impl ToolMemory {
             if entry.is_observe {
                 // Include the full observe result (truncated to fit context)
                 if let Some(ref obs) = self.last_observe_full {
-                    let truncated = if obs.len() > 3000 { &obs[..3000] } else { obs };
+                    let truncated = arkavo_llm::char_boundary_prefix(obs, 3000);
                     let _ = writeln!(out, "[Observed]: {truncated}");
                 }
             } else if !entry.result_summary.is_empty() {
@@ -360,6 +360,18 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
     use serde_json::json;
+
+    /// An observation is tool output and can end anywhere in a UTF-8 scalar.
+    #[test]
+    fn observe_context_is_safe_for_multibyte_results() {
+        let mut memory = ToolMemory::new(4);
+        memory.add("game:observe".to_string(), &json!({}), &"界".repeat(1200));
+        let context = memory
+            .format_recent_for_context()
+            .expect("an entry was added");
+        // 3000 bytes hold 1000 whole three-byte scalars.
+        assert_eq!(context.matches('界').count(), 1000);
+    }
 
     #[spec("SRV-003")]
     #[test]

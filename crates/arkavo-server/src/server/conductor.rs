@@ -677,6 +677,17 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    /// The classifier snippet is a byte budget over arbitrary task text.
+    #[test]
+    fn complexity_snippet_is_safe_for_multibyte_text() {
+        // 400 bytes hold 133 whole three-byte scalars.
+        assert_eq!(
+            complexity_snippet(&"界".repeat(200)).matches('界').count(),
+            133
+        );
+        assert_eq!(complexity_snippet("short task"), "short task");
+    }
+
     #[spec("SRV-009")]
     #[test]
     fn extract_reward_positive() {
@@ -744,16 +755,19 @@ mod tests {
 /// Returns true only when the model explicitly says MULTI — defaults to SINGLE
 /// on ambiguity, timeout, or error (false negatives are cheap, false positives
 /// cause 80+ second decomposition overhead).
+/// Trim a task to the head the complexity classifier reads.
+///
+/// Bounded to avoid wasting tokens on long cycle prompts, and cut on a
+/// character boundary because task text is arbitrary UTF-8.
+fn complexity_snippet(task_content: &str) -> &str {
+    arkavo_llm::char_boundary_prefix(task_content, 400)
+}
+
 async fn assess_complexity_with_model(
     router: &Arc<arkavo_router::Router>,
     task_content: &str,
 ) -> bool {
-    // Truncate to avoid wasting tokens on long cycle prompts
-    let snippet = if task_content.len() > 400 {
-        &task_content[..400]
-    } else {
-        task_content
-    };
+    let snippet = complexity_snippet(task_content);
 
     let prompt = format!(
         "Does this require breaking into SEPARATE INDEPENDENT subtasks that \

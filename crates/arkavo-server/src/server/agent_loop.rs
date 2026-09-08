@@ -738,11 +738,12 @@ pub(super) fn compact_observation(obs: &str, max_chars: usize) -> String {
             }
         }
     }
-    // Fallback: truncate with a note
+    // Fallback: truncate with a note. An observation is JSON built from tool
+    // output and can end anywhere in a UTF-8 scalar.
     let cut = max_chars.saturating_sub(30);
     format!(
         "{}...(truncated {} bytes)",
-        &obs[..cut.min(obs.len())],
+        arkavo_llm::char_boundary_prefix(obs, cut),
         obs.len()
     )
 }
@@ -1159,6 +1160,17 @@ mod urgency_tests {
     fn test_detect_urgency_json_without_alerts_key() {
         let data = r#"{"colonists":3,"resources":{"wood":50}}"#;
         assert_eq!(detect_urgency(data), UrgencyLevel::Low);
+    }
+
+    /// The truncating fallback runs on arbitrary tool output, which can end
+    /// anywhere in a UTF-8 scalar.
+    #[test]
+    fn compact_observation_is_safe_for_multibyte_text() {
+        let compacted = compact_observation(&"界".repeat(200), 130);
+        // The note reserves 30 bytes, so 100 remain: 33 whole three-byte scalars.
+        assert_eq!(compacted.matches('界').count(), 33);
+        assert!(compacted.ends_with("...(truncated 600 bytes)"));
+        assert_eq!(compact_observation("small", 130), "small");
     }
 }
 

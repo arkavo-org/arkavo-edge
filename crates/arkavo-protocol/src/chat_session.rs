@@ -1,8 +1,3 @@
-// Owned by this module: the chat loop is its only caller, so the turn helpers
-// stay private to it rather than becoming crate API.
-#[path = "chat_tool_turn.rs"]
-mod chat_tool_turn;
-
 use crate::auth::SessionAuth;
 use crate::chat_cloud_gate::{CloudConfirmation, cloud_confirmation, request_cloud_consent};
 use crate::config::{BufferConfig, ChatStreamingMode};
@@ -19,7 +14,6 @@ use arkavo_observability::{
     task_tracker::{ObservableTaskTracker, SessionTaskManager},
 };
 use arkavo_router::{CloudConsentPrompt, Router};
-use chat_tool_turn::{executed_tool_turn, unregistered_tool_turn};
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1320,7 +1314,7 @@ impl ChatSessionManager {
                                     // call with its output in the expected role
                                     let before_tool_turn = conversation_context.len();
                                     conversation_context.extend(
-                                        executed_tool_turn(&response, &tool_results),
+                                        response.recorded_turn(&tool_results),
                                     );
 
                                     continuation_context.extend_from_slice(
@@ -1407,7 +1401,9 @@ impl ChatSessionManager {
                                     // The calls still need paired outputs or the next
                                     // turn is rejected for a missing tool output.
                                     conversation_context.extend(
-                                        unregistered_tool_turn(&response),
+                                        response.recorded_turn(&response.unanswered_tool_results(
+                                            "this session has no tool registry",
+                                        )),
                                     );
                                 }
                             } else {
@@ -1516,7 +1512,7 @@ impl ChatSessionManager {
                                                 // Add the turn and its outputs together so the
                                                 // calls it issued are never left unanswered
                                                 conversation_context.extend(
-                                                    executed_tool_turn(&response, &tool_results),
+                                                    response.recorded_turn(&tool_results),
                                                 );
                                             }
                                             Err(retry_err) => {

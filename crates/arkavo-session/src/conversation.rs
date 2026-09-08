@@ -1077,11 +1077,15 @@ mod tests {
     }
 
     /// What `arkavo-cli`'s terminal loop writes after a turn, read back the way
-    /// a later process start reads it: the second turn must replay the first
-    /// turn's provider state, not a plain-text transcript of it.
+    /// a later process start reads it.
+    ///
+    /// The turn must round-trip *complete*: the assistant's provider state
+    /// replays verbatim, so a `function_call` persisted without its
+    /// `function_call_output` would make every later request fail with "No tool
+    /// output found" — and persisting it makes that failure outlive the process.
     #[tokio::test]
     #[spec("ASTRA-002")]
-    async fn a_persisted_terminal_turn_replays_on_the_next_session_start() {
+    async fn a_persisted_terminal_turn_replays_complete_on_the_next_session_start() {
         let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
 
         let mut first_run = ConversationManager::new(storage.clone()).unwrap();
@@ -1102,14 +1106,18 @@ mod tests {
             }],
             ..Default::default()
         };
+
+        // Exactly what the terminal loop persists: the user message, then the
+        // turn with an output for every call it issued.
+        let turn = response
+            .recorded_turn(&response.unanswered_tool_results("this session cannot run tools"));
         first_run
             .add_message(&Message::user("what time is it?"))
             .await
             .unwrap();
-        first_run
-            .add_message(&response.as_assistant_message())
-            .await
-            .unwrap();
+        for message in &turn {
+            first_run.add_message(message).await.unwrap();
+        }
 
         // A fresh process: restore the session and rebuild the context window.
         let mut second_run = ConversationManager::new(storage).unwrap();
@@ -1128,11 +1136,64 @@ mod tests {
             .expect("the first turn's assistant message is replayed");
         assert_eq!(assistant.provider_state, response.provider_state);
         assert_eq!(assistant.tool_calls[0].id.as_deref(), Some("call_1"));
+
+        // No call may be replayed without its output.
+        for call_id in assistant.provider_state.native_call_ids() {
+            assert!(
+                context.iter().any(|message| {
+                    message.role == arkavo_llm::Role::Tool
+                        && message.tool_call_id.as_deref() == Some(call_id)
+                }),
+                "persisted call {call_id} replays with no paired output"
+            );
+        }
         assert!(
             context
                 .iter()
                 .any(|message| message.content == "what time is it?")
         );
+    }
+
+    /// The terminal has no tool executor, so a turn ending in a tool call must
+    /// never be persisted as a bare assistant message.
+    #[tokio::test]
+    #[spec("ASTRA-002")]
+    async fn an_unanswered_tool_call_is_never_persisted_alone() {
+        let response = arkavo_llm::ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![json!({
+                "type": "function_call", "call_id": "call_1",
+                "name": "clock", "arguments": "{}"
+            })]),
+            tool_calls: vec![arkavo_llm::ParsedToolCall {
+                tool_name: "clock".into(),
+                arguments: json!({}),
+                call_id: Some("call_1".into()),
+            }],
+            ..Default::default()
+        };
+        let turn = response
+            .recorded_turn(&response.unanswered_tool_results("this session cannot run tools"));
+        assert_eq!(
+            turn.len(),
+            2,
+            "the call must be answered, not left orphaned"
+        );
+        assert_eq!(turn[1].role, arkavo_llm::Role::Tool);
+        assert_eq!(turn[1].tool_call_id.as_deref(), Some("call_1"));
+        assert!(turn[1].content.contains("unavailable"));
+
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+        manager.start_session("gpt-6-astra").await.unwrap();
+        for message in &turn {
+            manager.add_message(message).await.unwrap();
+        }
+        let context = manager
+            .get_context_messages_with_limits(None, Some(10))
+            .await
+            .unwrap();
+        assert_eq!(context.len(), 2);
+        assert_eq!(context[1].tool_call_id.as_deref(), Some("call_1"));
     }
 
     #[tokio::test]
