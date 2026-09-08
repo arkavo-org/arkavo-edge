@@ -89,39 +89,46 @@ impl Planner {
             "Planning with selected model"
         );
 
+        let messages = vec![LlmMessage::user(planning_prompt.clone())];
+        let max_tokens = planner_config.max_tokens().unwrap_or(4096);
+        let budget = CallBudget {
+            tracker: &self.budget_tracker,
+            agent_id: "github-orchestrator",
+        };
+
+        // Both gates settle before the planning client is built, so a refusal
+        // never opens a connection and the caller sees the policy error rather
+        // than a downstream credential failure. The ledger answers first, so an
+        // exhausted cap reports as `BudgetExceeded`. The preflight prices the
+        // schema in unconditionally — the upper bound of what this call can
+        // cost, since whether the provider takes a schema is not knowable until
+        // it exists. The planning arm is routed, never named by a caller, so the
+        // cloud gate is asked without authorization.
+        let schema = JsonExecutionPlan::json_schema();
+        let preflight = estimate_request(&messages, Some(&schema), max_tokens as u32);
+        let preflight_cost = self
+            .router
+            .usage_cost(&decision.recommended_model, &preflight);
+        budget
+            .check(preflight_cost)
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
+        self.router
+            .authorize_call(&decision.recommended_model, preflight_cost, false, None)
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
+
         let (planning_provider, actual_model) = self
             .router
             .get_provider_attributed(&decision.recommended_model)
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Planning provider unavailable: {e}")))?;
-        let messages = vec![LlmMessage::user(planning_prompt.clone())];
 
         // Use structured output with JSON schema if provider supports it
-        let schema = if planning_provider.supports_structured_output() {
-            Some(JsonExecutionPlan::json_schema())
-        } else {
-            None
-        };
-
-        let max_tokens = planner_config.max_tokens().unwrap_or(4096);
+        let schema = planning_provider
+            .supports_structured_output()
+            .then_some(schema);
         let estimated = estimate_request(&messages, schema.as_ref(), max_tokens as u32);
-        let budget = CallBudget {
-            tracker: &self.budget_tracker,
-            agent_id: "github-orchestrator",
-        };
-        budget
-            .check(self.router.usage_cost(&actual_model, &estimated))
-            .await
-            .map_err(|e| Error::Other(e.into()))?;
-        self.router
-            .authorize_call(
-                &actual_model,
-                self.router.usage_cost(&actual_model, &estimated),
-                false,
-                None,
-            )
-            .await
-            .map_err(|e| Error::Other(e.into()))?;
         let response = planning_provider
             .complete_with_schema_response(messages, schema, Some(max_tokens))
             .await;
@@ -227,12 +234,6 @@ impl Planner {
             decision.recommended_model
         );
 
-        let (provider, actual_model) = self
-            .router
-            .get_provider_attributed(&decision.recommended_model)
-            .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("Adjustment provider unavailable: {e}")))?;
-
         let messages = vec![LlmMessage::user(adjustment_prompt.clone())];
 
         let estimated = estimate_request(&messages, None, 4096);
@@ -240,19 +241,26 @@ impl Planner {
             tracker: &self.budget_tracker,
             agent_id: "github-orchestrator",
         };
+        // Ledger then policy, both before the client exists — as on every other
+        // routing path, so a refused adjustment opens no connection.
+        let estimated_cost = self
+            .router
+            .usage_cost(&decision.recommended_model, &estimated);
         budget
-            .check(self.router.usage_cost(&actual_model, &estimated))
+            .check(estimated_cost)
             .await
             .map_err(|e| Error::Other(e.into()))?;
         self.router
-            .authorize_call(
-                &actual_model,
-                self.router.usage_cost(&actual_model, &estimated),
-                false,
-                None,
-            )
+            .authorize_call(&decision.recommended_model, estimated_cost, false, None)
             .await
             .map_err(|e| Error::Other(e.into()))?;
+
+        let (provider, actual_model) = self
+            .router
+            .get_provider_attributed(&decision.recommended_model)
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("Adjustment provider unavailable: {e}")))?;
+
         let response = provider
             .complete_with_schema_response(messages, None, Some(4096))
             .await;
@@ -320,8 +328,15 @@ mod tests {
     use arkavo_router::{ModelChoice, ProviderFactory};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    #[derive(Clone)]
-    struct DispatchCounter(Arc<AtomicUsize>);
+    /// Counts both halves of a dispatch: providers the router asked this
+    /// factory to build, and calls that actually reached a model. A refusal
+    /// must leave both at zero — counting only calls would pass even when the
+    /// gate ran after a client was already open.
+    #[derive(Clone, Default)]
+    struct DispatchCounter {
+        builds: Arc<AtomicUsize>,
+        calls: Arc<AtomicUsize>,
+    }
 
     #[async_trait::async_trait]
     impl Provider for DispatchCounter {
@@ -330,7 +345,7 @@ mod tests {
             _: Vec<Message>,
             _: Option<usize>,
         ) -> arkavo_llm::Result<String> {
-            self.0.fetch_add(1, Ordering::SeqCst);
+            self.calls.fetch_add(1, Ordering::SeqCst);
             Err(arkavo_llm::Error::Provider("unexpected dispatch".into()))
         }
 
@@ -354,6 +369,7 @@ mod tests {
 
     impl ProviderFactory for DispatchCounter {
         fn build(&self, _: &ModelChoice) -> arkavo_router::Result<Box<dyn Provider>> {
+            self.builds.fetch_add(1, Ordering::SeqCst);
             Ok(Box::new(self.clone()))
         }
     }
@@ -361,7 +377,7 @@ mod tests {
     #[tokio::test]
     async fn cloud_policy_blocks_planning_and_adjustment_before_dispatch() {
         for policy in [CloudPolicy::LocalOnly, CloudPolicy::AskBeforeCloud] {
-            let counter = DispatchCounter(Arc::new(AtomicUsize::new(0)));
+            let counter = DispatchCounter::default();
             let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
             let availability = arkavo_router::ProviderAvailability {
                 openai: true,
@@ -423,7 +439,12 @@ mod tests {
                     "{error}"
                 );
             }
-            assert_eq!(counter.0.load(Ordering::SeqCst), 0);
+            assert_eq!(
+                counter.builds.load(Ordering::SeqCst),
+                0,
+                "a refused plan must not open a client"
+            );
+            assert_eq!(counter.calls.load(Ordering::SeqCst), 0);
             assert!(tracker.get_spending_history(10).await.is_empty());
         }
     }

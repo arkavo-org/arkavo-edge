@@ -236,7 +236,19 @@ impl ModelSelector {
     /// Prefers a cached model from [`Self::FAST_LOCAL_PREFERENCE`]; falls back to Gemma 4 E2B —
     /// the model first-run setup downloads — so chat never silently pulls an un-provisioned
     /// model the user never opted into.
+    ///
+    /// The fallback names an arm the device may not have. Callers that are
+    /// about to *dispatch* must ask [`Self::fastest_cached_local_model`] (or
+    /// `Router::require_provisioned`) instead, so an unprovisioned install
+    /// refuses rather than downloading weights mid-request.
     pub fn fastest_local_model(&self) -> ModelChoice {
+        self.fastest_cached_local_model()
+            .unwrap_or(ModelChoice::LocalGemma4E2B)
+    }
+
+    /// Fastest local arm whose weights are already on disk, or `None` when the
+    /// device has provisioned none of them.
+    pub(crate) fn fastest_cached_local_model(&self) -> Option<ModelChoice> {
         Self::pick_fast_local_model(|m| self.is_local_model_cached(m))
     }
 
@@ -252,13 +264,12 @@ impl ModelSelector {
             .then(|| self.best_cloud_model(false))
     }
 
-    /// Policy half of [`Self::fastest_local_model`], split out so the preference order and
-    /// fallback can be unit-tested without touching the on-disk model cache.
-    fn pick_fast_local_model(is_cached: impl Fn(&ModelChoice) -> bool) -> ModelChoice {
+    /// Policy half of [`Self::fastest_cached_local_model`], split out so the preference order
+    /// can be unit-tested without touching the on-disk model cache.
+    fn pick_fast_local_model(is_cached: impl Fn(&ModelChoice) -> bool) -> Option<ModelChoice> {
         Self::FAST_LOCAL_PREFERENCE
             .into_iter()
             .find(|m| is_cached(m))
-            .unwrap_or(ModelChoice::LocalGemma4E2B)
     }
 
     /// Check if system has at least `min_gb` of RAM
@@ -766,9 +777,30 @@ mod tests {
     #[test]
     fn test_fast_local_model_falls_back_to_provisioned_gemma() {
         let nothing_cached = |_: &ModelChoice| false;
+        // Nothing on disk is reported as such, so a dispatching caller can
+        // refuse; only the naming helper substitutes the setup model.
+        assert_eq!(ModelSelector::pick_fast_local_model(nothing_cached), None);
         assert_eq!(
-            ModelSelector::pick_fast_local_model(nothing_cached),
+            ModelSelector::with_availability(ProviderAvailability::default(), false)
+                .fastest_local_model(),
             ModelChoice::LocalGemma4E2B,
+        );
+    }
+
+    /// Regression: `fastest_local_model` names Gemma 4 E2B even on a device
+    /// that has never downloaded it, so `route_fast` used to hand that name
+    /// straight to the loader and start a multi-gigabyte fetch inside the
+    /// caller's timeout. The cached-only accessor is what a dispatch asks.
+    #[spec("ROUTER-003")]
+    #[test]
+    fn an_unprovisioned_device_reports_no_cached_fast_model() {
+        let selector = ModelSelector::with_availability(ProviderAvailability::default(), false);
+        assert_eq!(selector.fastest_cached_local_model(), None);
+
+        let provisioned = ModelSelector::with_availability(ProviderAvailability::default(), true);
+        assert_eq!(
+            provisioned.fastest_cached_local_model(),
+            Some(ModelChoice::LocalGemma4E2B)
         );
     }
 
@@ -784,7 +816,7 @@ mod tests {
         };
         assert_eq!(
             ModelSelector::pick_fast_local_model(gemma_cached),
-            ModelChoice::LocalGemma4E2B,
+            Some(ModelChoice::LocalGemma4E2B),
         );
     }
 
@@ -795,7 +827,7 @@ mod tests {
         let ministral_cached = |m: &ModelChoice| matches!(m, ModelChoice::LocalMinistral3B);
         assert_eq!(
             ModelSelector::pick_fast_local_model(ministral_cached),
-            ModelChoice::LocalMinistral3B,
+            Some(ModelChoice::LocalMinistral3B),
         );
     }
 }

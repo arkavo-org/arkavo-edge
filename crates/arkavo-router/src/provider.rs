@@ -1,5 +1,8 @@
 use crate::decision::ModelChoice;
 use crate::error::{Error, Result};
+// Weight discovery is only reachable from the local-inference paths; the
+// selector answers "is this weight on disk" for everyone else.
+#[cfg(feature = "llama-cpp")]
 use crate::model_discovery;
 use arkavo_llm::Provider;
 use std::path::Path;
@@ -168,6 +171,22 @@ impl super::Router {
         }
     }
 
+    /// Refuse a local arm whose weights are not on disk.
+    ///
+    /// A routing decision must never turn into a multi-gigabyte download: the
+    /// fetch runs inside whatever timeout the caller set (60s for intent
+    /// analysis) and reads as a hang, and provisioning is the user's decision,
+    /// made with `arkavo model download`, not a side effect of asking a
+    /// question.
+    pub(crate) fn require_provisioned(&self, model: &ModelChoice) -> Result<()> {
+        if model.is_local() && !self.selector.is_local_model_cached(model) {
+            return Err(Error::ModelNotAvailable {
+                model: model.name().to_string(),
+            });
+        }
+        Ok(())
+    }
+
     pub(crate) fn is_model_available(&self, model: &ModelChoice) -> bool {
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
@@ -188,12 +207,11 @@ impl super::Router {
             ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
                 cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok()
             }
-            m if m.is_local() && cfg!(feature = "llama-cpp") => {
-                match (m.repo_id(), m.gguf_filename()) {
-                    (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
-                    _ => false,
-                }
-            }
+            // The selector is the single authority on whether local weights are
+            // on disk, so availability, escalation and subtask assignment all
+            // read the same answer instead of each re-deriving it from the
+            // HuggingFace cache.
+            m if m.is_local() => self.selector.is_local_model_cached(m),
             _ => false,
         }
     }

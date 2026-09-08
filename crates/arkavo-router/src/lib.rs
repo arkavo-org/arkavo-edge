@@ -1452,6 +1452,20 @@ impl Router {
         #[cfg(not(feature = "llama-cpp"))]
         let model = preferred;
         tracing::debug!(model = %model.name(), "Fast-path routing (internal task)");
+        self.require_provisioned(&model)?;
+
+        // Ledger first, then policy, as on every other routing path: an
+        // exhausted cap reports as `BudgetExceeded` rather than as a policy
+        // denial. Both settle before the provider is built, so a refusal never
+        // opens a client.
+        let estimated = usage::estimate_request(&messages, None, 16_384);
+        let estimated_cost = self.usage_cost(&model, &estimated);
+        let budget = self.call_budget();
+        if let Some(budget) = budget {
+            budget.check(estimated_cost).await?;
+        }
+        self.authorize_call(&model, estimated_cost, false, None)
+            .await?;
 
         let use_spec = self.decide_spec_with_event(model.name());
         let provider = self
@@ -1464,14 +1478,6 @@ impl Router {
             .await
             .map_err(|_| Error::ModelExecution("Synthesis semaphore closed".to_string()))?;
 
-        let estimated = usage::estimate_request(&messages, None, 16_384);
-        let estimated_cost = self.usage_cost(&model, &estimated);
-        self.authorize_call(&model, estimated_cost, false, None)
-            .await?;
-        let budget = self.call_budget();
-        if let Some(budget) = budget {
-            budget.check(estimated_cost).await?;
-        }
         tracing::debug!(task = task_description, "Executing internal model call");
         let result = provider
             .complete_with_tools(messages, None, Some(16_384))
@@ -1571,21 +1577,23 @@ impl Router {
 
         let estimated = usage::estimate_request(&messages, tools_json.as_ref(), 16_384);
         let budget = self.call_budget();
-        // Policy and cap are settled before the provider is built, so a refusal
+        // Cap and policy are settled before the provider is built, so a refusal
         // never opens a client — and a session with no way to ask its user gets
-        // the refusal back without a model ever being loaded.
+        // the refusal back without a model ever being loaded. The ledger
+        // answers first so an exhausted cap reports as `BudgetExceeded`.
+        let explicit = spec.and_then(ModelSpec::as_named).is_some();
         if let Some(model) = named {
+            // Naming an arm is the user's own choice to reach for it. The
+            // automatic default is not, so an unprovisioned one refuses rather
+            // than pulling gigabytes of weights in the middle of a turn.
+            if !explicit {
+                self.require_provisioned(model)?;
+            }
             let cost = self.usage_cost(model, &estimated);
-            self.authorize_call(
-                model,
-                cost,
-                spec.and_then(ModelSpec::as_named).is_some(),
-                session,
-            )
-            .await?;
             if let Some(budget) = budget {
                 budget.check(cost).await?;
             }
+            self.authorize_call(model, cost, explicit, session).await?;
         }
 
         let provider = if let Some(path) = spec.and_then(ModelSpec::as_gguf_path) {
@@ -2570,6 +2578,115 @@ mod tests {
         );
         assert_eq!(provider.builds(), 0, "a refusal must not open a client");
         assert_eq!(provider.calls(), 0);
+    }
+
+    /// Regression: the fast path resolved its arm by name — Gemma 4 E2B even on
+    /// a device that had never downloaded it — and handed that name to the
+    /// loader, which started a multi-gigabyte fetch inside the caller's 60s
+    /// intent-analysis timeout and read as a hang. Routing refuses instead, and
+    /// opens no client on the way to the refusal.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn route_fast_refuses_an_unprovisioned_local_model() {
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("answer");
+        // A configured cloud arm cannot stand in here: the fast path is local
+        // by construction, so an unprovisioned device has nothing to run.
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::CloudWithinCap,
+            "openai",
+            &provider,
+        )
+        .await;
+
+        let Err(error) = router
+            .route_fast("intent analysis", vec![arkavo_llm::Message::user("hello")])
+            .await
+        else {
+            panic!("an unprovisioned device must refuse the fast path");
+        };
+
+        assert!(
+            matches!(&error, Error::ModelNotAvailable { model } if model == ModelChoice::LocalGemma4E2B.name()),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert_eq!(provider.calls(), 0);
+    }
+
+    /// The mirror: with the weights on disk the same call is served by the
+    /// provisioned local arm, so the guard refuses a missing weight and
+    /// nothing else.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn route_fast_serves_a_provisioned_local_model() {
+        use crate::test_support::{CountingProvider, only};
+
+        let provider = CountingProvider::new("answer");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(only("openai"), true))
+            .await
+            .with_provider_factory(provider.factory());
+
+        let response = router
+            .route_fast("intent analysis", vec![arkavo_llm::Message::user("hello")])
+            .await
+            .expect("a provisioned device serves the fast path")
+            .complete()
+            .await
+            .expect("the substituted provider answers");
+
+        assert_eq!(response.content, "answer");
+        assert!(response.model.is_local());
+        assert_eq!(provider.builds(), 1);
+    }
+
+    /// The automatic chat arm is local, and an unprovisioned one used to reach
+    /// the loader the same way the fast path did. Naming an arm is the user's
+    /// own choice to reach for it, so only the automatic path refuses.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn automatic_chat_refuses_an_unprovisioned_local_model() {
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("answer");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::CloudWithinCap,
+            "openai",
+            &provider,
+        )
+        .await;
+
+        let error = router
+            .route_chat_spec(
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                None,
+                Some("session-a"),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModelNotAvailable { .. }),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+
+        // A named arm still runs: naming it is itself the request to use it.
+        let response = router
+            .route_chat_spec(
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                Some(&ModelSpec::Named(ModelChoice::Gpt6Astra)),
+                Some("session-a"),
+            )
+            .await
+            .expect("a named arm is the caller's own choice");
+        assert_eq!(response.content, "answer");
+        assert_eq!(provider.builds(), 1);
     }
 
     /// Helper: a minimal `DecisionTrace` for constructing test decisions.

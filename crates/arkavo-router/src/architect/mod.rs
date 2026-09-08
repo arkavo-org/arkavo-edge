@@ -8,6 +8,7 @@ mod escalation;
 mod executor;
 mod planner;
 mod planning_provider;
+mod subtask_model;
 
 pub use complexity::{ComplexityScore, ComplexityScorer};
 pub use executor::{ArchitectExecutor, SubtaskResult};

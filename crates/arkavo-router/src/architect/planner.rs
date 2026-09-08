@@ -1,4 +1,4 @@
-use super::{ArchitectPlan, ComplexityScore, Subtask, planning_provider};
+use super::{ArchitectPlan, ComplexityScore, Subtask, planning_provider, subtask_model};
 use crate::classifier::TaskCategory;
 use crate::decision::ModelChoice;
 use crate::selector::ProviderAvailability;
@@ -192,8 +192,8 @@ Guidelines:
 
         for (index, subtask_resp) in parsed.subtasks.iter().enumerate() {
             let category = TaskCategory::from_string(&subtask_resp.category);
-            let model = self.select_model_for_category(category);
-            let cost = self.estimate_subtask_cost(&model, category);
+            let model = self.subtask_model(category);
+            let cost = subtask_model::estimate_subtask_cost(&model, category);
 
             let subtask = Subtask::new(index, subtask_resp.description.clone(), category)
                 .with_model(model, cost)
@@ -219,131 +219,10 @@ Guidelines:
         ))
     }
 
-    /// Select the best model for a subtask category
-    fn select_model_for_category(&self, category: TaskCategory) -> ModelChoice {
-        let preferred = match category {
-            // Frontend tasks: Use cheaper, fast models
-            TaskCategory::FrontendUI => {
-                if self.availability.gemini {
-                    ModelChoice::Gemini35Flash
-                } else if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else {
-                    ModelChoice::LocalMinistral3B
-                }
-            }
-
-            // Backend/Security/Tests/Review: Use more capable models
-            TaskCategory::BackendAPI
-            | TaskCategory::SecurityScan
-            | TaskCategory::TestGeneration
-            | TaskCategory::CodeReview => {
-                if self.availability.anthropic {
-                    ModelChoice::ClaudeOpus
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiPro
-                } else {
-                    ModelChoice::LocalMinistral8B
-                }
-            }
-
-            // Documentation: Use cheaper models
-            TaskCategory::Documentation => {
-                if self.availability.gemini {
-                    ModelChoice::Gemini35Flash
-                } else {
-                    ModelChoice::LocalQwen3
-                }
-            }
-
-            // Refactoring: Use balanced models
-            TaskCategory::Refactoring | TaskCategory::CodeGeneration => {
-                if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else if self.availability.gemini {
-                    ModelChoice::GeminiPro
-                } else {
-                    ModelChoice::LocalMinistral3B
-                }
-            }
-
-            // Code search: Local model is sufficient
-            TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
-
-            // Vision: Needs multimodal
-            TaskCategory::VisionAnalysis => {
-                if self.availability.gemini {
-                    ModelChoice::Gemini35Flash
-                } else if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else {
-                    ModelChoice::LocalMinistral3B
-                }
-            }
-
-            // Game/simulation and general: Use balanced default
-            TaskCategory::GameSimulation | TaskCategory::General => {
-                if self.availability.anthropic {
-                    ModelChoice::ClaudeSonnet
-                } else if self.availability.gemini {
-                    ModelChoice::Gemini35Flash
-                } else {
-                    ModelChoice::LocalQwen3
-                }
-            }
-        };
-        // Cloud augmentation must not displace a provisioned local subtask model.
-        let local_cached = self
-            .router
-            .as_ref()
-            .is_some_and(|router| router.selector.is_local_model_cached(&preferred));
-        if preferred.is_local() && !local_cached && self.availability.has_cloud() {
-            crate::ModelSelector::with_availability(self.availability.clone(), false)
-                .cloud_augmentation_model()
-                .unwrap_or(preferred)
-        } else {
-            preferred
-        }
-    }
-
-    fn estimate_subtask_cost(&self, model: &ModelChoice, category: TaskCategory) -> f64 {
-        let token_estimate = category.estimated_tokens();
-
-        match model {
-            ModelChoice::Gpt6Astra => crate::RoutingDecision::estimate_cost(model, category),
-            ModelChoice::GeminiFlash => {
-                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.30;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.50;
-                input_cost + output_cost
-            }
-            ModelChoice::Gemini35Flash => {
-                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.50;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 9.00;
-                input_cost + output_cost
-            }
-            ModelChoice::GeminiPro => {
-                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.25;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 5.00;
-                input_cost + output_cost
-            }
-            ModelChoice::ClaudeSonnet => {
-                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 3.00;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 15.00;
-                input_cost + output_cost
-            }
-            ModelChoice::ClaudeOpus => {
-                // Opus 4.8 pricing ($5/$25); the old $15/$75 was Opus 4.1.
-                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 5.00;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 25.00;
-                input_cost + output_cost
-            }
-            ModelChoice::ClaudeFable5 => {
-                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 10.00;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 50.00;
-                input_cost + output_cost
-            }
-            _ => crate::RoutingDecision::estimate_cost(model, category),
-        }
+    /// Arm for a subtask in `category`, filtered against what this device can
+    /// run. See [`subtask_model::select_model_for_category`].
+    fn subtask_model(&self, category: TaskCategory) -> ModelChoice {
+        subtask_model::select_model_for_category(&self.availability, self.router.as_ref(), category)
     }
 
     fn estimate_costs(&self, plan: &mut ArchitectPlan) {
@@ -401,7 +280,7 @@ mod tests {
     #[test]
     fn test_model_selection_frontend() {
         let planner = ArchitectPlanner::new();
-        let model = planner.select_model_for_category(TaskCategory::FrontendUI);
+        let model = planner.subtask_model(TaskCategory::FrontendUI);
 
         // Should prefer cheaper models for frontend
         assert!(matches!(
@@ -418,7 +297,7 @@ mod tests {
     #[test]
     fn test_model_selection_backend() {
         let planner = ArchitectPlanner::new();
-        let model = planner.select_model_for_category(TaskCategory::BackendAPI);
+        let model = planner.subtask_model(TaskCategory::BackendAPI);
 
         // Should prefer capable models for backend
         assert!(matches!(
@@ -443,14 +322,14 @@ mod tests {
                 TaskCategory::Documentation,
                 TaskCategory::CodeSearch,
             ] {
-                let model = planner.select_model_for_category(category);
+                let model = planner.subtask_model(category);
                 assert!(!model.is_local(), "{other}: {category:?}");
                 assert_ne!(
                     model,
                     ModelChoice::DeepSeekV32Speciale,
                     "subtasks need an execution model with tool support"
                 );
-                assert!(planner.estimate_subtask_cost(&model, category) > 0.0);
+                assert!(subtask_model::estimate_subtask_cost(&model, category) > 0.0);
             }
         }
     }
@@ -470,7 +349,7 @@ mod tests {
             .with_availability(availability)
             .with_router(Arc::new(router));
         assert_eq!(
-            planner.select_model_for_category(TaskCategory::CodeSearch),
+            planner.subtask_model(TaskCategory::CodeSearch),
             ModelChoice::LocalQwen3
         );
     }

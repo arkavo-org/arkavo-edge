@@ -122,6 +122,29 @@ impl ArchitectExecutor {
         let mut current_model = subtask.assigned_model.clone();
         let budget = self.router.call_budget();
 
+        // A plan can arrive carrying a local arm this device never provisioned
+        // — from a planner with no router to ask, or from a plan made before
+        // the weights were removed. Stepping to a runnable rung keeps the
+        // dispatch off the loader, which would otherwise pull the weight.
+        if self.router.require_provisioned(&current_model).is_err() {
+            let Some(runnable) = super::escalation::next_runnable_rung(&current_model, |next| {
+                self.router.is_model_available(next)
+            }) else {
+                let error = format!(
+                    "{} is not provisioned and no available escalation target can run this subtask",
+                    current_model.name()
+                );
+                return Ok(Self::unexecuted(subtask, current_model, error, 0));
+            };
+            tracing::warn!(
+                subtask_index = subtask.index,
+                unprovisioned = %current_model.name(),
+                new_model = ?runnable,
+                "Assigned local weight is not on disk; escalating instead of downloading"
+            );
+            current_model = runnable;
+        }
+
         let last_error = loop {
             // Build subtask prompt
             let mut messages = context.to_vec();
@@ -226,10 +249,13 @@ impl ArchitectExecutor {
                     }
 
                     // Re-dispatching the same model just re-spends on the same
-                    // failure, and a paid rung must be reachable. Local rungs
-                    // stay unfiltered so an uncached weight is fetched on demand.
-                    let Some(next_model) = super::escalation::next_rung(&current_model)
-                        .filter(|next| next.is_local() || self.router.is_model_available(next))
+                    // failure, and the rung climbed to must be one this device
+                    // can actually run: an unprovisioned local weight would be
+                    // downloaded on demand, which a retry must never trigger.
+                    let Some(next_model) =
+                        super::escalation::next_runnable_rung(&current_model, |next| {
+                            self.router.is_model_available(next)
+                        })
                     else {
                         break format!(
                             "{error_msg} (no available escalation target beyond {})",
@@ -248,18 +274,35 @@ impl ArchitectExecutor {
         };
 
         // All retries exhausted
-        Ok(SubtaskResult {
+        Ok(Self::unexecuted(
+            subtask,
+            current_model,
+            last_error,
+            retry_count,
+        ))
+    }
+
+    /// A subtask that produced nothing — retries exhausted, or no arm this
+    /// device can run. Nothing was dispatched on the last attempt, so nothing
+    /// is charged for it.
+    fn unexecuted(
+        subtask: &Subtask,
+        model_used: ModelChoice,
+        error: String,
+        retry_count: u8,
+    ) -> SubtaskResult {
+        SubtaskResult {
             subtask_id: subtask.id,
             index: subtask.index,
-            model_used: current_model,
+            model_used,
             response: String::new(),
             reasoning_content: None,
             tool_calls: Vec::new(),
             actual_cost_usd: 0.0,
             success: false,
-            error: Some(last_error),
+            error: Some(error),
             retry_count,
-        })
+        }
     }
 
     /// Cost of one settled attempt, priced off the same request estimate the
@@ -324,6 +367,7 @@ impl ArchitectExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[tokio::test]
     async fn grok_actual_cost_uses_list_rates_and_usage() {
@@ -372,5 +416,119 @@ mod tests {
             (thinking_cost - 3.0).abs() < 1e-9,
             "thinking tokens must not double-count; got {thinking_cost}"
         );
+    }
+
+    /// Regression: a plan could name a local arm this device never provisioned
+    /// — from a planner with no router to ask — and the executor handed it
+    /// straight to `load_local_model`, which downloaded the weights in the
+    /// middle of the plan. The dispatch now steps to a runnable rung instead,
+    /// and never builds the missing arm.
+    ///
+    /// Which rung it lands on *does* depend on the runner's own cloud
+    /// credentials, because `is_model_available` reads them for cloud arms
+    /// rather than the injected selector. So the fixture leaves cloud spend
+    /// open — online, `CloudWithinCap`, reachable — and the assertion is the
+    /// invariant that does not vary: no unprovisioned local arm is ever built.
+    /// A runner with a key escalates onto its cloud rung and succeeds; a runner
+    /// without one runs out of ladder and says why. Neither fetches the weight.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn an_unprovisioned_local_subtask_is_never_built() {
+        use crate::test_support::CountingProvider;
+
+        let provider = CountingProvider::new("done");
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = Arc::new(
+            router
+                .with_cloud_policy(arkavo_budget::CloudPolicy::CloudWithinCap)
+                .with_connectivity(crate::ConnectivityChecker::assume(true))
+                .with_selector(crate::ModelSelector::with_availability(
+                    crate::ProviderAvailability::default(),
+                    false,
+                ))
+                .await
+                .with_provider_factory(provider.factory()),
+        );
+        let mut plan = ArchitectPlan::new(
+            "ship the feature".into(),
+            super::super::ComplexityScore::simple(),
+        );
+        plan.add_subtask(
+            Subtask::new(
+                0,
+                "only step".into(),
+                crate::classifier::TaskCategory::General,
+            )
+            .with_model(ModelChoice::LocalQwen3, 0.0),
+        );
+
+        let result = ArchitectExecutor::new(router)
+            .execute_subtask(&plan.subtasks[0], &[], None)
+            .await
+            .unwrap();
+
+        assert!(
+            provider
+                .built_models()
+                .iter()
+                .all(|model| !model.is_local()),
+            "an unprovisioned local weight must never be instantiated: {:?}",
+            provider.built_models()
+        );
+        // The ladder either reaches a cloud rung the runner has configured or
+        // runs out; either way it says so instead of fetching the weight.
+        if !result.success {
+            assert!(
+                result
+                    .error
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("is not provisioned"),
+                "{:?}",
+                result.error
+            );
+        }
+    }
+
+    /// The mirror: with the weights on disk the assigned local arm is used as
+    /// planned, so the guard filters missing weights and nothing else.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_provisioned_local_subtask_runs_as_assigned() {
+        use crate::test_support::CountingProvider;
+
+        let provider = CountingProvider::new("done");
+        let router = Arc::new(
+            Router::new_offline()
+                .await
+                .unwrap()
+                .with_selector(crate::ModelSelector::with_availability(
+                    crate::ProviderAvailability::default(),
+                    true,
+                ))
+                .await
+                .with_provider_factory(provider.factory()),
+        );
+        let mut plan = ArchitectPlan::new(
+            "ship the feature".into(),
+            super::super::ComplexityScore::simple(),
+        );
+        plan.add_subtask(
+            Subtask::new(
+                0,
+                "only step".into(),
+                crate::classifier::TaskCategory::General,
+            )
+            .with_model(ModelChoice::LocalQwen3, 0.0),
+        );
+
+        let result = ArchitectExecutor::new(router)
+            .execute(&plan, Vec::new(), None)
+            .await
+            .unwrap();
+
+        assert!(result.subtask_results[0].success);
+        assert_eq!(provider.built_models(), vec![ModelChoice::LocalQwen3]);
     }
 }

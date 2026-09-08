@@ -54,6 +54,32 @@ pub(super) fn next_rung(current: &ModelChoice) -> Option<ModelChoice> {
     (next != *current).then_some(next)
 }
 
+/// The ladder is a strictly climbing chain, so the walk below always reaches
+/// a ceiling. The bound only keeps a future edit that introduced a cycle from
+/// hanging a retry loop.
+const MAX_LADDER_STEPS: usize = 32;
+
+/// First rung above `current` that this device can actually run.
+///
+/// A rung it cannot serve is skipped rather than ending the climb: an
+/// unprovisioned local weight would otherwise be fetched on demand — a
+/// multi-gigabyte download in the middle of a retry — and a cloud arm with no
+/// configured provider would only dead-end at instantiation.
+pub(super) fn next_runnable_rung(
+    current: &ModelChoice,
+    runnable: impl Fn(&ModelChoice) -> bool,
+) -> Option<ModelChoice> {
+    let mut model = current.clone();
+    for _ in 0..MAX_LADDER_STEPS {
+        let next = next_rung(&model)?;
+        if runnable(&next) {
+            return Some(next);
+        }
+        model = next;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +133,47 @@ mod tests {
         assert_ne!(
             next_rung(&ModelChoice::Gpt6Astra),
             Some(ModelChoice::Gpt6Astra)
+        );
+    }
+
+    /// Regression: local rungs used to be taken unfiltered, so a retry on an
+    /// unprovisioned device escalated onto a weight that was not on disk and
+    /// the loader downloaded it mid-plan. The climb now steps over every rung
+    /// the device cannot run.
+    #[spec("ROUTER-010")]
+    #[test]
+    fn the_climb_steps_over_rungs_this_device_cannot_run() {
+        // Nothing local is provisioned; only the Gemini tier is configured.
+        let runnable = |m: &ModelChoice| {
+            matches!(
+                m,
+                ModelChoice::GeminiFlash
+                    | ModelChoice::Gemini35Flash
+                    | ModelChoice::Gemini35FlashMedium
+                    | ModelChoice::Gemini35FlashHigh
+                    | ModelChoice::GeminiPro
+            )
+        };
+        assert_eq!(
+            next_runnable_rung(&ModelChoice::LocalQwen3, runnable),
+            Some(ModelChoice::GeminiFlash),
+            "every local rung between Qwen3 and Gemini Flash is unprovisioned"
+        );
+    }
+
+    /// With nothing runnable above it the climb ends instead of looping, and
+    /// the caller reports "no available escalation target".
+    #[spec("ROUTER-010")]
+    #[test]
+    fn a_ladder_with_no_runnable_rung_terminates() {
+        assert_eq!(
+            next_runnable_rung(&ModelChoice::LocalQwen3, |_| false),
+            None
+        );
+        assert_eq!(
+            next_runnable_rung(&ModelChoice::ClaudeFable5, |_| true),
+            None,
+            "the ceiling has no rung above it"
         );
     }
 }
