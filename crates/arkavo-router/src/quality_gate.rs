@@ -108,6 +108,14 @@ impl super::Router {
         let budget = budget.or_else(|| self.call_budget());
         let mut current_decision = self.classify_for_session(task_description, session).await?;
 
+        // Which arm the caller's hint actually put in play, if any. Not
+        // "the hint happens to equal what classification chose": the hint is
+        // declined on cooldown or when its weights are absent, and
+        // classification can land on the same arm by itself. Treating that
+        // coincidence as the caller's choice let an unapplied hint stand in
+        // for both consent to spend and consent to download.
+        let mut applied_hint: Option<crate::ModelChoice> = None;
+
         if let Some(hint) = model_hint {
             let consecutive = self.get_cooldown_consecutive(hint.name()).await;
             let reward_failures = self.get_reward_failure_count(hint.name()).await;
@@ -131,6 +139,7 @@ impl super::Router {
                     "Applying model hint from AGENTS.md"
                 );
                 current_decision.recommended_model = hint.clone();
+                applied_hint = Some(hint.clone());
             } else {
                 tracing::debug!(
                     hint = hint.name(),
@@ -275,14 +284,14 @@ impl super::Router {
             // and before the provider is built so a denial never opens a client.
             // "Explicit" means the caller named this model (an applied hint) or
             // it was already authorized for this dispatch.
-            let hinted = model_hint.is_some_and(|hint| *hint == actual_model);
-            let caller_authorized = authorized_cloud.as_ref() == Some(&actual_model) || hinted;
-            // An arm Thompson Sampling picked is not a request to download it.
-            // A hinted one is: naming an arm is the caller's own choice to
-            // reach for it, exactly as on the chat and execution paths.
-            if !hinted {
-                self.require_provisioned(&actual_model)?;
-            }
+            let caller_authorized = authorized_cloud.as_ref() == Some(&actual_model)
+                || applied_hint.as_ref() == Some(&actual_model);
+            // Unconditional, with no exemption for a hinted arm: applying a
+            // hint already required `is_model_available`, which asks the
+            // selector the same cache question, so an applied local hint
+            // passes here anyway and a cloud arm is never local. An arm
+            // Thompson Sampling picked is not a request to download it.
+            self.require_provisioned(&actual_model)?;
             if let Some(budget) = budget {
                 budget.check(estimated_cost).await?;
             }
@@ -862,6 +871,121 @@ mod tests {
         );
         assert_eq!(provider.builds(), 0, "a refusal must not open a client");
         assert_eq!(provider.calls(), 0);
+    }
+
+    /// Regression: the guard exempted "the hint equals the arm we are about to
+    /// run", which is value equality against whatever classification produced —
+    /// not evidence that the hint was applied. On a bare device the hint block
+    /// correctly declines an uncached `qwen3.5-0.8b`, classification lands on
+    /// the same arm by itself, and the coincidence used to skip the guard and
+    /// download it.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn a_declined_hint_does_not_authorize_a_download() {
+        use crate::test_support::CountingProvider;
+        use crate::{Error, ModelChoice, ModelSelector, ProviderAvailability, Router};
+
+        let provider = CountingProvider::new("answer");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability::default(),
+                false,
+            ))
+            .await
+            .with_provider_factory(provider.factory());
+
+        let error = router
+            .route_with_tools_hinted(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                Some(&ModelChoice::LocalQwen3),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModelNotAvailable { .. }),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert_eq!(provider.calls(), 0);
+    }
+
+    /// The positive control: the same hint on a provisioned device is applied
+    /// and served.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn an_applied_hint_is_served_on_a_provisioned_device() {
+        use crate::test_support::CountingProvider;
+        use crate::{ModelChoice, ModelSelector, ProviderAvailability, Router};
+
+        let provider = CountingProvider::new("answer");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability::default(),
+                true,
+            ))
+            .await
+            .with_provider_factory(provider.factory());
+
+        let response = router
+            .route_with_tools_hinted(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                Some(&ModelChoice::LocalQwen3),
+            )
+            .await
+            .expect("an applied hint on a provisioned device is served");
+        assert_eq!(response.content, "answer");
+        assert_eq!(provider.built_models(), vec![ModelChoice::LocalQwen3]);
+    }
+
+    /// The same coincidence stood in for consent to *spend*: a cooled-down
+    /// hint is not applied, but classification picked the same cloud arm, and
+    /// value equality reported that as the caller having named it — silently
+    /// satisfying `AskBeforeCloud`.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_declined_cloud_hint_is_not_the_users_consent_to_spend() {
+        use crate::test_support::{CountingProvider, cloud_router};
+        use crate::{Error, ModelChoice};
+
+        let provider = CountingProvider::new("answer");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::AskBeforeCloud,
+            "openai",
+            &provider,
+        )
+        .await;
+        // Three sustained quality failures put the hint past
+        // HINT_OVERRIDE_THRESHOLD, so it is declined. Unlike a cooldown this
+        // does not exclude the arm from the feasible set, so classification
+        // still reaches Astra on its own — which is the coincidence under test.
+        for _ in 0..3 {
+            router
+                .record_reward_failure(ModelChoice::Gpt6Astra.name())
+                .await;
+        }
+
+        let error = router
+            .route_with_tools_hinted(
+                "design the API surface",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                Some(&ModelChoice::Gpt6Astra),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::CloudConfirmationRequired { .. }),
+            "a hint that was never applied is nobody's consent: got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
     }
 
     /// The mirror: with the weights on disk the same call is served, so the

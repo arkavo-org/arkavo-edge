@@ -252,9 +252,13 @@ impl ModelSelector {
             feasible.retain(|m| !excluded.iter().any(|e| e == m.name()));
         }
 
-        // Ensure at least one model
+        // Every gate above can empty the set, and this function must still
+        // name an arm. Name the device's own default — a cached arm where
+        // there is one, the first-run model otherwise — rather than a fixed
+        // `LocalQwen3` whose weights nobody checked. When nothing is cached
+        // the name is what the dispatch guard reports as unprovisioned.
         if feasible.is_empty() {
-            feasible.push(ModelChoice::LocalQwen3);
+            feasible.push(self.fastest_local_model());
         }
 
         let excluded_names: Vec<String> = excluded.to_vec();
@@ -263,7 +267,7 @@ impl ModelSelector {
             let model = feasible
                 .into_iter()
                 .next()
-                .unwrap_or(ModelChoice::LocalQwen3);
+                .unwrap_or_else(|| self.fastest_local_model());
             let reasoning = format!("Single feasible model: {}", model.name());
             let trace = DecisionTrace::single_feasible(
                 classification.category,

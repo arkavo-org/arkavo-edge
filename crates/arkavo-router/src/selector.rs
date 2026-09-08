@@ -562,11 +562,30 @@ mod tests {
         assert!(xai_only().has_cloud());
     }
 
+    /// Regression: the feasible set used to end with an unconditional
+    /// `LocalQwen3` whose weights nobody had checked, so a device holding
+    /// nothing handed Thompson Sampling an arm that could only be served by
+    /// downloading it. A bare device now has nothing feasible, and the caller
+    /// turns that into a refusal.
     #[spec("ROUTER-003")]
     #[test]
-    fn test_feasible_models_no_cloud_has_fallback() {
+    fn test_feasible_models_no_cloud_no_weights_is_empty() {
         let selector = ModelSelector::with_availability(ProviderAvailability::default(), false);
-        let feasible = selector.feasible_models();
-        assert!(!feasible.is_empty());
+        assert!(selector.feasible_models().is_empty());
+    }
+
+    /// A device provisioned outside the local shortlist is still feasible on
+    /// what it actually holds.
+    #[spec("ROUTER-003")]
+    #[test]
+    fn test_feasible_models_names_an_arm_outside_the_shortlist() {
+        let selector = ModelSelector::with_parts(
+            ProviderAvailability::default(),
+            LocalWeights::Only(&[ModelChoice::LocalGemma4E4B]),
+        );
+        assert_eq!(
+            selector.feasible_models(),
+            vec![ModelChoice::LocalGemma4E4B]
+        );
     }
 }

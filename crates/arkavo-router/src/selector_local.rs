@@ -242,9 +242,15 @@ impl ModelSelector {
 
         models.extend(self.feasible_cloud_models());
 
-        // Fallback: always include Qwen3 as baseline
+        // The local block above enumerates a fixed shortlist, so a device
+        // provisioned with something outside it (Gemma 4 E4B, say) can reach
+        // here empty. Name what it actually holds — never a fixed arm whose
+        // weights nobody checked, which is how an "always include Qwen3"
+        // baseline used to put an unprovisioned model in front of Thompson
+        // Sampling. A device holding nothing has an empty feasible set, and
+        // the caller turns that into a refusal.
         if models.is_empty() {
-            models.push(ModelChoice::LocalQwen3);
+            models.extend(self.smallest_cached_local_model());
         }
 
         models
