@@ -21,12 +21,13 @@ cargo build --release -p arkavo \
   --features cloud
 ```
 
-`cloud` (declared in `crates/arkavo/Cargo.toml` and `crates/arkavo-cli/Cargo.toml`)
-currently expands to `memory,mdns,mcp-tools,llm-remote,web-ui` — it is the
-one place that list is named, so the Dockerfile and this doc cannot drift
-from each other. `.dockerignore` excludes `target/`, `vendor/`, and `.git/`
-from the build context. `llama-cpp` is feature-gated end to end for this
-feature set (see below), so the builder never compiles
+`cloud` is declared once, in `crates/arkavo-cli/Cargo.toml`, currently as
+`memory,mdns,mcp-tools,llm-remote,web-ui`; `crates/arkavo/Cargo.toml`'s own
+`cloud` forwards to it (`["arkavo-cli/cloud"]`) rather than repeating the
+list, so this is the one place it is named and the Dockerfile and this doc
+cannot drift from it. `.dockerignore` excludes `target/`, `vendor/`, and
+`.git/` from the build context. `llama-cpp` is feature-gated end to end for
+this feature set (see below), so the builder never compiles
 `arkavo-llama-cpp-sys` — the build needs neither `vendor/llama.cpp` nor
 cmake.
 

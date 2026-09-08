@@ -29,7 +29,7 @@ cd arkavo-edge
 # Build the local agent harness with optional cloud augmentation
 cargo build --release -p arkavo \
   --no-default-features \
-  --features llama-cpp,memory,mdns,mcp-tools,openai,web-ui
+  --features llama-cpp,memory,mdns,mcp-tools,llm-remote,openai,web-ui
 
 # Binary will be at target/release/arkavo
 ```
@@ -205,11 +205,11 @@ spec:
       labels:
         app: arkavo-edge
     spec:
-      # Both images run as the non-root `arkavo` user (uid 10001, no primary
-      # group of its own — see the Dockerfile's `useradd`); fsGroup makes a
-      # freshly provisioned PVC group-writable by that uid so the init
-      # container's `model download` and the main container's reads agree
-      # on ownership.
+      # Both images run as the non-root `arkavo` user (uid 10001; see the
+      # Dockerfile's `useradd`). fsGroup adds gid 10001 as a supplemental
+      # group on a freshly provisioned PVC so the init container's
+      # `model download` and the main container's reads agree on ownership,
+      # regardless of that user's own primary group.
       securityContext:
         fsGroup: 10001
       initContainers:
