@@ -483,7 +483,7 @@ pub async fn execute_with_conductor_and_learning(
 
     // Use parallel three-track loop for all agents with tools.
     let has_any_tools = !registry_arc.list_tools().is_empty();
-    let loop_result = if has_any_tools {
+    let loop_outcome = if has_any_tools {
         super::conductor_parallel::run_tool_loop_parallel(
             router,
             &registry_arc,
@@ -498,7 +498,7 @@ pub async fn execute_with_conductor_and_learning(
             #[cfg(feature = "taint")]
             Some(egress_guard.clone()),
         )
-        .await?
+        .await
     } else {
         super::conductor_tool_loop::run_tool_loop(
             router,
@@ -514,7 +514,26 @@ pub async fn execute_with_conductor_and_learning(
             #[cfg(feature = "taint")]
             Some(&egress_guard),
         )
-        .await?
+        .await
+    };
+
+    // A refused loop still has to close out the HRM task: it went Running
+    // before the loop started, so returning the refusal without recording it
+    // would leave the task running with no result and no reason. The learning
+    // updates below are deliberately skipped — no model produced an answer to
+    // score.
+    let loop_result = match loop_outcome {
+        Ok(result) => result,
+        Err(refusal) => {
+            let failed = BurstResult::failure(contract.id, refusal.clone());
+            if let Err(e) = conductor
+                .record_result(hrm_task.id, subtask.id, failed)
+                .await
+            {
+                warn!("Failed to record refused subtask {}: {e}", subtask.id);
+            }
+            return Err(refusal);
+        }
     };
 
     // Emit MCP-T behavior.trace for the completed task. Subject ID matches

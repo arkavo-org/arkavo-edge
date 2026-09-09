@@ -307,6 +307,10 @@ pub async fn run_agent_loop(
                 let memory_guard = config.agent_memory.read().await;
                 let control_signals = memory_guard.format_control_signals();
                 let memory_entry_count = memory_guard.entry_count();
+                // Baseline for "did *this* cycle run any tools", read again after
+                // the cycle. ToolMemory spans cycles, so its summary only stands
+                // in as this cycle's answer when the count moved.
+                let tools_recorded_before = memory_guard.total_recorded();
                 drop(memory_guard);
                 if let Some(ref signals) = control_signals {
                     info!(
@@ -456,19 +460,27 @@ pub async fn run_agent_loop(
                         // When the conductor returns empty text (tool-only response),
                         // build a summary from ToolMemory so the ConversationWindow
                         // retains what happened — enabling cross-cycle planning.
-                        let assistant_content = if result.is_empty() {
+                        let (assistant_content, ran_tools_this_cycle) = {
                             let mem = config.agent_memory.read().await;
-                            mem.format_recent_for_context()
-                                .unwrap_or_default()
-                        } else {
-                            result.clone()
+                            let ran = mem.total_recorded() > tools_recorded_before;
+                            let content = if result.is_empty() {
+                                mem.format_recent_for_context().unwrap_or_default()
+                            } else {
+                                result.clone()
+                            };
+                            (content, ran)
                         };
-                        // The requester gets exactly what the conversation
-                        // window records: the assistant text, or the same
-                        // tool-activity summary when the model answered with
-                        // tool calls only. An empty one means the cycle had
-                        // nothing to show, which is reported as a failure.
-                        let cycle_answer = assistant_content.clone();
+                        // The requester gets the assistant text, or the same
+                        // tool-activity summary the window records when the
+                        // model answered with tool calls only. That summary
+                        // covers earlier cycles too, so it is only an answer
+                        // when this cycle actually ran tools; otherwise the
+                        // cycle had nothing to show and says so.
+                        let cycle_answer = if result.is_empty() && !ran_tools_this_cycle {
+                            String::new()
+                        } else {
+                            assistant_content.clone()
+                        };
                         conversation
                             .push(arkavo_llm::Message::assistant(&assistant_content));
 
