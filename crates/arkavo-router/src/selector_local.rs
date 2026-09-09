@@ -81,12 +81,27 @@ impl ModelSelector {
     /// Cached local arms that fit the memory budget, smallest first.
     fn cached_local_models(&self) -> impl Iterator<Item = ModelChoice> + '_ {
         let mem_budget = self.memory_budget();
-        ModelChoice::ALL_LOCAL
+        Self::smallest_first(move |m| {
+            self.is_local_model_cached(m) && (mem_budget == 0 || m.size_bytes() <= mem_budget)
+        })
+    }
+
+    /// Policy half of [`Self::cached_local_models`], split out so the ordering can be
+    /// unit-tested without touching the on-disk model cache.
+    ///
+    /// `ALL_LOCAL` is declared by family, not by weight — `LocalMinistral3B` (6GB) is
+    /// listed before `LocalGemma4B` (2.5GB) — so ordering on `size_bytes` here is what
+    /// makes "smallest first" true for the callers that take the head of this iterator.
+    /// The sort is stable, so arms of equal size keep their declaration order and the
+    /// pick stays deterministic.
+    fn smallest_first(runnable: impl Fn(&ModelChoice) -> bool) -> std::vec::IntoIter<ModelChoice> {
+        let mut models: Vec<ModelChoice> = ModelChoice::ALL_LOCAL
             .iter()
-            .filter(move |m| {
-                self.is_local_model_cached(m) && (mem_budget == 0 || m.size_bytes() <= mem_budget)
-            })
+            .filter(|m| runnable(m))
             .cloned()
+            .collect();
+        models.sort_by_key(ModelChoice::size_bytes);
+        models.into_iter()
     }
 
     /// Best local arm this device can actually run.
@@ -265,6 +280,24 @@ mod tests {
 
     fn selector(cached: &'static [ModelChoice]) -> ModelSelector {
         ModelSelector::with_parts(ProviderAvailability::default(), LocalWeights::Only(cached))
+    }
+
+    /// Regression: `ALL_LOCAL` is declared by family, so taking the head of the
+    /// filtered list handed back Ministral 3B (6GB) as the "smallest" cached arm on
+    /// a device that also held Gemma 4B (2.5GB) — the opposite of what the CPU fast
+    /// path and the per-agent memory budget ask for.
+    #[spec("ROUTER-003")]
+    #[test]
+    fn the_smallest_cached_arm_is_picked_by_weight_not_declaration_order() {
+        let selector = selector(&[ModelChoice::LocalMinistral3B, ModelChoice::LocalGemma4B]);
+        assert!(
+            ModelChoice::LocalGemma4B.size_bytes() < ModelChoice::LocalMinistral3B.size_bytes(),
+            "fixture must have the later-declared arm be the smaller one"
+        );
+        assert_eq!(
+            selector.smallest_cached_local_model(),
+            Some(ModelChoice::LocalGemma4B)
+        );
     }
 
     /// Regression: the fast pick only ever considered Gemma 4 E2B, Ministral 3B
