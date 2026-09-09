@@ -32,13 +32,13 @@ scenarios:
     given:
       - Budget limit configured
       - Current spend near limit
-    when: BudgetMiddleware intercepts request
+    when: The router reserves the call's estimated cost before building a provider
     then:
       - Current spend checked
       - Request blocked if over budget
       - BudgetExceeded error returned
       - No provider call made
-    refs: [crates/arkavo-budget/src/middleware.rs]
+    refs: [crates/arkavo-router/src/usage.rs, crates/arkavo-router/src/quality_gate.rs]
 
   - id: BUDGET-003
     name: Model selection based on cost policy

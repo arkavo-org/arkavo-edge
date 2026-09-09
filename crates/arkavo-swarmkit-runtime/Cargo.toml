@@ -24,7 +24,7 @@ arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf"], optional = true }
 arkavo-agent-auth = { path = "../arkavo-agent-auth", optional = true }
 base64 = { workspace = true }
-blake3 = "1.5"
+blake3 = { workspace = true }
 dirs = { workspace = true }
 ed25519-dalek = { workspace = true }
 parking_lot = { workspace = true }

@@ -2,18 +2,47 @@ use anyhow::Result;
 use arkavo_llm::{LlmClient, Message};
 use arkavo_router::{ModelChoice, Router, RoutingDecision};
 
+/// Output allowance used to price a call before it is authorized.
+const MAX_OUTPUT_TOKENS: u32 = 4096;
+
 pub struct LlmIntegration {
     router: Router,
 }
 
 impl LlmIntegration {
-    pub async fn new() -> Result<Self> {
-        let gemini_available = std::env::var("GEMINI_API_KEY").is_ok();
+    /// Build on a caller-supplied router, so a caller that already configured
+    /// one — with its cloud policy, spend caps and provider set — is not
+    /// silently served by a second router built from the environment.
+    pub fn with_router(router: Router) -> Self {
+        Self { router }
+    }
 
-        let router = if gemini_available {
+    /// A gated client for `model`: the cloud policy and spend caps answer
+    /// before the client exists, so a refusal never opens a connection.
+    ///
+    /// `explicit` says the caller named this arm itself (a `--model` choice),
+    /// which is its own consent; an automatically routed arm is not.
+    async fn gated_client(&self, model: &ModelChoice, explicit: bool) -> Result<LlmClient> {
+        let usage = arkavo_router::usage::estimate_request(&[], None, MAX_OUTPUT_TOKENS);
+        let cost = self.router.usage_cost(model, &usage);
+        self.router
+            .authorize_call(model, cost, explicit, None)
+            .await?;
+        if !explicit {
+            self.router.require_provisioned(model)?;
+        }
+        Ok(LlmClient::new(
+            self.router.get_provider_attributed(model).await?.0,
+        ))
+    }
+
+    pub async fn new() -> Result<Self> {
+        let cloud_available = arkavo_router::ProviderAvailability::from_env().has_cloud();
+
+        let router = if cloud_available {
             Router::new().await?
         } else {
-            tracing::info!("No GEMINI_API_KEY found - using local models only");
+            tracing::info!("No cloud provider available - using local models only");
             Router::new_offline().await?
         };
 
@@ -38,118 +67,7 @@ impl LlmIntegration {
         decision: &RoutingDecision,
     ) -> Result<LlmClient> {
         match decision.recommended_model {
-            ModelChoice::GeminiFlash
-            | ModelChoice::Gemini35Flash
-            | ModelChoice::Gemini35FlashMinimal
-            | ModelChoice::Gemini35FlashMedium
-            | ModelChoice::Gemini35FlashHigh
-            | ModelChoice::GeminiPro => {
-                #[cfg(feature = "gemini")]
-                {
-                    use arkavo_llm::GeminiProvider;
-                    let provider = Box::new(GeminiProvider::new()?);
-                    Ok(LlmClient::new(provider))
-                }
-                #[cfg(not(feature = "gemini"))]
-                {
-                    anyhow::bail!("Gemini feature not enabled")
-                }
-            }
-            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
-                use arkavo_llm::providers::anthropic::AnthropicProvider;
-                if let Ok(provider) =
-                    AnthropicProvider::from_env_with_model(decision.recommended_model.name())
-                {
-                    Ok(LlmClient::new(Box::new(provider)))
-                } else {
-                    anyhow::bail!("ANTHROPIC_API_KEY not set")
-                }
-            }
-            ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
-                #[cfg(feature = "deepseek")]
-                {
-                    use arkavo_llm::DeepSeekProvider;
-                    if let Ok(provider) = DeepSeekProvider::from_env() {
-                        Ok(LlmClient::new(Box::new(provider)))
-                    } else {
-                        anyhow::bail!("DEEPSEEK_API_KEY not set")
-                    }
-                }
-                #[cfg(not(feature = "deepseek"))]
-                {
-                    anyhow::bail!("DeepSeek feature not enabled")
-                }
-            }
-            ModelChoice::KimiK2 => {
-                #[cfg(feature = "kimi")]
-                {
-                    use arkavo_llm::KimiProvider;
-                    if let Ok(provider) = KimiProvider::from_env() {
-                        Ok(LlmClient::new(Box::new(provider)))
-                    } else {
-                        anyhow::bail!("MOONSHOT_API_KEY not set")
-                    }
-                }
-                #[cfg(not(feature = "kimi"))]
-                {
-                    anyhow::bail!("Kimi feature not enabled")
-                }
-            }
-            ModelChoice::Glm52 => {
-                #[cfg(feature = "glm")]
-                {
-                    use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
-                    let Ok(api_key) = std::env::var("GLM_API_KEY") else {
-                        anyhow::bail!("GLM_API_KEY not set")
-                    };
-                    let base_url = std::env::var("GLM_BASE_URL")
-                        .unwrap_or_else(|_| "https://api.z.ai/api/paas/v4".to_string());
-                    let provider = OpenAIProvider::new(OpenAIConfig {
-                        api_key,
-                        base_url,
-                        model: decision.recommended_model.name().to_string(),
-                        organization_id: None,
-                        api_version: None,
-                        is_azure: false,
-                    })?;
-                    Ok(LlmClient::new(Box::new(provider)))
-                }
-                #[cfg(not(feature = "glm"))]
-                {
-                    anyhow::bail!("GLM feature not enabled")
-                }
-            }
-            ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
-                #[cfg(feature = "xai")]
-                {
-                    use arkavo_llm::providers::xai_responses::{
-                        ReasoningEffort, ResponsesConfig, ResponsesProvider,
-                    };
-                    let Ok(api_key) = std::env::var("XAI_API_KEY") else {
-                        anyhow::bail!("XAI_API_KEY not set")
-                    };
-                    let base_url = std::env::var("XAI_BASE_URL")
-                        .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-                    let api_model = decision
-                        .recommended_model
-                        .grok_api_model()
-                        .unwrap_or("grok-4.6")
-                        .to_string();
-                    let effort = if matches!(decision.recommended_model, ModelChoice::Grok46Xhigh) {
-                        ReasoningEffort::Xhigh
-                    } else {
-                        ReasoningEffort::Low
-                    };
-                    let config =
-                        ResponsesConfig::for_routed_arm(api_key, base_url, api_model, effort);
-                    let provider = ResponsesProvider::new(config)?;
-                    Ok(LlmClient::new(Box::new(provider)))
-                }
-                #[cfg(not(feature = "xai"))]
-                {
-                    anyhow::bail!("xAI/Grok feature not enabled")
-                }
-            }
+            ref model if model.is_cloud() => self.gated_client(model, false).await,
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
             | ModelChoice::LocalMinistral8B
@@ -188,21 +106,23 @@ impl LlmIntegration {
                     )
                 }
             }
+            ref model => self.gated_client(model, false).await,
         }
     }
 
     pub async fn create_client_from_model(&self, model_name: &str) -> Result<LlmClient> {
+        if let Some(model) = ModelChoice::from_name(model_name)
+            && model.is_cloud()
+        {
+            // Naming an arm is the caller's own consent to spend on it, but the
+            // policy and the caps still decide.
+            return self.gated_client(&model, true).await;
+        }
         if model_name.contains("gemini") {
-            #[cfg(feature = "gemini")]
-            {
-                use arkavo_llm::GeminiProvider;
-                let provider = Box::new(GeminiProvider::new()?);
-                Ok(LlmClient::new(provider))
-            }
-            #[cfg(not(feature = "gemini"))]
-            {
-                anyhow::bail!("Gemini feature not enabled")
-            }
+            // A gemini-shaped name that is not a routable arm has no pricing
+            // and no policy identity, so it cannot be gated — and an ungated
+            // cloud client is exactly what this path used to hand out.
+            anyhow::bail!("Unknown cloud model: {model_name}")
         } else {
             if let Ok(client) = LlmClient::from_env()
                 && client.complete(vec![Message::user("ping")]).await.is_ok()
@@ -305,5 +225,106 @@ impl LlmIntegration {
         }
 
         Ok(gguf_files[0].path())
+    }
+}
+
+#[cfg(test)]
+// `#[tokio::test]` expands to `Runtime::block_on`, which this crate disallows
+// outside tests.
+#[allow(clippy::disallowed_methods)]
+mod tests {
+    use super::*;
+    use arkavo_router::classifier::TaskCategory;
+    use arkavo_router::{
+        ConnectivityChecker, ModelSelector, ProviderAvailability, ProviderFactory,
+    };
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Counts provider construction, so "the call was refused before a client
+    /// existed" is an assertion rather than an inference.
+    #[derive(Default)]
+    struct CountingFactory {
+        builds: AtomicUsize,
+    }
+
+    impl ProviderFactory for CountingFactory {
+        fn build(
+            &self,
+            _model: &ModelChoice,
+        ) -> arkavo_router::Result<Box<dyn arkavo_llm::Provider>> {
+            self.builds.fetch_add(1, Ordering::SeqCst);
+            Err(arkavo_router::Error::ModelExecution(
+                "no client may be built in this test".to_string(),
+            ))
+        }
+    }
+
+    /// No local weights on disk, one configured cloud provider, cloud spend
+    /// refused: the deployment where the ungated path used to reach the network.
+    async fn local_only(factory: Arc<CountingFactory>) -> LlmIntegration {
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        LlmIntegration::with_router(
+            router
+                .with_cloud_policy(arkavo_budget::CloudPolicy::LocalOnly)
+                .with_connectivity(ConnectivityChecker::assume(true))
+                .with_selector(ModelSelector::with_availability(
+                    ProviderAvailability {
+                        gemini: true,
+                        ..ProviderAvailability::default()
+                    },
+                    false,
+                ))
+                .await
+                .with_provider_factory(factory),
+        )
+    }
+
+    /// Regression: this handed out a raw `GeminiProvider` built straight from
+    /// the environment, so a `LocalOnly` install still sent the prompt to
+    /// Gemini and the ledger never saw the call. Naming the arm is consent to
+    /// spend on it, but the policy still decides.
+    #[tokio::test]
+    async fn a_named_cloud_model_faces_the_cloud_policy() {
+        let factory = Arc::new(CountingFactory::default());
+        let error = local_only(factory.clone())
+            .await
+            .create_client_from_model("gemini-3.5-flash")
+            .await
+            .err()
+            .expect("a LocalOnly install must refuse a cloud client");
+        assert!(
+            error.to_string().contains("Cloud inference denied"),
+            "got {error}"
+        );
+        assert_eq!(
+            factory.builds.load(Ordering::SeqCst),
+            0,
+            "a refused call must not open a client"
+        );
+    }
+
+    /// The routed path used `Router::get_provider`, which gated nothing either.
+    #[tokio::test]
+    async fn a_routed_cloud_arm_faces_the_cloud_policy() {
+        let factory = Arc::new(CountingFactory::default());
+        let decision = RoutingDecision::new(
+            ModelChoice::Gemini35Flash,
+            TaskCategory::General,
+            0.9,
+            "test".to_string(),
+        );
+        let error = local_only(factory.clone())
+            .await
+            .create_client_from_routing(&decision)
+            .await
+            .err()
+            .expect("a LocalOnly install must refuse a cloud client");
+        assert!(
+            error.to_string().contains("Cloud inference denied"),
+            "got {error}"
+        );
+        assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
     }
 }

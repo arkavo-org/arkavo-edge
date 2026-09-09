@@ -188,10 +188,10 @@ impl TokenUsage {
 
     pub fn total_tokens(&self) -> u32 {
         self.input_tokens
-            + self.output_tokens
-            + self.cached_input_tokens
-            + self.cache_write_tokens
-            + self.thinking_tokens
+            .saturating_add(self.output_tokens)
+            .saturating_add(self.cached_input_tokens)
+            .saturating_add(self.cache_write_tokens)
+            .saturating_add(self.thinking_tokens)
     }
 
     pub fn calculate_cost(

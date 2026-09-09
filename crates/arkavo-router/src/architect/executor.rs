@@ -1,7 +1,7 @@
 use super::{ArchitectPlan, ArchitectResult, Subtask};
 use crate::decision::ModelChoice;
 use crate::{Error, Result, Router};
-use arkavo_llm::{Message, Provider, ProviderResponse};
+use arkavo_llm::{Message, ProviderResponse};
 use arkavo_mcp_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -35,14 +35,14 @@ pub struct SubtaskResult {
 
 /// Executes architect plans by routing subtasks to appropriate models
 pub struct ArchitectExecutor {
-    _router: Arc<Router>,
+    router: Arc<Router>,
     max_retries: u8,
 }
 
 impl ArchitectExecutor {
     pub fn new(router: Arc<Router>) -> Self {
         Self {
-            _router: router,
+            router,
             max_retries: 2,
         }
     }
@@ -99,7 +99,7 @@ impl ArchitectExecutor {
         // Synthesize final response
         let final_response = self.synthesize_results(plan, &results).await?;
 
-        let actual_savings = plan.opus_only_estimate_usd - total_cost;
+        let actual_savings = plan.single_arm_estimate_usd - total_cost;
         let was_cost_effective = actual_savings > 0.0;
 
         Ok(ArchitectResult {
@@ -119,13 +119,33 @@ impl ArchitectExecutor {
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<SubtaskResult> {
         let mut retry_count = 0;
-        #[allow(unused_assignments)]
-        let mut last_error = None;
         let mut current_model = subtask.assigned_model.clone();
+        let budget = self.router.call_budget();
 
-        loop {
-            let provider = self.get_provider(&current_model).await?;
+        // A plan can arrive carrying a local arm this device never provisioned
+        // — from a planner with no router to ask, or from a plan made before
+        // the weights were removed. Stepping to a runnable rung keeps the
+        // dispatch off the loader, which would otherwise pull the weight.
+        if self.router.require_provisioned(&current_model).is_err() {
+            let Some(runnable) = super::escalation::next_runnable_rung(&current_model, |next| {
+                self.router.is_model_available(next)
+            }) else {
+                let error = format!(
+                    "{} is not provisioned and no available escalation target can run this subtask",
+                    current_model.name()
+                );
+                return Ok(Self::unexecuted(subtask, current_model, error, 0));
+            };
+            tracing::warn!(
+                subtask_index = subtask.index,
+                unprovisioned = %current_model.name(),
+                new_model = ?runnable,
+                "Assigned local weight is not on disk; escalating instead of downloading"
+            );
+            current_model = runnable;
+        }
 
+        let last_error = loop {
             // Build subtask prompt
             let mut messages = context.to_vec();
             messages.push(Message::user(format!(
@@ -133,41 +153,56 @@ impl ArchitectExecutor {
                 subtask.description
             )));
 
-            // Execute with or without tools
-            let response = if tool_registry.is_some() && provider.supports_tools() {
-                let tools_json = tool_registry.map(|r| {
-                    let tool_infos = r.list_tools();
-                    // Use the correct format based on the model provider
-                    match current_model {
-                        ModelChoice::GeminiFlash
-                        | ModelChoice::Gemini35Flash
-                        | ModelChoice::GeminiPro => {
-                            arkavo_llm::McpConverter::to_gemini_format(&tool_infos)
-                        }
-                        _ => arkavo_llm::McpConverter::to_anthropic_format(&tool_infos),
+            let tools_json = tool_registry.map(|r| {
+                let tool_infos = r.list_tools();
+                // Use the correct format based on the model provider
+                match current_model {
+                    ModelChoice::GeminiFlash
+                    | ModelChoice::Gemini35Flash
+                    | ModelChoice::GeminiPro => {
+                        arkavo_llm::McpConverter::to_gemini_format(&tool_infos)
                     }
-                });
+                    _ => arkavo_llm::McpConverter::to_anthropic_format(&tool_infos),
+                }
+            });
 
+            let preflight = crate::usage::reserve_request(&messages, tools_json.as_ref(), 4096);
+            let settled = crate::usage::estimate_request(&messages, tools_json.as_ref(), 0);
+            // Both gates run before the provider exists: a refusal never opens
+            // a client, and an exhausted budget stops the plan rather than
+            // starting another paid attempt. The ledger answers first so an
+            // exhausted budget reports as `BudgetExceeded` rather than as a
+            // policy denial. Subtask arms are planner-assigned, never named by
+            // the caller, so the cloud gate is asked without authorization.
+            let estimated_cost = self.router.usage_cost(&current_model, &preflight);
+            if let Some(budget) = budget {
+                budget.check(estimated_cost).await?;
+            }
+            self.router
+                .authorize_call(&current_model, estimated_cost, false, None)
+                .await?;
+
+            let (provider, _) = self.router.get_provider_attributed(&current_model).await?;
+            let use_tools = tools_json.is_some() && provider.supports_tools();
+            let result = if use_tools {
                 provider
-                    .complete_with_tools(messages, tools_json, None)
+                    .complete_with_tools(messages, tools_json, Some(4096))
                     .await
             } else {
                 provider
-                    .complete(messages)
+                    .complete_with_schema_response(messages, None, Some(4096))
                     .await
-                    .map(|content| ProviderResponse {
-                        content,
-                        reasoning_content: None,
-                        tool_calls: Vec::new(),
-                        finish_reason: Some("stop".to_string()),
-                        inference_timing: None,
-                        quality_gate_retries: 0,
-                    })
             };
+
+            // Settle every attempt — a rejected retry stays charged.
+            let response = self
+                .router
+                .account_result(&current_model, &settled, result, budget)
+                .await;
 
             match response {
                 Ok(resp) => {
-                    let cost = self.estimate_actual_cost(&current_model, &resp);
+                    let cost = self.attempt_cost(&current_model, &settled, &resp);
                     return Ok(SubtaskResult {
                         subtask_id: subtask.id,
                         index: subtask.index,
@@ -186,8 +221,12 @@ impl ArchitectExecutor {
                     });
                 }
                 Err(e) => {
+                    // A ledger failure is not a model failure: retrying would
+                    // spend again against a budget that already refused.
+                    if matches!(e, Error::BudgetExceeded(_) | Error::BudgetError(_)) {
+                        return Err(e);
+                    }
                     let error_msg = e.to_string();
-                    last_error = Some(error_msg.clone());
                     retry_count += 1;
 
                     // Log the actual error for debugging
@@ -206,11 +245,24 @@ impl ArchitectExecutor {
                             last_error = %error_msg,
                             "Subtask failed after max retries exhausted"
                         );
-                        break;
+                        break error_msg;
                     }
 
-                    // Escalate to more capable model
-                    current_model = self.escalate_model(&current_model);
+                    // Re-dispatching the same model just re-spends on the same
+                    // failure, and the rung climbed to must be one this device
+                    // can actually run: an unprovisioned local weight would be
+                    // downloaded on demand, which a retry must never trigger.
+                    let Some(next_model) =
+                        super::escalation::next_runnable_rung(&current_model, |next| {
+                            self.router.is_model_available(next)
+                        })
+                    else {
+                        break format!(
+                            "{error_msg} (no available escalation target beyond {})",
+                            current_model.name()
+                        );
+                    };
+                    current_model = next_model;
                     tracing::warn!(
                         subtask_index = subtask.index,
                         new_model = ?current_model,
@@ -219,152 +271,51 @@ impl ArchitectExecutor {
                     );
                 }
             }
-        }
+        };
 
         // All retries exhausted
-        Ok(SubtaskResult {
+        Ok(Self::unexecuted(
+            subtask,
+            current_model,
+            last_error,
+            retry_count,
+        ))
+    }
+
+    /// A subtask that produced nothing — retries exhausted, or no arm this
+    /// device can run. Nothing was dispatched on the last attempt, so nothing
+    /// is charged for it.
+    fn unexecuted(
+        subtask: &Subtask,
+        model_used: ModelChoice,
+        error: String,
+        retry_count: u8,
+    ) -> SubtaskResult {
+        SubtaskResult {
             subtask_id: subtask.id,
             index: subtask.index,
-            model_used: current_model,
+            model_used,
             response: String::new(),
             reasoning_content: None,
             tool_calls: Vec::new(),
             actual_cost_usd: 0.0,
             success: false,
-            error: last_error,
+            error: Some(error),
             retry_count,
-        })
-    }
-
-    async fn get_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
-        match model {
-            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
-                use arkavo_llm::providers::anthropic::AnthropicProvider;
-                AnthropicProvider::from_env_with_model(model.name())
-                    .map(|p| Box::new(p) as Box<dyn Provider>)
-                    .map_err(|e| {
-                        Error::ModelExecution(format!("Failed to create Anthropic provider: {e}"))
-                    })
-            }
-            ModelChoice::GeminiFlash | ModelChoice::Gemini35Flash | ModelChoice::GeminiPro => {
-                #[cfg(feature = "gemini")]
-                {
-                    arkavo_llm::GeminiProvider::new()
-                        .map(|p| Box::new(p) as Box<dyn Provider>)
-                        .map_err(|e| {
-                            Error::ModelExecution(format!("Failed to create Gemini provider: {e}"))
-                        })
-                }
-                #[cfg(not(feature = "gemini"))]
-                {
-                    Err(Error::ModelExecution(
-                        "Gemini feature not enabled".to_string(),
-                    ))
-                }
-            }
-            _ => {
-                #[cfg(feature = "gemini")]
-                if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
-                    return Ok(Box::new(provider));
-                }
-                Err(Error::ModelExecution(format!(
-                    "Model {model:?} not available"
-                )))
-            }
         }
     }
 
-    fn escalate_model(&self, current: &ModelChoice) -> ModelChoice {
-        match current {
-            // Qwen3/Ministral escalation path
-            ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
-            ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalMinistral8B => ModelChoice::LocalQwen35_9B,
-            ModelChoice::LocalQwen35_9B => ModelChoice::LocalQwen35_27B,
-            ModelChoice::LocalQwen35_27B => ModelChoice::LocalQwen36A3B,
-            ModelChoice::LocalQwen36A3B => ModelChoice::LocalGlm47Flash,
-            ModelChoice::LocalGlm47Flash => ModelChoice::GeminiFlash,
-            // Gemma 4 escalation path
-            ModelChoice::LocalGemma4E2B => ModelChoice::LocalGemma4E4B,
-            ModelChoice::LocalGemma4E4B => ModelChoice::LocalMinistral8B,
-            ModelChoice::LocalGemma4_12B => ModelChoice::LocalGemma4_26B,
-            ModelChoice::LocalGemma4_26B => ModelChoice::LocalGemma4_31B,
-            ModelChoice::LocalGemma4_31B => ModelChoice::GeminiFlash,
-            // Legacy Gemma escalation path
-            ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
-            ModelChoice::LocalGemma4B => ModelChoice::GeminiFlash,
-            ModelChoice::LocalGemma12B => ModelChoice::GeminiPro,
-            // Other escalation paths
-            ModelChoice::LocalDeepSeekCoder => ModelChoice::DeepSeekV32,
-            ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
-            ModelChoice::DeepSeekV32Speciale => ModelChoice::ClaudeOpus,
-            ModelChoice::GeminiFlash => ModelChoice::Gemini35Flash,
-            // Escalate within the 3.5 Flash thinking-tier ladder before
-            // jumping families, so Thompson Sampling actually exercises the
-            // distinct arms before falling back to Anthropic.
-            ModelChoice::Gemini35FlashMinimal => ModelChoice::Gemini35Flash,
-            ModelChoice::Gemini35Flash => ModelChoice::Gemini35FlashMedium,
-            ModelChoice::Gemini35FlashMedium => ModelChoice::Gemini35FlashHigh,
-            ModelChoice::Gemini35FlashHigh => ModelChoice::ClaudeSonnet,
-            ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
-            ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
-            // Fable 5 is the most capable tier — the escalation ceiling.
-            ModelChoice::ClaudeOpus => ModelChoice::ClaudeFable5,
-            ModelChoice::ClaudeFable5 => ModelChoice::ClaudeFable5,
-            ModelChoice::KimiK2 => ModelChoice::ClaudeSonnet,
-            // GLM-5.2 is a low-cost cloud arm; escalate to a stronger tier
-            // when it underperforms on a task.
-            ModelChoice::Glm52 => ModelChoice::ClaudeSonnet,
-            // Grok 4.6 climbs the effort ladder before leaving the family.
-            ModelChoice::Grok46 => ModelChoice::Grok46Xhigh,
-            ModelChoice::Grok46Xhigh => ModelChoice::ClaudeSonnet,
-        }
-    }
-
-    fn estimate_actual_cost(&self, model: &ModelChoice, response: &ProviderResponse) -> f64 {
-        // Prefer provider-reported usage when present; otherwise rough
-        // char-length heuristics (~4 chars/token, ~3:1 in:out).
-        let (input_tokens, output_tokens) = if let Some(t) = &response.inference_timing {
-            let thinking = f64::from(t.n_thinking_eval.unwrap_or(0));
-            (f64::from(t.n_prompt_eval), f64::from(t.n_eval) + thinking)
-        } else {
-            let output_tokens = (response.content.len() / 4) as f64;
-            (output_tokens / 3.0, output_tokens)
-        };
-
-        match model {
-            ModelChoice::GeminiFlash => {
-                (input_tokens / 1_000_000.0).mul_add(0.30, (output_tokens / 1_000_000.0) * 2.50)
-            }
-            ModelChoice::Gemini35Flash
-            | ModelChoice::Gemini35FlashMinimal
-            | ModelChoice::Gemini35FlashMedium
-            | ModelChoice::Gemini35FlashHigh => {
-                (input_tokens / 1_000_000.0).mul_add(1.50, (output_tokens / 1_000_000.0) * 9.00)
-            }
-            ModelChoice::GeminiPro => {
-                (input_tokens / 1_000_000.0).mul_add(1.25, (output_tokens / 1_000_000.0) * 5.00)
-            }
-            ModelChoice::ClaudeSonnet => {
-                (input_tokens / 1_000_000.0).mul_add(3.00, (output_tokens / 1_000_000.0) * 15.00)
-            }
-            ModelChoice::ClaudeOpus => {
-                // Opus 4.8 pricing ($5/$25); the old $15/$75 was Opus 4.1.
-                (input_tokens / 1_000_000.0).mul_add(5.00, (output_tokens / 1_000_000.0) * 25.00)
-            }
-            ModelChoice::ClaudeFable5 => {
-                (input_tokens / 1_000_000.0).mul_add(10.00, (output_tokens / 1_000_000.0) * 50.00)
-            }
-            ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
-                // Grok 4.6 list rates: $2.00/1M input, $6.00/1M output
-                (input_tokens / 1_000_000.0).mul_add(2.00, (output_tokens / 1_000_000.0) * 6.00)
-            }
-            ModelChoice::Glm52 => {
-                // GLM-5.2 list rates: $1.40/1M input, $4.40/1M output
-                (input_tokens / 1_000_000.0).mul_add(1.40, (output_tokens / 1_000_000.0) * 4.40)
-            }
-            _ => 0.0,
-        }
+    /// Cost of one settled attempt, priced off the same request estimate the
+    /// ledger used so the plan total and the budget entries agree.
+    fn attempt_cost(
+        &self,
+        model: &ModelChoice,
+        estimated: &arkavo_budget::cost::TokenUsage,
+        response: &ProviderResponse,
+    ) -> f64 {
+        self.router
+            .attribute_response(model.clone(), estimated, response)
+            .cost_usd
     }
 
     async fn synthesize_results(
@@ -395,19 +346,29 @@ impl ArchitectExecutor {
             );
         }
 
-        // Add cost summary
+        // Add cost summary. The comparison names the arm that planned, because
+        // that is the only single-model run the plan can be measured against;
+        // a plan with no planning arm reports its cost and nothing else.
         let total_cost: f64 = results.iter().map(|r| r.actual_cost_usd).sum();
-        let savings = plan.opus_only_estimate_usd - total_cost;
-        let savings_pct = if plan.opus_only_estimate_usd > 0.0 {
-            (savings / plan.opus_only_estimate_usd) * 100.0
-        } else {
-            0.0
-        };
-
-        let _ = write!(
-            summary,
-            "---\n**Cost**: ${total_cost:.4} (saved ${savings:.4}, {savings_pct:.1}% vs Opus-only)\n"
-        );
+        // Nothing was saved unless the run actually came in under the
+        // baseline, so a plan that cost more than the single arm reports its
+        // cost and makes no claim.
+        match (
+            &plan.planning_model,
+            plan.single_arm_estimate_usd - total_cost,
+        ) {
+            (Some(model), savings) if savings > 0.0 && plan.single_arm_estimate_usd > 0.0 => {
+                let savings_pct = (savings / plan.single_arm_estimate_usd) * 100.0;
+                let name = model.name();
+                let _ = write!(
+                    summary,
+                    "---\n**Cost**: ${total_cost:.4} (saved ${savings:.4}, {savings_pct:.1}% vs {name} alone)\n"
+                );
+            }
+            _ => {
+                let _ = write!(summary, "---\n**Cost**: ${total_cost:.4}\n");
+            }
+        }
 
         Ok(summary)
     }
@@ -418,62 +379,16 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
-    #[spec("ROUTER-002")]
-    #[spec("ROUTER-010")]
-    #[test]
-    fn test_model_escalation() {
-        let router = futures::executor::block_on(async { Router::new().await.ok() });
-
-        if let Some(router) = router {
-            let executor = ArchitectExecutor::new(Arc::new(router));
-
-            assert_eq!(
-                executor.escalate_model(&ModelChoice::GeminiFlash),
-                ModelChoice::Gemini35Flash
-            );
-            assert_eq!(
-                executor.escalate_model(&ModelChoice::Gemini35Flash),
-                ModelChoice::Gemini35FlashMedium
-            );
-            assert_eq!(
-                executor.escalate_model(&ModelChoice::Gemini35FlashHigh),
-                ModelChoice::ClaudeSonnet
-            );
-            assert_eq!(
-                executor.escalate_model(&ModelChoice::ClaudeSonnet),
-                ModelChoice::GeminiPro
-            );
-            assert_eq!(
-                executor.escalate_model(&ModelChoice::ClaudeOpus),
-                ModelChoice::ClaudeFable5
-            );
-            // Fable 5 is the escalation ceiling — it must not escalate past itself.
-            assert_eq!(
-                executor.escalate_model(&ModelChoice::ClaudeFable5),
-                ModelChoice::ClaudeFable5
-            );
-            assert_eq!(
-                executor.escalate_model(&ModelChoice::Grok46),
-                ModelChoice::Grok46Xhigh
-            );
-            assert_eq!(
-                executor.escalate_model(&ModelChoice::Grok46Xhigh),
-                ModelChoice::ClaudeSonnet
-            );
-        }
-    }
-
-    #[test]
-    fn grok_actual_cost_uses_list_rates_and_usage() {
-        let router = futures::executor::block_on(async { Router::new().await.ok() });
-        let Some(router) = router else {
-            return;
-        };
+    #[tokio::test]
+    async fn grok_actual_cost_uses_list_rates_and_usage() {
+        let router = Router::new_offline().await.unwrap();
         let executor = ArchitectExecutor::new(Arc::new(router));
 
         let resp = ProviderResponse {
             content: "hello".into(),
             inference_timing: Some(arkavo_llm::InferenceTiming {
+                n_cached_prompt_eval: None,
+                n_cache_write_prompt_eval: None,
                 n_prompt_eval: 1_000_000,
                 n_eval: 500_000,
                 ..Default::default()
@@ -481,7 +396,8 @@ mod tests {
             ..Default::default()
         };
         // $2/M in + $6/M out → 2 + 3 = $5.00
-        let cost = executor.estimate_actual_cost(&ModelChoice::Grok46, &resp);
+        let usage = arkavo_budget::cost::TokenUsage::default();
+        let cost = executor.attempt_cost(&ModelChoice::Grok46, &usage, &resp);
         assert!(
             (cost - 5.0).abs() < 1e-9,
             "Grok actual cost should be $5.00 for 1M/0.5M tokens, got {cost}"
@@ -495,6 +411,8 @@ mod tests {
         let with_thinking = ProviderResponse {
             content: "hello".into(),
             inference_timing: Some(arkavo_llm::InferenceTiming {
+                n_cached_prompt_eval: None,
+                n_cache_write_prompt_eval: None,
                 n_prompt_eval: 0,
                 n_eval: 200_000,
                 n_thinking_eval: Some(300_000),
@@ -503,10 +421,124 @@ mod tests {
             ..Default::default()
         };
         // 500k output tokens at $6/M → $3.00 (not $3.00 + $1.80 double-count)
-        let thinking_cost = executor.estimate_actual_cost(&ModelChoice::Grok46, &with_thinking);
+        let thinking_cost = executor.attempt_cost(&ModelChoice::Grok46, &usage, &with_thinking);
         assert!(
             (thinking_cost - 3.0).abs() < 1e-9,
             "thinking tokens must not double-count; got {thinking_cost}"
         );
+    }
+
+    /// Regression: a plan could name a local arm this device never provisioned
+    /// — from a planner with no router to ask — and the executor handed it
+    /// straight to `load_local_model`, which downloaded the weights in the
+    /// middle of the plan. The dispatch now steps to a runnable rung instead,
+    /// and never builds the missing arm.
+    ///
+    /// Which rung it lands on *does* depend on the runner's own cloud
+    /// credentials, because `is_model_available` reads them for cloud arms
+    /// rather than the injected selector. So the fixture leaves cloud spend
+    /// open — online, `CloudWithinCap`, reachable — and the assertion is the
+    /// invariant that does not vary: no unprovisioned local arm is ever built.
+    /// A runner with a key escalates onto its cloud rung and succeeds; a runner
+    /// without one runs out of ladder and says why. Neither fetches the weight.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn an_unprovisioned_local_subtask_is_never_built() {
+        use crate::test_support::CountingProvider;
+
+        let provider = CountingProvider::new("done");
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = Arc::new(
+            router
+                .with_cloud_policy(arkavo_budget::CloudPolicy::CloudWithinCap)
+                .with_connectivity(crate::ConnectivityChecker::assume(true))
+                .with_selector(crate::ModelSelector::with_availability(
+                    crate::ProviderAvailability::default(),
+                    false,
+                ))
+                .await
+                .with_provider_factory(provider.factory()),
+        );
+        let mut plan = ArchitectPlan::new(
+            "ship the feature".into(),
+            super::super::ComplexityScore::simple(),
+        );
+        plan.add_subtask(
+            Subtask::new(
+                0,
+                "only step".into(),
+                crate::classifier::TaskCategory::General,
+            )
+            .with_model(ModelChoice::LocalQwen3, 0.0),
+        );
+
+        let result = ArchitectExecutor::new(router)
+            .execute_subtask(&plan.subtasks[0], &[], None)
+            .await
+            .unwrap();
+
+        assert!(
+            provider
+                .built_models()
+                .iter()
+                .all(|model| !model.is_local()),
+            "an unprovisioned local weight must never be instantiated: {:?}",
+            provider.built_models()
+        );
+        // The ladder either reaches a cloud rung the runner has configured or
+        // runs out; either way it says so instead of fetching the weight.
+        if !result.success {
+            assert!(
+                result
+                    .error
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("is not provisioned"),
+                "{:?}",
+                result.error
+            );
+        }
+    }
+
+    /// The mirror: with the weights on disk the assigned local arm is used as
+    /// planned, so the guard filters missing weights and nothing else.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_provisioned_local_subtask_runs_as_assigned() {
+        use crate::test_support::CountingProvider;
+
+        let provider = CountingProvider::new("done");
+        let router = Arc::new(
+            Router::new_offline()
+                .await
+                .unwrap()
+                .with_selector(crate::ModelSelector::with_availability(
+                    crate::ProviderAvailability::default(),
+                    true,
+                ))
+                .await
+                .with_provider_factory(provider.factory()),
+        );
+        let mut plan = ArchitectPlan::new(
+            "ship the feature".into(),
+            super::super::ComplexityScore::simple(),
+        );
+        plan.add_subtask(
+            Subtask::new(
+                0,
+                "only step".into(),
+                crate::classifier::TaskCategory::General,
+            )
+            .with_model(ModelChoice::LocalQwen3, 0.0),
+        );
+
+        let result = ArchitectExecutor::new(router)
+            .execute(&plan, Vec::new(), None)
+            .await
+            .unwrap();
+
+        assert!(result.subtask_results[0].success);
+        assert_eq!(provider.built_models(), vec![ModelChoice::LocalQwen3]);
     }
 }

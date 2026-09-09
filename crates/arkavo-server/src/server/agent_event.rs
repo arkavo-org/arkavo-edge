@@ -23,6 +23,22 @@ pub struct CycleReceipt {
     pub disposition: MessageDisposition,
 }
 
+/// What the cycle that served a request actually produced.
+///
+/// The receipt only says the message was picked up; it says nothing about the
+/// answer. Without a second signal a requester has no way to tell a finished
+/// cycle from a wedged one, so it waits out its own timeout in silence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CycleOutcome {
+    /// Assistant text, or a summary of the cycle's tool activity when the
+    /// model answered with tool calls only.
+    Completed { text: String },
+    /// The cycle could not produce an answer: a routing, budget, policy or
+    /// timeout refusal, or a cycle that yielded nothing at all. `error`
+    /// carries the underlying message so the requester can act on it.
+    Failed { error: String },
+}
+
 pub enum AgentEvent {
     IncomingMessage {
         /// did:key of the sending agent
@@ -31,11 +47,14 @@ pub enum AgentEvent {
         task_id: uuid::Uuid,
         correlation_id: CorrelationId,
         reply: oneshot::Sender<CycleReceipt>,
+        /// Answered once the serving cycle finishes, fails, or is rejected.
+        outcome: oneshot::Sender<CycleOutcome>,
     },
     HumanOverride {
         instruction: String,
         correlation_id: CorrelationId,
         reply: oneshot::Sender<CycleReceipt>,
+        outcome: oneshot::Sender<CycleOutcome>,
     },
     /// MCP server push notification (game state change, etc.)
     /// Fire-and-forget — no CycleReceipt reply needed.
@@ -58,6 +77,9 @@ pub struct PendingMessage {
     pub task_id: Option<uuid::Uuid>,
     pub correlation_id: CorrelationId,
     pub reply: Option<oneshot::Sender<CycleReceipt>>,
+    /// Held until the cycle that incorporates this message finishes, so the
+    /// requester is answered even when the cycle fails or is skipped.
+    pub outcome: Option<oneshot::Sender<CycleOutcome>>,
     pub priority: MessagePriority,
 }
 
@@ -91,6 +113,7 @@ mod tests {
             task_id: None,
             correlation_id: CorrelationId(uuid::Uuid::new_v4()),
             reply: None,
+            outcome: None,
             priority: MessagePriority::Normal,
         };
         messages.push(normal);
@@ -99,6 +122,7 @@ mod tests {
             task_id: None,
             correlation_id: CorrelationId(uuid::Uuid::new_v4()),
             reply: None,
+            outcome: None,
             priority: MessagePriority::Override,
         };
         messages.insert(0, override_msg);

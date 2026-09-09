@@ -7,10 +7,6 @@ use arkavo_router::Router;
 #[cfg(all(unix, feature = "mcp-tools"))]
 use std::collections::HashSet;
 #[cfg(all(unix, feature = "mcp-tools"))]
-use std::collections::hash_map::DefaultHasher;
-#[cfg(all(unix, feature = "mcp-tools"))]
-use std::hash::{Hash, Hasher};
-#[cfg(all(unix, feature = "mcp-tools"))]
 use std::sync::Arc;
 
 #[cfg(not(all(unix, feature = "mcp-tools")))]
@@ -55,7 +51,11 @@ async fn verify_response_with_critic(
         response_for_critic,
         available_tools,
     );
+    let gate_start = std::time::Instant::now();
     let result = critic.verify(&input).await;
+    arkavo_observability::subsystem_timing::global_timing()
+        .dispatch_gate
+        .record(gate_start.elapsed().as_millis() as u64);
     if result.passed {
         Ok(())
     } else {
@@ -325,11 +325,12 @@ pub async fn process_with_tools(
             // Not architect mode - convert RouteResponse to ProviderResponse
             let result = stream.complete().await?;
             ProviderResponse {
+                provider_state: result.provider_state,
                 content: result.content,
-                reasoning_content: None,
+                reasoning_content: result.reasoning_content,
                 tool_calls: result.tool_calls,
                 finish_reason: None,
-                inference_timing: None,
+                inference_timing: result.inference_timing,
                 quality_gate_retries: 0,
             }
         } else {
@@ -436,9 +437,7 @@ pub async fn process_with_tools(
         }
 
         // Check for repeated content (model output loop detection)
-        let mut hasher = DefaultHasher::new();
-        response.content.hash(&mut hasher);
-        let content_hash = hasher.finish();
+        let content_hash = response_fingerprint(&response);
 
         if Some(content_hash) == last_content_hash {
             same_content_count += 1;
@@ -461,7 +460,7 @@ pub async fn process_with_tools(
         // Check if LLM is requesting tools via REQUEST_TOOL protocol
         let requested_keywords =
             arkavo_router::tool_request_parser::parse_tool_requests(&response.content);
-        if !requested_keywords.is_empty() {
+        if !requested_keywords.is_empty() && response.tool_calls.is_empty() {
             // Tool metadata requests don't count as iterations
             tracing::info!("LLM requested tools via keywords: {:?}", requested_keywords);
 
@@ -517,7 +516,7 @@ pub async fn process_with_tools(
                 )
             };
 
-            messages.push(Message::assistant(&response.content));
+            messages.push(response.as_assistant_message());
             messages.push(Message::user(&tool_response));
 
             // Safeguard against infinite discovery loops
@@ -580,7 +579,12 @@ pub async fn process_with_tools(
         println!("→ {current_tools}");
 
         // Check for repeated same-tool calls (model stuck in loop)
-        if Some(&current_tools) == last_tool_call.as_ref() {
+        let tool_signature = tool_calls
+            .iter()
+            .map(|call| (&call.tool_name, &call.arguments))
+            .collect::<Vec<_>>();
+        let tool_signature = serde_json::to_string(&tool_signature)?;
+        if Some(&tool_signature) == last_tool_call.as_ref() {
             same_tool_count += 1;
             if same_tool_count >= MAX_SAME_TOOL_CALLS {
                 tracing::warn!(
@@ -597,7 +601,7 @@ pub async fn process_with_tools(
             }
         } else {
             same_tool_count = 1;
-            last_tool_call = Some(current_tools);
+            last_tool_call = Some(tool_signature);
         }
 
         if config.show_tool_execution {
@@ -650,10 +654,8 @@ pub async fn process_with_tools(
             all_tool_executions.push(result);
         }
 
-        messages.push(Message::assistant(&response.content));
-
-        let tool_results_message = format_tool_results(&tool_results);
-        messages.push(Message::user(&tool_results_message));
+        messages.push(response.as_assistant_message());
+        messages.extend(response.tool_result_messages(&tool_results));
 
         if config.show_tool_execution {
             println!("\n=== Feeding results back to LLM ===\n");
@@ -719,118 +721,6 @@ fn parse_markdown_tool_calls(
     }
 }
 
-/// Maximum characters per tool result to prevent exceeding LLM token limits
-/// Gemini has 1M token limit (~4 chars/token), so 200K chars is ~50K tokens per result
-const MAX_TOOL_RESULT_CHARS: usize = 200_000;
-
-#[cfg(all(unix, feature = "mcp-tools"))]
-fn format_tool_results(results: &[ToolExecutionResult]) -> String {
-    use std::fmt::Write;
-
-    let mut formatted = String::from("Tool execution results:\n\n");
-
-    for result in results {
-        let _ = writeln!(formatted, "Tool: {}", result.tool_name);
-        if result.success {
-            let result_json =
-                serde_json::to_string_pretty(&result.result).unwrap_or_else(|_| "{}".to_string());
-
-            // Truncate large results to prevent exceeding LLM token limits
-            if result_json.len() > MAX_TOOL_RESULT_CHARS {
-                let truncated = &result_json[..MAX_TOOL_RESULT_CHARS];
-                // Find a good break point (newline or space)
-                let break_point = truncated
-                    .rfind('\n')
-                    .or_else(|| truncated.rfind(' '))
-                    .unwrap_or(MAX_TOOL_RESULT_CHARS);
-                let _ = writeln!(
-                    formatted,
-                    "Result (truncated from {} to {} chars):\n{}...\n[OUTPUT TRUNCATED - result too large for LLM context]",
-                    result_json.len(),
-                    break_point,
-                    &result_json[..break_point]
-                );
-            } else {
-                let _ = writeln!(formatted, "Result: {result_json}");
-            }
-        } else {
-            let error_msg = result.error.as_deref().unwrap_or("Unknown error");
-            let _ = writeln!(formatted, "Error: {error_msg}");
-
-            // Include schema hint when available (helps LLM retry with correct params)
-            if let Some(schema) = &result.schema_hint {
-                let _ = writeln!(
-                    formatted,
-                    "\nTo fix this error, use the correct parameter format:"
-                );
-                if let Some(desc) = schema.get("description").and_then(|v| v.as_str()) {
-                    let _ = writeln!(formatted, "Description: {desc}");
-                }
-                if let Some(params) = schema.get("parameters") {
-                    // Format parameters in a clear, LLM-friendly way
-                    if let Some(props) = params.get("properties") {
-                        let _ = writeln!(formatted, "Required parameters:");
-                        if let Some(required) = params.get("required").and_then(|v| v.as_array()) {
-                            for req in required {
-                                if let Some(name) = req.as_str()
-                                    && let Some(prop_schema) = props.get(name)
-                                {
-                                    let prop_type = prop_schema
-                                        .get("type")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("any");
-                                    let prop_desc = prop_schema
-                                        .get("description")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let _ = writeln!(
-                                        formatted,
-                                        "  - {name} ({prop_type}): {prop_desc}"
-                                    );
-                                }
-                            }
-                        }
-                        // Also show optional parameters if any
-                        let required_set: std::collections::HashSet<&str> = params
-                            .get("required")
-                            .and_then(|v| v.as_array())
-                            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                            .unwrap_or_default();
-
-                        let optional_params: Vec<_> = props
-                            .as_object()
-                            .map(|obj| {
-                                obj.iter()
-                                    .filter(|(k, _)| !required_set.contains(k.as_str()))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-
-                        if !optional_params.is_empty() {
-                            let _ = writeln!(formatted, "Optional parameters:");
-                            for (name, prop_schema) in optional_params {
-                                let prop_type = prop_schema
-                                    .get("type")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("any");
-                                let prop_desc = prop_schema
-                                    .get("description")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                let _ =
-                                    writeln!(formatted, "  - {name} ({prop_type}): {prop_desc}");
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        formatted.push('\n');
-    }
-
-    formatted
-}
-
 /// Simplified version for non-interactive use (task command, A2A, etc.)
 #[cfg(all(unix, feature = "mcp-tools"))]
 pub async fn complete_with_tools(
@@ -879,9 +769,36 @@ pub async fn process_with_tools_interactive(
     Err("Tool integration requires Unix platform with mcp-tools feature".into())
 }
 
+#[cfg(all(unix, feature = "mcp-tools"))]
+fn response_fingerprint(response: &ProviderResponse) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    response.content.hash(&mut hasher);
+    for call in &response.tool_calls {
+        call.tool_name.hash(&mut hasher);
+        call.arguments.to_string().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 #[cfg(all(unix, feature = "mcp-tools", test))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_tool_only_turns_are_not_mistaken_for_repeated_empty_text() {
+        let mut response = ProviderResponse::default();
+        response.tool_calls.push(ParsedToolCall {
+            tool_name: "read_file".into(),
+            arguments: serde_json::json!({"path": "a"}),
+            call_id: Some("call_a".into()),
+        });
+        let first = response_fingerprint(&response);
+        response.tool_calls[0].call_id = Some("call_b".into());
+        assert_eq!(first, response_fingerprint(&response));
+        response.tool_calls[0].arguments = serde_json::json!({"path": "b"});
+        assert_ne!(first, response_fingerprint(&response));
+    }
 
     #[tokio::test]
     async fn critic_blocks_unsafe_content_before_execution() {
@@ -893,6 +810,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result =
@@ -910,6 +828,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
         let tool_calls = vec![ParsedToolCall {
             tool_name: "unknown_tool".to_string(),

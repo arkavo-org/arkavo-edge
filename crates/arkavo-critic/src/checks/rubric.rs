@@ -278,6 +278,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
         let mut input = VerificationInput::new("test task".to_string(), response, vec![]);
         if let Some(ctx) = context {

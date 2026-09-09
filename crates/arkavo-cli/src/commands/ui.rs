@@ -576,7 +576,7 @@ async fn handle_prompt_async(
         String::new()
     } else {
         // Fallback to direct streaming
-        let client = create_client_from_routing(&routing_decision).await?;
+        let client = create_client_from_routing(&router, &routing_decision).await?;
 
         let stream_result = client.stream(messages).await;
         let mut stream = match stream_result {
@@ -722,8 +722,13 @@ async fn handle_architect_prompt(
     );
     renderer.render(&planning_html, "", "").await?;
 
+    // One router clone bills planning and every subtask attempt against the
+    // same tracker. Without `with_router` the planner builds its own client and
+    // the decomposition call is spent but never recorded.
+    let router = Arc::new(Router::new().await?);
+
     // Create planner and generate task graph
-    let planner = ArchitectPlanner::new();
+    let planner = ArchitectPlanner::new().with_router(router.clone());
     let plan = match planner.create_plan(prompt, complexity.clone()).await {
         Ok(p) => p,
         Err(e) => {
@@ -752,10 +757,13 @@ async fn handle_architect_prompt(
     };
 
     eprintln!(
-        "[ARCHITECT] Plan created: {} subtasks, est. ${:.4} (saves ${:.4})",
+        "[ARCHITECT] Plan created: {} subtasks, est. ${:.4} (saves ${:.4} vs {} alone)",
         plan.subtasks.len(),
         plan.architect_estimate_usd,
-        plan.opus_only_estimate_usd - plan.architect_estimate_usd
+        plan.single_arm_estimate_usd - plan.architect_estimate_usd,
+        plan.planning_model
+            .as_ref()
+            .map_or("a single arm", |model| model.name())
     );
 
     // Persist the plan for resume capability
@@ -834,9 +842,8 @@ async fn handle_architect_prompt(
     );
     renderer.render(&plan_html, "", "").await?;
 
-    // Execute the plan
-    let router = Router::new().await?;
-    let executor = ArchitectExecutor::new(Arc::new(router));
+    // Execute the plan on the same router that planned it.
+    let executor = ArchitectExecutor::new(router);
     let messages = vec![Message::user(prompt)];
 
     let result = match executor.execute(&plan, messages, None).await {
@@ -970,153 +977,24 @@ async fn handle_architect_prompt(
     })
 }
 
+/// A client for the routed arm, obtained the way every other dispatch obtains
+/// one: the router's cloud policy and spend caps answer first, then the router
+/// builds the provider. This used to construct each vendor's client directly
+/// from the environment, which spent on a `LocalOnly` install and left the
+/// ledger with no record of the call.
 #[cfg(feature = "cef-ui")]
 async fn create_client_from_routing(
+    router: &arkavo_router::Router,
     decision: &arkavo_router::RoutingDecision,
 ) -> Result<arkavo_llm::LlmClient, Box<dyn std::error::Error>> {
-    use arkavo_llm::{LlmClient, Message};
-    use arkavo_router::ModelChoice;
-
-    match decision.recommended_model {
-        ModelChoice::GeminiFlash
-        | ModelChoice::Gemini35Flash
-        | ModelChoice::Gemini35FlashMinimal
-        | ModelChoice::Gemini35FlashMedium
-        | ModelChoice::Gemini35FlashHigh
-        | ModelChoice::GeminiPro => {
-            #[cfg(feature = "gemini")]
-            {
-                use arkavo_llm::GeminiProvider;
-                let provider = Box::new(GeminiProvider::new()?);
-                Ok(LlmClient::new(provider))
-            }
-            #[cfg(not(feature = "gemini"))]
-            {
-                Err("Gemini feature not enabled".into())
-            }
-        }
-        ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
-            #[cfg(feature = "llm-remote")]
-            {
-                use arkavo_llm::providers::AnthropicProvider;
-                let provider = Box::new(AnthropicProvider::from_env_with_model(
-                    decision.recommended_model.name(),
-                )?);
-                Ok(LlmClient::new(provider))
-            }
-            #[cfg(not(feature = "llm-remote"))]
-            {
-                Err("Anthropic support requires llm-remote feature".into())
-            }
-        }
-        ModelChoice::LocalQwen3
-        | ModelChoice::LocalMinistral3B
-        | ModelChoice::LocalMinistral8B
-        | ModelChoice::LocalQwen35_9B
-        | ModelChoice::LocalQwen35_27B
-        | ModelChoice::LocalQwen36A3B
-        | ModelChoice::LocalGlm47Flash
-        | ModelChoice::LocalGemma4E2B
-        | ModelChoice::LocalGemma4E4B
-        | ModelChoice::LocalGemma4_26B
-        | ModelChoice::LocalGemma4_31B
-        | ModelChoice::LocalGemma4_12B
-        | ModelChoice::LocalGemma270M
-        | ModelChoice::LocalGemma4B
-        | ModelChoice::LocalGemma12B
-        | ModelChoice::LocalDeepSeekCoder => {
-            // Try Ollama first (from_env defaults to ollama)
-            println!("Checking for Ollama...");
-            if let Ok(client) = LlmClient::from_env() {
-                // Test if ollama is actually running
-                if client.complete(vec![Message::user("ping")]).await.is_ok() {
-                    println!("Using Ollama for local model");
-                    return Ok(client);
-                }
-            }
-
-            // Ollama is required for local models in UI mode
-            // The chat command uses the router which handles llama.cpp internally
-            Err(
-                "No local LLM available. Please install and start Ollama (https://ollama.ai)."
-                    .into(),
-            )
-        }
-        ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
-            #[cfg(feature = "deepseek")]
-            {
-                use arkavo_llm::DeepSeekProvider;
-                let provider = Box::new(DeepSeekProvider::from_env()?);
-                Ok(LlmClient::new(provider))
-            }
-            #[cfg(not(feature = "deepseek"))]
-            {
-                Err("DeepSeek support requires deepseek feature".into())
-            }
-        }
-        ModelChoice::KimiK2 => {
-            #[cfg(feature = "kimi")]
-            {
-                use arkavo_llm::KimiProvider;
-                let provider = Box::new(KimiProvider::from_env()?);
-                Ok(LlmClient::new(provider))
-            }
-            #[cfg(not(feature = "kimi"))]
-            {
-                Err("Kimi support requires kimi feature".into())
-            }
-        }
-        ModelChoice::Glm52 => {
-            #[cfg(feature = "glm")]
-            {
-                use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
-                let api_key = std::env::var("GLM_API_KEY")?;
-                let base_url = std::env::var("GLM_BASE_URL")
-                    .unwrap_or_else(|_| "https://api.z.ai/api/paas/v4".to_string());
-                let provider = Box::new(OpenAIProvider::new(OpenAIConfig {
-                    api_key,
-                    base_url,
-                    model: decision.recommended_model.name().to_string(),
-                    organization_id: None,
-                    api_version: None,
-                    is_azure: false,
-                })?);
-                Ok(LlmClient::new(provider))
-            }
-            #[cfg(not(feature = "glm"))]
-            {
-                Err("GLM support requires glm feature".into())
-            }
-        }
-        ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
-            #[cfg(feature = "xai")]
-            {
-                use arkavo_llm::providers::xai_responses::{
-                    ReasoningEffort, ResponsesConfig, ResponsesProvider,
-                };
-                let api_key = std::env::var("XAI_API_KEY")?;
-                let base_url = std::env::var("XAI_BASE_URL")
-                    .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-                let api_model = decision
-                    .recommended_model
-                    .grok_api_model()
-                    .unwrap_or("grok-4.6")
-                    .to_string();
-                let effort = if matches!(decision.recommended_model, ModelChoice::Grok46Xhigh) {
-                    ReasoningEffort::Xhigh
-                } else {
-                    ReasoningEffort::Low
-                };
-                let config = ResponsesConfig::for_routed_arm(api_key, base_url, api_model, effort);
-                let provider = Box::new(ResponsesProvider::new(config)?);
-                Ok(LlmClient::new(provider))
-            }
-            #[cfg(not(feature = "xai"))]
-            {
-                Err("xAI/Grok support requires xai feature".into())
-            }
-        }
-    }
+    let model = &decision.recommended_model;
+    let usage = arkavo_router::usage::estimate_request(&[], None, 4096);
+    router
+        .authorize_call(model, router.usage_cost(model, &usage), false, None)
+        .await?;
+    router.require_provisioned(model)?;
+    let (provider, _) = router.get_provider_attributed(model).await?;
+    Ok(arkavo_llm::LlmClient::new(provider))
 }
 
 #[cfg(feature = "web-ui")]

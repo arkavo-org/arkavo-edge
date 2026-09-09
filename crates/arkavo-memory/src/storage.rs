@@ -1,3 +1,6 @@
+#[path = "replay_state.rs"]
+mod replay_state;
+
 use crate::embeddings::EmbeddingService;
 use crate::error::{MemoryError, Result};
 use crate::event_store::{EventStore, SerializedEvent, StoredEvent};
@@ -5,12 +8,64 @@ use crate::models::{AgentConversation, Memory, SearchResult};
 use crate::workspace_config::WorkspaceConfig;
 use hnsw_rs::prelude::*;
 use sqlx::Row;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteRow};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use uuid::Uuid;
+
+// Embeddings are written as little-endian f32 bytes (see `store_with_replay_state`,
+// which builds `embedding_blob` via `f.to_le_bytes()`). sqlx hands blobs back as a
+// plain `Vec<u8>` with no alignment guarantee -- an empty `Vec<u8>` even has a
+// dangling pointer with alignment 1 -- so casting the bytes to `&[f32]` in place
+// (e.g. via `bytemuck::cast_slice`) can panic on unaligned input. Decoding
+// f32-at-a-time with `from_le_bytes` copies out of the blob instead of reinterpreting
+// it, so it works regardless of the blob's alignment. Any trailing bytes that don't
+// fill a full 4-byte chunk are dropped rather than causing a panic.
+fn decode_embedding(blob: &[u8]) -> Vec<f32> {
+    blob.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
+        .collect()
+}
+
+// Every `memories` row selected with the full column set decodes the same way, so
+// `get`, `list_by_category`, `scan_recent` and the FTS path share this.
+fn memory_from_row(row: &SqliteRow) -> Result<Memory> {
+    let id_str: String = row.get("id");
+    let id =
+        Uuid::parse_str(&id_str).map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
+
+    let embedding_blob: Vec<u8> = row.get("embedding_blob");
+    let embedding: Vec<f32> = decode_embedding(&embedding_blob);
+
+    let metadata_str: Option<String> = row.get("metadata");
+    let metadata = metadata_str
+        .as_ref()
+        .map(|m| serde_json::from_str(m))
+        .transpose()?;
+
+    let created_at_str: String = row.get("created_at");
+    let updated_at_str: String = row.get("updated_at");
+    let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
+        .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
+        .with_timezone(&chrono::Utc);
+    let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
+        .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
+        .with_timezone(&chrono::Utc);
+
+    Ok(Memory {
+        id,
+        content: row.get("content"),
+        metadata,
+        category: row.get("category"),
+        embedding,
+        created_at,
+        updated_at,
+    })
+}
 
 // Lightweight struct for database queries that only need partial data
 #[derive(sqlx::FromRow)]
@@ -119,6 +174,7 @@ impl MemoryStorage {
             .await?;
 
         Self::ensure_table_exists(&pool).await?;
+        replay_state::ensure_table_exists(&pool).await?;
 
         let hnsw = Self::create_new_index(&config);
         let event_store = EventStore::new(pool.clone());
@@ -379,12 +435,7 @@ impl MemoryStorage {
             let embedding_blob: Vec<u8> = row.get("embedding_blob");
             let id = Uuid::parse_str(&id_str)
                 .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
-            let embedding: Vec<f32> = embedding_blob
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|chunk| f32::from_le_bytes(*chunk))
-                .collect();
+            let embedding: Vec<f32> = decode_embedding(&embedding_blob);
             parsed.push((id, embedding));
         }
 
@@ -541,6 +592,16 @@ impl MemoryStorage {
     }
 
     pub async fn store(&self, memory: Memory) -> Result<()> {
+        self.store_with_replay_state(memory, None).await
+    }
+
+    /// Persist a public memory and its private provider state atomically.
+    /// State is never included in embeddings, search results, or public metadata.
+    pub async fn store_with_replay_state(
+        &self,
+        memory: Memory,
+        replay_state: Option<&[u8]>,
+    ) -> Result<()> {
         let id_str = memory.id.to_string();
         let embedding_blob: Vec<u8> = memory
             .embedding
@@ -553,6 +614,7 @@ impl MemoryStorage {
             .map(serde_json::to_string)
             .transpose()?;
 
+        let mut transaction = self.pool.begin().await?;
         sqlx::query(
             r#"
             INSERT INTO memories (id, content, metadata, category, embedding_blob, created_at, updated_at)
@@ -566,8 +628,17 @@ impl MemoryStorage {
         .bind(&embedding_blob)
         .bind(memory.created_at.to_rfc3339())
         .bind(memory.updated_at.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
+
+        if let Some(state) = replay_state {
+            sqlx::query("INSERT INTO conversation_replay_state (memory_id, state) VALUES (?, ?)")
+                .bind(&id_str)
+                .bind(state)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
 
         // Only update indexes if embedding is not empty
         if !memory.embedding.is_empty() {
@@ -621,34 +692,7 @@ impl MemoryStorage {
             .await?
             .ok_or(MemoryError::NotFound)?;
 
-        let embedding_blob: Vec<u8> = row.get("embedding_blob");
-        let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
-
-        let metadata_str: Option<String> = row.get("metadata");
-        let metadata = metadata_str
-            .as_ref()
-            .map(|m| serde_json::from_str(m))
-            .transpose()?;
-
-        let created_at_str: String = row.get("created_at");
-        let updated_at_str: String = row.get("updated_at");
-
-        let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
-            .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
-            .with_timezone(&chrono::Utc);
-        let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
-            .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
-            .with_timezone(&chrono::Utc);
-
-        Ok(Memory {
-            id,
-            content: row.get("content"),
-            metadata,
-            category: row.get("category"),
-            embedding,
-            created_at,
-            updated_at,
-        })
+        memory_from_row(&row)
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<()> {
@@ -717,36 +761,45 @@ impl MemoryStorage {
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let id_str: String = row.get("id");
-            let id = Uuid::parse_str(&id_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
+            out.push(memory_from_row(&row)?);
+        }
+        Ok(out)
+    }
 
-            let embedding_blob: Vec<u8> = row.get("embedding_blob");
-            let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
+    /// Exact, newest-first scan used when the vector index cannot rank the query.
+    ///
+    /// `rowid DESC` is a required secondary key: `updated_at` is stored as an
+    /// RFC 3339 string and several memories written in the same tick compare
+    /// equal, which would otherwise leave the order up to SQLite.
+    async fn scan_recent(&self, limit: usize, category: Option<&str>) -> Result<Vec<SearchResult>> {
+        const COLUMNS: &str =
+            "SELECT id, content, metadata, category, embedding_blob, created_at, updated_at
+             FROM memories";
 
-            let metadata_str: Option<String> = row.get("metadata");
-            let metadata = metadata_str
-                .as_ref()
-                .map(|m| serde_json::from_str(m))
-                .transpose()?;
+        let rows = if let Some(cat) = category {
+            sqlx::query(&format!(
+                "{COLUMNS} WHERE category = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?"
+            ))
+            .bind(cat)
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(&format!(
+                "{COLUMNS} ORDER BY updated_at DESC, rowid DESC LIMIT ?"
+            ))
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await?
+        };
 
-            let created_at_str: String = row.get("created_at");
-            let updated_at_str: String = row.get("updated_at");
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
-                .with_timezone(&chrono::Utc);
-            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
-                .with_timezone(&chrono::Utc);
-
-            out.push(Memory {
-                id,
-                content: row.get("content"),
-                metadata,
-                category: row.get("category"),
-                embedding,
-                created_at,
-                updated_at,
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            // A zero-norm query carries no direction, so there is no similarity to
+            // report; recency is the only ordering signal available.
+            out.push(SearchResult {
+                memory: memory_from_row(&row)?,
+                score: 0.0,
             });
         }
         Ok(out)
@@ -759,6 +812,17 @@ impl MemoryStorage {
         category: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
         let query_embedding = self.embedding_service.generate_embedding(query).await?;
+
+        // Cosine distance is undefined for a zero-norm vector, and the backing
+        // implementation reports 0.0 rather than failing, so every indexed point ties
+        // at the best possible distance. The HNSW greedy walk then has no gradient to
+        // follow, and its layer assignment is seeded from OS entropy, so the subset of
+        // tied points it happens to reach differs on every process run -- it silently
+        // drops points even when the requested k exceeds the whole index. Rank exactly
+        // instead; without a query direction there is nothing for the index to do.
+        if query_embedding.iter().all(|v| *v == 0.0) {
+            return self.scan_recent(limit, category).await;
+        }
 
         let index_clone = Arc::clone(&self.index);
         let k = limit * 2;
@@ -887,39 +951,12 @@ impl MemoryStorage {
                 continue;
             }
 
-            let embedding_blob: Vec<u8> = row.get("embedding_blob");
-            let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
-
-            let metadata_str: Option<String> = row.get("metadata");
-            let metadata = metadata_str
-                .as_ref()
-                .map(|m| serde_json::from_str(m))
-                .transpose()?;
-
-            let created_at_str: String = row.get("created_at");
-            let updated_at_str: String = row.get("updated_at");
-
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
-                .with_timezone(&chrono::Utc);
-            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
-                .with_timezone(&chrono::Utc);
-
             let rank: f64 = row.get("rank");
             // BM25 returns negative values, more negative = better match
             // Normalize to 0-1 range (approximate)
             let score = (1.0 / (1.0 - rank)).clamp(0.0, 1.0) as f32;
 
-            let memory = Memory {
-                id,
-                content: row.get("content"),
-                metadata,
-                category: row.get("category"),
-                embedding,
-                created_at,
-                updated_at,
-            };
+            let memory = memory_from_row(&row)?;
 
             // Promote cold memory to hot tier
             self.promote_to_hot(&memory).await?;
@@ -1015,13 +1052,7 @@ impl MemoryStorage {
         for row in rows {
             if let Some(category) = row.category {
                 // Convert binary blob to f32 vector
-                let mem_embedding: Vec<f32> = row
-                    .embedding_blob
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|chunk| f32::from_le_bytes(*chunk))
-                    .collect();
+                let mem_embedding: Vec<f32> = decode_embedding(&row.embedding_blob);
                 let score = EmbeddingService::cosine_similarity(&embedding, &mem_embedding);
 
                 if score > best_score {
@@ -1212,5 +1243,42 @@ mod tests {
             MemoryStorage::sanitize_fts5_word("hello\"world"),
             "hello\"world"
         );
+    }
+
+    // Regression test for a Linux-only panic: `bytemuck::cast_slice::<u8, f32>`
+    // requires the input slice to be 4-byte aligned, but a `Vec<u8>` returned by
+    // sqlx carries no such guarantee. Slicing off a leading byte here reproduces
+    // an unaligned blob the way sqlx can hand one back; `decode_embedding` must
+    // decode it without relying on the slice's address.
+    #[test]
+    fn test_decode_embedding_handles_misaligned_blob() {
+        let values: [f32; 3] = [1.0, -2.5, 3.25];
+        let mut bytes = vec![0u8]; // leading pad byte forces misalignment below
+        for v in values {
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+
+        let misaligned = &bytes[1..];
+        assert_ne!(
+            misaligned
+                .as_ptr()
+                .align_offset(std::mem::align_of::<f32>()),
+            0,
+            "test setup should produce a misaligned slice"
+        );
+
+        assert_eq!(decode_embedding(misaligned), values.to_vec());
+    }
+
+    #[test]
+    fn test_decode_embedding_empty_blob_yields_empty_vec() {
+        assert_eq!(decode_embedding(&[]), Vec::<f32>::new());
+    }
+
+    #[test]
+    fn test_decode_embedding_ignores_trailing_partial_chunk() {
+        let mut bytes = 1.5f32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&[0xAA, 0xBB, 0xCC]); // 3 stray bytes, not a full f32
+        assert_eq!(decode_embedding(&bytes), vec![1.5]);
     }
 }

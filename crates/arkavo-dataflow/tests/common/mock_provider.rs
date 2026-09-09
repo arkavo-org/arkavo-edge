@@ -79,6 +79,7 @@ impl Provider for MockProvider {
                 reasoning_content: None,
                 done: true,
                 inference_timing: None,
+                ..Default::default()
             }));
         });
 

@@ -195,6 +195,7 @@ impl Provider for GeminiProvider {
                     // Token usage only arrives on the terminal chunk;
                     // intermediate deltas get `None`.
                     inference_timing: response.usage.as_ref().map(timing_from_usage),
+                    ..Default::default()
                 })
                 .map_err(|e| Error::Stream(format!("Stream error: {e}")))
         });
@@ -327,9 +328,8 @@ impl Provider for GeminiProvider {
                 Some(accumulated_thought)
             },
             tool_calls: parsed_tool_calls,
-            finish_reason: None,
             inference_timing: last_usage.as_ref().map(timing_from_usage),
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 }
@@ -341,6 +341,8 @@ impl Provider for GeminiProvider {
 /// thinking — are the load-bearing fields for cost tracking.
 fn timing_from_usage(usage: &UsageMetadata) -> InferenceTiming {
     InferenceTiming {
+        n_cached_prompt_eval: None,
+        n_cache_write_prompt_eval: None,
         prompt_eval_ms: 0.0,
         generation_ms: 0.0,
         n_prompt_eval: usage.prompt_token_count.unwrap_or(0),
@@ -376,13 +378,9 @@ impl GeminiProvider {
                     }
                 }
                 Role::Tool => {
-                    // Tool results go as user messages with context
-                    let tool_text = if let Some(name) = &msg.tool_name {
-                        format!("[Tool result from {}]: {}", name, msg.content)
-                    } else {
-                        msg.content.clone()
-                    };
-                    contents.push(("user".to_string(), tool_text));
+                    // Gemini's `contents` array knows only user and model, so a
+                    // tool result travels as user text that names its tool.
+                    contents.push(("user".to_string(), msg.tool_result_as_user_text()));
                 }
             }
         }

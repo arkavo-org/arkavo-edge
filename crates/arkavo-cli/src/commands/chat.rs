@@ -212,10 +212,17 @@ fn execute_a2a_chat(
             .await
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
-        // Create ChatSession (wraps A2aClient)
-        let mut session =
-            ChatSession::new_with_model(engine.router(), Some(engine.tool_registry()), model_name)
-                .await?;
+        // Create ChatSession (wraps A2aClient). This command owns a terminal,
+        // so it is the host that can put the cloud-spend question to the user.
+        let mut session = ChatSession::new_with_model(
+            engine.router(),
+            Some(engine.tool_registry()),
+            model_name,
+            Some(std::sync::Arc::new(
+                crate::cloud_consent::TtyCloudConsent::new(),
+            )),
+        )
+        .await?;
 
         if std::env::var("ARKAVO_DEBUG").is_ok() && session.is_active() {
             eprintln!("{}", debug_session_started_message());

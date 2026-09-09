@@ -47,7 +47,7 @@ The bench now wires through the same post-processing as the production router:
 
 ## Cloud Models (GLM-5.2 and beyond)
 
-`tool-bench` benchmarks **cloud** models through the same 8-scenario suite as local models, so a cloud cell and a local cell in the same column are scored identically. The cloud path reuses the **exact production provider instantiation** (`Router::get_provider(model)` → `complete_with_tools`), not a bespoke client — the numbers reflect real routing.
+`tool-bench` benchmarks **cloud** models through the same 8-scenario suite as local models, so a cloud cell and a local cell in the same column are scored identically. The cloud path reuses the **exact production provider instantiation** (`Router::authorize_call` → `Router::get_provider_attributed(model)` → `complete_with_tools`), not a bespoke client — the numbers reflect real routing.
 
 GLM-5.2 (Zhipu AI / Z.ai) is the first cloud arm wired in. It speaks the OpenAI chat-completions wire format and is routed through the generic OpenAI-compatible adapter, so its native function-calling is scored directly (no fence-format layer). Because cloud calls cost money, the bench reports **real per-call token usage and USD cost** from the response `usage` block, priced at the published per-MTok rate — the credibility signal that distinguishes a paid model benchmark from a latency-only run.
 

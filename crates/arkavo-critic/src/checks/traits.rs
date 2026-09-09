@@ -127,6 +127,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("prompt".to_string(), response, vec![])

@@ -72,6 +72,7 @@ fn make_response(content: &str, tool_calls: Vec<ParsedToolCall>) -> ProviderResp
         finish_reason: None,
         inference_timing: None,
         quality_gate_retries: 0,
+        ..Default::default()
     }
 }
 

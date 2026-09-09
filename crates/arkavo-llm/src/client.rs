@@ -303,22 +303,16 @@ mod tests {
         let chunks = vec![
             Ok(StreamResponse {
                 content: "Hel".to_string(),
-                reasoning_content: None,
-                done: false,
-                inference_timing: None,
+                ..Default::default()
             }),
             Err(Error::Stream("mid-stream failure".to_string())),
             Ok(StreamResponse {
                 content: "lo".to_string(),
-                reasoning_content: None,
-                done: false,
-                inference_timing: None,
+                ..Default::default()
             }),
             Ok(StreamResponse {
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
-                inference_timing: None,
+                ..Default::default()
             }),
         ];
         let provider = MockProvider::with_stream(chunks);

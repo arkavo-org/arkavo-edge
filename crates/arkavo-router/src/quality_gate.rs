@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 #[cfg(feature = "llama-cpp")]
 use crate::judge;
 use crate::learning::BurstFeedback;
+use crate::usage::{CallBudget, RoutedResponse};
 use crate::{classifier, prompt_advisor, selector_quality, tool_extraction, validator};
 use arkavo_llm::{Message, ProviderResponse};
 use arkavo_mcp_tools::ToolRegistry;
@@ -18,175 +19,6 @@ impl super::Router {
             .await
     }
 
-    /// Route for execution iterations — stripped profile for fast tool calls.
-    ///
-    /// Uses near-greedy temperature (0.1), thinking disabled, max 200 tokens,
-    /// and skips Judge validation. For iterations where the model just needs
-    /// to emit the next tool call, not reason about it.
-    pub async fn route_with_tools_execution(
-        &self,
-        _task_description: &str,
-        messages: Vec<Message>,
-        tool_registry: Option<&ToolRegistry>,
-        model_hint: Option<&crate::ModelChoice>,
-    ) -> Result<ProviderResponse> {
-        // Execution mode: bypass classification and Thompson Sampling entirely.
-        // The model is already known (from the hint or fastest local fallback)
-        // and all tools should be passed with compact schemas since the model
-        // already saw full schemas in round 0.
-        let model = model_hint
-            .cloned()
-            .unwrap_or_else(|| self.selector.fastest_local_model());
-
-        let tools_json = match tool_registry {
-            Some(registry) => {
-                // Pass ALL tools with NameAndDescription detail level.
-                // Empty query returns everything — no keyword filtering needed
-                // since the model already knows which tools to call.
-                let tool_infos =
-                    registry.search_tools("", arkavo_mcp_tools::DetailLevel::NameAndDescription);
-                let json = match model {
-                    crate::ModelChoice::GeminiFlash
-                    | crate::ModelChoice::Gemini35Flash
-                    | crate::ModelChoice::Gemini35FlashMinimal
-                    | crate::ModelChoice::Gemini35FlashMedium
-                    | crate::ModelChoice::Gemini35FlashHigh
-                    | crate::ModelChoice::GeminiPro => {
-                        arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
-                    }
-                    _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
-                };
-                Some(json)
-            }
-            None => None,
-        };
-
-        let provider = self.instantiate_provider(&model).await?;
-        let _permit = self
-            .inference_semaphore
-            .acquire()
-            .await
-            .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
-
-        let mut response = provider
-            .complete_with_tools(messages, tools_json, None)
-            .await
-            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
-
-        response.tool_calls = tool_extraction::filter_and_extract_tool_calls(response.tool_calls);
-
-        if response.tool_calls.is_empty() && !response.content.is_empty() {
-            let extracted = tool_extraction::extract_tool_calls_from_text(&response.content);
-            if !extracted.is_empty() {
-                response.tool_calls = extracted;
-            }
-        }
-
-        Ok(response)
-    }
-
-    /// Route with a model override — bypass classification, Thompson Sampling,
-    /// and quality gate retries. Use when AGENTS.md specifies `model:` and the
-    /// caller wants the exact model with minimal overhead.
-    pub async fn route_with_tools_override(
-        &self,
-        task_description: &str,
-        messages: Vec<Message>,
-        tool_registry: Option<&ToolRegistry>,
-        model: &crate::ModelChoice,
-    ) -> Result<ProviderResponse> {
-        let inference_start = std::time::Instant::now();
-
-        // Track whether tools were actually attached (non-empty) so the
-        // quality scorer can penalize text-only responses correctly. A
-        // registry that returns zero matches must NOT count as attached —
-        // otherwise the model gets penalized for legitimately producing
-        // text when no tools were callable.
-        let (tools_json, tools_were_attached) = match tool_registry {
-            Some(registry) => {
-                let detail_level = tool_extraction::detail_level_for_model(model);
-                let keywords = tool_extraction::extract_keywords(task_description);
-                let input_tokens = tool_extraction::estimate_tokens(task_description);
-                let tool_infos = tool_extraction::search_tools_hybrid(
-                    registry,
-                    &keywords,
-                    detail_level,
-                    Some(input_tokens),
-                )
-                .await;
-                let attached = !tool_infos.is_empty();
-                let json = match model {
-                    crate::ModelChoice::GeminiFlash
-                    | crate::ModelChoice::Gemini35Flash
-                    | crate::ModelChoice::Gemini35FlashMinimal
-                    | crate::ModelChoice::Gemini35FlashMedium
-                    | crate::ModelChoice::Gemini35FlashHigh
-                    | crate::ModelChoice::GeminiPro => {
-                        arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
-                    }
-                    _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
-                };
-                (Some(json), attached)
-            }
-            None => (None, false),
-        };
-
-        let use_spec = self.decide_spec_with_event(model.name());
-        let provider = self.instantiate_provider_with_spec(model, use_spec).await?;
-        let _permit = self
-            .inference_semaphore
-            .acquire()
-            .await
-            .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
-        let mut response = provider
-            .complete_with_tools(messages, tools_json, None)
-            .await
-            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))?;
-
-        response.tool_calls = tool_extraction::filter_and_extract_tool_calls(response.tool_calls);
-
-        if response.tool_calls.is_empty() && !response.content.is_empty() {
-            let extracted = tool_extraction::extract_tool_calls_from_text(&response.content);
-            if !extracted.is_empty() {
-                response.tool_calls = extracted;
-            }
-        }
-
-        let elapsed = inference_start.elapsed();
-        let quality = selector_quality::compute_response_quality(
-            &response.content,
-            elapsed.as_millis() as u64,
-            "general",
-            response.tool_calls.len(),
-            tools_were_attached,
-        );
-        tracing::info!(
-            model = model.name(),
-            quality = format!("{quality:.3}").as_str(),
-            latency_ms = elapsed.as_millis() as u64,
-            response_len = response.content.len(),
-            tool_call_count = response.tool_calls.len(),
-            "Model override: inference completed"
-        );
-        self.model_learning
-            .immediate_update(
-                model.name(),
-                &BurstFeedback::success(
-                    uuid::Uuid::new_v4(),
-                    "general".to_string(),
-                    elapsed.as_millis() as u64,
-                )
-                .with_quality(quality),
-            )
-            .await;
-
-        if let Ok(mut guard) = self.last_routed_model.write() {
-            *guard = Some(model.name().to_string());
-        }
-
-        Ok(response)
-    }
-
     /// Route with a model hint from AGENTS.md configuration.
     ///
     /// If the hinted model is available, it biases the initial Thompson Sampling
@@ -198,38 +30,93 @@ impl super::Router {
         tool_registry: Option<&ToolRegistry>,
         model_hint: Option<&crate::ModelChoice>,
     ) -> Result<ProviderResponse> {
-        self.route_with_tools_internal(task_description, messages, tool_registry, model_hint, false)
+        self.route_with_tools_internal(
+            task_description,
+            messages,
+            tool_registry,
+            model_hint,
+            None,
+            None,
+        )
+        .await
+        .map(|r| r.response)
+    }
+
+    /// Route on behalf of one chat session, so a cloud approval its user gave
+    /// authorizes this call and no other session's.
+    pub async fn route_with_tools_for_session(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        session: &str,
+    ) -> Result<ProviderResponse> {
+        self.route_with_tools_internal(
+            task_description,
+            messages,
+            tool_registry,
+            None,
+            None,
+            Some(session),
+        )
+        .await
+        .map(|r| r.response)
+    }
+
+    /// Attribute every completed attempt, including responses rejected by a retry gate.
+    /// Spending is recorded inside the loop, so a later error cannot erase earlier usage.
+    pub async fn route_with_tools_budgeted(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+        budget: CallBudget<'_>,
+    ) -> Result<RoutedResponse> {
+        self.route_with_tools_internal(
+            task_description,
+            messages,
+            tool_registry,
+            None,
+            Some(budget),
+            None,
+        )
+        .await
+    }
+
+    pub async fn route_with_tools_attributed(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+    ) -> Result<RoutedResponse> {
+        self.route_with_tools_internal(task_description, messages, tool_registry, None, None, None)
             .await
     }
 
+    // Internal plumbing, not API surface: every public entry point above hands
+    // this one call its own shape (hint, ledger, session).
     async fn route_with_tools_internal(
         &self,
         task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
         model_hint: Option<&crate::ModelChoice>,
-        execution_mode: bool,
-    ) -> Result<ProviderResponse> {
+        budget: Option<CallBudget<'_>>,
+        session: Option<&str>,
+    ) -> Result<RoutedResponse> {
         const MAX_RETRIES: u8 = 3;
-        let mut current_decision = self.classify(task_description).await?;
+        let budget = budget.or_else(|| self.call_budget());
+        let mut current_decision = self.classify_for_session(task_description, session).await?;
 
-        // Execution iterations: when a model hint is provided (from AGENTS.md),
-        // use it with execution-mode sampling (temp 0.1, thinking off, max 200 tokens).
-        // Without a hint, fall back to the fastest local model for mechanical tool calls.
-        let fast_model = self.selector.fastest_local_model();
-        let effective_hint =
-            if execution_mode && model_hint.is_none() && self.is_model_available(&fast_model) {
-                tracing::debug!(
-                    fast_model = fast_model.name(),
-                    "Execution mode: using fastest local model (no hint)"
-                );
-                current_decision.recommended_model = fast_model;
-                None
-            } else {
-                model_hint
-            };
+        // Which arm the caller's hint actually put in play, if any. Not
+        // "the hint happens to equal what classification chose": the hint is
+        // declined on cooldown or when its weights are absent, and
+        // classification can land on the same arm by itself. Treating that
+        // coincidence as the caller's choice let an unapplied hint stand in
+        // for both consent to spend and consent to download.
+        let mut applied_hint: Option<crate::ModelChoice> = None;
 
-        if let Some(hint) = effective_hint {
+        if let Some(hint) = model_hint {
             let consecutive = self.get_cooldown_consecutive(hint.name()).await;
             let reward_failures = self.get_reward_failure_count(hint.name()).await;
             // Hinted models get 3 chances to learn from feedback before
@@ -252,6 +139,7 @@ impl super::Router {
                     "Applying model hint from AGENTS.md"
                 );
                 current_decision.recommended_model = hint.clone();
+                applied_hint = Some(hint.clone());
             } else {
                 tracing::debug!(
                     hint = hint.name(),
@@ -261,6 +149,11 @@ impl super::Router {
         }
 
         let mut feedback_messages: Vec<Message> = Vec::new();
+        let mut attempts = Vec::new();
+        // Cloud arm already authorized for this dispatch, so a retry against the
+        // same model is not re-asked while a switch to a different cloud arm
+        // still is.
+        let mut authorized_cloud: Option<crate::ModelChoice> = None;
 
         let input_tokens = tool_extraction::estimate_tokens(task_description);
         let is_simple = prompt_advisor::is_simple_query(&task_description.to_lowercase());
@@ -273,13 +166,9 @@ impl super::Router {
             // A registry that returns zero matches must NOT count as attached.
             let (tools_json, tools_were_attached) = match tool_registry {
                 Some(registry) => {
-                    // Execution mode uses NameAndDescription to keep Jinja template
-                    // expansion compact — the model already saw full schemas in round 0.
-                    let detail_level = if execution_mode {
-                        arkavo_mcp_tools::DetailLevel::NameAndDescription
-                    } else {
-                        tool_extraction::detail_level_for_model(&current_decision.recommended_model)
-                    };
+                    let detail_level = tool_extraction::detail_level_for_model(
+                        &current_decision.recommended_model,
+                    );
                     let keywords = tool_extraction::extract_keywords(task_description);
 
                     let tool_infos = tool_extraction::search_tools_hybrid(
@@ -294,6 +183,9 @@ impl super::Router {
                     let json = match current_decision.recommended_model {
                         crate::ModelChoice::GeminiFlash
                         | crate::ModelChoice::Gemini35Flash
+                        | crate::ModelChoice::Gemini35FlashMinimal
+                        | crate::ModelChoice::Gemini35FlashMedium
+                        | crate::ModelChoice::Gemini35FlashHigh
                         | crate::ModelChoice::GeminiPro => {
                             arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
                         }
@@ -380,33 +272,50 @@ impl super::Router {
                 }
             }
 
-            let provider = if execution_mode {
-                self.instantiate_provider_execution(&current_decision.recommended_model)
-                    .await?
-            } else {
-                self.instantiate_provider_with_spec(
-                    &current_decision.recommended_model,
+            let actual_model = current_decision.recommended_model.clone();
+            let max_tokens = 4096usize;
+            // Reserve for the request in hand, not for a maximum-length answer:
+            // the loop settles every attempt against measured usage below, so
+            // the preflight only has to be a realistic bound.
+            let estimated_usage = crate::usage::reserve_request(
+                &advised_messages,
+                tools_json.as_ref(),
+                max_tokens as u32,
+            );
+            let estimated_cost = self.usage_cost(&actual_model, &estimated_usage);
+            // Cloud-spend policy gates the tool-loop exactly as it gates chat,
+            // and before the provider is built so a denial never opens a client.
+            // "Explicit" means the caller named this model (an applied hint) or
+            // it was already authorized for this dispatch.
+            let caller_authorized = authorized_cloud.as_ref() == Some(&actual_model)
+                || applied_hint.as_ref() == Some(&actual_model);
+            // Unconditional, with no exemption for a hinted arm: applying a
+            // hint already required `is_model_available`, which asks the
+            // selector the same cache question, so an applied local hint
+            // passes here anyway and a cloud arm is never local. An arm
+            // Thompson Sampling picked is not a request to download it.
+            self.require_provisioned(&actual_model)?;
+            if let Some(budget) = budget {
+                budget.check(estimated_cost).await?;
+            }
+            self.authorize_call(&actual_model, estimated_cost, caller_authorized, session)
+                .await?;
+            if actual_model.is_cloud() {
+                authorized_cloud = Some(actual_model.clone());
+            }
+            let provider = self
+                .instantiate_provider_exact_with_spec(
+                    &actual_model,
                     current_decision.use_spec_decoding,
                 )
-                .await?
-            };
+                .await?;
 
-            // Execution iterations use the chat semaphore — they're fast, sub-second
-            // inferences that shouldn't queue behind heavy planning work.
-            let semaphore = if execution_mode {
-                &self.chat_semaphore
-            } else {
-                &self.inference_semaphore
-            };
-            let _permit = semaphore
+            let _permit = self
+                .inference_semaphore
                 .acquire()
                 .await
                 .map_err(|_| Error::ModelExecution("Semaphore closed".to_string()))?;
-            tracing::debug!(
-                execution_mode,
-                semaphore = if execution_mode { "chat" } else { "inference" },
-                "Semaphore acquired"
-            );
+            tracing::debug!("Inference semaphore acquired");
 
             // Feasibility plane (pre-dispatch): assess whether the local model
             // can run this prompt now, surfacing a reshape/unavailable signal
@@ -414,13 +323,29 @@ impl super::Router {
             // spends.
             self.check_local_feasibility(&current_decision.recommended_model, input_tokens as u32);
 
-            let max_tokens = if execution_mode { Some(200usize) } else { None };
+            let request_usage =
+                crate::usage::estimate_request(&advised_messages, tools_json.as_ref(), 0);
             let mut response = match provider
-                .complete_with_tools(advised_messages, tools_json, max_tokens)
+                .complete_with_tools(advised_messages, tools_json, Some(max_tokens))
                 .await
             {
                 Ok(r) => r,
                 Err(e) => {
+                    if let Some(timing) = e.inference_timing() {
+                        let failed_response = ProviderResponse {
+                            inference_timing: Some(timing.clone()),
+                            ..Default::default()
+                        };
+                        let attributed = self.attribute_response(
+                            actual_model.clone(),
+                            &request_usage,
+                            &failed_response,
+                        );
+                        if let Some(budget) = budget {
+                            budget.record(&attributed).await?;
+                        }
+                        attempts.push(attributed);
+                    }
                     self.record_model_cooldown(current_decision.recommended_model.name())
                         .await;
 
@@ -472,13 +397,19 @@ impl super::Router {
                 }
             };
 
+            let attributed =
+                self.attribute_response(actual_model.clone(), &request_usage, &response);
+            if let Some(budget) = budget {
+                budget.record(&attributed).await?;
+            }
+            attempts.push(attributed);
+
             // Record per-attempt inference latency so retries are individually visible
             let attempt_ms = inference_start.elapsed().as_millis() as u64;
             if attempt > 0 {
                 tracing::info!(
                     attempt = attempt + 1,
                     attempt_ms,
-                    execution_mode,
                     model = %current_decision.recommended_model.name(),
                     "Quality gate retry inference completed"
                 );
@@ -553,7 +484,7 @@ impl super::Router {
                         let available_tool_names: Vec<&str> =
                             tool_infos.iter().map(|t| t.name.as_str()).collect();
                         let fix = validation_error.fix_suggestion(&available_tool_names);
-                        feedback_messages.push(Message::assistant(response.content.clone()));
+                        append_rejected_response(&mut feedback_messages, &response);
                         feedback_messages.push(Message::user(format!(
                             "ERROR: {validation_error}\n\nFix: {fix}",
                         )));
@@ -567,13 +498,15 @@ impl super::Router {
                         "Validation failed after {} attempts, returning response",
                         MAX_RETRIES
                     );
-                    return Ok(response);
+                    return Ok(RoutedResponse {
+                        response,
+                        model: actual_model,
+                        attempts,
+                    });
                 }
 
-                // Skip Judge validation in execution mode — fast syntax check is sufficient
-                // for mechanical tool calls (send_task, list_agents, get_task_status).
                 #[cfg(feature = "llama-cpp")]
-                if !execution_mode {
+                {
                     use crate::judge::IssueType;
 
                     match judge::ResponseJudge::new_local().await {
@@ -629,8 +562,7 @@ impl super::Router {
                                         .reason
                                         .as_deref()
                                         .unwrap_or("Quality check failed");
-                                    feedback_messages
-                                        .push(Message::assistant(response.content.clone()));
+                                    append_rejected_response(&mut feedback_messages, &response);
                                     feedback_messages.push(Message::user(format!(
                                         "ERROR: Your response was rejected: {reason}\n\nPlease fix the issue and try again. Use the correct tool call format.",
                                     )));
@@ -644,7 +576,11 @@ impl super::Router {
                                     "Judge rejected after {} attempts, returning response",
                                     MAX_RETRIES
                                 );
-                                return Ok(response);
+                                return Ok(RoutedResponse {
+                                    response,
+                                    model: actual_model,
+                                    attempts,
+                                });
                             }
                         }
                         Err(e) => {
@@ -659,7 +595,7 @@ impl super::Router {
             // final-answer turn. A collapse may trigger a retry/offer, but per
             // the plane separation it never silently spends: cloud becomes a
             // retry candidate only when the policy authorizes silent spend.
-            if !execution_mode && response.tool_calls.is_empty() && attempt + 1 < MAX_RETRIES {
+            if response.tool_calls.is_empty() && attempt + 1 < MAX_RETRIES {
                 use crate::planes::{self, CollapseSignal, CollapseVerdict, UpgradeOffer};
                 let collapse = planes::detect_collapse(&planes::AnswerObservation {
                     text: &response.content,
@@ -688,14 +624,18 @@ impl super::Router {
                     );
                     // Spend plane: a collapse only *requests* cloud. Authorize
                     // it through the budget plane — policy AND the live remaining
-                    // cap — never on the quality signal alone. A one-shot user
-                    // confirmation (set via confirm_next_cloud_upgrade after a
+                    // cap — never on the quality signal alone. A standing
+                    // approval from this caller (recorded after a
                     // CloudUpgradeOffered) satisfies AskBeforeCloud; otherwise the
                     // decision tells us whether to offer (ask) or refuse.
                     let allow_cloud = if let UpgradeOffer::Offer(reason) = offer {
                         let caps = self.cloud_spend_caps().await;
                         let projected = self.projected_cloud_cost(&current_decision);
-                        let confirmed = self.consume_cloud_confirmation();
+                        // Only a *user* approval authorizes the upgrade. A
+                        // caller naming a model authorizes that model, not a
+                        // later switch to a different, possibly dearer arm, so
+                        // `authorized_cloud` deliberately does not count here.
+                        let confirmed = self.cloud_approved(session);
                         match planes::authorize_upgrade(
                             self.cloud_policy(),
                             reason,
@@ -770,6 +710,9 @@ impl super::Router {
                             "Re-routed after local collapse"
                         );
                         current_decision = next;
+                        if allow_cloud && current_decision.recommended_model.is_cloud() {
+                            authorized_cloud = Some(current_decision.recommended_model.clone());
+                        }
                         continue;
                     }
                 }
@@ -853,18 +796,35 @@ impl super::Router {
             }
 
             response.quality_gate_retries = attempt;
-            return Ok(response);
+            return Ok(RoutedResponse {
+                response,
+                model: actual_model,
+                attempts,
+            });
         }
 
-        tracing::warn!("Route loop completed without returning, using empty response");
-        Ok(ProviderResponse {
-            content: String::new(),
-            reasoning_content: None,
-            tool_calls: Vec::new(),
-            finish_reason: None,
-            inference_timing: None,
-            quality_gate_retries: MAX_RETRIES,
+        Err(Error::MaxRetriesExceeded {
+            attempts: MAX_RETRIES,
         })
+    }
+}
+
+// A rejected tool call still needs an output paired to its native ID before
+// Responses can continue the conversation. Nothing in this retry was executed.
+fn append_rejected_response(messages: &mut Vec<Message>, response: &ProviderResponse) {
+    if response.provider_state.is_empty() {
+        messages.push(Message::assistant(response.content.clone()));
+        return;
+    }
+    messages.push(response.as_assistant_message());
+    for (id, name) in response.provider_state.native_calls() {
+        messages.push(Message::tool_result(
+            "Tool call rejected by response validation; it was not executed.",
+            id,
+            // A provider that recorded a call but omitted its name still needs
+            // an answer, so it is attributed to a generic tool, not dropped.
+            if name.is_empty() { "tool" } else { name },
+        ));
     }
 }
 
@@ -874,6 +834,193 @@ mod tests {
     use crate::tool_extraction;
     use arkavo_mcp_tools::{DetailLevel, ToolRegistry};
     use arkavo_test_macros::spec;
+
+    /// Regression: the tool loop resolved its arm from classification and went
+    /// straight to provider construction, so a device with no weights on disk
+    /// and no cloud keys reached `load_local_model` and started a
+    /// multi-gigabyte fetch inside the caller's turn. The guard sits at the
+    /// dispatch site, not in `classify`: the hint is applied *after*
+    /// classification, so a check inside `classify` would test an arm the loop
+    /// is not going to run — and classification is also used for previews and
+    /// metrics that never dispatch.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn the_tool_loop_refuses_an_unprovisioned_automatic_arm() {
+        use crate::test_support::CountingProvider;
+        use crate::{Error, ModelSelector, ProviderAvailability, Router};
+
+        let provider = CountingProvider::new("answer");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability::default(),
+                false,
+            ))
+            .await
+            .with_provider_factory(provider.factory());
+
+        let error = router
+            .route_with_tools(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModelNotAvailable { .. }),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert_eq!(provider.calls(), 0);
+    }
+
+    /// Regression: the guard exempted "the hint equals the arm we are about to
+    /// run", which is value equality against whatever classification produced —
+    /// not evidence that the hint was applied. On a bare device the hint block
+    /// correctly declines an uncached `qwen3.5-0.8b`, classification lands on
+    /// the same arm by itself, and the coincidence used to skip the guard and
+    /// download it.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn a_declined_hint_does_not_authorize_a_download() {
+        use crate::test_support::CountingProvider;
+        use crate::{Error, ModelChoice, ModelSelector, ProviderAvailability, Router};
+
+        let provider = CountingProvider::new("answer");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability::default(),
+                false,
+            ))
+            .await
+            .with_provider_factory(provider.factory());
+
+        let error = router
+            .route_with_tools_hinted(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                Some(&ModelChoice::LocalQwen3),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModelNotAvailable { .. }),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert_eq!(provider.calls(), 0);
+    }
+
+    /// The positive control: the same hint on a provisioned device is applied
+    /// and served.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn an_applied_hint_is_served_on_a_provisioned_device() {
+        use crate::test_support::CountingProvider;
+        use crate::{ModelChoice, ModelSelector, ProviderAvailability, Router};
+
+        let provider = CountingProvider::new("answer");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability::default(),
+                true,
+            ))
+            .await
+            .with_provider_factory(provider.factory());
+
+        let response = router
+            .route_with_tools_hinted(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                Some(&ModelChoice::LocalQwen3),
+            )
+            .await
+            .expect("an applied hint on a provisioned device is served");
+        assert_eq!(response.content, "answer");
+        assert_eq!(provider.built_models(), vec![ModelChoice::LocalQwen3]);
+    }
+
+    /// The same coincidence stood in for consent to *spend*: a cooled-down
+    /// hint is not applied, but classification picked the same cloud arm, and
+    /// value equality reported that as the caller having named it — silently
+    /// satisfying `AskBeforeCloud`.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_declined_cloud_hint_is_not_the_users_consent_to_spend() {
+        use crate::test_support::{CountingProvider, cloud_router};
+        use crate::{Error, ModelChoice};
+
+        let provider = CountingProvider::new("answer");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::AskBeforeCloud,
+            "openai",
+            &provider,
+        )
+        .await;
+        // Three sustained quality failures put the hint past
+        // HINT_OVERRIDE_THRESHOLD, so it is declined. Unlike a cooldown this
+        // does not exclude the arm from the feasible set, so classification
+        // still reaches Astra on its own — which is the coincidence under test.
+        for _ in 0..3 {
+            router
+                .record_reward_failure(ModelChoice::Gpt6Astra.name())
+                .await;
+        }
+
+        let error = router
+            .route_with_tools_hinted(
+                "design the API surface",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+                Some(&ModelChoice::Gpt6Astra),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::CloudConfirmationRequired { .. }),
+            "a hint that was never applied is nobody's consent: got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+    }
+
+    /// The mirror: with the weights on disk the same call is served, so the
+    /// guard refuses a missing weight and nothing else.
+    #[spec("ROUTER-003")]
+    #[tokio::test]
+    async fn the_tool_loop_serves_a_provisioned_automatic_arm() {
+        use crate::test_support::CountingProvider;
+        use crate::{ModelSelector, ProviderAvailability, Router};
+
+        let provider = CountingProvider::new("answer");
+        let router = Router::new_offline()
+            .await
+            .unwrap()
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability::default(),
+                true,
+            ))
+            .await
+            .with_provider_factory(provider.factory());
+
+        let response = router
+            .route_with_tools(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("hello")],
+                None,
+            )
+            .await
+            .expect("a provisioned device serves the tool loop");
+        assert_eq!(response.content, "answer");
+        assert_eq!(provider.builds(), 1);
+    }
 
     /// Regression for the bug surfaced by gitar-bot on PR #598: an empty
     /// `ToolRegistry` (or a registry whose keyword search yields zero hits)
@@ -927,5 +1074,264 @@ mod tests {
             "empty-tools path must avoid the -0.7 tool-required penalty \
              (no_penalty={quality_no_penalty}, with_penalty={quality_with_penalty})"
         );
+    }
+    #[spec("ASTRA-002")]
+    #[test]
+    fn validation_retry_preserves_reasoning_and_resolves_tool_ids() {
+        let response = arkavo_llm::ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                serde_json::json!({"type":"reasoning","id":"reasoning-1","encrypted_content":"opaque"}),
+                serde_json::json!({"type":"function_call","call_id":"call-1","name":"read","arguments":"{}"}),
+            ]),
+            tool_calls: vec![arkavo_llm::tool_parser::ParsedToolCall {
+                tool_name: "read".into(),
+                arguments: serde_json::json!({}),
+                call_id: Some("call-1".into()),
+            }],
+            ..Default::default()
+        };
+        let mut messages = Vec::new();
+        super::append_rejected_response(&mut messages, &response);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].provider_state, response.provider_state);
+        assert_eq!(messages[1].tool_call_id.as_deref(), Some("call-1"));
+        assert!(messages[1].content.contains("not executed"));
+    }
+
+    /// The tool loop dispatches paid cloud calls exactly like chat, so it must
+    /// consult the same cloud-spend policy — `LocalOnly` used to be silently
+    /// ignored here, letting an OPENAI_API_KEY-only agent reach Astra.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn local_only_denies_the_tool_loop_path() {
+        use crate::Error;
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("ok");
+        let router = cloud_router(arkavo_budget::CloudPolicy::LocalOnly, "openai", &provider).await;
+        let error = router
+            .route_with_tools_attributed(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("summarize the diff")],
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::ModerationBlocked { policy_id, .. } if policy_id == "cloud_spend"),
+            "got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a denied call must not open a client");
+        assert_eq!(provider.calls(), 0);
+    }
+
+    /// Amendment (b): an auto-selected cloud arm has no caller authorization,
+    /// so `AskBeforeCloud` must ask before the loop spends anything.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn auto_selected_cloud_asks_before_the_loop_spends() {
+        use crate::Error;
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::new("ok");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::AskBeforeCloud,
+            "openai",
+            &provider,
+        )
+        .await;
+        let error = router
+            .route_with_tools_attributed(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("summarize the diff")],
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::CloudConfirmationRequired { model, .. } if model == "gpt-6-astra"),
+            "got {error:?}"
+        );
+        assert_eq!(provider.calls(), 0);
+    }
+
+    /// Amendment (c): once confirmed the loop proceeds — and a retry *inside*
+    /// that loop must not re-ask, because the one-shot flag is already spent.
+    /// The empty registry rejects the answer's tool call, so all three attempts
+    /// run against the same authorized arm.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn confirmation_covers_every_retry_of_the_same_arm() {
+        use crate::test_support::{CountingProvider, cloud_router};
+
+        let provider = CountingProvider::calling_tool("no_such_tool");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::AskBeforeCloud,
+            "openai",
+            &provider,
+        )
+        .await;
+        router.approve_cloud_for_host();
+
+        let registry = ToolRegistry::empty();
+        let routed = router
+            .route_with_tools_attributed(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("summarize the diff")],
+                Some(&registry),
+            )
+            .await
+            .expect("the confirmed arm must not be re-asked mid-loop");
+        assert_eq!(routed.model, crate::ModelChoice::Gpt6Astra);
+        assert_eq!(
+            provider.calls(),
+            3,
+            "every validation retry reuses the authorization granted once"
+        );
+    }
+
+    /// The collapse plane may upgrade a breakdown to cloud once the spend plane
+    /// authorizes it. That authorization consumes the user's one-shot flag, so
+    /// the retry it schedules must inherit it — otherwise the loop either
+    /// re-asks (and fails the whole request) or silently re-offers the upgrade
+    /// it was just granted.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_confirmed_collapse_upgrade_is_not_re_asked() {
+        use crate::selector::ModelSelector;
+        use crate::test_support::{CountingProvider, only};
+        use crate::{ConnectivityChecker, Router, RouterEvent};
+
+        // Exactly two feasible arms: the cheapest cached local model and the one
+        // configured cloud provider. The memory budget drops every other local.
+        let selector = ModelSelector::with_availability(only("openai"), true);
+        selector.set_memory_budget(600_000_000);
+        assert_eq!(
+            selector.feasible_models(),
+            vec![
+                crate::ModelChoice::LocalQwen3,
+                crate::ModelChoice::Gpt6Astra
+            ]
+        );
+
+        let provider = CountingProvider::blank_then("a complete answer for the request");
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = router
+            .with_cloud_policy(arkavo_budget::CloudPolicy::AskBeforeCloud)
+            .with_connectivity(ConnectivityChecker::assume(true))
+            .with_selector(selector)
+            .await
+            .with_provider_factory(provider.factory());
+        let _ = router.drain_events();
+        router.approve_cloud_for_host();
+
+        let routed = router
+            .route_with_tools_attributed(
+                "summarize the diff",
+                vec![arkavo_llm::Message::user("summarize the diff")],
+                None,
+            )
+            .await
+            .expect("a confirmed dispatch must not be re-asked mid-loop");
+        assert!(!routed.response.content.is_empty());
+        assert_eq!(provider.calls(), 2, "the collapse must have been retried");
+        assert!(
+            !router
+                .drain_events()
+                .iter()
+                .any(|event| matches!(event, RouterEvent::CloudUpgradeOffered { .. })),
+            "an already-confirmed upgrade must not be offered again"
+        );
+    }
+
+    /// A one-cent session cap is genuinely exhausted for any paid arm, and the
+    /// ledger must say so before a client is opened. The proportional reserve
+    /// only re-prices the call; `CallBudget::check` still rounds it up to a whole
+    /// cent, so re-pricing must not soften this refusal into a bypass.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn a_tiny_cap_still_refuses_the_loop_before_a_provider_exists() {
+        use crate::test_support::{CountingProvider, cloud_router};
+        use crate::{Error, ModelChoice};
+        use arkavo_budget::{BudgetConfig, BudgetTracker, TokenCost};
+        use std::sync::Arc;
+
+        let mut config = BudgetConfig::default();
+        config.limits.session_limit = Some(TokenCost::from_cents(1));
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+        let provider = CountingProvider::new("ready");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::CloudWithinCap,
+            "openai",
+            &provider,
+        )
+        .await
+        .with_budget_tracker(tracker.clone());
+
+        let error = router
+            .route_with_tools_hinted(
+                "reply to the operator",
+                vec![arkavo_llm::Message::user(
+                    "Reply with the single word ready.",
+                )],
+                None,
+                Some(&ModelChoice::Gpt6Astra),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::BudgetExceeded(_)),
+            "an exhausted cap must refuse the loop: got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert_eq!(provider.calls(), 0);
+        assert!(tracker.get_spending_history(10).await.is_empty());
+    }
+
+    /// Regression: the hinted tool loop reserved a full 4096-token response for
+    /// every call, so on Astra's $50/MTok output rate the preflight bound was
+    /// at least $0.2048 before the prompt was even counted — and `CallBudget`
+    /// rounds that up to 21 cents. A 20-cent session cap could therefore never
+    /// fund a single one-line request: it reported `BudgetExceeded` and
+    /// abandoned the task without ever building a provider, while the answer it
+    /// refused to make would have cost a fraction of a cent.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn a_modest_cap_funds_a_small_astra_tool_loop_call() {
+        use crate::ModelChoice;
+        use crate::test_support::{CountingProvider, cloud_router};
+        use arkavo_budget::{BudgetConfig, BudgetTracker, TokenCost};
+        use std::sync::Arc;
+
+        let mut config = BudgetConfig::default();
+        config.limits.session_limit = Some(TokenCost::from_cents(20));
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+        let provider = CountingProvider::new("ready");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::CloudWithinCap,
+            "openai",
+            &provider,
+        )
+        .await
+        .with_budget_tracker(tracker.clone());
+
+        let response = router
+            .route_with_tools_hinted(
+                "reply to the operator",
+                vec![arkavo_llm::Message::user(
+                    "Reply with the single word ready.",
+                )],
+                None,
+                Some(&ModelChoice::Gpt6Astra),
+            )
+            .await
+            .expect("a 20-cent cap must fund one short cloud call");
+        assert_eq!(response.content, "ready");
+        assert_eq!(provider.built_models(), vec![ModelChoice::Gpt6Astra]);
+        assert_eq!(provider.calls(), 1, "one dispatch answered the request");
+        // Settlement is what actually charges the ledger, so the call the
+        // reserve admitted is still accounted against the cap.
+        assert_eq!(tracker.get_spending_history(10).await.len(), 1);
     }
 }

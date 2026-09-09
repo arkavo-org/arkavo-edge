@@ -1,8 +1,11 @@
 use anyhow::Result;
 use arkavo_llm::Message;
-use arkavo_router::Router;
+use arkavo_router::{ModelChoice, Router};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// Output allowance for one planning call — a JSON array of at most ten parts.
+const MAX_PLAN_TOKENS: u32 = 4096;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildPlan {
@@ -39,26 +42,43 @@ impl UiPlanner {
     }
 
     async fn try_llm_plan(&self, user_prompt: &str) -> Result<BuildPlan> {
-        let planning_prompt = self.build_planning_prompt(user_prompt);
+        let messages = vec![Message::user(self.build_planning_prompt(user_prompt))];
+        let model = self.planning_model()?;
 
-        // Try Gemini first (if available), fall back to local model
-        let response = if let Some(gemini_provider) = self.router.get_planning_provider() {
-            gemini_provider
-                .complete(vec![Message::user(planning_prompt.clone())])
-                .await
-                .map_err(|e| anyhow::anyhow!("Gemini planning failed: {e}"))?
-        } else {
-            // Use local model via Router
-            let local_provider = self.router.get_local_provider();
-            local_provider
-                .complete(vec![Message::user(planning_prompt)])
-                .await
-                .map_err(|e| anyhow::anyhow!("Local model planning failed: {e}"))?
-        };
+        // Planning spends like any other call, so it faces the router's cloud
+        // policy and spend caps before a client exists — a refusal must not
+        // open a connection, and must not be silently downgraded to a
+        // different arm than the one the user was asked about.
+        let usage = arkavo_router::usage::estimate_request(&messages, None, MAX_PLAN_TOKENS);
+        let cost = self.router.usage_cost(&model, &usage);
+        self.router
+            .authorize_call(&model, cost, false, None)
+            .await?;
 
-        let plan = self.parse_plan(&response)?;
+        let (provider, _) = self.router.get_provider_attributed(&model).await?;
+        let response = provider
+            .complete(messages)
+            .await
+            .map_err(|e| anyhow::anyhow!("UI planning failed on {}: {e}", model.name()))?;
 
-        Ok(plan)
+        self.parse_plan(&response)
+    }
+
+    /// The arm that plans: this device's local model when its weights are on
+    /// disk, and the configured cloud augmentation only when they are not.
+    /// Cloud augments local inference here as everywhere else; it does not
+    /// replace it.
+    fn planning_model(&self) -> Result<ModelChoice> {
+        let local = self.router.default_chat_model();
+        if self.router.require_provisioned(&local).is_ok() {
+            return Ok(local);
+        }
+        self.router.cloud_augmentation_model().ok_or_else(|| {
+            anyhow::anyhow!(
+                "No planning model available: {} is not provisioned and no cloud provider is configured",
+                local.name()
+            )
+        })
     }
 
     fn build_planning_prompt(&self, user_prompt: &str) -> String {
@@ -142,6 +162,29 @@ Return ONLY the JSON array, nothing else."#
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_router::{
+        ConnectivityChecker, ModelSelector, ProviderAvailability, ProviderFactory,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Counts provider construction, so "the plan was refused before a client
+    /// existed" is an assertion rather than an inference.
+    #[derive(Default)]
+    struct CountingFactory {
+        builds: AtomicUsize,
+    }
+
+    impl ProviderFactory for CountingFactory {
+        fn build(
+            &self,
+            _model: &ModelChoice,
+        ) -> arkavo_router::Result<Box<dyn arkavo_llm::Provider>> {
+            self.builds.fetch_add(1, Ordering::SeqCst);
+            Err(arkavo_router::Error::ModelExecution(
+                "no client may be built in this test".to_string(),
+            ))
+        }
+    }
 
     #[test]
     fn test_parse_plan() {
@@ -160,5 +203,97 @@ mod tests {
         assert_eq!(parts[0].name, "Header");
         assert_eq!(parts[0].description, "Top bar");
         assert_eq!(parts[0].priority, 1);
+    }
+
+    /// A router with no local weights and one configured cloud provider: the
+    /// deployment where the ungated path used to reach the network.
+    async fn unprovisioned_router(
+        policy: arkavo_budget::CloudPolicy,
+        factory: Arc<CountingFactory>,
+    ) -> Router {
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        router
+            .with_cloud_policy(policy)
+            .with_connectivity(ConnectivityChecker::assume(true))
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability {
+                    gemini: true,
+                    ..ProviderAvailability::default()
+                },
+                false,
+            ))
+            .await
+            .with_provider_factory(factory)
+    }
+
+    /// Under `AskBeforeCloud` the planning call is not denied outright — it
+    /// needs the user's answer, and nobody has given one. The refusal names
+    /// that, and still opens no client.
+    #[tokio::test]
+    async fn ask_before_cloud_needs_confirmation_before_the_planning_call() {
+        let factory = Arc::new(CountingFactory::default());
+        let router =
+            unprovisioned_router(arkavo_budget::CloudPolicy::AskBeforeCloud, factory.clone()).await;
+
+        let error = UiPlanner::new(Arc::new(router))
+            .plan("a dashboard with charts")
+            .await
+            .expect_err("an unapproved cloud planning call must be refused");
+        let router_error = error
+            .downcast_ref::<arkavo_router::Error>()
+            .expect("router error");
+        assert!(
+            matches!(
+                router_error,
+                arkavo_router::Error::CloudConfirmationRequired { .. }
+            ),
+            "got {router_error:?}"
+        );
+        assert_eq!(
+            factory.builds.load(Ordering::SeqCst),
+            0,
+            "a call awaiting confirmation must not open a client"
+        );
+    }
+
+    /// Regression: the planner reached for a raw Gemini client through
+    /// `Router::get_planning_provider`, which never consulted the cloud
+    /// policy — so a `LocalOnly` install still sent the prompt to Gemini.
+    /// Planning now goes through the same gate as every other call, and a
+    /// refusal opens no client.
+    #[tokio::test]
+    async fn local_only_refuses_the_planning_call_without_building_a_client() {
+        let factory = Arc::new(CountingFactory::default());
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = router
+            .with_cloud_policy(arkavo_budget::CloudPolicy::LocalOnly)
+            .with_connectivity(ConnectivityChecker::assume(true))
+            // No local weights on disk, one configured cloud provider: the
+            // deployment where the ungated path used to reach the network.
+            .with_selector(ModelSelector::with_availability(
+                ProviderAvailability {
+                    gemini: true,
+                    ..ProviderAvailability::default()
+                },
+                false,
+            ))
+            .await
+            .with_provider_factory(factory.clone());
+
+        let error = UiPlanner::new(Arc::new(router))
+            .plan("a dashboard with charts")
+            .await
+            .expect_err("a LocalOnly install must refuse a cloud planning call");
+        assert!(
+            error.to_string().contains("Cloud inference denied"),
+            "got {error}"
+        );
+        assert_eq!(
+            factory.builds.load(Ordering::SeqCst),
+            0,
+            "a refused plan must not open a client"
+        );
     }
 }

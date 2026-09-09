@@ -23,7 +23,7 @@ snpe = ["dep:arkavo-snpe"]
 
 [dependencies]
 # Core dependencies - always needed for public API
-tokio = { workspace = true, features = ["rt", "macros", "sync"] }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 futures = { workspace = true }

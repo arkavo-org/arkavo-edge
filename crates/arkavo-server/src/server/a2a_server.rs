@@ -1293,7 +1293,10 @@ impl A2aServer {
             auth_backend: Arc::new(arkavo_protocol::auth::JwtAuthBackend::new(
                 "change-me-in-production",
             )),
-            registration_service: Arc::new(arkavo_agent::registration::RegistrationService::new()),
+            registration_service: Arc::new(
+                arkavo_agent::registration::RegistrationService::new()
+                    .with_delegation_config(&super::config_helpers::delegation_config_from_env()?)?,
+            ),
             conductor: self.conductor.read().await.clone(),
             router,
             learning_bus: learning_bus_for_rpc,
@@ -1308,11 +1311,20 @@ impl A2aServer {
             #[cfg(feature = "kas")]
             kas_handler: {
                 let agent_config = self.agent_config.read().await;
-                let kas_config = agent_config.kas.clone().map(|k| arkavo_tdf::KasA2aConfig {
-                    key_id: k.key_id.unwrap_or_else(|| "kas-key-1".to_string()),
-                    algorithm: k.algorithm.unwrap_or_else(|| "ec:secp256r1".to_string()),
-                });
-                let mut handler = KasA2aHandler::new(vec![], kas_config.unwrap_or_default());
+                let (kas_config, trusted_roots) = match agent_config.kas.as_ref() {
+                    Some(k) => (
+                        arkavo_tdf::KasA2aConfig {
+                            key_id: k.key_id.clone().unwrap_or_else(|| "kas-key-1".to_string()),
+                            algorithm: k
+                                .algorithm
+                                .clone()
+                                .unwrap_or_else(|| "ec:secp256r1".to_string()),
+                        },
+                        super::handlers::kas::trusted_roots_from_config(k),
+                    ),
+                    None => (arkavo_tdf::KasA2aConfig::default(), Vec::new()),
+                };
+                let mut handler = KasA2aHandler::new(trusted_roots, kas_config);
                 handler.set_keypair(arkavo_tdf::KasKeypair::generate());
                 Some(Arc::new(handler))
             },
@@ -1628,5 +1640,59 @@ mod dedup_tests {
         // cycle 3: new specialist advice — executes (reset)
         // cycle 4-5: duplicate — skipped
         assert_eq!(executed, vec![0, 3]);
+    }
+}
+
+/// The A2A server serves requests it did not originate, so it must never own a
+/// consent prompter: a chat manager that could ask would put the question on
+/// the server's own console and park a remote client's request on it.
+#[cfg(test)]
+mod cloud_consent_tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    /// Both shapes this file builds: the router-backed manager that serves real
+    /// client requests, and the no-router fallback. `with_config` is the only
+    /// constructor either uses, and a prompter can only arrive afterwards
+    /// through `set_cloud_consent_prompt`, which appears nowhere in this crate.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn the_server_builds_chat_managers_that_cannot_prompt() {
+        // Injected availability keeps the fixture off the host's model cache.
+        let router = arkavo_router::Router::new_offline()
+            .await
+            .expect("an offline router needs no credentials")
+            .with_selector(arkavo_router::ModelSelector::with_availability(
+                arkavo_router::ProviderAvailability::default(),
+                false,
+            ))
+            .await;
+        let registry = Arc::new(arkavo_mcp_tools::ToolRegistry::empty());
+
+        let with_router = chat_session::ChatSessionManager::with_config(
+            None,
+            Some(Arc::new(router)),
+            Some(registry),
+            3600,
+            BufferConfig::default(),
+        );
+        assert!(
+            !with_router.has_cloud_consent_prompt(),
+            "the manager that serves A2A clients must have no way to read the server's console"
+        );
+        with_router.shutdown().await;
+
+        let fallback = chat_session::ChatSessionManager::with_config(
+            None,
+            None,
+            None,
+            3600,
+            BufferConfig::default(),
+        );
+        assert!(
+            !fallback.has_cloud_consent_prompt(),
+            "the no-router fallback must not read the server's console either"
+        );
+        fallback.shutdown().await;
     }
 }

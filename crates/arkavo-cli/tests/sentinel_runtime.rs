@@ -101,6 +101,7 @@ impl Provider for OutputProvider {
             reasoning_content: self.0.reasoning_content.clone(),
             done: true,
             inference_timing: None,
+            ..Default::default()
         })])))
     }
 

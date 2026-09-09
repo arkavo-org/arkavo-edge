@@ -1,7 +1,11 @@
 pub mod agent;
+pub mod agent_config;
+pub mod agent_config_markdown;
+pub mod agent_config_yaml;
 pub mod chat;
 pub mod dataflow;
 pub mod login;
+pub mod mcp_proxy;
 pub mod mesh;
 pub mod model;
 pub mod model_list;

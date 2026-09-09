@@ -98,10 +98,7 @@ mod tests {
         let messages = vec![Message {
             role: Role::User,
             content: "What's the weather in New York?".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         }];
 
         println!("\n=== Testing: What's the weather in New York? ===");
@@ -160,10 +157,7 @@ mod tests {
         let messages = vec![Message {
             role: Role::User,
             content: "Read the file at /tmp/test.txt".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         }];
 
         println!("\n=== Testing: Read the file at /tmp/test.txt ===");
@@ -227,10 +221,7 @@ mod tests {
             let messages = vec![Message {
                 role: Role::User,
                 content: prompt.to_string(),
-                images: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_calls: Vec::new(),
+                ..Default::default()
             }];
 
             let fence_result = fence_provider

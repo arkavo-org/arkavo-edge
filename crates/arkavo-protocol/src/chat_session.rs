@@ -1,12 +1,11 @@
 use crate::auth::SessionAuth;
+use crate::chat_cloud_gate::{CloudConfirmation, cloud_confirmation, request_cloud_consent};
 use crate::config::{BufferConfig, ChatStreamingMode};
 use crate::error::{A2aError, Result};
 use crate::types::{
     ChatCapabilities, ChatSession, MessageDelta, MessageDeltaContent, StreamEndReason, UserMessage,
 };
-use arkavo_llm::{
-    DeltaType, LlmClientAdapter, Message, StreamLlmModel, ToolExecutionResult, ToolExecutor,
-};
+use arkavo_llm::{DeltaType, LlmClientAdapter, Message, StreamLlmModel, ToolExecutor};
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_observability::{
     metrics::MetricsCollector,
@@ -14,7 +13,7 @@ use arkavo_observability::{
     session_observability,
     task_tracker::{ObservableTaskTracker, SessionTaskManager},
 };
-use arkavo_router::Router;
+use arkavo_router::{CloudConsentPrompt, Router};
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,6 +63,12 @@ pub struct ChatSessionManager {
     /// Updated by the server from ToolMemory + conductor task store.
     /// Injected as a system message so chat can reference what the agent has been doing.
     task_context: Option<Arc<RwLock<String>>>,
+    /// The host's channel to the person who decides whether this process may
+    /// spend on cloud inference. Absent by default, which is what a server
+    /// answering remote clients must stay: with no prompter a refused cloud
+    /// call returns `CloudConfirmationRequired` at once rather than waiting on
+    /// a console nobody is watching.
+    cloud_consent_prompt: Option<Arc<dyn CloudConsentPrompt>>,
 }
 
 struct ChatSessionState {
@@ -168,6 +173,7 @@ impl ChatSessionManager {
             system_prompt: None,
             model_override: None,
             task_context: None,
+            cloud_consent_prompt: None,
         }
     }
 
@@ -198,6 +204,22 @@ impl ChatSessionManager {
     /// Override chat inference with a catalog model or an on-disk GGUF path.
     pub fn set_model_spec(&mut self, spec: arkavo_router::ModelSpec) {
         self.model_override = Some(spec);
+    }
+
+    /// Give this manager a way to ask the user before a session's request is
+    /// sent to paid cloud inference.
+    ///
+    /// Only a host that owns a channel to a person — an interactive CLI — may
+    /// install one. A process serving requests it did not originate installs
+    /// none, so a refusal is reported to the caller rather than parked on a
+    /// prompt nobody can answer.
+    pub fn set_cloud_consent_prompt(&mut self, prompt: Arc<dyn CloudConsentPrompt>) {
+        self.cloud_consent_prompt = Some(prompt);
+    }
+
+    /// Whether this manager can ask its user about cloud spend.
+    pub fn has_cloud_consent_prompt(&self) -> bool {
+        self.cloud_consent_prompt.is_some()
     }
 
     /// Set a shared task context that will be injected into chat sessions.
@@ -291,6 +313,7 @@ impl ChatSessionManager {
             let system_prompt = self.system_prompt.clone();
             let model_override = self.model_override.clone();
             let task_context = self.task_context.clone();
+            let cloud_consent_prompt = self.cloud_consent_prompt.clone();
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -308,6 +331,7 @@ impl ChatSessionManager {
                         system_prompt,
                         model_override,
                         task_context,
+                        cloud_consent_prompt,
                     )
                     .await;
                 });
@@ -443,7 +467,48 @@ impl ChatSessionManager {
 
             self.task_tracker
                 .spawn_named("delta-forwarder", async move {
-                    while let Ok(delta) = broadcast_rx.recv().await {
+                    loop {
+                        let delta = match broadcast_rx.recv().await {
+                            Ok(delta) => delta,
+                            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                                // Dropped deltas corrupt the reassembled message, so a
+                                // lagging subscriber must see an explicit stream error
+                                // rather than a truncated stream that looks complete.
+                                warn!(
+                                    session.id = %session_id_clone,
+                                    skipped,
+                                    "Delta subscriber lagged; terminating stream with error"
+                                );
+                                let error_delta = MessageDelta {
+                                    session_id: session_id_clone.clone(),
+                                    message_id: uuid::Uuid::new_v4().to_string(),
+                                    sequence: 0,
+                                    delta: MessageDeltaContent::Error {
+                                        code: "STREAM_LAGGED".to_string(),
+                                        message: format!(
+                                            "Stream truncated: subscriber lagged, {skipped} deltas dropped"
+                                        ),
+                                    },
+                                    timestamp: chrono::Utc::now(),
+                                };
+                                if delta_tx.send(error_delta).await.is_err() {
+                                    break; // Receiver dropped
+                                }
+                                let end_delta = MessageDelta {
+                                    session_id: session_id_clone.clone(),
+                                    message_id: uuid::Uuid::new_v4().to_string(),
+                                    sequence: 1,
+                                    delta: MessageDeltaContent::StreamEnd {
+                                        reason: StreamEndReason::Error,
+                                    },
+                                    timestamp: chrono::Utc::now(),
+                                };
+                                let _ = delta_tx.send(end_delta).await;
+                                break;
+                            }
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        };
+
                         // Record delta metrics
                         let delta_type = match &delta.delta {
                             MessageDeltaContent::Text { .. } => "text",
@@ -499,6 +564,24 @@ impl ChatSessionManager {
         // Update metrics state
         if let Some(metrics) = self.session_metrics.write().await.get_mut(session_id) {
             metrics.set_state(SessionState::Closing);
+        }
+
+        // Notify stream subscribers with a terminal StreamEnd before teardown,
+        // so the delta channel does not close silently — the streaming handler
+        // reports a channel close without StreamEnd as an abnormal termination.
+        {
+            let sessions = self.sessions.read().await;
+            if let Some(state) = sessions.get(session_id) {
+                let _ = state.delta_tx.send(MessageDelta {
+                    session_id: session_id.to_string(),
+                    message_id: uuid::Uuid::new_v4().to_string(),
+                    sequence: 0,
+                    delta: MessageDeltaContent::StreamEnd {
+                        reason: StreamEndReason::SessionClosed,
+                    },
+                    timestamp: chrono::Utc::now(),
+                });
+            }
         }
 
         // Gracefully shutdown session task manager
@@ -868,7 +951,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with Router (quality gate + tools)
-    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt, model_override, task_context), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, router, tool_registry, sessions, session_metrics, metrics_collector, learning_context, teaching_tx, system_prompt, model_override, task_context, cloud_consent_prompt), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session_with_router(
         session_id: String,
@@ -884,8 +967,14 @@ impl ChatSessionManager {
         system_prompt: Option<String>,
         model_override: Option<arkavo_router::ModelSpec>,
         task_context: Option<Arc<RwLock<String>>>,
+        cloud_consent_prompt: Option<Arc<dyn CloudConsentPrompt>>,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
+        // An approval is held by the router against this session id, so the
+        // answer itself needs no mirror here. `cloud_asked` records only that
+        // the question was put at all, which makes a decline as final as an
+        // approval and keeps the user from being asked again on the next turn.
+        let mut cloud_asked = false;
         info!("Router-based session handler started");
 
         loop {
@@ -911,11 +1000,9 @@ impl ChatSessionManager {
                     // Chat path: fastest local model on separate semaphore
                     // Sliding window prevents unbounded context growth
                     const CHAT_WINDOW_SIZE: usize = 8;
-                    let mut windowed_context: Vec<Message> = if conversation_context.len() > CHAT_WINDOW_SIZE {
-                        conversation_context[conversation_context.len() - CHAT_WINDOW_SIZE..].to_vec()
-                    } else {
-                        conversation_context.clone()
-                    };
+                    let mut windowed_context = super::chat_history::recent_turns(
+                        &conversation_context, CHAT_WINDOW_SIZE,
+                    );
 
                     // Prepend task context as system message (recent tasks + last observed state)
                     if let Some(ref tc) = task_context {
@@ -965,12 +1052,19 @@ impl ChatSessionManager {
 
                     // Classify human teaching intent before routing
                     let last_trace = router.last_decision_trace().map(|t| t.trace_id);
-                    let intent = arkavo_router::learning::human_teaching::classify_intent_llm(
-                        &user_message.content,
-                        last_trace,
-                        &router,
-                    )
-                    .await;
+                    let selected_model = model_override.as_ref()
+                        .and_then(arkavo_router::ModelSpec::as_named)
+                        .cloned()
+                        .unwrap_or_else(|| router.default_chat_model());
+                    let intent = if selected_model.is_local() && model_override.as_ref().is_none_or(|s| s.as_gguf_path().is_none()) {
+                        arkavo_router::learning::human_teaching::classify_intent_llm(
+                            &user_message.content, last_trace, &router,
+                        ).await
+                    } else {
+                        arkavo_router::learning::human_teaching::classify_intent(
+                            &user_message.content, last_trace,
+                        )
+                    };
 
                     if intent != arkavo_router::learning::TeachingIntent::Question {
                         // Emit intent metadata delta so the UI can display it
@@ -1035,14 +1129,14 @@ impl ChatSessionManager {
                         );
                     }
 
-                    let spec = model_override.clone().unwrap_or_else(|| {
-                        arkavo_router::ModelSpec::Named(router.fastest_local_model())
-                    });
+                    let spec = model_override
+                        .clone()
+                        .unwrap_or(arkavo_router::ModelSpec::Named(selected_model));
                     let model_label = spec.display_name();
                     let reasoning = if model_override.is_some() {
                         format!("--model override: {model_label}")
                     } else {
-                        "Chat path: fastest local model, separate semaphore".to_string()
+                        "Chat path: available model, separate semaphore".to_string()
                     };
                     let metadata_delta = MessageDelta {
                         session_id: session_id.clone(),
@@ -1065,12 +1159,15 @@ impl ChatSessionManager {
                     // can exceed the 60s named-model budget.
                     let chat_timeout_secs = if spec.as_gguf_path().is_some() {
                         180
+                    } else if spec.as_named().is_some_and(|m| !m.is_local()) {
+                        3600
                     } else {
                         60
                     };
-                    let route_result = match tokio::time::timeout(
+                    let mut continuation_context = windowed_context.clone();
+                    let mut route_result = match tokio::time::timeout(
                         std::time::Duration::from_secs(chat_timeout_secs),
-                        router.route_chat_spec(windowed_context, tool_registry.as_deref(), model_override.as_ref()),
+                        router.route_chat_spec(windowed_context, tool_registry.as_deref(), model_override.as_ref(), Some(&session_id)),
                     )
                     .await
                     {
@@ -1082,6 +1179,49 @@ impl ChatSessionManager {
                             ))
                         }
                     };
+
+                    // Cloud augmentation needs authorization here; ask the
+                    // user once, through the host's own channel, and
+                    // re-dispatch the identical request. A host with no channel
+                    // never reaches this branch, so the refusal is returned to
+                    // whoever sent the message instead of parked on a console.
+                    if let Err(ref route_err) = route_result
+                        && let CloudConfirmation::Ask { model, estimated_cost_usd } = cloud_confirmation(
+                            route_err,
+                            cloud_consent_prompt.is_some(),
+                            cloud_asked,
+                        )
+                        && let Some(prompt) = cloud_consent_prompt.as_ref()
+                    {
+                        // Asked counts whichever way it is answered; a decline is
+                        // final for the session and must not be re-litigated.
+                        cloud_asked = true;
+                        // An approval is recorded against this session id, so
+                        // the calls this turn fans out into — and every later
+                        // turn of this conversation — inherit it without
+                        // re-asking, and no other session inherits anything.
+                        if request_cloud_consent(prompt, &router, &session_id, &model, estimated_cost_usd).await {
+                            route_result = match tokio::time::timeout(
+                                std::time::Duration::from_secs(chat_timeout_secs),
+                                router.route_chat_spec(
+                                    continuation_context.clone(),
+                                    tool_registry.as_deref(),
+                                    model_override.as_ref(),
+                                    Some(&session_id),
+                                ),
+                            )
+                            .await
+                            {
+                                Ok(inner) => inner,
+                                Err(_elapsed) => {
+                                    error!(session.id = %session_id, "Chat inference timed out after {chat_timeout_secs}s");
+                                    Err(arkavo_router::Error::ModelExecution(
+                                        format!("Chat inference timed out after {chat_timeout_secs}s"),
+                                    ))
+                                }
+                            };
+                        }
+                    }
 
                     match route_result {
                         Ok(response) => {
@@ -1170,12 +1310,16 @@ impl ChatSessionManager {
                                     let executor = ToolExecutor::with_registry(registry.clone());
                                     let tool_results = executor.execute_batch(&response.tool_calls).await;
 
-                                    // Add assistant message with tool calls to context
-                                    conversation_context.push(Message::assistant(response.content.clone()));
+                                    // Add the assistant turn and pair every issued
+                                    // call with its output in the expected role
+                                    let before_tool_turn = conversation_context.len();
+                                    conversation_context.extend(
+                                        response.recorded_turn(&tool_results),
+                                    );
 
-                                    // Format and add tool results to context as user message
-                                    let results_message = format_tool_results(&tool_results);
-                                    conversation_context.push(Message::user(results_message));
+                                    continuation_context.extend_from_slice(
+                                        &conversation_context[before_tool_turn..],
+                                    );
 
                                     // Send tool result deltas
                                     for (idx, result) in tool_results.iter().enumerate() {
@@ -1195,28 +1339,26 @@ impl ChatSessionManager {
 
                                     // Route again with same model to synthesize final answer from tool results
                                     let retry_result = tokio::time::timeout(
-                                        std::time::Duration::from_mins(2),
-                                        router.route_chat_spec(conversation_context.clone(), None, model_override.as_ref()),
+                                        std::time::Duration::from_secs(chat_timeout_secs),
+                                        router.route_chat_spec(continuation_context, None, Some(&spec), Some(&session_id)),
                                     )
                                     .await;
                                     let retry_result = match retry_result {
                                         Ok(inner) => inner,
                                         Err(_) => Err(arkavo_router::Error::ModelExecution(
-                                            "LLM inference timed out after 120s".to_string(),
+                                            format!("LLM inference timed out after {chat_timeout_secs}s"),
                                         )),
                                     };
                                     match retry_result {
                                         Ok(final_resp) => {
-                                            // Strip think blocks from final response (second inference
-                                            // may use a larger model that produces <think> tags)
-                                            let clean_content = arkavo_router::strip_think_blocks(&final_resp.content);
-                                            final_response = clean_content.clone();
+                                            // route_chat_spec already strips <think> blocks.
+                                            final_response = final_resp.content.clone();
 
                                             // Emit telemetry for second inference
                                             let mut tool_loop_value = serde_json::json!({
                                                 "phase": "tool_result_synthesis",
                                                 "latency_ms": inference_start.elapsed().as_millis() as u64,
-                                                "response_len": clean_content.len(),
+                                                "response_len": final_resp.content.len(),
                                             });
                                             if let Some(ref timing) = final_resp.inference_timing {
                                                 tool_loop_value["prompt_tokens"] = serde_json::json!(timing.n_prompt_eval);
@@ -1240,14 +1382,14 @@ impl ChatSessionManager {
                                                 message_id: message_id.clone(),
                                                 sequence: (response.tool_calls.len() + tool_results.len() + 4) as u64,
                                                 delta: MessageDeltaContent::Text {
-                                                    text: clean_content.clone(),
+                                                    text: final_resp.content.clone(),
                                                 },
                                                 timestamp: chrono::Utc::now(),
                                             };
                                             let _ = delta_tx.send(final_delta);
 
                                             // Add final assistant response to context
-                                            conversation_context.push(Message::assistant(clean_content));
+                                            conversation_context.push(final_resp.as_assistant_message());
                                         }
                                         Err(e) => {
                                             error!(error = %e, "Failed to get final response after tool execution");
@@ -1256,8 +1398,13 @@ impl ChatSessionManager {
                                     }
                                 } else {
                                     warn!("Tool calls received but no tool registry available");
-                                    // Add assistant message to context without tool execution
-                                    conversation_context.push(Message::assistant(response.content));
+                                    // The calls still need paired outputs or the next
+                                    // turn is rejected for a missing tool output.
+                                    conversation_context.extend(
+                                        response.recorded_turn(&response.unanswered_tool_results(
+                                            "this session has no tool registry",
+                                        )),
+                                    );
                                 }
                             } else {
                                 // No tool calls - send text delta and add to context
@@ -1271,7 +1418,7 @@ impl ChatSessionManager {
                                     timestamp: chrono::Utc::now(),
                                 };
                                 let _ = delta_tx.send(text_delta);
-                                conversation_context.push(Message::assistant(response.content));
+                                conversation_context.push(response.as_assistant_message());
                             }
                         }
                         Err(e) => {
@@ -1307,17 +1454,18 @@ impl ChatSessionManager {
                                         // Retry with tool hints
                                         let hint_result = tokio::time::timeout(
                                             std::time::Duration::from_mins(2),
-                                            router.route_with_tools(
+                                            router.route_with_tools_for_session(
                                                 &user_message.content,
                                                 conversation_context.clone(),
                                                 tool_registry.as_deref(),
+                                                &session_id,
                                             ),
                                         )
                                         .await;
                                         let hint_result = match hint_result {
                                             Ok(inner) => inner,
                                             Err(_) => Err(arkavo_router::Error::ModelExecution(
-                                                "LLM inference timed out after 120s".to_string(),
+                                                format!("LLM inference timed out after {chat_timeout_secs}s"),
                                             )),
                                         };
                                         match hint_result {
@@ -1337,7 +1485,9 @@ impl ChatSessionManager {
                                                 let _ = delta_tx.send(text_delta);
 
                                                 // Handle tool calls if present
-                                                if !response.tool_calls.is_empty() {
+                                                let tool_results = if response.tool_calls.is_empty() {
+                                                    Vec::new()
+                                                } else {
                                                     let executor = ToolExecutor::with_registry(registry.clone());
                                                     let tool_results = executor.execute_batch(&response.tool_calls).await;
 
@@ -1356,10 +1506,14 @@ impl ChatSessionManager {
                                                         };
                                                         let _ = delta_tx.send(result_delta);
                                                     }
-                                                }
+                                                    tool_results
+                                                };
 
-                                                // Add response to context
-                                                conversation_context.push(Message::assistant(response.content));
+                                                // Add the turn and its outputs together so the
+                                                // calls it issued are never left unanswered
+                                                conversation_context.extend(
+                                                    response.recorded_turn(&tool_results),
+                                                );
                                             }
                                             Err(retry_err) => {
                                                 final_response = String::new();
@@ -1523,48 +1677,6 @@ impl ChatSessionManager {
 
         info!("Chat session manager shutdown complete");
     }
-}
-
-/// Maximum characters per tool result to prevent exceeding LLM token limits
-const MAX_TOOL_RESULT_CHARS: usize = 200_000;
-
-/// Format tool execution results for adding to conversation context
-fn format_tool_results(results: &[ToolExecutionResult]) -> String {
-    use std::fmt::Write;
-
-    let mut formatted = String::from("Tool execution results:\n\n");
-
-    for result in results {
-        let _ = writeln!(formatted, "Tool: {}", result.tool_name);
-        if result.success {
-            let result_json =
-                serde_json::to_string_pretty(&result.result).unwrap_or_else(|_| "{}".to_string());
-
-            // Truncate large results to prevent exceeding LLM token limits
-            if result_json.len() > MAX_TOOL_RESULT_CHARS {
-                let truncated = &result_json[..MAX_TOOL_RESULT_CHARS];
-                let break_point = truncated
-                    .rfind('\n')
-                    .or_else(|| truncated.rfind(' '))
-                    .unwrap_or(MAX_TOOL_RESULT_CHARS);
-                let _ = writeln!(
-                    formatted,
-                    "Result (truncated from {} to {} chars):\n{}...\n[OUTPUT TRUNCATED]",
-                    result_json.len(),
-                    break_point,
-                    &result_json[..break_point]
-                );
-            } else {
-                let _ = writeln!(formatted, "Result: {result_json}");
-            }
-        } else {
-            let error_msg = result.error.as_deref().unwrap_or("Unknown error");
-            let _ = writeln!(formatted, "Error: {error_msg}");
-        }
-        formatted.push('\n');
-    }
-
-    formatted
 }
 
 #[cfg(test)]
@@ -1754,6 +1866,7 @@ mod tests {
                     reasoning_content: None,
                     done: i == count - 1,
                     inference_timing: None,
+                    ..Default::default()
                 });
             }
             Self {
@@ -2085,6 +2198,76 @@ mod tests {
 
     #[tokio::test]
     #[spec("CHAT-008")]
+    async fn test_lagging_delta_stream_ends_with_error_not_silent_truncation() {
+        let manager = ChatSessionManager::new(None);
+        let session = manager.create_session(None).await;
+        let session_id = session.session_id.clone();
+
+        let mut delta_rx = manager
+            .get_delta_stream(&session_id)
+            .await
+            .expect("delta stream available");
+
+        // Flood the broadcast channel without consuming from the mpsc receiver,
+        // so the forwarder lags behind and deltas are dropped.
+        let broadcast_tx = {
+            let sessions = manager.sessions.read().await;
+            sessions
+                .get(&session_id)
+                .expect("session exists")
+                .delta_tx
+                .clone()
+        };
+        // Broadcast capacity is 256 and the mpsc buffer is 32; 512 guarantees lag.
+        const FLOOD: usize = 512;
+        for i in 0..FLOOD {
+            let _ = broadcast_tx.send(MessageDelta {
+                session_id: session_id.clone(),
+                message_id: "flood".to_string(),
+                sequence: i as u64,
+                delta: MessageDeltaContent::Text {
+                    text: "x".to_string(),
+                },
+                timestamp: chrono::Utc::now(),
+            });
+        }
+
+        // Drain until the stream closes; truncation must be surfaced as an
+        // explicit error followed by StreamEnd(Error), not silent completion.
+        let mut saw_lag_error = false;
+        let mut saw_error_end = false;
+        while let Ok(Some(delta)) =
+            tokio::time::timeout(std::time::Duration::from_secs(5), delta_rx.recv()).await
+        {
+            match &delta.delta {
+                MessageDeltaContent::Error { code, .. } if code == "STREAM_LAGGED" => {
+                    saw_lag_error = true;
+                }
+                MessageDeltaContent::StreamEnd { reason } => {
+                    assert!(
+                        matches!(reason, StreamEndReason::Error),
+                        "Truncated stream must end with StreamEndReason::Error"
+                    );
+                    saw_error_end = true;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(
+            saw_lag_error,
+            "Lagged subscriber must receive an explicit STREAM_LAGGED error delta"
+        );
+        assert!(
+            saw_error_end,
+            "Lagged subscriber must receive StreamEnd with Error reason"
+        );
+
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-008")]
     async fn test_get_delta_stream_closed_session_returns_none() {
         let adapter = create_mock_adapter(0);
         let manager = ChatSessionManager::new(Some(adapter));
@@ -2099,6 +2282,263 @@ mod tests {
         assert!(
             manager.get_delta_stream(&session_id).await.is_none(),
             "Closed session must not expose a delta stream"
+        );
+
+        manager.shutdown().await;
+    }
+
+    /// Counts provider construction so "this turn was refused before a model
+    /// was ever loaded" is an assertion rather than an inference.
+    #[derive(Default)]
+    struct CountingFactory {
+        builds: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CountingFactory {
+        fn builds(&self) -> usize {
+            self.builds.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl arkavo_llm::Provider for CountingFactory {
+        async fn complete_with_options(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+            _max_tokens: Option<usize>,
+        ) -> arkavo_llm::Result<String> {
+            Ok("cloud answer".to_string())
+        }
+
+        async fn stream(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+        ) -> arkavo_llm::Result<
+            Box<
+                dyn futures::Stream<Item = arkavo_llm::Result<arkavo_llm::StreamResponse>>
+                    + Send
+                    + Unpin,
+            >,
+        > {
+            Ok(Box::new(futures::stream::empty()))
+        }
+
+        fn name(&self) -> &str {
+            "counting-factory"
+        }
+
+        async fn complete_with_tools(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+            _tools: Option<serde_json::Value>,
+            _max_tokens: Option<usize>,
+        ) -> arkavo_llm::Result<arkavo_llm::ProviderResponse> {
+            Ok(arkavo_llm::ProviderResponse {
+                content: "cloud answer".to_string(),
+                ..Default::default()
+            })
+        }
+    }
+
+    impl arkavo_router::ProviderFactory for CountingFactory {
+        fn build(
+            &self,
+            _model: &arkavo_router::ModelChoice,
+        ) -> arkavo_router::Result<Box<dyn arkavo_llm::Provider>> {
+            self.builds.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(CountingFactory::default()))
+        }
+    }
+
+    /// A prompter that answers a fixed way and records which sessions asked.
+    struct ScriptedConsent {
+        answer: bool,
+        asked: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl ScriptedConsent {
+        fn new(answer: bool) -> Self {
+            Self {
+                answer,
+                asked: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn times_asked(&self) -> usize {
+            self.asked.lock().expect("asked log").len()
+        }
+    }
+
+    #[async_trait]
+    impl arkavo_router::CloudConsentPrompt for ScriptedConsent {
+        async fn ask(&self, request: arkavo_router::CloudConsentRequest<'_>) -> bool {
+            let label = match request {
+                arkavo_router::CloudConsentRequest::Call { model, .. } => model.to_string(),
+                arkavo_router::CloudConsentRequest::Session => "session".to_string(),
+            };
+            self.asked.lock().expect("asked log").push(label);
+            self.answer
+        }
+    }
+
+    /// A router with one configured cloud provider and injected availability,
+    /// so the test never consults the host's model cache or the network.
+    async fn chat_router(
+        policy: arkavo_budget::CloudPolicy,
+        factory: Arc<CountingFactory>,
+    ) -> Arc<arkavo_router::Router> {
+        let availability = arkavo_router::ProviderAvailability {
+            gemini: true,
+            ..Default::default()
+        };
+        let mut router = arkavo_router::Router::new_offline().await.expect("router");
+        router.set_offline_mode(false);
+        Arc::new(
+            router
+                .with_cloud_policy(policy)
+                .with_connectivity(arkavo_router::ConnectivityChecker::assume(true))
+                .with_selector(arkavo_router::ModelSelector::with_availability(
+                    availability,
+                    false,
+                ))
+                .await
+                .with_provider_factory(factory),
+        )
+    }
+
+    /// Drive one turn and return the deltas it produced, giving up rather than
+    /// hanging if the session never terminates the stream.
+    async fn one_turn(manager: &ChatSessionManager, session_id: &str) -> Vec<MessageDelta> {
+        let mut rx = manager
+            .get_delta_stream(session_id)
+            .await
+            .expect("active session must expose a delta stream");
+        manager
+            .send_message(
+                session_id,
+                UserMessage {
+                    content: "summarize this".to_string(),
+                    attachments: None,
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("send must be accepted");
+
+        let mut deltas = Vec::new();
+        while let Ok(Some(delta)) =
+            tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await
+        {
+            let done = matches!(delta.delta, MessageDeltaContent::StreamEnd { .. });
+            deltas.push(delta);
+            if done {
+                break;
+            }
+        }
+        deltas
+    }
+
+    fn error_text(deltas: &[MessageDelta]) -> Option<String> {
+        deltas.iter().find_map(|delta| match &delta.delta {
+            MessageDeltaContent::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        })
+    }
+
+    /// Regression: the consent prompt used to read stdin from inside this
+    /// crate, so a server started at a terminal blocked a remote client's
+    /// request on its own console. A manager is prompter-less unless a host
+    /// that owns a channel to a person installs one — which is what the A2A
+    /// server must stay.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_manager_cannot_prompt_until_a_host_installs_a_channel() {
+        let mut manager =
+            ChatSessionManager::with_config(None, None, None, 3600, BufferConfig::default());
+        assert!(
+            !manager.has_cloud_consent_prompt(),
+            "a manager is prompter-less until a host installs one"
+        );
+
+        manager.set_cloud_consent_prompt(Arc::new(ScriptedConsent::new(true)));
+        assert!(manager.has_cloud_consent_prompt());
+
+        manager.shutdown().await;
+    }
+
+    /// A turn the spend policy refuses reaches the caller as an error delta —
+    /// promptly, without a model load, and without consulting the host: the
+    /// refusal is a policy denial, not a question anyone can answer.
+    #[spec("ASTRA-004")]
+    #[tokio::test]
+    async fn a_policy_refusal_is_reported_rather_than_asked_about() {
+        let factory = Arc::new(CountingFactory::default());
+        let router = chat_router(arkavo_budget::CloudPolicy::LocalOnly, factory.clone()).await;
+        let consent = Arc::new(ScriptedConsent::new(true));
+        let mut manager = ChatSessionManager::with_config(
+            None,
+            Some(router),
+            None,
+            3600,
+            BufferConfig::default(),
+        );
+        manager.set_cloud_consent_prompt(consent.clone());
+        // Naming the arm is the only way a chat turn reaches a cloud model:
+        // automatic selection is always local.
+        manager.set_model_spec(arkavo_router::ModelSpec::Named(
+            arkavo_router::ModelChoice::GeminiPro,
+        ));
+
+        let session = manager.create_session(None).await;
+        let deltas = one_turn(&manager, &session.session_id).await;
+
+        let message = error_text(&deltas).expect("the refusal must reach the caller");
+        assert!(
+            message.contains("denied"),
+            "expected a policy denial, got: {message}"
+        );
+        assert_eq!(
+            consent.times_asked(),
+            0,
+            "a denial is not a question for the user"
+        );
+        assert_eq!(
+            factory.builds(),
+            0,
+            "a refused turn must not construct a provider"
+        );
+        manager.shutdown().await;
+    }
+
+    /// Regression: closing a session must deliver a terminal StreamEnd to
+    /// existing subscribers so the streaming handler does not report a
+    /// normal close as an abnormal STREAM_TERMINATED error.
+    #[tokio::test]
+    #[spec("CHAT-008")]
+    async fn test_close_session_delivers_stream_end_to_subscribers() {
+        let adapter = create_mock_adapter(0);
+        let manager = ChatSessionManager::new(Some(adapter));
+        let session = manager.create_session(None).await;
+        let session_id = session.session_id.clone();
+
+        let mut delta_rx = manager
+            .get_delta_stream(&session_id)
+            .await
+            .expect("active session must expose a delta stream");
+        manager.close_session(&session_id).await.unwrap();
+
+        let delta = tokio::time::timeout(std::time::Duration::from_secs(5), delta_rx.recv())
+            .await
+            .expect("subscriber must receive a terminal delta promptly")
+            .expect("stream must not close without a delta");
+        assert!(
+            matches!(
+                delta.delta,
+                MessageDeltaContent::StreamEnd {
+                    reason: StreamEndReason::SessionClosed
+                }
+            ),
+            "normal close must end the stream with StreamEndReason::SessionClosed"
         );
 
         manager.shutdown().await;

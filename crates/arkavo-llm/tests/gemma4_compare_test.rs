@@ -82,10 +82,7 @@ mod tests {
         Message {
             role: Role::User,
             content: content.to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         }
     }
 

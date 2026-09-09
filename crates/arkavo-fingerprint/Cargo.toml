@@ -12,7 +12,7 @@ categories = ["algorithms"]
 [dependencies]
 # Keyed hashing. BLAKE3's keyed mode is a PRF over the whole input, so a shingle
 # hash is one pass rather than HMAC's two, and the crate is already vendored.
-blake3 = "1.5"
+blake3 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -30,7 +30,7 @@ arkavo-budget = { path = "../arkavo-budget" }
 arkavo-arp = { path = "../arkavo-arp" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-github = { path = "../arkavo-github" }
-arkavo-router = { path = "../arkavo-router", features = ["llama-cpp", "gemini"] }
+arkavo-router = { path = "../arkavo-router", default-features = false }
 arkavo-llm = { path = "../arkavo-llm" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-context = { path = "../arkavo-context" }
@@ -51,6 +51,9 @@ mdns-sd = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+# Only to name the `Stream` type in the substituted provider a strategy test
+# installs on the router; nothing in this crate streams at runtime.
+tokio-stream = { workspace = true }
 
 [features]
 default = []
@@ -59,6 +62,17 @@ mdns = ["mdns-sd"]
 # and arkavo-protocol's KAS-side wrap_bundle. Off by default so non-KAS
 # builds stay light; the CLI's kas feature turns it on.
 kas = ["dep:arkavo-tdf", "arkavo-protocol/kas"]
+# Provider pass-throughs. The router is taken without default features so this
+# crate stops forcing the whole provider set (llama-cpp included) into every
+# binary that links it; the CLI selects the arms the build actually ships.
+llama-cpp = ["arkavo-router/llama-cpp"]
+gemini = ["arkavo-router/gemini"]
+deepseek = ["arkavo-router/deepseek"]
+kimi = ["arkavo-router/kimi"]
+glm = ["arkavo-router/glm"]
+xai = ["arkavo-router/xai"]
+openai = ["arkavo-router/openai"]
+llm-remote = ["arkavo-router/llm-remote"]
 
 [lints]
 workspace = true

@@ -57,6 +57,8 @@ pub(super) struct ResponsesUsage {
     pub output_tokens: Option<u32>,
     #[serde(default)]
     pub output_tokens_details: Option<OutputTokenDetails>,
+    #[serde(default)]
+    pub input_tokens_details: Option<InputTokenDetails>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,19 +66,32 @@ pub(super) struct OutputTokenDetails {
     pub reasoning_tokens: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct InputTokenDetails {
+    pub cached_tokens: Option<u32>,
+}
+
 /// Map xAI Responses `usage` into [`InferenceTiming`].
 ///
 /// xAI reports `output_tokens` as the **total** generated tokens (including
 /// reasoning). [`InferenceTiming`] keeps `n_eval` and `n_thinking_eval`
 /// disjoint so downstream cost paths can sum them without double-counting.
+/// Cached input tokens are a subset of `input_tokens`, billed at the cache
+/// rate, so they are reported rather than dropped.
 pub(super) fn timing_from_usage(usage: &ResponsesUsage) -> InferenceTiming {
     let reasoning = usage
         .output_tokens_details
         .as_ref()
         .and_then(|d| d.reasoning_tokens);
+    let input = usage.input_tokens.unwrap_or(0);
     let total_output = usage.output_tokens.unwrap_or(0);
     InferenceTiming {
-        n_prompt_eval: usage.input_tokens.unwrap_or(0),
+        n_prompt_eval: input,
+        n_cached_prompt_eval: usage
+            .input_tokens_details
+            .as_ref()
+            .and_then(|d| d.cached_tokens)
+            .map(|cached| cached.min(input)),
         n_eval: total_output.saturating_sub(reasoning.unwrap_or(0)),
         n_thinking_eval: reasoning,
         ..Default::default()
@@ -95,11 +110,19 @@ mod tests {
             output_tokens_details: Some(OutputTokenDetails {
                 reasoning_tokens: Some(30),
             }),
+            input_tokens_details: Some(InputTokenDetails {
+                cached_tokens: Some(80),
+            }),
         };
         let timing = timing_from_usage(&usage);
         assert_eq!(timing.n_prompt_eval, 100);
         assert_eq!(timing.n_eval, 20, "visible output must exclude reasoning");
         assert_eq!(timing.n_thinking_eval, Some(30));
+        assert_eq!(
+            timing.n_cached_prompt_eval,
+            Some(80),
+            "cached input tokens are billed at the cache rate and must be reported"
+        );
         // Downstream cost paths sum these without double-count.
         assert_eq!(
             timing.n_eval + timing.n_thinking_eval.unwrap_or(0),
@@ -108,15 +131,32 @@ mod tests {
         );
     }
 
+    /// A cache figure larger than the reported input would make the cached
+    /// tokens look like additional input downstream.
+    #[test]
+    fn cached_tokens_stay_a_subset_of_the_reported_input() {
+        let usage = ResponsesUsage {
+            input_tokens: Some(40),
+            output_tokens: Some(5),
+            output_tokens_details: None,
+            input_tokens_details: Some(InputTokenDetails {
+                cached_tokens: Some(100),
+            }),
+        };
+        assert_eq!(timing_from_usage(&usage).n_cached_prompt_eval, Some(40));
+    }
+
     #[test]
     fn timing_without_reasoning_details() {
         let usage = ResponsesUsage {
             input_tokens: Some(10),
             output_tokens: Some(5),
             output_tokens_details: None,
+            input_tokens_details: None,
         };
         let timing = timing_from_usage(&usage);
         assert_eq!(timing.n_eval, 5);
         assert_eq!(timing.n_thinking_eval, None);
+        assert_eq!(timing.n_cached_prompt_eval, None);
     }
 }

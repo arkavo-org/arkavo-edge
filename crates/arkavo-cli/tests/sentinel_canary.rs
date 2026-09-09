@@ -56,6 +56,7 @@ fn stream_of(text: &str) -> Vec<arkavo_llm::Result<StreamResponse>> {
                 reasoning_content: None,
                 done: false,
                 inference_timing: None,
+                ..Default::default()
             })
         })
         .collect();
@@ -64,6 +65,7 @@ fn stream_of(text: &str) -> Vec<arkavo_llm::Result<StreamResponse>> {
         reasoning_content: None,
         done: true,
         inference_timing: None,
+        ..Default::default()
     }));
     chunks
 }

@@ -89,7 +89,7 @@ arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["ki
 # Direct llama.cpp handle for LlamaTokenEstimator (real tokenizer); only under llama-cpp.
 arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 arkavo-budget = { path = "../arkavo-budget" }
-arkavo-router = { path = "../arkavo-router", features = ["advisor-persistence", "persistence"] }
+arkavo-router = { path = "../arkavo-router", default-features = false, features = ["advisor-persistence", "persistence"] }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-crypto = { path = "../arkavo-crypto" }
@@ -126,16 +126,30 @@ mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf", "arkavo-router/tdf-encrypt", "arkavo-protocol/kas"]
 iroh = []
-# Agent-loop SwarmKit apply tool. Off by default: it pulls arkavo-orchestrator
-# (which forces the router/llama-cpp stack), so standalone server builds stay
-# light and C++-free unless this is explicitly enabled (the CLI turns it on).
+# Agent-loop SwarmKit apply tool. Off by default because it pulls the whole
+# orchestrator, GitHub and swarmkit-runtime stack for one tool; a server that is
+# not shipping specialization bundles should not compile or link it. (It no
+# longer forces llama-cpp: arkavo-orchestrator now takes the router without
+# default features and the provider set is chosen by the binary.)
 swarm-apply = ["kas", "iroh", "dep:arkavo-orchestrator", "arkavo-orchestrator/kas"]
 # The real LlamaTokenEstimator in agent_loop.rs is gated on this feature and
 # calls Router::any_loaded_model() / min_feasible_context_size(), which only
 # exist under arkavo-router's own llama-cpp feature. Propagate it here so the
 # real tokenizer compiles and budget/window trimming stops falling back to the
 # chars/4 MockEstimator.
-llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-router/llama-cpp", "dep:arkavo-llama-cpp"]
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-router/llama-cpp", "arkavo-orchestrator?/llama-cpp", "dep:arkavo-llama-cpp"]
+# Provider pass-throughs. The router is taken without default features so a
+# cloud-only binary is actually cloud-only: feature unification used to hand
+# every build the full provider set through this dependency. The CLI turns on
+# whichever of these its own provider features select. The `?` keeps the
+# optional orchestrator dependency optional.
+gemini = ["arkavo-router/gemini", "arkavo-orchestrator?/gemini"]
+deepseek = ["arkavo-router/deepseek", "arkavo-orchestrator?/deepseek"]
+kimi = ["arkavo-router/kimi", "arkavo-orchestrator?/kimi"]
+glm = ["arkavo-router/glm", "arkavo-orchestrator?/glm"]
+xai = ["arkavo-router/xai", "arkavo-orchestrator?/xai"]
+openai = ["arkavo-router/openai", "arkavo-orchestrator?/openai"]
+llm-remote = ["arkavo-router/llm-remote", "arkavo-orchestrator?/llm-remote"]
 claude-agent = ["dep:arkavo-mcp-claude"]
 # Taint-aware egress enforcement in the conductor's tool loop (SEQ-003, SEQ-014,
 # SEQ-015). Off until the sequence-integrity work reaches GA.

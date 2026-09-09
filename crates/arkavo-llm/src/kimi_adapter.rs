@@ -79,18 +79,28 @@ impl KimiProvider {
     }
 }
 
-/// Convert arkavo-llm messages to arkavo-kimi messages
+/// Convert arkavo-llm messages to arkavo-kimi messages.
+///
+/// Tool results become user turns: Moonshot continues a trailing assistant
+/// message rather than answering it, so replaying a result under that role
+/// makes the model finish its own tool output. The wire crate exposes no tool
+/// role, and this adapter forwards no assistant `tool_calls` that a tool role
+/// would have to pair with, so user text is the only well-formed carrier.
 fn convert_messages_to_kimi(messages: Vec<Message>) -> Vec<arkavo_kimi::Message> {
     messages
         .into_iter()
-        .map(|msg| arkavo_kimi::Message {
-            role: match msg.role {
-                Role::System => arkavo_kimi::Role::System,
-                Role::User => arkavo_kimi::Role::User,
-                Role::Assistant | Role::Tool => arkavo_kimi::Role::Assistant,
-            },
-            content: msg.content,
-            images: msg.images,
+        .map(|msg| {
+            let (role, content) = match msg.role {
+                Role::System => (arkavo_kimi::Role::System, msg.content),
+                Role::User => (arkavo_kimi::Role::User, msg.content),
+                Role::Assistant => (arkavo_kimi::Role::Assistant, msg.content),
+                Role::Tool => (arkavo_kimi::Role::User, msg.tool_result_as_user_text()),
+            };
+            arkavo_kimi::Message {
+                role,
+                content,
+                images: msg.images,
+            }
         })
         .collect()
 }
@@ -101,7 +111,7 @@ fn convert_stream_response(resp: arkavo_kimi::StreamResponse) -> StreamResponse 
         content: resp.content,
         reasoning_content: resp.reasoning_content,
         done: resp.done,
-        inference_timing: None,
+        ..Default::default()
     }
 }
 
@@ -162,5 +172,40 @@ impl Provider for KimiProvider {
         // Use the arkavo-kimi Provider trait
         use arkavo_kimi::Provider as KimiProviderTrait;
         self.inner.name()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    /// Moonshot's chat API treats a trailing assistant message as a turn to
+    /// continue, so a tool result sent under that role makes the model finish
+    /// its own tool output. `arkavo_kimi::Role` has no tool variant, so the
+    /// result has to arrive as user text that names the tool.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn tool_result_is_not_sent_as_an_assistant_turn() {
+        let messages = vec![
+            Message::user("what is the weather in Dublin"),
+            Message::assistant_with_tool_calls(
+                "Checking the forecast.",
+                vec![crate::ToolCall {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"Dublin"}"#.to_string(),
+                    id: Some("call_1".to_string()),
+                }],
+            ),
+            Message::tool_result("sunny, 21C", "call_1", "get_weather"),
+        ];
+
+        let converted = convert_messages_to_kimi(messages);
+
+        let last = converted.last().expect("conversation is not empty");
+        assert_ne!(last.role, arkavo_kimi::Role::Assistant);
+        assert_eq!(last.role, arkavo_kimi::Role::User);
+        assert!(last.content.contains("sunny, 21C"), "{:?}", last.content);
+        assert!(last.content.contains("get_weather"), "{:?}", last.content);
     }
 }

@@ -1,7 +1,7 @@
 // Phase 2: Orchestrator E2E Tests - Suite C (Multi-Agent Handoffs)
 // Issue #358: Gemini 3 Pro Preview Multi-Environment E2E Test Plan
 
-use arkavo_router::{ModelChoice, Router};
+use arkavo_router::Router;
 
 fn should_skip_integration_tests() -> bool {
     std::env::var("GEMINI_API_KEY").is_err()
@@ -135,12 +135,12 @@ async fn test_orc_01c_router_fallback() {
 
     println!("Offline mode routed to: {:?}", decision.recommended_model);
 
-    // In offline mode, should always use a local model
+    // In offline mode, should always use a local model. Assert against the
+    // canonical registry predicate instead of a hardcoded variant list — the
+    // selector picks among all cached local models, so any `is_local()` arm
+    // is a valid fallback.
     assert!(
-        matches!(
-            decision.recommended_model,
-            ModelChoice::LocalGemma4B | ModelChoice::LocalQwen3
-        ),
+        decision.recommended_model.is_local(),
         "Offline mode should route to local model, got: {:?}",
         decision.recommended_model
     );

@@ -1,4 +1,5 @@
 mod a2a_server;
+mod agent_cycle_reply;
 mod agent_event;
 mod agent_loop;
 mod anti_pattern;
@@ -6,6 +7,7 @@ mod autolearn_bridge;
 mod conductor;
 mod conductor_autoresearch;
 mod conductor_evofabric;
+mod conductor_history;
 mod conductor_parallel;
 mod conductor_planner;
 mod conductor_tool_loop;
@@ -44,8 +46,8 @@ mod well_known;
 
 pub use a2a_server::A2aServer;
 pub use agent_event::{
-    AgentEvent, CorrelationId, CycleId, CycleReceipt, MessageDisposition, MessagePriority,
-    PendingMessage,
+    AgentEvent, CorrelationId, CycleId, CycleOutcome, CycleReceipt, MessageDisposition,
+    MessagePriority, PendingMessage,
 };
 pub use agent_loop::{AgentLoopConfig, run_agent_loop};
 pub use arkavo_autolearn::PainSignal;

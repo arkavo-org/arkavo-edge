@@ -26,7 +26,9 @@ pub mod agent_config;
 pub mod agent_registry;
 pub mod agent_specialization;
 pub mod auth;
+pub mod chat_cloud_gate;
 pub mod chat_commands;
+pub mod chat_history;
 pub mod chat_session;
 #[cfg(feature = "taint")]
 pub mod classification_evidence;
@@ -119,8 +121,8 @@ pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{IpRateLimiter, RateLimitConfig, RateLimiter, spawn_cleanup_task};
 pub use rate_limit_middleware::{extract_client_ip, ip_rate_limit_middleware};
 pub use registration::{
-    ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
-    VerifyResponse,
+    ChallengeRequest, ChallengeResponse, DelegationConfig, RegistrationService, RegistrationStatus,
+    VerifyRequest, VerifyResponse,
 };
 pub use security::{AuthMethod, SecurityConfig, TlsSettings, TlsVersion};
 #[cfg(feature = "taint")]

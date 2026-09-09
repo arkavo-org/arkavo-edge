@@ -483,7 +483,7 @@ pub async fn execute_with_conductor_and_learning(
 
     // Use parallel three-track loop for all agents with tools.
     let has_any_tools = !registry_arc.list_tools().is_empty();
-    let loop_result = if has_any_tools {
+    let loop_outcome = if has_any_tools {
         super::conductor_parallel::run_tool_loop_parallel(
             router,
             &registry_arc,
@@ -498,7 +498,7 @@ pub async fn execute_with_conductor_and_learning(
             #[cfg(feature = "taint")]
             Some(egress_guard.clone()),
         )
-        .await?
+        .await
     } else {
         super::conductor_tool_loop::run_tool_loop(
             router,
@@ -514,7 +514,26 @@ pub async fn execute_with_conductor_and_learning(
             #[cfg(feature = "taint")]
             Some(&egress_guard),
         )
-        .await?
+        .await
+    };
+
+    // A refused loop still has to close out the HRM task: it went Running
+    // before the loop started, so returning the refusal without recording it
+    // would leave the task running with no result and no reason. The learning
+    // updates below are deliberately skipped — no model produced an answer to
+    // score.
+    let loop_result = match loop_outcome {
+        Ok(result) => result,
+        Err(refusal) => {
+            let failed = BurstResult::failure(contract.id, refusal.clone());
+            if let Err(e) = conductor
+                .record_result(hrm_task.id, subtask.id, failed)
+                .await
+            {
+                warn!("Failed to record refused subtask {}: {e}", subtask.id);
+            }
+            return Err(refusal);
+        }
     };
 
     // Emit MCP-T behavior.trace for the completed task. Subject ID matches
@@ -677,6 +696,17 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    /// The classifier snippet is a byte budget over arbitrary task text.
+    #[test]
+    fn complexity_snippet_is_safe_for_multibyte_text() {
+        // 400 bytes hold 133 whole three-byte scalars.
+        assert_eq!(
+            complexity_snippet(&"界".repeat(200)).matches('界').count(),
+            133
+        );
+        assert_eq!(complexity_snippet("short task"), "short task");
+    }
+
     #[spec("SRV-009")]
     #[test]
     fn extract_reward_positive() {
@@ -744,16 +774,19 @@ mod tests {
 /// Returns true only when the model explicitly says MULTI — defaults to SINGLE
 /// on ambiguity, timeout, or error (false negatives are cheap, false positives
 /// cause 80+ second decomposition overhead).
+/// Trim a task to the head the complexity classifier reads.
+///
+/// Bounded to avoid wasting tokens on long cycle prompts, and cut on a
+/// character boundary because task text is arbitrary UTF-8.
+fn complexity_snippet(task_content: &str) -> &str {
+    arkavo_llm::char_boundary_prefix(task_content, 400)
+}
+
 async fn assess_complexity_with_model(
     router: &Arc<arkavo_router::Router>,
     task_content: &str,
 ) -> bool {
-    // Truncate to avoid wasting tokens on long cycle prompts
-    let snippet = if task_content.len() > 400 {
-        &task_content[..400]
-    } else {
-        task_content
-    };
+    let snippet = complexity_snippet(task_content);
 
     let prompt = format!(
         "Does this require breaking into SEPARATE INDEPENDENT subtasks that \

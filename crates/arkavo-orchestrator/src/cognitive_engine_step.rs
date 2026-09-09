@@ -7,9 +7,10 @@
 use crate::cognitive_engine_types::PlanStep;
 use crate::error::{Error, Result};
 use crate::step_context::StepTrace;
-use crate::token_estimator;
+use arkavo_budget::BudgetTracker;
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_router::Router;
+use arkavo_router::usage::CallBudget;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -24,6 +25,7 @@ use tracing::{debug, info};
 pub async fn do_step(
     router: &Arc<Router>,
     tool_registry: &Arc<ToolRegistry>,
+    budget_tracker: &Arc<BudgetTracker>,
     step: &PlanStep,
     command_timeout: Duration,
 ) -> Result<u32> {
@@ -49,7 +51,15 @@ pub async fn do_step(
         let messages = trace.build_messages(task_prompt.clone());
 
         // R4: bound a single command's wall-clock time.
-        let call = router.route_with_tools(command, messages, Some(tool_registry));
+        let call = router.route_with_tools_budgeted(
+            command,
+            messages,
+            Some(tool_registry),
+            CallBudget {
+                tracker: budget_tracker,
+                agent_id: "github-orchestrator-step",
+            },
+        );
         let response = match timeout(command_timeout, call).await {
             Err(_) => {
                 return Err(Error::Other(anyhow::anyhow!(
@@ -67,23 +77,15 @@ pub async fn do_step(
             }
         };
 
+        tokens_used = tokens_used.saturating_add(response.total_tokens());
+        let response = response.response;
+
         info!(
             step = step.step_number,
             tool_calls = response.tool_calls.len(),
             "Command executed with {} tool calls",
             response.tool_calls.len()
         );
-
-        // P4: provider-reported counts when available; otherwise estimate
-        // against the FULL prompt actually sent (the rendered trace +
-        // task_prompt) so the fallback path doesn't undercount when the
-        // trace is non-empty.
-        let accounted_prompt = trace.rendered_prompt(&task_prompt);
-        let (input_tokens, output_tokens) =
-            token_estimator::tokens_from_response(&accounted_prompt, &response);
-        tokens_used = tokens_used
-            .saturating_add(input_tokens)
-            .saturating_add(output_tokens);
 
         if !response.tool_calls.is_empty() {
             debug!(

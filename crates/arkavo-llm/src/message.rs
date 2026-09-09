@@ -1,3 +1,4 @@
+use crate::provider_state::ProviderState;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -25,8 +26,12 @@ pub struct ToolCall {
     pub id: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Message {
+    /// Provider-owned conversation items, replayed only by the wire family that
+    /// produced them. These are opaque state, never user-facing reasoning text.
+    #[serde(default, skip_serializing_if = "ProviderState::is_empty")]
+    pub provider_state: ProviderState,
     pub role: Role,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -47,6 +52,7 @@ pub struct Message {
 impl Message {
     pub fn system(content: impl Into<String>) -> Self {
         Self {
+            provider_state: ProviderState::default(),
             role: Role::System,
             content: content.into(),
             images: None,
@@ -58,6 +64,7 @@ impl Message {
 
     pub fn user(content: impl Into<String>) -> Self {
         Self {
+            provider_state: ProviderState::default(),
             role: Role::User,
             content: content.into(),
             images: None,
@@ -69,6 +76,7 @@ impl Message {
 
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
+            provider_state: ProviderState::default(),
             role: Role::Assistant,
             content: content.into(),
             images: None,
@@ -86,6 +94,7 @@ impl Message {
         tool_calls: Vec<ToolCall>,
     ) -> Self {
         Self {
+            provider_state: ProviderState::default(),
             role: Role::Assistant,
             content: content.into(),
             images: None,
@@ -104,6 +113,7 @@ impl Message {
         name: impl Into<String>,
     ) -> Self {
         Self {
+            provider_state: ProviderState::default(),
             role: Role::Tool,
             content: content.into(),
             images: None,
@@ -115,6 +125,7 @@ impl Message {
 
     pub fn user_with_images(content: impl Into<String>, images: Vec<String>) -> Self {
         Self {
+            provider_state: ProviderState::default(),
             role: Role::User,
             content: content.into(),
             images: Some(images),
@@ -122,6 +133,39 @@ impl Message {
             tool_name: None,
             tool_calls: Vec::new(),
         }
+    }
+
+    /// Render a tool result as user text that still names the tool it came from.
+    ///
+    /// Several request formats have no usable tool role: Anthropic's converter
+    /// carries plain strings rather than `tool_result` blocks, Gemini's
+    /// `contents` array knows only user and model, and the Kimi and DeepSeek
+    /// wire crates expose no tool variant that this adapter could pair with an
+    /// assistant `tool_calls` block. None of them may fall back to the
+    /// assistant role: those APIs continue a trailing assistant message as
+    /// prefill, so the model finishes its own tool output instead of answering
+    /// it. Sending the result as user text keeps the turn well-formed, and the
+    /// tool name preserves the provenance the role would otherwise have
+    /// carried. One implementation so the four adapters cannot drift apart.
+    pub fn tool_result_as_user_text(&self) -> String {
+        match &self.tool_name {
+            Some(name) => format!("[Tool result from {name}]: {}", self.content),
+            None => self.content.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Message")
+            .field("role", &self.role)
+            .field("content", &self.content)
+            .field("images", &self.images)
+            .field("tool_call_id", &self.tool_call_id)
+            .field("tool_name", &self.tool_name)
+            .field("tool_calls", &self.tool_calls)
+            .field("provider_state", &self.provider_state)
+            .finish()
     }
 }
 
@@ -301,5 +345,27 @@ mod tests {
         assert!(!json.contains(r#""id""#));
         let back: Message = serde_json::from_str(&json).unwrap();
         assert_eq!(back.tool_calls, msg.tool_calls);
+    }
+
+    /// The four adapters that cannot carry a tool role on the wire share this
+    /// rendering, so the attribution format is asserted once, here.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn tool_result_renders_as_attributed_user_text() {
+        let msg = Message::tool_result("sunny, 21C", "call_1", "get_weather");
+        assert_eq!(
+            msg.tool_result_as_user_text(),
+            "[Tool result from get_weather]: sunny, 21C"
+        );
+    }
+
+    /// With no tool name there is nothing to attribute, so the output stays the
+    /// raw content rather than gaining an empty label.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn unnamed_tool_result_renders_as_bare_content() {
+        let mut msg = Message::tool_result("sunny, 21C", "call_1", "get_weather");
+        msg.tool_name = None;
+        assert_eq!(msg.tool_result_as_user_text(), "sunny, 21C");
     }
 }

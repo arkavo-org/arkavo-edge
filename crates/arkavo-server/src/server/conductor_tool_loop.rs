@@ -37,6 +37,36 @@ pub(super) struct ToolLoopResult {
     pub tool_observations: Vec<ToolCallObservation>,
 }
 
+/// Decide what a finished tool loop hands back to its caller.
+///
+/// Both loops can stop on a refusal — a routing error, a budget that cannot
+/// fund the model, a policy denial, an inference timeout. Such a refusal *is*
+/// the answer when the loop has nothing else to show: returning empty text
+/// instead turns an actionable condition into silence for whoever asked for
+/// the work, which is how these refusals used to end at a `warn!` and no more.
+///
+/// `tool_summary` is what a caller that synthesises its own tool-only answer
+/// passes in; it outranks the refusal because a caller holding a real summary
+/// has already said what the cycle achieved. Callers whose tool record lives
+/// elsewhere (the parallel loop's lives in `ToolMemory`, which the agent loop
+/// turns into the cycle's answer) pass `None`.
+pub(super) fn loop_result_text(
+    final_text: String,
+    tool_summary: Option<String>,
+    failure: Option<String>,
+) -> Result<String, String> {
+    if !final_text.trim().is_empty() {
+        return Ok(final_text);
+    }
+    if let Some(summary) = tool_summary {
+        return Ok(summary);
+    }
+    match failure {
+        Some(reason) => Err(reason),
+        None => Ok(final_text),
+    }
+}
+
 /// True if a tool call is permitted under an optional grant set.
 /// `None` = unspecialized agent (no filtering). `Some(set)` = specialized;
 /// only names in the set may execute.
@@ -73,6 +103,9 @@ pub(super) async fn run_tool_loop(
     let mut force_planning = false;
     let mut consecutive_negative_rewards: u32 = 0;
     let mut tool_observations: Vec<ToolCallObservation> = Vec::new();
+    // Why the loop stopped, when it stopped on a refusal rather than a finished
+    // answer. Delivered to the caller if nothing else was produced.
+    let mut failure: Option<String> = None;
     let declared_scope: Vec<String> = registry_arc
         .list_tools()
         .iter()
@@ -108,6 +141,9 @@ pub(super) async fn run_tool_loop(
                         "Compute budget exhausted — stopping tool loop at iteration {}",
                         iteration
                     );
+                    failure = Some(format!(
+                        "compute budget exhausted before tool loop iteration {iteration}"
+                    ));
                     break;
                 }
             }
@@ -133,12 +169,11 @@ pub(super) async fn run_tool_loop(
         let mut context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         if context_chars > char_budget && messages.len() > 3 {
             // Collect oldest non-system messages to compact (keep system + 2 recent)
-            let keep_recent = 2;
-            let compactable = messages.len() - 1 - keep_recent; // exclude system
+            let compactable = super::conductor_history::compactable_prefix(&messages, 2);
             if compactable > 0 {
                 let old_messages: Vec<String> = messages[1..=compactable]
                     .iter()
-                    .map(|m| format!("[{:?}] {}", m.role, &m.content[..m.content.len().min(500)]))
+                    .map(super::conductor_history::summary_line)
                     .collect();
                 let old_chars: usize = messages[1..=compactable]
                     .iter()
@@ -321,6 +356,7 @@ pub(super) async fn run_tool_loop(
                                 "Tool loop inference error — breaking loop"
                             );
                         }
+                        failure = Some(e.to_string());
                         break;
                     }
                 }
@@ -359,6 +395,7 @@ pub(super) async fn run_tool_loop(
                 if let Some(hint) = model_hint {
                     router.advisor().observe(hint.family(), task_content, "");
                 }
+                failure = Some(format!("inference timed out after {timeout_secs}s"));
                 break;
             }
         };
@@ -400,17 +437,13 @@ pub(super) async fn run_tool_loop(
             );
             eprintln!(
                 "{}",
-                &response.content[..std::cmp::min(1000, response.content.len())]
+                arkavo_llm::char_boundary_prefix(&response.content, 1000)
             );
         }
 
         debug!(
             "LLM response content: {}",
-            if response.content.len() > 500 {
-                format!("{}...", &response.content[..500])
-            } else {
-                response.content.clone()
-            }
+            super::conductor_history::preview(&response.content, 500)
         );
 
         if !response.content.is_empty() {
@@ -458,19 +491,7 @@ pub(super) async fn run_tool_loop(
         // reconstructing one with empty arguments from the tool results. Calls
         // are emitted in the same order as the tool results pushed below, so the
         // template pairs them positionally and by call id.
-        let assistant_tool_calls: Vec<arkavo_llm::ToolCall> = response
-            .tool_calls
-            .iter()
-            .map(|tc| arkavo_llm::ToolCall {
-                name: tc.tool_name.clone(),
-                arguments: tc.arguments.to_string(),
-                id: tc.call_id.clone(),
-            })
-            .collect();
-        messages.push(arkavo_llm::Message::assistant_with_tool_calls(
-            response.content.clone(),
-            assistant_tool_calls,
-        ));
+        messages.push(response.as_assistant_message());
 
         let tool_result_parts = execute_tool_calls(
             &response.tool_calls,
@@ -577,16 +598,18 @@ pub(super) async fn run_tool_loop(
         // Push tool results as proper tool-role messages so Jinja templates
         // (especially Gemma 4) generate the correct token structure.
         // Falls back to user-role for models without native tool response support.
+        let native_tool_role = response.tool_results_use_tool_role();
         if response.tool_calls.len() == 1 {
             let tc = &response.tool_calls[0];
             let call_id = tc
                 .call_id
                 .clone()
                 .unwrap_or_else(|| format!("call_{total_step_idx}"));
-            messages.push(arkavo_llm::Message::tool_result(
+            messages.push(arkavo_llm::tool_feedback_message(
                 format!("{result_to_append}{exploration_nudge}"),
                 call_id,
                 &tc.tool_name,
+                native_tool_role,
             ));
         } else {
             // Multiple tool calls: push one tool_result per call
@@ -599,10 +622,11 @@ pub(super) async fn run_tool_loop(
                     .get(i)
                     .cloned()
                     .unwrap_or_else(|| "ok".to_string());
-                messages.push(arkavo_llm::Message::tool_result(
+                messages.push(arkavo_llm::tool_feedback_message(
                     part,
                     call_id,
                     &tc.tool_name,
+                    native_tool_role,
                 ));
             }
             if !exploration_nudge.is_empty() {
@@ -611,19 +635,16 @@ pub(super) async fn run_tool_loop(
         }
     }
 
-    // Synthesize a minimal summary when the LLM's last turn was a tool call
-    // (not a text response). Without this, compute_response_quality("", ...) returns
-    // 0.0, keeping Thompson Sampling avg_quality stuck at 0%.
-    if final_result.is_empty() && total_step_idx > 0 {
-        final_result = format!(
-            "Completed {} tool call(s). Last result: {}",
-            total_step_idx,
-            messages
-                .last()
-                .map(|m| &m.content[..m.content.len().min(200)])
-                .unwrap_or("ok")
-        );
-    }
+    let loop_outcome = loop_result_text(
+        final_result,
+        (total_step_idx > 0).then(|| {
+            super::conductor_history::tool_only_summary(
+                total_step_idx,
+                messages.last().map(|m| m.content.as_str()),
+            )
+        }),
+        failure,
+    );
 
     apply_reward_correction(router, &reward_signals).await;
 
@@ -638,6 +659,10 @@ pub(super) async fn run_tool_loop(
     arkavo_observability::subsystem_timing::global_timing()
         .conductor_orchestration
         .record(total_latency_ms);
+
+    // Refusals surface after the bookkeeping above so a failed loop still
+    // reports its latency and feeds the learning signals it earned.
+    let final_result = loop_outcome?;
 
     Ok(ToolLoopResult {
         final_text: final_result,
@@ -1590,5 +1615,76 @@ mod tests {
     #[test]
     fn no_grant_set_permits_everything() {
         assert!(tool_call_permitted("anything", None));
+    }
+
+    /// Bug 1: a routing or budget refusal used to end at `warn!` and the loop
+    /// returned empty text, so the requester saw neither an answer nor an
+    /// error. A refusal that produced nothing must come back as an error
+    /// carrying the underlying message.
+    #[test]
+    fn a_refusal_that_produced_nothing_is_returned_as_an_error() {
+        let refusal = "Budget exceeded: shared budget cannot fund router";
+        assert_eq!(
+            loop_result_text(String::new(), None, Some(refusal.to_string())),
+            Err(refusal.to_string())
+        );
+        assert_eq!(
+            loop_result_text(
+                "   ".to_string(),
+                None,
+                Some("planner inference timed out after 90s".to_string())
+            ),
+            Err("planner inference timed out after 90s".to_string())
+        );
+    }
+
+    /// Bug 2: a cycle whose model answered with tool calls only still owes the
+    /// requester a description of what it did, and a caller that already holds
+    /// that description keeps it even when the loop then hit a refusal.
+    #[test]
+    fn a_tool_only_loop_answers_with_its_summary() {
+        let summary = super::super::conductor_history::tool_only_summary(1, Some("2 agents"));
+        assert_eq!(
+            loop_result_text(String::new(), Some(summary.clone()), None),
+            Ok(summary.clone())
+        );
+        assert_eq!(
+            loop_result_text(
+                String::new(),
+                Some(summary.clone()),
+                Some("Budget exceeded: shared budget cannot fund router".to_string())
+            ),
+            Ok(summary)
+        );
+    }
+
+    /// A caller whose tool record lives in ToolMemory takes the empty text and
+    /// summarises there — but a refusal still has to reach it as an error.
+    #[test]
+    fn a_caller_without_its_own_summary_still_sees_the_refusal() {
+        assert_eq!(
+            loop_result_text(String::new(), None, None),
+            Ok(String::new())
+        );
+        assert_eq!(
+            loop_result_text(
+                String::new(),
+                None,
+                Some("Budget exceeded: shared budget cannot fund router".to_string())
+            ),
+            Err("Budget exceeded: shared budget cannot fund router".to_string())
+        );
+    }
+
+    #[test]
+    fn assistant_text_wins_over_every_fallback() {
+        assert_eq!(
+            loop_result_text(
+                "here is the answer".to_string(),
+                Some("ignored".to_string()),
+                Some("ignored".to_string())
+            ),
+            Ok("here is the answer".to_string())
+        );
     }
 }

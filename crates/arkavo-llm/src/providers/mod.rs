@@ -26,3 +26,8 @@ pub use health::{
 pub use openai::{OpenAIConfig, OpenAIProvider};
 #[cfg(feature = "llm-remote")]
 pub use xai_responses::{ReasoningEffort, ResponsesConfig, ResponsesProvider, ResponsesResult};
+
+#[cfg(feature = "llm-remote")]
+pub mod openai_responses;
+#[cfg(feature = "llm-remote")]
+pub use openai_responses::{OpenAIReasoningEffort, OpenAIResponsesConfig, OpenAIResponsesProvider};

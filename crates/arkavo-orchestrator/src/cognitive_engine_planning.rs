@@ -5,11 +5,11 @@ use crate::cognitive_engine_planning_parser::{parse_plan_from_response, parse_pl
 use crate::cognitive_engine_schema::JsonExecutionPlan;
 use crate::error::{Error, Result};
 use crate::planner_config::get_planner_config;
-use crate::token_estimator;
-use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
-use arkavo_llm::{Message as LlmMessage, Provider};
+use arkavo_budget::BudgetTracker;
+use arkavo_llm::Message as LlmMessage;
 use arkavo_memory::{PersistedPlan, PlanStateStore, PlanStatus};
 use arkavo_router::Router;
+use arkavo_router::usage::{CallBudget, estimate_request};
 use chrono::Utc;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -89,64 +89,68 @@ impl Planner {
             "Planning with selected model"
         );
 
-        // Get provider - supports both local and cloud models
-        let planning_provider: Arc<dyn Provider> = if decision.recommended_model.is_local() {
-            let provider = self
-                .router
-                .get_provider(&decision.recommended_model)
-                .await
-                .map_err(|e| {
-                    Error::Other(anyhow::anyhow!("Failed to create local provider: {e}"))
-                })?;
-            Arc::from(provider)
-        } else if let Some(gemini) = self.router.get_planning_provider() {
-            Arc::from(gemini)
-        } else {
-            return Err(Error::Other(anyhow::anyhow!(
-                "Planning model not available. Set GEMINI_API_KEY for remote planning."
-            )));
+        let messages = vec![LlmMessage::user(planning_prompt.clone())];
+        let max_tokens = planner_config.max_tokens().unwrap_or(4096);
+        let budget = CallBudget {
+            tracker: &self.budget_tracker,
+            agent_id: "github-orchestrator",
         };
 
-        let messages = vec![LlmMessage::user(planning_prompt.clone())];
+        // Both gates settle before the planning client is built, so a refusal
+        // never opens a connection and the caller sees the policy error rather
+        // than a downstream credential failure. The ledger answers first, so an
+        // exhausted cap reports as `BudgetExceeded`. The preflight prices the
+        // schema in unconditionally — the upper bound of what this call can
+        // cost, since whether the provider takes a schema is not knowable until
+        // it exists. The planning arm is routed, never named by a caller, so the
+        // cloud gate is asked without authorization.
+        let schema = JsonExecutionPlan::json_schema();
+        let preflight = estimate_request(&messages, Some(&schema), max_tokens as u32);
+        let preflight_cost = self
+            .router
+            .usage_cost(&decision.recommended_model, &preflight);
+        // The arm is routed, never named, so an unprovisioned local weight is a
+        // refusal rather than a multi-gigabyte download inside the plan.
+        self.router
+            .require_provisioned(&decision.recommended_model)
+            .map_err(|e| Error::Other(e.into()))?;
+        budget
+            .check(preflight_cost)
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
+        self.router
+            .authorize_call(&decision.recommended_model, preflight_cost, false, None)
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
+
+        let (planning_provider, actual_model) = self
+            .router
+            .get_provider_attributed(&decision.recommended_model)
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("Planning provider unavailable: {e}")))?;
 
         // Use structured output with JSON schema if provider supports it
-        let schema = if planning_provider.supports_structured_output() {
-            Some(JsonExecutionPlan::json_schema())
-        } else {
-            None
-        };
-
+        let schema = planning_provider
+            .supports_structured_output()
+            .then_some(schema);
+        let estimated = estimate_request(&messages, schema.as_ref(), max_tokens as u32);
         let response = planning_provider
-            .complete_with_schema(messages, schema, planner_config.max_tokens())
+            .complete_with_schema_response(messages, schema, Some(max_tokens))
+            .await;
+        let response = self
+            .account_failure(response, &actual_model, &estimated, budget)
+            .await?;
+
+        // Record the paid call before parsing: malformed plans still consumed tokens.
+        let usage = self
+            .router
+            .attribute_response(actual_model, &estimated, &response);
+        budget
+            .record(&usage)
             .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("Planning LLM call failed: {e}")))?;
-
-        let steps = parse_plan_json_or_text(&response)?;
-
-        // P4: Accurate token estimation. `complete_with_schema` returns a
-        // raw String with no provider-reported counts, so we use an
-        // improved character/word heuristic rather than the legacy
-        // len()/4 approximation.
-        let (estimated_input_tokens, estimated_output_tokens) =
-            token_estimator::tokens_from_texts(&planning_prompt, &response);
-        let total_tokens = estimated_input_tokens + estimated_output_tokens;
-
-        let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
-        let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
-
-        if let Err(e) = self
-            .budget_tracker
-            .record_spending(
-                "github-orchestrator".to_string(),
-                decision.recommended_model.provider().to_string(),
-                decision.recommended_model.name().to_string(),
-                usage,
-                cost,
-            )
-            .await
-        {
-            warn!(error = %e, "Failed to record budget usage for planning");
-        }
+            .map_err(|e| Error::Other(e.into()))?;
+        let total_tokens = usage.usage.total_tokens();
+        let steps = parse_plan_json_or_text(&response.content)?;
 
         let plan_id = Uuid::new_v4();
         let plan = ExecutionPlan {
@@ -235,55 +239,51 @@ impl Planner {
             decision.recommended_model
         );
 
-        // Get provider - supports both local and cloud models
-        let provider: Arc<dyn Provider> = if decision.recommended_model.is_local() {
-            let p = self
-                .router
-                .get_provider(&decision.recommended_model)
-                .await
-                .map_err(|e| {
-                    Error::Other(anyhow::anyhow!(
-                        "Failed to create local provider for adjustment: {e}"
-                    ))
-                })?;
-            Arc::from(p)
-        } else if let Some(gemini) = self.router.get_planning_provider() {
-            Arc::from(gemini)
-        } else {
-            return Err(Error::Other(anyhow::anyhow!(
-                "Adjustment requires a model. Set GEMINI_API_KEY for remote planning."
-            )));
-        };
-
         let messages = vec![LlmMessage::user(adjustment_prompt.clone())];
 
+        let estimated = estimate_request(&messages, None, 4096);
+        let budget = CallBudget {
+            tracker: &self.budget_tracker,
+            agent_id: "github-orchestrator",
+        };
+        // Ledger then policy, both before the client exists — as on every other
+        // routing path, so a refused adjustment opens no connection.
+        let estimated_cost = self
+            .router
+            .usage_cost(&decision.recommended_model, &estimated);
+        self.router
+            .require_provisioned(&decision.recommended_model)
+            .map_err(|e| Error::Other(e.into()))?;
+        budget
+            .check(estimated_cost)
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
+        self.router
+            .authorize_call(&decision.recommended_model, estimated_cost, false, None)
+            .await
+            .map_err(|e| Error::Other(e.into()))?;
+
+        let (provider, actual_model) = self
+            .router
+            .get_provider_attributed(&decision.recommended_model)
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("Adjustment provider unavailable: {e}")))?;
+
         let response = provider
-            .complete(messages)
+            .complete_with_schema_response(messages, None, Some(4096))
+            .await;
+        let response = self
+            .account_failure(response, &actual_model, &estimated, budget)
+            .await?;
+
+        let usage = self
+            .router
+            .attribute_response(actual_model, &estimated, &response);
+        budget
+            .record(&usage)
             .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("Adjustment LLM call failed: {e}")))?;
-
-        // P4: accurate token estimation.
-        let (estimated_input_tokens, estimated_output_tokens) =
-            token_estimator::tokens_from_texts(&adjustment_prompt, &response);
-
-        let usage = TokenUsage::new(estimated_input_tokens, estimated_output_tokens);
-        let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
-
-        if let Err(e) = self
-            .budget_tracker
-            .record_spending(
-                "github-orchestrator".to_string(),
-                decision.recommended_model.provider().to_string(),
-                decision.recommended_model.name().to_string(),
-                usage,
-                cost,
-            )
-            .await
-        {
-            warn!(error = %e, "Failed to record budget usage for adjustment");
-        }
-
-        let adjusted_steps = parse_plan_from_response(&response)?;
+            .map_err(|e| Error::Other(e.into()))?;
+        let adjusted_steps = parse_plan_from_response(&response.content)?;
 
         if let Some(adjusted_step) = adjusted_steps.first() {
             info!(
@@ -296,5 +296,269 @@ impl Planner {
             warn!(step = step.step_number, "Failed to parse adjustment");
             Ok(None)
         }
+    }
+    async fn account_failure(
+        &self,
+        result: arkavo_llm::Result<arkavo_llm::ProviderResponse>,
+        model: &arkavo_router::ModelChoice,
+        estimated: &arkavo_budget::cost::TokenUsage,
+        budget: CallBudget<'_>,
+    ) -> Result<arkavo_llm::ProviderResponse> {
+        match result {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                if let Some(timing) = error.inference_timing() {
+                    let response = arkavo_llm::ProviderResponse {
+                        inference_timing: Some(timing.clone()),
+                        ..Default::default()
+                    };
+                    let usage = self
+                        .router
+                        .attribute_response(model.clone(), estimated, &response);
+                    budget
+                        .record(&usage)
+                        .await
+                        .map_err(|e| Error::Other(e.into()))?;
+                }
+                Err(Error::Other(anyhow::anyhow!(
+                    "Planning LLM call failed: {error}"
+                )))
+            }
+        }
+    }
+}
+
+#[cfg(all(test, feature = "openai"))]
+mod tests {
+    use super::*;
+    use arkavo_budget::{BudgetConfig, CloudPolicy};
+    use arkavo_llm::{Message, Provider};
+    use arkavo_router::{ModelChoice, ProviderFactory};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Counts both halves of a dispatch: providers the router asked this
+    /// factory to build, and calls that actually reached a model. A refusal
+    /// must leave both at zero — counting only calls would pass even when the
+    /// gate ran after a client was already open.
+    #[derive(Clone, Default)]
+    struct DispatchCounter {
+        builds: Arc<AtomicUsize>,
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for DispatchCounter {
+        async fn complete_with_options(
+            &self,
+            _: Vec<Message>,
+            _: Option<usize>,
+        ) -> arkavo_llm::Result<String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(arkavo_llm::Error::Provider("unexpected dispatch".into()))
+        }
+
+        async fn stream(
+            &self,
+            _: Vec<Message>,
+        ) -> arkavo_llm::Result<
+            Box<
+                dyn tokio_stream::Stream<Item = arkavo_llm::Result<arkavo_llm::StreamResponse>>
+                    + Send
+                    + Unpin,
+            >,
+        > {
+            panic!("planning does not stream")
+        }
+
+        fn name(&self) -> &str {
+            "dispatch-counter"
+        }
+    }
+
+    impl ProviderFactory for DispatchCounter {
+        fn build(&self, _: &ModelChoice) -> arkavo_router::Result<Box<dyn Provider>> {
+            self.builds.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(self.clone()))
+        }
+    }
+
+    fn assignment() -> AgentAssignment {
+        serde_json::from_value(serde_json::json!({
+            "issue_number": 1, "repository": "test/repo", "issue_title": "Fix a bug",
+            "issue_body": "Private issue content", "assigned_agent_id": null,
+            "assignment_rationale": "test",
+            "routing_decision": {
+                "strategy": "plan_first", "rationale": "test", "should_notify_human": false,
+                "priority": "medium", "analysis": {
+                    "issue_type": "bug", "complexity": "simple", "technologies": [],
+                    "required_capabilities": [], "estimated_tokens": 1000
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    fn step() -> PlanStep {
+        PlanStep {
+            step_number: 1,
+            description: "Fix a bug".into(),
+            commands: vec![],
+            verification: vec![],
+            confidence: 0.5,
+        }
+    }
+
+    fn failures() -> [VerificationResult; 1] {
+        [VerificationResult {
+            check: crate::cognitive_engine_core::VerificationCheck::TestsPassing,
+            passed: false,
+            details: "Private failure details".into(),
+        }]
+    }
+
+    /// A planner with one configured cloud provider, no local weights on disk,
+    /// and every provider substituted — so nothing here reads credentials, the
+    /// model cache or the network.
+    async fn planner_with(
+        policy: CloudPolicy,
+        config: BudgetConfig,
+    ) -> (Planner, DispatchCounter, Arc<BudgetTracker>) {
+        planner_for(
+            policy,
+            config,
+            arkavo_router::ProviderAvailability {
+                openai: true,
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    async fn planner_for(
+        policy: CloudPolicy,
+        config: BudgetConfig,
+        availability: arkavo_router::ProviderAvailability,
+    ) -> (Planner, DispatchCounter, Arc<BudgetTracker>) {
+        let counter = DispatchCounter::default();
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+        let mut router = Router::new_offline().await.unwrap();
+        router.set_offline_mode(false);
+        let router = router
+            .with_selector(arkavo_router::ModelSelector::with_availability(
+                availability,
+                false,
+            ))
+            .await
+            .with_connectivity(arkavo_router::ConnectivityChecker::assume(true))
+            .with_cloud_policy(policy)
+            .with_provider_factory(Arc::new(counter.clone()));
+        let planner = Planner::new(tracker.clone(), Arc::new(router), None);
+        (planner, counter, tracker)
+    }
+
+    fn router_error(error: Error) -> anyhow::Error {
+        let Error::Other(error) = error else {
+            panic!("unexpected error")
+        };
+        error
+    }
+
+    #[tokio::test]
+    async fn cloud_policy_blocks_planning_and_adjustment_before_dispatch() {
+        for policy in [CloudPolicy::LocalOnly, CloudPolicy::AskBeforeCloud] {
+            let (planner, counter, tracker) = planner_with(policy, BudgetConfig::default()).await;
+            for error in [
+                planner.plan(&assignment()).await.unwrap_err(),
+                planner.adjust(&step(), &failures()).await.unwrap_err(),
+            ] {
+                let error = router_error(error);
+                let error = error
+                    .downcast_ref::<arkavo_router::Error>()
+                    .expect("router error");
+                assert!(
+                    matches!(
+                        error,
+                        arkavo_router::Error::ModerationBlocked { .. }
+                            | arkavo_router::Error::CloudConfirmationRequired { .. }
+                    ),
+                    "{error}"
+                );
+            }
+            assert_eq!(
+                counter.builds.load(Ordering::SeqCst),
+                0,
+                "a refused plan must not open a client"
+            );
+            assert_eq!(counter.calls.load(Ordering::SeqCst), 0);
+            assert!(tracker.get_spending_history(10).await.is_empty());
+        }
+    }
+
+    /// Regression: the ledger answers before the cloud policy, so an exhausted
+    /// cap reports the money being gone rather than a policy denial — which
+    /// would have sent the operator looking for the wrong setting.
+    #[tokio::test]
+    async fn an_exhausted_cap_outranks_the_cloud_policy() {
+        let mut config = BudgetConfig::default();
+        config.limits.session_limit = Some(arkavo_budget::TokenCost::from_cents(1));
+        let (planner, counter, tracker) = planner_with(CloudPolicy::LocalOnly, config).await;
+
+        for error in [
+            planner.plan(&assignment()).await.unwrap_err(),
+            planner.adjust(&step(), &failures()).await.unwrap_err(),
+        ] {
+            let error = router_error(error);
+            let error = error
+                .downcast_ref::<arkavo_router::Error>()
+                .expect("router error");
+            assert!(
+                matches!(error, arkavo_router::Error::BudgetExceeded(_)),
+                "the ledger must answer before the policy: {error}"
+            );
+        }
+        assert_eq!(
+            counter.builds.load(Ordering::SeqCst),
+            0,
+            "a refused plan must not open a client"
+        );
+        assert_eq!(counter.calls.load(Ordering::SeqCst), 0);
+        assert!(tracker.get_spending_history(10).await.is_empty());
+    }
+
+    /// Regression: `plan` and `adjust` took their arm from classification and
+    /// went straight to provider construction. With no cloud keys the routed
+    /// arm is local, and on a device holding no weights that reached the
+    /// loader and started a multi-gigabyte download mid-plan. The
+    /// cloud-policy test above cannot see this: it configures OpenAI, so the
+    /// routed arm is never local.
+    #[tokio::test]
+    async fn an_unprovisioned_device_refuses_planning_and_adjustment() {
+        let (planner, counter, tracker) = planner_for(
+            CloudPolicy::CloudWithinCap,
+            BudgetConfig::default(),
+            arkavo_router::ProviderAvailability::default(),
+        )
+        .await;
+
+        for error in [
+            planner.plan(&assignment()).await.unwrap_err(),
+            planner.adjust(&step(), &failures()).await.unwrap_err(),
+        ] {
+            let error = router_error(error);
+            let error = error
+                .downcast_ref::<arkavo_router::Error>()
+                .expect("router error");
+            assert!(
+                matches!(error, arkavo_router::Error::ModelNotAvailable { .. }),
+                "{error}"
+            );
+        }
+        assert_eq!(
+            counter.builds.load(Ordering::SeqCst),
+            0,
+            "a refused plan must not open a client"
+        );
+        assert_eq!(counter.calls.load(Ordering::SeqCst), 0);
+        assert!(tracker.get_spending_history(10).await.is_empty());
     }
 }
