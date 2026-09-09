@@ -80,6 +80,44 @@ pub fn estimate_request(
     TokenUsage::new(estimate_tokens(bytes), output)
 }
 
+/// A realistic short cloud answer, so a small request does not systematically
+/// settle an order of magnitude above what it reserved. This is a pricing floor
+/// only — the gate stays closed without it, because `CallBudget::check` rounds
+/// any positive reserve up to a whole cent.
+const MIN_RESERVE_OUTPUT_TOKENS: u32 = 512;
+
+/// Preflight reserve for a request whose answer length is not yet known.
+///
+/// Settlement is the authority on what a call cost: every dispatch is charged
+/// its measured usage through `Router::account_result`, so the reserve only has
+/// to be a realistic bound that still refuses a ledger with nothing left.
+/// Reserving the dispatch's whole `max_output` instead priced every call as a
+/// maximum-length answer — on a $50/MTok output arm that is $0.20 of reserve
+/// for a five-character reply, and `CallBudget::check` rounds it up to 21
+/// cents, so no per-session cap under a fifth of a dollar could fund a single
+/// call. The reserve therefore scales with the request being made.
+///
+/// The allowance tracks the conversation alone. A tool schema is input the
+/// provider genuinely receives, so it is priced as input, but attaching one does
+/// not make the model's answer longer and so must not push the output reserve
+/// back up to the ceiling.
+///
+/// A single call can still settle above its reserve, bounded by the `max_output`
+/// the dispatch itself enforces; the overshoot is charged and the next call is
+/// refused.
+pub fn reserve_request(
+    messages: &[Message],
+    tools: Option<&serde_json::Value>,
+    max_output: u32,
+) -> TokenUsage {
+    let sent = estimate_request(messages, tools, 0).input_tokens;
+    let conversation = estimate_request(messages, None, 0).input_tokens;
+    // `min` last: a dispatch that allows less than the floor may not reserve
+    // more than it can possibly generate.
+    let output = conversation.max(MIN_RESERVE_OUTPUT_TOKENS).min(max_output);
+    TokenUsage::new(sent, output)
+}
+
 fn estimate_tokens(bytes: usize) -> u32 {
     u32::try_from(bytes.div_ceil(3)).unwrap_or(u32::MAX)
 }
@@ -280,6 +318,69 @@ mod tests {
         assert_eq!(usage.thinking_tokens, 200);
         assert_eq!(usage.total_tokens(), 1300);
         assert!((ModelChoice::Gpt6Astra.usage_cost_usd(&usage) - 0.0196).abs() < 1e-9);
+    }
+
+    /// The reserve for a one-line prompt has to fit inside a cap a person would
+    /// plausibly set. Reserving the dispatch's full 4096-token allowance cost
+    /// $0.2048 of output alone, which `CallBudget::check` rounds to 21 cents.
+    #[spec("ASTRA-005")]
+    #[test]
+    fn a_short_request_reserves_a_short_answer() {
+        let messages = [Message::user("Reply with the single word ready.")];
+        let reserve = reserve_request(&messages, None, 4096);
+        assert_eq!(reserve.output_tokens, MIN_RESERVE_OUTPUT_TOKENS);
+        let cost = ModelChoice::Gpt6Astra.usage_cost_usd(&reserve);
+        assert!(cost < 0.03, "reserve priced at ${cost}");
+        assert!(
+            (cost * 100.0).ceil() as u64 <= 20,
+            "a 20-cent cap must fund the reserve, priced at ${cost}"
+        );
+    }
+
+    /// A tool schema is input the provider really receives, so it is priced —
+    /// but offering tools does not lengthen the answer, and it used to drag the
+    /// output reserve back up to the dispatch ceiling.
+    #[spec("ASTRA-005")]
+    #[test]
+    fn a_large_tool_schema_prices_input_without_inflating_the_answer() {
+        let messages = [Message::user("Reply with the single word ready.")];
+        let tools = serde_json::json!(
+            (0..400)
+                .map(|i| serde_json::json!({
+                    "name": format!("tool_{i}"),
+                    "description": "A registered capability with a description long enough to matter",
+                    "input_schema": {"type": "object", "properties": {}},
+                }))
+                .collect::<Vec<_>>()
+        );
+        let bare = reserve_request(&messages, None, 4096);
+        let with_tools = reserve_request(&messages, Some(&tools), 4096);
+        assert!(
+            with_tools.input_tokens > bare.input_tokens * 10,
+            "the schema is sent, so it must be priced as input"
+        );
+        assert_eq!(with_tools.output_tokens, bare.output_tokens);
+    }
+
+    /// The floor may never reserve more output than the dispatch itself permits
+    /// the model to generate.
+    #[spec("ASTRA-005")]
+    #[test]
+    fn a_tight_ceiling_outranks_the_reserve_floor() {
+        let messages = [Message::user("hello")];
+        let reserve = reserve_request(&messages, None, 64);
+        assert_eq!(reserve.output_tokens, 64);
+        assert!(ModelChoice::Gpt6Astra.usage_cost_usd(&reserve) > 0.0);
+    }
+
+    /// A long conversation reserves proportionally more, up to the ceiling, so
+    /// the cheaper reserve is a re-pricing rather than a blanket discount.
+    #[spec("ASTRA-005")]
+    #[test]
+    fn a_long_conversation_reserves_up_to_the_dispatch_ceiling() {
+        let messages = [Message::user(&"analyse this passage. ".repeat(2_000))];
+        let reserve = reserve_request(&messages, None, 4096);
+        assert_eq!(reserve.output_tokens, 4096);
     }
 
     #[spec("ASTRA-005")]

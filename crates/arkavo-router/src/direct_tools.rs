@@ -77,7 +77,7 @@ impl super::Router {
             None => None,
         };
 
-        let request_usage = crate::usage::estimate_request(&messages, tools_json.as_ref(), 4096);
+        let request_usage = crate::usage::reserve_request(&messages, tools_json.as_ref(), 4096);
         let estimated_cost = self.usage_cost(&model, &request_usage);
         // The execution path spends exactly like chat, so it faces the same
         // ledger and cloud policy — both before the provider is built, so a
@@ -179,7 +179,7 @@ impl super::Router {
         };
 
         let model = model.clone();
-        let request_usage = crate::usage::estimate_request(&messages, tools_json.as_ref(), 4096);
+        let request_usage = crate::usage::reserve_request(&messages, tools_json.as_ref(), 4096);
         let estimated_cost = self.usage_cost(&model, &request_usage);
         // An override names the model explicitly, which satisfies
         // `AskBeforeCloud` — but never `LocalOnly` or an exhausted cap.

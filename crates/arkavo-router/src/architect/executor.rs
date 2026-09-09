@@ -166,7 +166,7 @@ impl ArchitectExecutor {
                 }
             });
 
-            let preflight = crate::usage::estimate_request(&messages, tools_json.as_ref(), 4096);
+            let preflight = crate::usage::reserve_request(&messages, tools_json.as_ref(), 4096);
             let settled = crate::usage::estimate_request(&messages, tools_json.as_ref(), 0);
             // Both gates run before the provider exists: a refusal never opens
             // a client, and an exhausted budget stops the plan rather than
