@@ -182,6 +182,9 @@ fn is_wire_identifier(value: &str) -> bool {
 /// in prose under `incomplete_details.reason` while the `error.code` beside it
 /// is clean. Judging each candidate on its own keeps the clean one instead of
 /// letting the first unusable value collapse the whole chain to a fallback.
+// Only the Responses providers read a wire code, and they are behind
+// `llm-remote`; `test` keeps the unit tests below compiling without it.
+#[cfg(any(feature = "llm-remote", test))]
 pub(crate) fn first_wire_code<'a>(candidates: &[Option<&'a str>]) -> Option<&'a str> {
     candidates
         .iter()
