@@ -1459,7 +1459,7 @@ impl Router {
         // exhausted cap reports as `BudgetExceeded` rather than as a policy
         // denial. Both settle before the provider is built, so a refusal never
         // opens a client.
-        let estimated = usage::estimate_request(&messages, None, 16_384);
+        let estimated = usage::reserve_request(&messages, None, 16_384);
         let estimated_cost = self.usage_cost(&model, &estimated);
         let budget = self.call_budget();
         if let Some(budget) = budget {
@@ -1576,7 +1576,7 @@ impl Router {
             None => None,
         };
 
-        let estimated = usage::estimate_request(&messages, tools_json.as_ref(), 16_384);
+        let estimated = usage::reserve_request(&messages, tools_json.as_ref(), 16_384);
         let budget = self.call_budget();
         // Cap and policy are settled before the provider is built, so a refusal
         // never opens a client — and a session with no way to ask its user gets

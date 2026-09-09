@@ -67,7 +67,7 @@ impl ArchitectPlanner {
         let model = planning_provider::choose_model(&self.availability)
             .ok_or_else(planning_provider::no_planning_model)?;
         let messages = vec![Message::user(self.build_planning_prompt(task))];
-        let preflight = crate::usage::estimate_request(&messages, None, 4096);
+        let preflight = crate::usage::reserve_request(&messages, None, 4096);
         let settled = crate::usage::estimate_request(&messages, None, 0);
         let budget = self.router.as_ref().and_then(|r| r.call_budget());
         // What the planning call itself is expected to cost. Without a router

@@ -274,7 +274,10 @@ impl super::Router {
 
             let actual_model = current_decision.recommended_model.clone();
             let max_tokens = 4096usize;
-            let estimated_usage = crate::usage::estimate_request(
+            // Reserve for the request in hand, not for a maximum-length answer:
+            // the loop settles every attempt against measured usage below, so
+            // the preflight only has to be a realistic bound.
+            let estimated_usage = crate::usage::reserve_request(
                 &advised_messages,
                 tools_json.as_ref(),
                 max_tokens as u32,
@@ -1240,5 +1243,95 @@ mod tests {
                 .any(|event| matches!(event, RouterEvent::CloudUpgradeOffered { .. })),
             "an already-confirmed upgrade must not be offered again"
         );
+    }
+
+    /// A one-cent session cap is genuinely exhausted for any paid arm, and the
+    /// ledger must say so before a client is opened. The proportional reserve
+    /// only re-prices the call; `CallBudget::check` still rounds it up to a whole
+    /// cent, so re-pricing must not soften this refusal into a bypass.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn a_tiny_cap_still_refuses_the_loop_before_a_provider_exists() {
+        use crate::test_support::{CountingProvider, cloud_router};
+        use crate::{Error, ModelChoice};
+        use arkavo_budget::{BudgetConfig, BudgetTracker, TokenCost};
+        use std::sync::Arc;
+
+        let mut config = BudgetConfig::default();
+        config.limits.session_limit = Some(TokenCost::from_cents(1));
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+        let provider = CountingProvider::new("ready");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::CloudWithinCap,
+            "openai",
+            &provider,
+        )
+        .await
+        .with_budget_tracker(tracker.clone());
+
+        let error = router
+            .route_with_tools_hinted(
+                "reply to the operator",
+                vec![arkavo_llm::Message::user(
+                    "Reply with the single word ready.",
+                )],
+                None,
+                Some(&ModelChoice::Gpt6Astra),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::BudgetExceeded(_)),
+            "an exhausted cap must refuse the loop: got {error:?}"
+        );
+        assert_eq!(provider.builds(), 0, "a refusal must not open a client");
+        assert_eq!(provider.calls(), 0);
+        assert!(tracker.get_spending_history(10).await.is_empty());
+    }
+
+    /// Regression: the hinted tool loop reserved a full 4096-token response for
+    /// every call, so on Astra's $50/MTok output rate the preflight bound was
+    /// at least $0.2048 before the prompt was even counted — and `CallBudget`
+    /// rounds that up to 21 cents. A 20-cent session cap could therefore never
+    /// fund a single one-line request: it reported `BudgetExceeded` and
+    /// abandoned the task without ever building a provider, while the answer it
+    /// refused to make would have cost a fraction of a cent.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn a_modest_cap_funds_a_small_astra_tool_loop_call() {
+        use crate::ModelChoice;
+        use crate::test_support::{CountingProvider, cloud_router};
+        use arkavo_budget::{BudgetConfig, BudgetTracker, TokenCost};
+        use std::sync::Arc;
+
+        let mut config = BudgetConfig::default();
+        config.limits.session_limit = Some(TokenCost::from_cents(20));
+        let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
+        let provider = CountingProvider::new("ready");
+        let router = cloud_router(
+            arkavo_budget::CloudPolicy::CloudWithinCap,
+            "openai",
+            &provider,
+        )
+        .await
+        .with_budget_tracker(tracker.clone());
+
+        let response = router
+            .route_with_tools_hinted(
+                "reply to the operator",
+                vec![arkavo_llm::Message::user(
+                    "Reply with the single word ready.",
+                )],
+                None,
+                Some(&ModelChoice::Gpt6Astra),
+            )
+            .await
+            .expect("a 20-cent cap must fund one short cloud call");
+        assert_eq!(response.content, "ready");
+        assert_eq!(provider.built_models(), vec![ModelChoice::Gpt6Astra]);
+        assert_eq!(provider.calls(), 1, "one dispatch answered the request");
+        // Settlement is what actually charges the ledger, so the call the
+        // reserve admitted is still accounted against the cap.
+        assert_eq!(tracker.get_spending_history(10).await.len(), 1);
     }
 }
