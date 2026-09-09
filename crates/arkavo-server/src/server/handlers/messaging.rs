@@ -14,6 +14,10 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::super::LearningBus;
+use super::super::agent_cycle_reply::{
+    REQUEST_REPLY_BUDGET, apply_outcome, deliver_outcome_to_task,
+};
+use super::super::agent_event::CycleOutcome;
 use super::super::config_helpers::AgentMetadata;
 use super::super::execute_with_conductor_and_learning;
 use super::super::tool_memory::ToolMemory;
@@ -259,6 +263,7 @@ pub async fn handle_message_send(
 
                     let correlation_id = CorrelationId(uuid::Uuid::new_v4());
                     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                    let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
 
                     let sender_did = request_metadata_ref
                         .as_ref()
@@ -274,27 +279,23 @@ pub async fn handle_message_send(
                             task_id: task_id_clone,
                             correlation_id,
                             reply: reply_tx,
+                            outcome: outcome_tx,
                         })
                         .await;
 
+                    // The requester polls this task, so the cycle's answer —
+                    // text, tool summary, or refusal — has to land on it. The
+                    // specialist path below does the same thing inline.
+                    let executor = task_executor.clone();
                     tokio::spawn(async move {
-                        match tokio::time::timeout(std::time::Duration::from_mins(2), reply_rx)
-                            .await
-                        {
-                            Ok(Ok(receipt)) => {
-                                info!(
-                                    correlation_id = %receipt.correlation_id.0,
-                                    cycle = receipt.cycle_id.0,
-                                    "Message incorporated into orchestrator cycle"
-                                );
-                            }
-                            Ok(Err(_canceled)) => {
-                                warn!("Agent loop dropped message — event channel closed");
-                            }
-                            Err(_timeout) => {
-                                warn!("Message not processed within 120s");
-                            }
-                        }
+                        deliver_outcome_to_task(
+                            executor,
+                            task_id_clone,
+                            reply_rx,
+                            outcome_rx,
+                            REQUEST_REPLY_BUDGET,
+                        )
+                        .await;
                     });
                 } else {
                     // Specialist path: execute directly via conductor
@@ -487,6 +488,18 @@ pub async fn handle_message_send(
                         }
                     });
                 }
+            } else {
+                // No router means no way to execute this task, ever. Submitting
+                // it and walking away leaves the requester polling a task that
+                // will never move.
+                apply_outcome(
+                    task_executor,
+                    &task_id,
+                    &CycleOutcome::Failed {
+                        error: "agent has no router configured to execute this message".to_string(),
+                    },
+                )
+                .await;
             }
 
             let response = MessageSendResponse {

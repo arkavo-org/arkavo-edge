@@ -40,39 +40,6 @@ pub struct AgentLoopConfig {
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
 }
 
-// --- Pending message drain helper ---
-
-fn drain_pending_messages(
-    pending: &mut Vec<super::agent_event::PendingMessage>,
-    cycle_id: super::agent_event::CycleId,
-) -> (
-    String,
-    Vec<(
-        tokio::sync::oneshot::Sender<super::agent_event::CycleReceipt>,
-        super::agent_event::CycleReceipt,
-    )>,
-) {
-    let mut block = String::new();
-    let mut receipts = Vec::new();
-    for mut msg in pending.drain(..) {
-        if !block.is_empty() {
-            block.push('\n');
-        }
-        block.push_str(&msg.content);
-        if let Some(reply) = msg.reply.take() {
-            receipts.push((
-                reply,
-                super::agent_event::CycleReceipt {
-                    cycle_id,
-                    correlation_id: msg.correlation_id,
-                    disposition: super::agent_event::MessageDisposition::Incorporated { cycle_id },
-                },
-            ));
-        }
-    }
-    (block, receipts)
-}
-
 // --- Registry build helpers ---
 
 /// Build the full (unfiltered) tool registry from config sources.
@@ -130,6 +97,9 @@ pub async fn run_agent_loop(
     config: AgentLoopConfig,
     mut agent_event_rx: tokio::sync::mpsc::Receiver<super::agent_event::AgentEvent>,
 ) {
+    use super::agent_cycle_reply::{
+        answer_waiters, drain_pending_messages, outcome_for_cycle, reject_pending,
+    };
     use super::agent_event::{AgentEvent, CycleId, MessagePriority, PendingMessage};
     use std::sync::atomic::Ordering::Relaxed;
 
@@ -197,10 +167,24 @@ pub async fn run_agent_loop(
                     error!(
                         "Agent reached absolute cycle limit ({MAX_AGENT_CYCLES}), shutting down loop"
                     );
+                    reject_pending(
+                        &mut pending_messages,
+                        CycleId(cycle),
+                        "agent loop reached its cycle limit and is shutting down",
+                    );
                     break;
                 }
 
+                // Requests cannot be served without an identity to serve them
+                // under, and cannot be served at all once the compute budget is
+                // gone. Both are terminal for anything already queued: leaving
+                // it queued is what makes a requester wait on silence.
                 if config.purpose.is_empty() {
+                    reject_pending(
+                        &mut pending_messages,
+                        CycleId(cycle),
+                        "agent has no configured purpose",
+                    );
                     continue;
                 }
 
@@ -210,6 +194,11 @@ pub async fn run_agent_loop(
                     let snapshot = budget.snapshot();
                     if !snapshot.has_remaining {
                         drop(budget);
+                        reject_pending(
+                            &mut pending_messages,
+                            CycleId(cycle),
+                            "compute budget exhausted",
+                        );
                         continue;
                     }
                 }
@@ -304,10 +293,13 @@ pub async fn run_agent_loop(
                     ctx
                 };
 
-                // 3. Drain pending_messages into message block + send CycleReceipts
-                let (message_block, receipts) =
-                    drain_pending_messages(&mut pending_messages, CycleId(cycle));
-                for (sender, receipt) in receipts {
+                // 3. Drain pending_messages into message block + send CycleReceipts.
+                // The outcome channels stay open until this cycle ends: whatever
+                // happens next, these requesters get an answer.
+                let drained = drain_pending_messages(&mut pending_messages, CycleId(cycle));
+                let message_block = drained.block;
+                let cycle_waiters = drained.waiters;
+                for (sender, receipt) in drained.receipts {
                     let _ = sender.send(receipt);
                 }
 
@@ -315,6 +307,10 @@ pub async fn run_agent_loop(
                 let memory_guard = config.agent_memory.read().await;
                 let control_signals = memory_guard.format_control_signals();
                 let memory_entry_count = memory_guard.entry_count();
+                // Baseline for "did *this* cycle run any tools", read again after
+                // the cycle. ToolMemory spans cycles, so its summary only stands
+                // in as this cycle's answer when the count moved.
+                let tools_recorded_before = memory_guard.total_recorded();
                 drop(memory_guard);
                 if let Some(ref signals) = control_signals {
                     info!(
@@ -374,7 +370,11 @@ pub async fn run_agent_loop(
                 // Skip empty cycles for toolless specialists — "Continue." with no
                 // new information just burns inference. Wait for incoming messages
                 // or state broadcasts from the orchestrator.
-                if !config.has_mcp_tools && cycle_prompt == "Continue." && cycle > 1 {
+                if !config.has_mcp_tools
+                    && cycle_prompt == "Continue."
+                    && cycle > 1
+                    && cycle_waiters.is_empty()
+                {
                     info!(
                         "Agent cycle {cycle}: skipping empty specialist cycle (no incoming state)"
                     );
@@ -391,7 +391,10 @@ pub async fn run_agent_loop(
                     consecutive_no_action_cycles.min(5).hash(&mut hasher);
                     hasher.finish()
                 };
-                if prompt_hash == last_cycle_prompt_hash && consecutive_no_action_cycles >= 2 {
+                if prompt_hash == last_cycle_prompt_hash
+                    && consecutive_no_action_cycles >= 2
+                    && cycle_waiters.is_empty()
+                {
                     consecutive_duplicate_prompts += 1;
                     if !consecutive_duplicate_prompts.is_multiple_of(5) {
                         info!(
@@ -457,12 +460,26 @@ pub async fn run_agent_loop(
                         // When the conductor returns empty text (tool-only response),
                         // build a summary from ToolMemory so the ConversationWindow
                         // retains what happened — enabling cross-cycle planning.
-                        let assistant_content = if result.is_empty() {
+                        let (assistant_content, ran_tools_this_cycle) = {
                             let mem = config.agent_memory.read().await;
-                            mem.format_recent_for_context()
-                                .unwrap_or_default()
+                            let ran = mem.total_recorded() > tools_recorded_before;
+                            let content = if result.is_empty() {
+                                mem.format_recent_for_context().unwrap_or_default()
+                            } else {
+                                result.clone()
+                            };
+                            (content, ran)
+                        };
+                        // The requester gets the assistant text, or the same
+                        // tool-activity summary the window records when the
+                        // model answered with tool calls only. That summary
+                        // covers earlier cycles too, so it is only an answer
+                        // when this cycle actually ran tools; otherwise the
+                        // cycle had nothing to show and says so.
+                        let cycle_answer = if result.is_empty() && !ran_tools_this_cycle {
+                            String::new()
                         } else {
-                            result.clone()
+                            assistant_content.clone()
                         };
                         conversation
                             .push(arkavo_llm::Message::assistant(&assistant_content));
@@ -595,12 +612,14 @@ pub async fn run_agent_loop(
                             elapsed.as_secs_f64(),
                             result.len(),
                         );
+                        answer_waiters(cycle_waiters, &outcome_for_cycle(&Ok(cycle_answer)));
                     }
                     Err(e) => {
                         // User msg already pushed (step 7), no assistant response
                         consecutive_no_action_cycles += 1;
                         consecutive_timeouts += 1;
                         warn!("Agent cycle {cycle} failed: {e}");
+                        answer_waiters(cycle_waiters, &outcome_for_cycle(&Err(e)));
                     }
                 }
                 config.inference_active.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -629,6 +648,7 @@ pub async fn run_agent_loop(
                         task_id,
                         correlation_id,
                         reply,
+                        outcome,
                     } => {
                         pending_messages.push(PendingMessage {
                             content: format!(
@@ -638,6 +658,7 @@ pub async fn run_agent_loop(
                             task_id: Some(task_id),
                             correlation_id,
                             reply: Some(reply),
+                            outcome: Some(outcome),
                             priority: MessagePriority::Normal,
                         });
                         tick_interval.reset();
@@ -646,6 +667,7 @@ pub async fn run_agent_loop(
                         instruction,
                         correlation_id,
                         reply,
+                        outcome,
                     } => {
                         pending_messages.insert(
                             0,
@@ -657,6 +679,7 @@ pub async fn run_agent_loop(
                                 task_id: None,
                                 correlation_id,
                                 reply: Some(reply),
+                                outcome: Some(outcome),
                                 priority: MessagePriority::Override,
                             },
                         );
@@ -672,15 +695,31 @@ pub async fn run_agent_loop(
                             task_id: None,
                             correlation_id,
                             reply: None,
+                            // Push notifications have no requester to answer.
+                            outcome: None,
                             priority: MessagePriority::Normal,
                         });
                         // Don't reset tick — let events accumulate and coalesce
                     }
-                    AgentEvent::Shutdown => break,
+                    AgentEvent::Shutdown => {
+                        reject_pending(
+                            &mut pending_messages,
+                            CycleId(cycle),
+                            "agent loop is shutting down",
+                        );
+                        break;
+                    }
                 }
             }
         }
     }
+    // The channel receivers outlive this loop, so anything still queued has to
+    // be refused here rather than dropped without a word.
+    reject_pending(
+        &mut pending_messages,
+        CycleId(cycle),
+        "agent loop exited before serving this message",
+    );
     info!("Agent loop exiting");
 }
 
