@@ -37,6 +37,36 @@ pub(super) struct ToolLoopResult {
     pub tool_observations: Vec<ToolCallObservation>,
 }
 
+/// Decide what a finished tool loop hands back to its caller.
+///
+/// Both loops can stop on a refusal — a routing error, a budget that cannot
+/// fund the model, a policy denial, an inference timeout. Such a refusal *is*
+/// the answer when the loop has nothing else to show: returning empty text
+/// instead turns an actionable condition into silence for whoever asked for
+/// the work, which is how these refusals used to end at a `warn!` and no more.
+///
+/// `tool_summary` is what a caller that synthesises its own tool-only answer
+/// passes in; it outranks the refusal because a caller holding a real summary
+/// has already said what the cycle achieved. Callers whose tool record lives
+/// elsewhere (the parallel loop's lives in `ToolMemory`, which the agent loop
+/// turns into the cycle's answer) pass `None`.
+pub(super) fn loop_result_text(
+    final_text: String,
+    tool_summary: Option<String>,
+    failure: Option<String>,
+) -> Result<String, String> {
+    if !final_text.trim().is_empty() {
+        return Ok(final_text);
+    }
+    if let Some(summary) = tool_summary {
+        return Ok(summary);
+    }
+    match failure {
+        Some(reason) => Err(reason),
+        None => Ok(final_text),
+    }
+}
+
 /// True if a tool call is permitted under an optional grant set.
 /// `None` = unspecialized agent (no filtering). `Some(set)` = specialized;
 /// only names in the set may execute.
@@ -73,6 +103,9 @@ pub(super) async fn run_tool_loop(
     let mut force_planning = false;
     let mut consecutive_negative_rewards: u32 = 0;
     let mut tool_observations: Vec<ToolCallObservation> = Vec::new();
+    // Why the loop stopped, when it stopped on a refusal rather than a finished
+    // answer. Delivered to the caller if nothing else was produced.
+    let mut failure: Option<String> = None;
     let declared_scope: Vec<String> = registry_arc
         .list_tools()
         .iter()
@@ -108,6 +141,9 @@ pub(super) async fn run_tool_loop(
                         "Compute budget exhausted — stopping tool loop at iteration {}",
                         iteration
                     );
+                    failure = Some(format!(
+                        "compute budget exhausted before tool loop iteration {iteration}"
+                    ));
                     break;
                 }
             }
@@ -320,6 +356,7 @@ pub(super) async fn run_tool_loop(
                                 "Tool loop inference error — breaking loop"
                             );
                         }
+                        failure = Some(e.to_string());
                         break;
                     }
                 }
@@ -358,6 +395,7 @@ pub(super) async fn run_tool_loop(
                 if let Some(hint) = model_hint {
                     router.advisor().observe(hint.family(), task_content, "");
                 }
+                failure = Some(format!("inference timed out after {timeout_secs}s"));
                 break;
             }
         };
@@ -597,12 +635,16 @@ pub(super) async fn run_tool_loop(
         }
     }
 
-    if final_result.is_empty() && total_step_idx > 0 {
-        final_result = super::conductor_history::tool_only_summary(
-            total_step_idx,
-            messages.last().map(|m| m.content.as_str()),
-        );
-    }
+    let loop_outcome = loop_result_text(
+        final_result,
+        (total_step_idx > 0).then(|| {
+            super::conductor_history::tool_only_summary(
+                total_step_idx,
+                messages.last().map(|m| m.content.as_str()),
+            )
+        }),
+        failure,
+    );
 
     apply_reward_correction(router, &reward_signals).await;
 
@@ -617,6 +659,10 @@ pub(super) async fn run_tool_loop(
     arkavo_observability::subsystem_timing::global_timing()
         .conductor_orchestration
         .record(total_latency_ms);
+
+    // Refusals surface after the bookkeeping above so a failed loop still
+    // reports its latency and feeds the learning signals it earned.
+    let final_result = loop_outcome?;
 
     Ok(ToolLoopResult {
         final_text: final_result,
@@ -1569,5 +1615,76 @@ mod tests {
     #[test]
     fn no_grant_set_permits_everything() {
         assert!(tool_call_permitted("anything", None));
+    }
+
+    /// Bug 1: a routing or budget refusal used to end at `warn!` and the loop
+    /// returned empty text, so the requester saw neither an answer nor an
+    /// error. A refusal that produced nothing must come back as an error
+    /// carrying the underlying message.
+    #[test]
+    fn a_refusal_that_produced_nothing_is_returned_as_an_error() {
+        let refusal = "Budget exceeded: shared budget cannot fund router";
+        assert_eq!(
+            loop_result_text(String::new(), None, Some(refusal.to_string())),
+            Err(refusal.to_string())
+        );
+        assert_eq!(
+            loop_result_text(
+                "   ".to_string(),
+                None,
+                Some("planner inference timed out after 90s".to_string())
+            ),
+            Err("planner inference timed out after 90s".to_string())
+        );
+    }
+
+    /// Bug 2: a cycle whose model answered with tool calls only still owes the
+    /// requester a description of what it did, and a caller that already holds
+    /// that description keeps it even when the loop then hit a refusal.
+    #[test]
+    fn a_tool_only_loop_answers_with_its_summary() {
+        let summary = super::super::conductor_history::tool_only_summary(1, Some("2 agents"));
+        assert_eq!(
+            loop_result_text(String::new(), Some(summary.clone()), None),
+            Ok(summary.clone())
+        );
+        assert_eq!(
+            loop_result_text(
+                String::new(),
+                Some(summary.clone()),
+                Some("Budget exceeded: shared budget cannot fund router".to_string())
+            ),
+            Ok(summary)
+        );
+    }
+
+    /// A caller whose tool record lives in ToolMemory takes the empty text and
+    /// summarises there — but a refusal still has to reach it as an error.
+    #[test]
+    fn a_caller_without_its_own_summary_still_sees_the_refusal() {
+        assert_eq!(
+            loop_result_text(String::new(), None, None),
+            Ok(String::new())
+        );
+        assert_eq!(
+            loop_result_text(
+                String::new(),
+                None,
+                Some("Budget exceeded: shared budget cannot fund router".to_string())
+            ),
+            Err("Budget exceeded: shared budget cannot fund router".to_string())
+        );
+    }
+
+    #[test]
+    fn assistant_text_wins_over_every_fallback() {
+        assert_eq!(
+            loop_result_text(
+                "here is the answer".to_string(),
+                Some("ignored".to_string()),
+                Some("ignored".to_string())
+            ),
+            Ok("here is the answer".to_string())
+        );
     }
 }
