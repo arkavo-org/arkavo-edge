@@ -92,6 +92,7 @@ members = [
     "crates/arkavo-mcp-proxy",
     "crates/arkavo-shadow-consolidation",
     "crates/arkavo-lesson-synthesis",
+    "crates/arkavo-routines",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]
@@ -170,7 +171,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.93.0"
+version = "0.94.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

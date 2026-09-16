@@ -144,6 +144,8 @@ pub struct LearningBusStats {
 
 /// Central bus connecting event capture to learning and gossip
 pub struct LearningBus {
+    #[cfg(feature = "routines")]
+    pub(super) routine_library: OnceLock<Option<Arc<std::sync::Mutex<arkavo_routines::Library>>>>,
     pub(super) agent_id: String,
     pub(super) swarm_id: String,
     /// Learning configuration
@@ -246,6 +248,8 @@ impl LearningBus {
         Self {
             agent_id,
             swarm_id,
+            #[cfg(feature = "routines")]
+            routine_library: OnceLock::new(),
             config: learning_config.clone(),
             event_tx,
             event_rx: Arc::new(RwLock::new(Some(event_rx))),
@@ -290,6 +294,8 @@ impl LearningBus {
     pub async fn init_persistence(&self, db_path: &std::path::Path) {
         match LearningStore::new(db_path).await {
             Ok(store) => {
+                #[cfg(feature = "routines")]
+                super::routine_tools::init_persistence(self, db_path);
                 let store = Arc::new(store);
                 // Load existing lessons into policy cache
                 if let Ok(lessons) = store.get_lessons(&self.swarm_id).await
