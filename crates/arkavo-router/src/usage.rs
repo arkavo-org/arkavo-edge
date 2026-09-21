@@ -281,7 +281,7 @@ impl ModelChoice {
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => (0.27, 1.10, 0.27, 0.27),
             Self::KimiK2 => (0.55, 2.20, 0.55, 0.55),
             Self::Glm52 => (1.40, 4.40, 1.40, 1.40),
-            Self::Grok46 | Self::Grok46Xhigh => (2.0, 6.0, 0.50, 2.0),
+            Self::Grok47 | Self::Grok47Xhigh => (2.0, 6.0, 0.50, 2.0),
             _ => return 0.0,
         };
         calculate_cost(usage, input, output, cached, write)

@@ -205,10 +205,10 @@ impl ModelSelector {
             models.push(ModelChoice::Gpt6Astra);
         }
         if self.availability.xai {
-            // Grok 4.6 base arm (low effort) plus the xhigh companion so
+            // Grok 4.7 base arm (low effort) plus the xhigh companion so
             // Thompson Sampling can learn when max-depth reasoning pays off.
-            models.push(ModelChoice::Grok46);
-            models.push(ModelChoice::Grok46Xhigh);
+            models.push(ModelChoice::Grok47);
+            models.push(ModelChoice::Grok47Xhigh);
         }
         models
     }
@@ -309,7 +309,7 @@ pub(crate) fn best_configured_cloud_model(
     } else if availability.glm {
         Some(ModelChoice::Glm52)
     } else if availability.xai {
-        Some(ModelChoice::Grok46)
+        Some(ModelChoice::Grok47)
     } else if availability.openai {
         Some(ModelChoice::Gpt6Astra)
     } else {
@@ -546,8 +546,8 @@ mod tests {
     fn test_feasible_models_xai_only() {
         let selector = ModelSelector::with_availability(xai_only(), false);
         let feasible = selector.feasible_models();
-        assert!(feasible.contains(&ModelChoice::Grok46));
-        assert!(feasible.contains(&ModelChoice::Grok46Xhigh));
+        assert!(feasible.contains(&ModelChoice::Grok47));
+        assert!(feasible.contains(&ModelChoice::Grok47Xhigh));
         assert!(!feasible.contains(&ModelChoice::Glm52));
         assert!(!feasible.contains(&ModelChoice::ClaudeSonnet));
     }

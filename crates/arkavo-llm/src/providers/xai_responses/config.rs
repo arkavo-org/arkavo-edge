@@ -94,7 +94,7 @@ impl Default for ResponsesConfig {
         Self {
             api_key: String::new(),
             base_url: "https://api.x.ai/v1".to_string(),
-            model: "grok-4.6".to_string(),
+            model: "grok-4.7".to_string(),
             reasoning_effort: ReasoningEffort::Low,
             store: false,
             service_tier: None,
@@ -215,7 +215,7 @@ mod tests {
         let cfg = ResponsesConfig::default();
         assert!(!cfg.store);
         assert_eq!(cfg.reasoning_effort, ReasoningEffort::Low);
-        assert_eq!(cfg.model, "grok-4.6");
+        assert_eq!(cfg.model, "grok-4.7");
         assert!(cfg.prompt_cache_key.is_none());
     }
 
@@ -223,7 +223,7 @@ mod tests {
     fn with_reasoning_effort_overrides_default() {
         let cfg = ResponsesConfig::default().with_reasoning_effort(ReasoningEffort::Xhigh);
         assert_eq!(cfg.reasoning_effort, ReasoningEffort::Xhigh);
-        assert_eq!(cfg.model, "grok-4.6");
+        assert_eq!(cfg.model, "grok-4.7");
     }
 
     #[test]
@@ -231,18 +231,18 @@ mod tests {
         let low = ResponsesConfig::for_routed_arm(
             "k".into(),
             "https://api.x.ai/v1".into(),
-            "grok-4.6".into(),
+            "grok-4.7".into(),
             ReasoningEffort::Low,
         );
         let xhigh = ResponsesConfig::for_routed_arm(
             "k".into(),
             "https://api.x.ai/v1".into(),
-            "grok-4.6".into(),
+            "grok-4.7".into(),
             ReasoningEffort::Xhigh,
         );
         assert_eq!(low.reasoning_effort, ReasoningEffort::Low);
         assert_eq!(xhigh.reasoning_effort, ReasoningEffort::Xhigh);
-        assert_eq!(low.model, "grok-4.6");
+        assert_eq!(low.model, "grok-4.7");
     }
 
     #[test]

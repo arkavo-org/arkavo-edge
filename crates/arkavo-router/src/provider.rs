@@ -194,7 +194,7 @@ impl super::Router {
             ModelChoice::KimiK2 => self.is_kimi_available(),
             ModelChoice::Gpt6Astra => self.is_openai_available(),
             ModelChoice::Glm52 => cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
-            ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
+            ModelChoice::Grok47 | ModelChoice::Grok47Xhigh => {
                 cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok()
             }
             // The selector is the single authority on whether local weights are
@@ -488,10 +488,10 @@ impl super::Router {
                 Ok(self.protect_provider(Box::new(provider)))
             }
             #[cfg(feature = "xai")]
-            ModelChoice::Grok46 | ModelChoice::Grok46Xhigh => {
-                // Grok 4.6 uses the xAI Responses API (not Chat Completions)
+            ModelChoice::Grok47 | ModelChoice::Grok47Xhigh => {
+                // Grok 4.7 uses the xAI Responses API (not Chat Completions)
                 // for reasoning_effort control. The API model is always
-                // `grok-4.6`; `Grok46Xhigh` forces `reasoning.effort = xhigh`.
+                // `grok-4.7`; `Grok47Xhigh` forces `reasoning.effort = xhigh`.
                 use arkavo_llm::providers::xai_responses::{
                     ReasoningEffort, ResponsesConfig, ResponsesProvider,
                 };
@@ -500,9 +500,9 @@ impl super::Router {
                     .map_err(|_| Error::ModelExecution("XAI_API_KEY not set".to_string()))?;
                 let base_url = std::env::var("XAI_BASE_URL")
                     .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
-                let api_model = model.grok_api_model().unwrap_or("grok-4.6").to_string();
+                let api_model = model.grok_api_model().unwrap_or("grok-4.7").to_string();
 
-                let effort = if matches!(model, ModelChoice::Grok46Xhigh) {
+                let effort = if matches!(model, ModelChoice::Grok47Xhigh) {
                     ReasoningEffort::Xhigh
                 } else {
                     ReasoningEffort::Low
