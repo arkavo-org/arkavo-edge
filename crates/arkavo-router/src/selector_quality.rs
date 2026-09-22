@@ -107,8 +107,8 @@ impl ModelSelector {
             ModelChoice::KimiK2 => "Fast (5s), 256K context, thinking mode support",
             ModelChoice::Glm52 => "GLM-5.2 (8s), low-cost cloud reasoning, OpenAI-compatible",
             ModelChoice::Gpt6Astra => "GPT-6 Astra, OpenAI Responses, tools and reasoning",
-            ModelChoice::Grok46 => "Grok 4.6 (7s), xAI Responses API, tools + low-effort reasoning",
-            ModelChoice::Grok46Xhigh => "Grok 4.6 xhigh (25s), maximum reasoning depth, tools",
+            ModelChoice::Grok47 => "Grok 4.7 (7s), xAI Responses API, tools + low-effort reasoning",
+            ModelChoice::Grok47Xhigh => "Grok 4.7 xhigh (25s), maximum reasoning depth, tools",
         };
 
         format!(

@@ -397,7 +397,7 @@ mod tests {
         };
         // $2/M in + $6/M out → 2 + 3 = $5.00
         let usage = arkavo_budget::cost::TokenUsage::default();
-        let cost = executor.attempt_cost(&ModelChoice::Grok46, &usage, &resp);
+        let cost = executor.attempt_cost(&ModelChoice::Grok47, &usage, &resp);
         assert!(
             (cost - 5.0).abs() < 1e-9,
             "Grok actual cost should be $5.00 for 1M/0.5M tokens, got {cost}"
@@ -421,7 +421,7 @@ mod tests {
             ..Default::default()
         };
         // 500k output tokens at $6/M → $3.00 (not $3.00 + $1.80 double-count)
-        let thinking_cost = executor.attempt_cost(&ModelChoice::Grok46, &usage, &with_thinking);
+        let thinking_cost = executor.attempt_cost(&ModelChoice::Grok47, &usage, &with_thinking);
         assert!(
             (thinking_cost - 3.0).abs() < 1e-9,
             "thinking tokens must not double-count; got {thinking_cost}"
