@@ -31,6 +31,8 @@ mod local_engine;
 mod mcp_bridge;
 mod policy_cache;
 mod rlm_bridge;
+#[cfg(feature = "routines")]
+mod routine_tools;
 mod startup;
 #[cfg(feature = "swarm-apply")]
 mod swarm_apply_tool;

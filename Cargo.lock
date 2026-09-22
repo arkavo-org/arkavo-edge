@@ -1954,6 +1954,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-routines"
+version = "0.94.0"
+dependencies = [
+ "arkavo-mcp",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "arkavo-sat"
 version = "0.94.0"
 dependencies = [
@@ -2060,6 +2074,7 @@ dependencies = [
  "arkavo-orchestrator",
  "arkavo-protocol",
  "arkavo-router",
+ "arkavo-routines",
  "arkavo-security",
  "arkavo-tasks",
  "arkavo-tdf",
