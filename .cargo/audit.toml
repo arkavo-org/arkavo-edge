@@ -10,14 +10,6 @@ ignore = [
     "RUSTSEC-2023-0071",
     # derivative unmaintained — transitive via alloy-primitives -> ruint -> ark-ff
     "RUSTSEC-2024-0388",
-    # number_prefix unmaintained — transitive via fastembed -> hf-hub -> indicatif
-    "RUSTSEC-2025-0119",
-    # hickory-proto O(n²) name compression CPU exhaustion.
-    # iroh 0.98.2 hard-pins hickory-resolver =0.26.0-beta.4 (still affected); fix is in
-    # hickory-proto 0.26.1 stable. Blocked on iroh shipping a release that adopts 0.26.1.
-    "RUSTSEC-2026-0119",
-    # hickory-net NSEC3 closest-encloser proof unbounded loop. Same blocker as above.
-    "RUSTSEC-2026-0120",
     # atomic-polyfill unmaintained — transitive via heapless -> postcard -> irpc -> iroh-blobs.
     # Blocked on iroh updating to postcard 2.x which drops heapless 0.7.
     "RUSTSEC-2023-0089",
@@ -28,9 +20,4 @@ ignore = [
     "RUSTSEC-2024-0436",
     # proc-macro-error unmaintained — widely used transitive proc-macro crate.
     "RUSTSEC-2024-0370",
-    # quick-xml DoS via unbounded namespace allocation / quadratic attribute
-    # checking. Forced by iroh -> netwatch -> netdev -> plist =^1.8 which pins
-    # quick-xml ^0.39.2. Fix needs plist >= version that requires quick-xml 0.41+.
-    "RUSTSEC-2026-0195",
-    "RUSTSEC-2026-0194",
 ]
