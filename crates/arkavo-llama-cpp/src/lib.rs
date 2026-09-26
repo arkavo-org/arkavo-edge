@@ -39,6 +39,10 @@ pub mod multimodal;
 #[cfg(not(target_env = "musl"))]
 pub mod memory;
 
+// Pooled sentence embeddings
+#[cfg(not(target_env = "musl"))]
+pub mod embedding;
+
 // Speculative decoding via arkavo_spec_wrapper
 #[cfg(not(target_env = "musl"))]
 pub mod speculative;
