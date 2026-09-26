@@ -4,7 +4,7 @@
 
 **Status:** Proposed architecture and implementation contract; not a claim of implemented enforcement.
 
-**Scope:** Arkavo Edge, the Arkavo OpenTDF platform fork, `opentdf-rs`, and their identity/attestation integration.
+**Scope:** Arkavo Edge, the deployed Arkavo platform (`arkavo-rs` in front of the `opentdf-platform` fork), `authnz-rs` (identity.arkavo.net), `opentdf-rs`, and their identity/attestation integration.
 
 **Design input:** the outbound prompt gate for sealed knowledge, designed 2026-09-26. The "Changes required in the outbound design" section summarizes each proposal it revises, so this document stands on its own.
 
@@ -88,6 +88,7 @@ Every operation has a structured security context. A display name, an Agent Card
 | Agent workload | Execute scoped tasks using its own authenticated key | Its user's full privileges or its host administrator's rights |
 | Attestation verifier | Appraise evidence against reference values and issue results | Authorize data release just by reporting a healthy device |
 | Trust Guardian | Independently appraise enrolled agents; issue scoped quarantine signals from attributable evidence | Create data entitlements, approve its own workload, or restore access on its own after quarantine |
+| Swarm authz agent | Hold one share of each intra-swarm key and release it under owner-signed policy | Release alone, act on the orchestrator's instruction, or be appointed or reassigned by the orchestrator |
 | Local trust service | Report attributable observations about peers | Convert peer popularity, competence or tenure into clearance |
 | Model/tool processor | Receive only data approved for that endpoint and action | Inherit the requester's permissions |
 | KAS / policy service | Release keys and decide permitted operations under owner policy | Guarantee behavior after plaintext leaves its controlled boundary |
@@ -223,7 +224,7 @@ The lease rules make every connectivity-dependent action explicit when the node 
 
 | Action | Offline |
 |---|---|
-| `decrypt` (a new key release) | Not possible; KAS is required. The local-custody profile, where keys already sit on the node, is the weaker exception identified under "Rust OpenTDF implementation". |
+| `decrypt` (a new key release) | From the network KAS: not possible. Inside a provisioned swarm: possible through the swarm tiers only with a swarm-local status authority (see "Key access tiers"); otherwise suspended within 5 s. The local-custody profile, where keys already sit on the node, is the weaker exception identified under "Rust OpenTDF implementation". |
 | `process_local` with a key already released | Continues, honouring the local deny latch. Owner policy may require a live lease instead. |
 | `send_model` | Denied above Public; it needs the network anyway |
 | `delegate`, `share_wrapped` | Denied; they need a current lease |
@@ -234,6 +235,7 @@ A Raspberry Pi or `new_offline` node therefore keeps working on packs it has alr
 #### Minimum Guardian deployment
 
 - **Personal edge swarm:** the Guardian and the credential and egress broker run as separate processes under a separate OS user, with their own keys, on the same host. This contains a compromised worker, not a compromised host.
+- **A swarm that must keep working offline** runs a swarm Guardian on its LAN, enrolled by the owner as the status authority for that swarm's scope (see "Key access tiers").
 - **Host compromise in the threat model:** they run on a separate device, or in an attested confidential environment.
 
 ### Standards mapping
@@ -266,7 +268,46 @@ flowchart TD
     Cloud --> Release[Response and artifact enforcement]
 ```
 
+### Key access tiers
+
+Keys are released at three tiers. Each has a different job, and each enforces quarantine independently.
+
+| Tier | Where | Releases | Needed when |
+|---|---|---|---|
+| Network KAS | `platform.arkavo.net` (see "Platform fork") | Keys under the owner's policy, into a swarm, up to the limit the owner authorized for that swarm | A swarm is provisioned, or a workload is first authorized |
+| Swarm orchestrator KAS | The orchestrator's node, paired with an owner-enrolled authz agent's KAS for the second share, with an authn agent that pre-checks requests | Bundle and pack keys to an agent for its current flight role, within the swarm's limit | Each specialization and each pack load |
+| Agent KAS | Each agent (edge's `kas.rewrap` handler) | Keys for the agent's own outputs and state (what its role's release policy wraps), and peer-to-peer shares | Whenever a peer or the agent itself unwraps agent-produced data |
+
+**Intra-swarm release needs two shares.** A key released inside a swarm is split with the standard OpenTDF split-key scheme: one share wrapped to the orchestrator KAS, one to an independent authz agent's KAS, both under owner-signed policy. Neither can release a role's key alone. This preserves SwarmKit's guarantee that a compromised orchestrator cannot hand one role's data to another role (`docs/SWARMKIT.md`).
+
+- **The network KAS makes the split, and the orchestrator never holds an unsplit key.**
+  - At provisioning, the owner approves the swarm's orchestrator-KAS and authz-KAS public keys at the network KAS.
+  - When a pack or bundle key enters the swarm, the network KAS unwraps it under the owner's policy and rewraps it as two shares, one to each registered swarm key. This is a new "rewrap into split" operation in `opentdf-platform`.
+  - An agent obtains one share from each swarm KAS and combines them. As the intended recipient, it is the only party inside the swarm that ever holds the whole key.
+  - The alternative, the owner wrapping each pack with a split once a swarm's keys exist, needs a human step per swarm, so it is not the default.
+- **The authz agent is independent of the orchestrator.**
+  - The owner enrolls it; the orchestrator cannot appoint, reassign or restart it.
+  - It runs as a separate process under a separate OS user, and on a separate device when host compromise is in scope (as for the Guardian).
+  - It is a distinct principal from the Guardian: it holds key shares and decides release, while the Guardian assesses and quarantines. Both can share a host but not an identity.
+- **Each swarm KAS verifies the agent's CWT and proof of possession itself,** using the issuer's COSE keys. The authn agent may pre-check and audit requests, but it is never the verifier of record. A compromised authn agent must not be able to vouch a rogue agent into both shares.
+
+**Every tier checks workload status before releasing a share.** A quarantined workload gets nothing from any tier, whichever DID it presents.
+
+**Offline operation needs a swarm-local status authority.** Intra-swarm releases need only the swarm's own KASes. The network KAS is needed to provision a swarm or authorize a workload, not for each release. But every release also needs a current status lease of at most 5 s, and an isolated replica cannot mint positive leases.
+- **With a swarm Guardian on the LAN,** enrolled by the owner as the status authority for that swarm's scope and keeping its own authoritative history, a disconnected swarm keeps releasing keys.
+- **Without one,** the lease lapses within 5 s of disconnection and swarm releases suspend.
+- **Quarantines raised at the network level while the swarm is disconnected** apply when it reconnects. This is the offline-revocation limit stated under "State, revocation and retention".
+
+**The in-mesh KAS code needs hardening before it can serve either swarm tier:**
+- the NanoTDF handler's assumed ephemeral-key offset (see "Verified implementation gaps");
+- the legacy Ed25519 delegation chain;
+- the absence of split-key support in `opentdf-rs` 0.15, which reads only the first key-access object.
+
+The Go SDK in `opentdf-platform` already plans splits across KASes (`sdk/tdf.go`), so this follows a supported scheme rather than inventing one.
+
 ### Platform fork
+
+The deployed platform at `platform.arkavo.net` is `arkavo-rs`, a Rust server that proxies `/kas/v2/rewrap` and Connect `Rewrap` unchanged to a co-located `opentdf-platform`, the Go fork of OpenTDF (`arkavo-rs/docs/platform-proxy.md`). The fork verifies CWT bearer tokens from identity.arkavo.net (`service/internal/auth/cwt_verifier.go`: issuer, audience, expiry) and resolves entities through an Arkavo ERS that passes claims through. Rewrap authorization and all KAS changes below land in `opentdf-platform`. `arkavo-rs` needs changes only if its own legacy rewrap paths are used. `arkavo-org/platform` is a separate, plain upstream mirror and is not what runs.
 
 The platform is a resource server; identity and token issuance belong to the integrated identity authority. [OpenTDF authentication documentation](https://opentdf.io/sdks/authentication) describes that split. Keep authnz-rs responsible for its issued credentials rather than adding a second unrelated identity system inside KAS.
 
@@ -410,21 +451,33 @@ These are source observations at the baseline above, not results of a live deplo
 | [TDF policy conversion](../crates/arkavo-tdf/src/opentdf_impl.rs) | Invalid FQNs are filtered out during conversion (#700) | Reject malformed policy instead of dropping restrictions; add regression coverage |
 | [A2A KAS implementation](../crates/arkavo-tdf/src/a2a_handler.rs) | NanoTDF handling includes a simplified assumed ephemeral-key offset | Use validated profile parsing and cross-implementation vectors before trusting this as an alternative KAS path |
 
-The checked-in lockfile uses `opentdf` **0.15.0**, also the [latest published Rust release observed](https://github.com/arkavo-org/opentdf-rs/releases/tag/0.15.0). The platform fork's observed default-branch commit is [21e95e0](https://github.com/arkavo-org/platform/commit/21e95e04c9f5903dc4c437d12ea790bbbf20bbb1); its [authorization v2 proto](https://github.com/arkavo-org/platform/blob/21e95e04c9f5903dc4c437d12ea790bbbf20bbb1/service/authorization/v2/authorization.proto) has entity/resource oneofs, nested `ResourceDecision`, `required_obligations` and `fulfillable_obligation_fqns`. Current upstream documentation is not proof that a running Arkavo deployment exposes every newer feature. Deployment version, authnz-rs integration and live KAS behavior still require integration verification.
+The checked-in lockfile uses `opentdf` **0.15.0**, also the [latest published Rust release observed](https://github.com/arkavo-org/opentdf-rs/releases/tag/0.15.0).
+
+**Deployed platform code observed:** `opentdf-platform` [c2b1c18](https://github.com/arkavo-org/opentdf-platform/commit/c2b1c182b0f04a17b11b4186a193507d19858c31), behind `arkavo-rs` [68fd928](https://github.com/arkavo-org/arkavo-rs/commit/68fd92841fff3217c5d63256c155246667c5e247), with `authnz-rs` [8c7cc4e](https://github.com/arkavo-org/authnz-rs/commit/8c7cc4e866bc9917f722a4949b6be3afad12661e) as the issuer. The authorization v2 shape cited above (entity/resource oneofs, nested `ResourceDecision`, `required_obligations`, `fulfillable_obligation_fqns`) was read from upstream-equivalent code; confirm it in `opentdf-platform`.
+
+Gaps in that deployed code which the first delivery must close:
+- **Agent tokens fail authentication at KAS.** An agent CWT's `cnf` is an embedded COSE Ed25519 key. The fork runs DPoP validation whenever `cnf` is present and accepts only a `cnf.jkt` thumbprint with RS/ES/PS algorithms (`service/internal/auth/authn.go`).
+- **The owner's identity can leak into an agent's entitlements.** The Arkavo ERS evaluates an agent token as its own subject but copies the owner's account id into the client-id claim. A subject mapping keyed on that claim would entitle the agent as the owner.
+- **Rewrap has no delegation-scope check and no status or quarantine callout.** The fork's RFC 8693/9396 token-exchange endpoint (`service/authorization/v2/rar.go`) is not consulted by rewrap.
+- **Edge's SwarmKit apply tool defaults to `https://kas.arkavo.net`** (`swarm_apply_tool.rs`), which does not resolve. The network KAS is `platform.arkavo.net`.
+- **authnz-rs has no quarantine or token status.** Delegation revocation blocks only new agent tokens, which last up to 15 minutes. Agent tokens put the agent DID in `sub` and a fixed service list in `act`. `/agents/authorize` accepts only a short-lived passkey token with audience `arkavo`, not the OIDC access token edge's `arkavo-identity` holds.
+
+Live KAS behaviour still requires integration verification.
 
 ## Delivery and acceptance
 
 Implement separate reviewable changes in dependency order. Independent appraisal for autonomous role work and rapid quarantine are part of this delivery, not a future scoring extension. Keep protected cloud uplift disabled until their enforcement dependencies pass.
 
-The first two deliveries depend on none of the identity migration, the Guardian or status leases. They make the primary agent path protect sealed knowledge with no uplift of any kind: `send_model` is never granted, so nothing above Public reaches a cloud processor except classifier-clean derived text an owner explicitly opted in. They reach the honest-worker threat tier only.
+The first three deliveries make the primary agent path protect sealed knowledge with no uplift of any kind: `send_model` is never granted, so nothing above Public reaches a cloud processor except classifier-clean derived text an owner explicitly opted in. Rapid containment requires independently revocable agent credentials, so the revocation half of Guardian containment comes first: workload quarantine, status and minimal Guardian enrollment. Guardian appraisal, pushed incidents and local deny latches stay in "Guardian containment". Outbound enforcement reaches the honest-worker threat tier only.
 
 | Delivery | Owner | Threat tier | Completion condition |
 |---|---|---|---|
-| Pack provisioning | edge | — | KAS-backed `BundleDecryptor` exercised against a live KAS; SwarmKit-delivered pack references, keys and bytes; verified pack admission and protection readiness; a pack registry replacing the single-pack `OnceLock`, with the retained set persisted and signed (rollback anchoring waits for "Retention and provenance") |
+| Agent credentials and quarantine | authnz-rs + opentdf-platform + opentdf-rs + edge | revocable credentials (not released plaintext) | Transitional: the network KAS releases bundle and pack keys directly to agents within the limit the owner authorized for the swarm and workload, with no per-flight narrowing yet; the key access tiers table describes the state after the next delivery. Versioned agent token profile: owner as subject, agent as the RFC 8693 current actor, KAS audience, RFC 9396 `authorization_details` scope, RFC 8747 COSE key confirmation, at most 5 minutes. Operator authorizes a workload's ceiling once with a passkey, outside the worker. Workload quarantine keyed by owner and workload, not only DID, with generations, owner-only recovery citing the cleared incident, and a status endpoint valid for at most 5 s. Minimal Guardian enrollment: a key that can only quarantine. At the network KAS: COSE-key DPoP with EdDSA, scope enforcement, the client-id leak closed, and a status check before every release. Edge: agent token client, KAS-backed `BundleDecryptor` and pack unwrap exercised against a live KAS. |
+| Swarm key tiers and pack provisioning | edge + opentdf-rs + opentdf-platform | revocable credentials | Network-KAS rewrap into split shares for registered swarm KAS keys; orchestrator KAS plus owner-enrolled authz-agent KAS with two-share release under owner-signed policy, each verifying credentials itself; per-flight narrowing at the swarm tier; split-key support in `opentdf-rs`; hardened in-mesh KAS; status checks at both swarm tiers; SwarmKit-delivered pack references and bytes; verified pack admission and protection readiness; a pack registry replacing the single-pack `OnceLock`, with the retained set persisted and signed (rollback anchoring waits for "Retention and provenance") |
 | Baseline outbound enforcement | edge | honest worker | Request gate on every provider method; task-scoped provenance taint shared with `EgressGuard` and pack-cascade ingestion of tool results; per-attribute pack policy block (`egress`, `feedback_cap`, `derived`); scrub, block and hold; immutable send permits; separate classification and authorization caches; L0–L3 feedback with the corrected L3 rule; audit |
 | Identity and policy contract | edge + authnz-rs | — | Versioned claims; authenticated A2A ingress/task access; preserved actor chain; fork-compatible v2 client; mandatory obligation handling. Overlaps the planned A2A realignment onto the A2A 1.0 specification; sequence the two together. |
 | Owner-scoped authority | platform fork + edge | — | Grant-issuer ceilings per attribute namespace; processor approval registry; `send_model` and `process_local` actions in the policy domain; revocation leases and task/flight binding. `PackManifest` gains an owner field. |
-| Guardian containment | edge + platform fork | compromised worker (with the broker) | Independently enrolled security role, protected pre-action observers, durable deny latches, pushed incidents, short status leases and recovery authority |
+| Guardian containment | edge + opentdf-platform + authnz-rs | compromised worker (with the broker) | Builds on the quarantine and status path above: independent appraisal, full enrollment, protected pre-action observers, durable deny latches, pushed incidents, short status leases and recovery authority |
 | Credential and egress broker | edge | compromised worker | Provider keys and model egress outside the worker's process and OS user; single-use permits; bundles stop delivering provider tokens to the worker |
 | Retention and provenance | edge | — | Rollback-anchored registry generations, taint labels on memory, lessons and persisted history, safe succession and recoverable purge |
 | Evidence-based uplift | edge (+ #696) | — | Verified independent evidence for peer requests and the agent's own workload grants; production enablement only after containment, the broker and all preceding boundaries pass |
