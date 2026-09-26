@@ -44,6 +44,48 @@ def test_sentences_split_after_terminators_and_newlines():
     assert semantic_units("One here. Two there!\nThree?") == ["One here. Two there! Three?"]
 
 
+def _word_chars(unit):
+    return sum(len(w) for w in unit.split())
+
+
+def test_a_long_unbroken_run_is_bounded_per_unit():
+    # Mirrors `a_long_unbroken_run_is_bounded_per_unit`: 5000 chars become
+    # 313 sixteen-char pieces, windowed 96 at a time with a 72-piece step.
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    run = (alphabet * 100)[:5000]
+    units = semantic_units(run)
+    assert [len(u.split()) for u in units] == [96, 96, 96, 96, 25]
+    assert all(_word_chars(u) <= UNIT_WORDS * 16 for u in units)
+    assert all(len(w) <= 16 for u in units for w in u.split())
+    assert run.startswith("".join(units[0].split()))
+
+
+def test_full_width_terminators_end_sentences():
+    assert semantic_units("甲乙。丙丁！戊己？庚辛；壬癸") == ["甲乙。 丙丁！ 戊己？ 庚辛； 壬癸"]
+
+
+def test_a_cjk_run_without_punctuation_is_split_on_char_boundaries():
+    run = ("数据保密协议" * 17)[:100]
+    units = semantic_units(run)
+    assert len(units) == 1
+    pieces = units[0].split()
+    assert len(pieces) == 7
+    assert "".join(pieces) == run
+
+
+def test_words_up_to_sixty_four_chars_are_kept_whole():
+    word = "a" * 64
+    assert semantic_units(f"see {word} here") == [f"see {word} here"]
+
+
+def test_long_words_close_a_unit_before_it_outgrows_the_context():
+    word = "b" * 60
+    for text in (" ".join([word] * 120), " ".join([word + "."] * 120)):
+        units = semantic_units(text)
+        assert [len(u.split()) for u in units] == [25] * 6
+        assert all(_word_chars(u) <= UNIT_WORDS * 16 for u in units)
+
+
 def test_normalize_matches_the_rust_rule():
     assert normalize("  Public Filing,  TEXT! ") == "public filing text"
     assert normalize("--- ...") == ""
