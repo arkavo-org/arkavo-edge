@@ -1,4 +1,4 @@
-//! The semantic section of the index component (spec: "Components").
+//! The semantic section of the index component.
 //!
 //! Vectors of protected text are invertible, so unlike the keyed tiers this
 //! section is safe only because the component is sealed. It stores no text and
