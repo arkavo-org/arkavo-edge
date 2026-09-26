@@ -3,6 +3,8 @@ pub mod agent_config;
 pub mod agent_config_markdown;
 pub mod agent_config_yaml;
 pub mod chat;
+#[cfg(feature = "sentinel")]
+pub mod chat_pack;
 pub mod dataflow;
 pub mod login;
 pub mod mcp_proxy;

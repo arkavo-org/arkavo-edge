@@ -107,10 +107,7 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     // extra steps.
     let anchor_path = anchor
         .ok_or("--anchor is required; a pack cannot be trusted without an organization anchor")?;
-    let anchor_bytes = std::fs::read(&anchor_path)
-        .map_err(|e| format!("cannot read the anchor {}: {e}", anchor_path.display()))?;
-    let anchor = AgentPublicKey::from_bytes(&anchor_bytes)
-        .map_err(|e| format!("the anchor key is unusable: {e}"))?;
+    let anchor = read_anchor(&anchor_path)?;
 
     let verified = verify_pack(&pack, Some(&anchor)).map_err(|e| format!("{e}"))?;
 
@@ -124,6 +121,16 @@ pub fn verify(args: &[String]) -> Result<(), String> {
         println!("Absent:   {}", verified.absent.join(", "));
     }
     Ok(())
+}
+
+/// Read an organization anchor public key from the file an operator supplied.
+///
+/// Shared by every entry point that trusts a pack, so they all accept exactly
+/// the same anchor file and refuse it with the same words.
+pub(crate) fn read_anchor(path: &Path) -> Result<AgentPublicKey, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("cannot read the anchor {}: {e}", path.display()))?;
+    AgentPublicKey::from_bytes(&bytes).map_err(|e| format!("the anchor key is unusable: {e}"))
 }
 
 /// KP-009: an index leaves the build wrapped or not at all.
