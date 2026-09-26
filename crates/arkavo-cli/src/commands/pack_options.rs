@@ -52,9 +52,19 @@ fn parse_pooling(name: &str) -> Result<EmbeddingPooling, String> {
 }
 
 #[cfg(feature = "sentinel")]
+/// Range-checked here rather than left to calibration, which would only
+/// refuse it after the multi-minute embedding pass.
 fn parse_target_fpr(raw: &str) -> Result<f32, String> {
-    raw.parse()
-        .map_err(|e| format!("--target-fpr '{raw}' is not a number: {e}"))
+    let rate: f32 = raw
+        .parse()
+        .map_err(|e| format!("--target-fpr '{raw}' is not a number: {e}"))?;
+    if rate.is_finite() && rate > 0.0 && rate < 1.0 {
+        Ok(rate)
+    } else {
+        Err(format!(
+            "--target-fpr '{raw}' must be a finite number in (0, 1)"
+        ))
+    }
 }
 
 pub(crate) fn parse(args: &[String]) -> Result<Options, String> {
@@ -280,6 +290,17 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(err.contains("--embedder-source"));
+    }
+
+    #[cfg(feature = "sentinel")]
+    #[test]
+    fn a_target_fpr_outside_zero_to_one_is_refused_at_parse_time() {
+        for raw in ["0", "1", "-0.01", "1.5", "NaN", "inf"] {
+            let err = parse(&args(&["--target-fpr", raw])).unwrap_err();
+            assert!(err.contains("--target-fpr"), "{raw}: {err}");
+            assert!(err.contains("(0, 1)"), "{raw}: {err}");
+        }
+        assert!((parse_target_fpr("0.01").unwrap() - 0.01).abs() < f32::EPSILON);
     }
 
     #[cfg(not(feature = "sentinel"))]
