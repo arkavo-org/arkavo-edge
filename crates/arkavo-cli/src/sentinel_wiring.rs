@@ -7,7 +7,8 @@
 //! the cascade actually meets them. A build without the `sentinel` feature
 //! compiles neither adapter and behaves exactly as it did before.
 
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use arkavo_critic::{ClassificationSource, SentinelCheck, SentinelEvidence};
 use arkavo_fingerprint::{Embedder, IndexKey};
@@ -146,24 +147,36 @@ pub struct CascadeFactory {
 
 impl CascadeFactory {
     pub fn new(cascade: Arc<Cascade>) -> Self {
-        let critic = arkavo_critic::CriticPipeline::new()
-            .add_check(arkavo_critic::CircuitCheck::new())
-            .add_check(arkavo_critic::SentinelCheck::new(Arc::new(
-                CascadeSource::new(cascade.clone()),
-            )));
+        let critic = critic_for(cascade.clone());
         Self { cascade, critic }
+    }
+}
+
+/// The response checks run before the release policy, over `cascade`.
+fn critic_for(cascade: Arc<Cascade>) -> arkavo_critic::CriticPipeline {
+    arkavo_critic::CriticPipeline::new()
+        .add_check(arkavo_critic::CircuitCheck::new())
+        .add_check(arkavo_critic::SentinelCheck::new(Arc::new(
+            CascadeSource::new(cascade),
+        )))
+}
+
+async fn verify_with(
+    critic: &arkavo_critic::CriticPipeline,
+    response: &arkavo_llm::ProviderResponse,
+) -> arkavo_llm::Result<()> {
+    let input = arkavo_critic::VerificationInput::new(String::new(), response.clone(), vec![]);
+    if critic.verify(&input).await.passed {
+        Ok(())
+    } else {
+        Err(arkavo_llm::Error::Provider(arkavo_llm::GATE_BLOCKED.into()))
     }
 }
 
 #[async_trait::async_trait]
 impl ReleaseGateFactory for CascadeFactory {
     async fn verify(&self, response: &arkavo_llm::ProviderResponse) -> arkavo_llm::Result<()> {
-        let input = arkavo_critic::VerificationInput::new(String::new(), response.clone(), vec![]);
-        if self.critic.verify(&input).await.passed {
-            Ok(())
-        } else {
-            Err(arkavo_llm::Error::Provider(arkavo_llm::GATE_BLOCKED.into()))
-        }
+        verify_with(&self.critic, response).await
     }
 
     fn create(&self, _model: &str) -> Arc<dyn ReleaseGate> {
@@ -176,18 +189,108 @@ impl ReleaseGateFactory for CascadeFactory {
     }
 }
 
+/// The release policy a provisioned pack enforces.
+struct PackFactory {
+    runtime: SentinelRuntime,
+    critic: arkavo_critic::CriticPipeline,
+}
+
+impl PackFactory {
+    fn new(runtime: SentinelRuntime) -> Self {
+        let critic = critic_for(runtime.cascade());
+        Self { runtime, critic }
+    }
+}
+
+#[async_trait::async_trait]
+impl ReleaseGateFactory for PackFactory {
+    async fn verify(&self, response: &arkavo_llm::ProviderResponse) -> arkavo_llm::Result<()> {
+        verify_with(&self.critic, response).await
+    }
+
+    fn create(&self, _model: &str) -> Arc<dyn ReleaseGate> {
+        // The signed pack supplies the ceiling the baseline had to assume, so
+        // the gate streams exactly as partially as the pack's content allows.
+        Arc::new(self.runtime.gate())
+    }
+}
+
+/// The policy this crate installs: the baseline until a pack is provisioned,
+/// the pack from then on.
+///
+/// The router's policy is set once, before any router exists, so a pack
+/// verified later cannot replace it. It is provisioned *into* it instead.
+/// `GuardedProvider` asks its factory for a gate on every completion, so a
+/// provider built before provisioning enforces the pack from its next
+/// completion on. The pack's cascade always carries the baseline's pattern
+/// tier, and a provisioned pack can be neither replaced nor withdrawn, so
+/// enforcement only ever moves up.
+struct ProvisionableFactory {
+    baseline: CascadeFactory,
+    provisioned: OnceLock<PackFactory>,
+}
+
+#[async_trait::async_trait]
+impl ReleaseGateFactory for ProvisionableFactory {
+    async fn verify(&self, response: &arkavo_llm::ProviderResponse) -> arkavo_llm::Result<()> {
+        match self.provisioned.get() {
+            Some(pack) => pack.verify(response).await,
+            None => self.baseline.verify(response).await,
+        }
+    }
+
+    fn create(&self, model: &str) -> Arc<dyn ReleaseGate> {
+        match self.provisioned.get() {
+            Some(pack) => pack.create(model),
+            None => self.baseline.create(model),
+        }
+    }
+}
+
+static FACTORY: OnceLock<Arc<ProvisionableFactory>> = OnceLock::new();
+/// Whether the router accepted [`FACTORY`] as its policy. A host that
+/// installed its own first owns the policy, and provisioning into ours would
+/// then enforce nothing.
+static OURS: AtomicBool = AtomicBool::new(false);
+
 /// Install the available tier for all routers created by the CLI and server.
-/// Provisioned cascades use the same registration seam; signed pack loading is
-/// separate from this runtime connection.
+/// A pack verified later is provisioned into this policy with [`provision`].
 pub fn install() {
-    let cascade = Arc::new(
-        Cascade::new(arkavo_protocol::taxonomy::TaxonomyMap::v1().version()).with_tier(Arc::new(
-            arkavo_sentinel::PatternTier::new(Arc::new(arkavo_protocol::RegexInferencer::new())),
-        )),
-    );
+    let factory = FACTORY.get_or_init(|| {
+        let cascade = Arc::new(
+            Cascade::new(arkavo_protocol::taxonomy::TaxonomyMap::v1().version()).with_tier(
+                Arc::new(arkavo_sentinel::PatternTier::new(Arc::new(
+                    arkavo_protocol::RegexInferencer::new(),
+                ))),
+            ),
+        );
+        Arc::new(ProvisionableFactory {
+            baseline: CascadeFactory::new(cascade),
+            provisioned: OnceLock::new(),
+        })
+    });
     // A host may already have installed a provisioned cascade. Never replace
-    // its policy with the baseline tier during CLI initialization.
-    let _ = arkavo_router::response_policy::install(Arc::new(CascadeFactory::new(cascade)));
+    // its policy with the baseline tier during CLI initialization. A repeat
+    // call finds the policy already set; `OURS` keeps whatever the first
+    // call learned, so it is only ever raised.
+    if arkavo_router::response_policy::install(factory.clone()).is_ok() {
+        OURS.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Make `runtime`'s pack the release policy for every completion from now on.
+///
+/// Once per process: a second pack would have to replace the first, and
+/// replacing a policy is how it gets weakened.
+pub fn provision(runtime: SentinelRuntime) -> Result<(), String> {
+    let factory = FACTORY
+        .get()
+        .filter(|_| OURS.load(Ordering::SeqCst))
+        .ok_or("response policy was installed by the host; a pack cannot be provisioned into it")?;
+    factory
+        .provisioned
+        .set(PackFactory::new(runtime))
+        .map_err(|_| "a pack is already provisioned; provisioning is once, upward only".to_string())
 }
 
 /// Everything a session needs to enforce classification, provisioned from one

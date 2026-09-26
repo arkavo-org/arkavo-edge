@@ -10,6 +10,8 @@
 #![cfg(feature = "sentinel")]
 #![allow(clippy::disallowed_methods)]
 
+mod common;
+
 use std::sync::Arc;
 
 use arkavo_cli::mock_provider::{MockProvider, MockProviderConfig};
@@ -371,223 +373,39 @@ async fn a_verified_pack_provisions_a_gate_that_catches_its_own_corpus() {
 }
 
 /// Loading a pack whose index carries a semantic section.
-///
-/// `arkavo-fingerprint`'s deterministic test embedder (`embed::tests::BagOfWords`)
-/// is `#[cfg(test)]`-only and private to that crate, so this module keeps its
-/// own stand-in — same trick (hash each word into a fixed bucket) so two texts
-/// sharing words share direction, without pulling in a real model.
 mod semantic_load {
-    use std::collections::BTreeMap;
-    use std::hash::{Hash, Hasher};
     use std::sync::Arc;
 
-    use arkavo_crypto::AgentKeypair;
-    use arkavo_fingerprint::{
-        Embedder, EmbedderRecord, EmbeddingPooling, IndexKey, SemanticCalibration,
-        SemanticIndexBuilder, label_key,
-    };
-    use arkavo_gguf_tdf::{
-        Classification, ComponentRole, GgufTdfError, PayloadKeyWrapper, PreResolvedKey, WrappedKey,
-    };
-    use arkavo_knowledge_pack::{
-        LoadError, PackBuilder, PackIndexes, load_pack, seal_blob, verify_pack,
-    };
-    use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
+    use arkavo_fingerprint::Embedder;
+    use arkavo_gguf_tdf::{Classification, PreResolvedKey};
+    use arkavo_knowledge_pack::{LoadError, load_pack};
+    use arkavo_protocol::data_classification::SensitivityLevel;
 
-    const SEMANTIC_CANARY: &str =
-        "the northwind acquisition closes in march with a hidden indemnity clause";
-    const EMBEDDER_DIGEST: &str = "test-digest";
+    use crate::common::{
+        WordHashEmbedder, embedder, index_key, sealed_pack_with_semantic_index, semantic_thresholds,
+    };
+
     const OTHER_DIGEST: &str = "some-other-digest";
 
-    /// Deterministic stand-in for a real embedder: hashes each word into one of
-    /// 64 buckets with a fixed-key hasher, so the same text always embeds to
-    /// the same vector across runs and processes.
-    struct WordHashEmbedder {
-        digest: &'static str,
-    }
-
-    impl Embedder for WordHashEmbedder {
-        fn digest(&self) -> &str {
-            self.digest
-        }
-
-        fn pooling(&self) -> EmbeddingPooling {
-            EmbeddingPooling::Last
-        }
-
-        fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, String> {
-            Ok(texts
-                .iter()
-                .map(|t| {
-                    let mut v = vec![0.0f32; 64];
-                    for w in t.split_whitespace() {
-                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                        w.to_lowercase().hash(&mut hasher);
-                        v[(hasher.finish() % 64) as usize] += 1.0;
-                    }
-                    v
-                })
-                .collect())
-        }
-    }
-
-    fn embedder_record() -> EmbedderRecord {
-        EmbedderRecord {
-            source: "org/model/file.gguf".to_string(),
-            sha256: EMBEDDER_DIGEST.to_string(),
-            pooling: EmbeddingPooling::Last,
-        }
-    }
-
-    fn semantic_calibration() -> SemanticCalibration {
-        let mut margins = BTreeMap::new();
-        // A margin threshold low enough that any embedding of the canary
-        // clears it: this suite is about whether `load_pack` builds the tier
-        // at all, not about the tier's own judgement, which is covered in
-        // `arkavo-fingerprint`.
-        margins.insert(
-            label_key(DataCategory::Internal, SensitivityLevel::Confidential),
-            -1.0,
-        );
-        SemanticCalibration {
-            detector_version: SemanticCalibration::detector_version_for(EMBEDDER_DIGEST),
-            taxonomy_version: "1.0.0".to_string(),
-            margins,
-            embedder: embedder_record(),
-        }
-    }
-
-    /// The manifest thresholds `sealed_pack_with_semantic_index` normally
-    /// carries: only the semantic tier's calibration.
-    fn thresholds_with_semantic() -> serde_json::Value {
-        serde_json::json!({
-            "semantic": serde_json::to_value(semantic_calibration()).expect("serialize calibration"),
-        })
-    }
-
-    /// The wrap attribute a `recorded_ceiling` needs, in the taxonomy's own
-    /// vocabulary (`schemas/taxonomy-map.v1.json`'s clearance `order`), so a
-    /// fixture can wrap a component under exactly the clearance it will
-    /// record — satisfying `policy_covers_ceiling` regardless of what the
-    /// test wants the *content* check to do afterward.
-    fn clearance_attribute(ceiling: Classification) -> String {
-        let level = match ceiling {
-            Classification::Public => "public",
-            Classification::Internal => "internal",
-            Classification::Confidential => "confidential",
-            Classification::Restricted => "restricted",
-        };
-        format!("https://attr.arkavo.com/clearance/{level}")
-    }
-
-    /// A pack whose index carries a semantic section over `SEMANTIC_CANARY`
-    /// at `document_sensitivity`, sealed with the given manifest thresholds
-    /// and recorded (and wrapped) at `recorded_ceiling`. Returns the temp
-    /// directory (kept alive so `load_pack` can still read the pack from
-    /// disk), the verified pack, and the payload key the index was wrapped
-    /// under.
-    fn sealed_pack_with_semantic_index(
-        thresholds: serde_json::Value,
-        document_sensitivity: SensitivityLevel,
-        recorded_ceiling: Classification,
-    ) -> (
-        tempfile::TempDir,
-        arkavo_knowledge_pack::VerifiedPack,
-        [u8; 32],
-    ) {
-        struct Capturing(std::sync::Mutex<Option<[u8; 32]>>);
-        impl PayloadKeyWrapper for Capturing {
-            fn wrap(&self, payload_key: &[u8; 32]) -> Result<WrappedKey, GgufTdfError> {
-                *self.0.lock().expect("lock") = Some(*payload_key);
-                Ok(WrappedKey {
-                    kas_url: "https://kas.example".into(),
-                    kid: None,
-                    wrapped_key: "AA==".into(),
-                })
-            }
-        }
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let staging = dir.path().join("staging");
-        std::fs::create_dir_all(&staging).expect("staging");
-
-        let mut builder = SemanticIndexBuilder::new("1.0.0", embedder_record());
-        builder
-            .add_document(
-                &WordHashEmbedder {
-                    digest: EMBEDDER_DIGEST,
-                },
-                SEMANTIC_CANARY,
-                DataCategory::Internal,
-                document_sensitivity,
-                "board-minutes",
-            )
-            .expect("add document");
-        builder
-            .add_anchor(
-                &WordHashEmbedder {
-                    digest: EMBEDDER_DIGEST,
-                },
-                "oxycodone prescribing information warns of misuse",
-            )
-            .expect("add anchor");
-        let semantic_index = builder.build().expect("build semantic index");
-
-        let indexes = PackIndexes {
-            reference: {
-                let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
-                arkavo_fingerprint::ReferenceIndex::builder(&key, "1.0.0").build()
-            },
-            near: None,
-            semantic: Some(semantic_index),
-        };
-
-        let wrapper = Capturing(std::sync::Mutex::new(None));
-        let blob = seal_blob(
-            &serde_json::to_vec(&indexes).expect("serialize"),
-            &wrapper,
-            &[clearance_attribute(recorded_ceiling)],
-            "application/json",
-        )
-        .expect("seal");
-        std::fs::write(
-            staging.join("index.tdf"),
-            serde_json::to_vec(&blob).expect("serialize"),
-        )
-        .expect("write");
-        let payload_key = wrapper.0.lock().expect("lock").expect("a key");
-
-        let mut pack_builder =
-            PackBuilder::new("semantic-pack", "1.0.0", "qwen3.5-0.8b").with_thresholds(thresholds);
-        pack_builder
-            .add_component(
-                &staging.join("index.tdf"),
-                ComponentRole::Index,
-                Some(recorded_ceiling),
-            )
-            .expect("component");
-        let signing = AgentKeypair::generate();
-        let root = dir.path().join("pack");
-        pack_builder.build(&root, &signing).expect("build");
-
-        let verified = verify_pack(&root, Some(&signing.public_key())).expect("verify");
-        (dir, verified, payload_key)
-    }
+    /// A margin threshold low enough that any embedding of the canary clears
+    /// it: this suite is about whether `load_pack` builds the tier at all, not
+    /// about the tier's own judgement, which is covered in
+    /// `arkavo-fingerprint`.
+    const ANY_TEXT_FIRES: f32 = -1.0;
 
     /// SENT-013: a declared semantic requirement is refused, not dropped,
     /// when no embedder is provisioned to score it.
     #[test]
     fn a_semantic_index_without_an_embedder_is_refused() {
         let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
-            thresholds_with_semantic(),
+            semantic_thresholds(ANY_TEXT_FIRES, None),
             SensitivityLevel::Confidential,
             Classification::Confidential,
         );
-        let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
 
         let refused = load_pack(
             &verified,
-            Some(&key),
+            Some(&index_key()),
             &PreResolvedKey::new(payload_key),
             None,
         );
@@ -601,18 +419,17 @@ mod semantic_load {
     #[test]
     fn a_mismatched_embedder_is_refused_as_a_semantic_load_error() {
         let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
-            thresholds_with_semantic(),
+            semantic_thresholds(ANY_TEXT_FIRES, None),
             SensitivityLevel::Confidential,
             Classification::Confidential,
         );
-        let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
         let wrong_embedder: Arc<dyn Embedder> = Arc::new(WordHashEmbedder {
             digest: OTHER_DIGEST,
         });
 
         let refused = load_pack(
             &verified,
-            Some(&key),
+            Some(&index_key()),
             &PreResolvedKey::new(payload_key),
             Some(wrong_embedder),
         );
@@ -625,20 +442,16 @@ mod semantic_load {
     #[test]
     fn a_matching_embedder_adds_the_semantic_tier_to_the_cascade() {
         let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
-            thresholds_with_semantic(),
+            semantic_thresholds(ANY_TEXT_FIRES, None),
             SensitivityLevel::Confidential,
             Classification::Confidential,
         );
-        let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
-        let embedder: Arc<dyn Embedder> = Arc::new(WordHashEmbedder {
-            digest: EMBEDDER_DIGEST,
-        });
 
         let loaded = load_pack(
             &verified,
-            Some(&key),
+            Some(&index_key()),
             &PreResolvedKey::new(payload_key),
-            Some(embedder),
+            Some(embedder()),
         )
         .expect("a matching embedder must load");
 
@@ -666,16 +479,12 @@ mod semantic_load {
             SensitivityLevel::Confidential,
             Classification::Confidential,
         );
-        let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
-        let embedder: Arc<dyn Embedder> = Arc::new(WordHashEmbedder {
-            digest: EMBEDDER_DIGEST,
-        });
 
         let refused = load_pack(
             &verified,
-            Some(&key),
+            Some(&index_key()),
             &PreResolvedKey::new(payload_key),
-            Some(embedder),
+            Some(embedder()),
         );
 
         assert!(matches!(refused, Err(LoadError::NoSemanticThresholds)));
@@ -692,15 +501,14 @@ mod semantic_load {
     #[test]
     fn a_semantic_ceiling_below_its_content_is_refused() {
         let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
-            thresholds_with_semantic(),
+            semantic_thresholds(ANY_TEXT_FIRES, None),
             SensitivityLevel::Restricted,
             Classification::Internal,
         );
-        let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
 
         let refused = load_pack(
             &verified,
-            Some(&key),
+            Some(&index_key()),
             &PreResolvedKey::new(payload_key),
             None,
         );
@@ -710,5 +518,96 @@ mod semantic_load {
             Ok(_) => panic!("a semantic section recorded below its own content must not be loaded"),
         };
         assert!(message.contains("classified"), "{message}");
+    }
+}
+
+/// The pipeline a live `--pack` session runs: a sealed pack whose index
+/// carries a semantic section and whose manifest uses the thresholds object
+/// form, provisioned into a runtime whose gate streams completions through
+/// `gated(..)`.
+///
+/// `provision_from_pack` cannot run here — it fetches the embedder the
+/// manifest names — so the runtime is built with the deterministic test
+/// embedder directly. Everything downstream of that is the production path.
+mod semantic_pipeline {
+    use arkavo_cli::sentinel_wiring::SentinelRuntime;
+    use arkavo_gguf_tdf::{Classification, PreResolvedKey};
+    use arkavo_protocol::data_classification::SensitivityLevel;
+
+    use super::*;
+    use crate::common::{
+        SEMANTIC_CANARY, embedder, index_key, sealed_pack_with_semantic_index, semantic_thresholds,
+    };
+
+    /// A margin the canary clears and a short unrelated span stays below —
+    /// the value `arkavo-fingerprint`'s own short-span test is calibrated at.
+    const CALIBRATED_MARGIN: f32 = 0.3;
+
+    fn runtime() -> SentinelRuntime {
+        let sentinel_table = serde_json::json!({
+            "detector_version": "sentinel-0.1",
+            "taxonomy_version": "1.0.0",
+            "thresholds": { "credentials": 0.8 }
+        });
+        let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
+            semantic_thresholds(CALIBRATED_MARGIN, Some(sentinel_table)),
+            SensitivityLevel::Confidential,
+            Classification::Confidential,
+        );
+        SentinelRuntime::from_pack(
+            &verified,
+            Some(&index_key()),
+            &PreResolvedKey::new(payload_key),
+            Some(embedder()),
+        )
+        .expect("provision from the pack")
+    }
+
+    /// Stream `completion` through the runtime's own gate; returns what the
+    /// consumer saw and whether the stream was cut.
+    async fn through_gate(runtime: &SentinelRuntime, completion: &str) -> (String, bool) {
+        let gate: Arc<dyn ReleaseGate> = Arc::new(runtime.gate());
+        let mut stream = gated(Box::pin(futures::stream::iter(stream_of(completion))), gate);
+        let mut seen = String::new();
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(chunk) => seen.push_str(&chunk.content),
+                Err(_) => return (seen, true),
+            }
+        }
+        (seen, false)
+    }
+
+    #[spec("SENT-007")]
+    #[tokio::test]
+    async fn a_live_semantic_pack_withholds_its_canary_and_releases_a_short_answer() {
+        let runtime = runtime();
+        assert!(
+            runtime.cascade().tier_names().contains(&"semantic"),
+            "{:?}",
+            runtime.cascade().tier_names()
+        );
+        // Both halves of the object form were read.
+        assert!(runtime.calibration.is_some(), "the sentinel table");
+
+        let leaking = completion_containing(&format!("Summary. {SEMANTIC_CANARY}. Regards.")).await;
+        let (seen, refused) = through_gate(&runtime, &leaking).await;
+        assert!(refused, "the pack's own corpus must be caught");
+        assert!(!seen.contains("northwind"), "{seen}");
+
+        // Regression: a live pack with a semantic tier once held every short
+        // completion forever, because the near-duplicate tier reports a short
+        // span out of scope and nothing covered it. That condition must hold
+        // here, or the release below would prove nothing about it.
+        let evidence = runtime.cascade().inspect_unbudgeted("ok");
+        assert!(
+            evidence.tiers.iter().any(|t| t.is_out_of_scope()),
+            "{:?}",
+            evidence.tiers
+        );
+        let short = completion_containing("ok").await;
+        let (seen, refused) = through_gate(&runtime, &short).await;
+        assert!(!refused, "a short clean completion must not be refused");
+        assert_eq!(seen, "ok");
     }
 }
