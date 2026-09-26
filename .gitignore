@@ -1,4 +1,9 @@
 /target
+# Private measurement inputs, generated calibration text and run keys.
+# No trailing slash: in a worktree `models` is a symlink, which a
+# directory-only pattern does not match.
+/models
+__pycache__/
 .claude/
 .mcp.json
 .arkavo/

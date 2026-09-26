@@ -11,8 +11,8 @@ use arkavo_gguf_tdf::{
     PreResolvedKey, WrappedKey,
 };
 use arkavo_knowledge_pack::{
-    Entitlements, Lineage, PackBuilder, PackIndexes, SelectionError, load_pack, seal_blob,
-    select_adapters, verify_pack,
+    EVAL_EVIDENCE_FILE, Entitlements, Lineage, PackBuilder, PackIndexes, SelectionError,
+    VerifyError, digest_of, load_pack, seal_blob, select_adapters, verify_pack,
 };
 use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
 use arkavo_test_macros::spec;
@@ -89,6 +89,7 @@ fn write_index_component(dir: &Path, key: &IndexKey) -> [u8; 32] {
     let indexes = PackIndexes {
         reference: reference.build(),
         near: Some(near.build()),
+        semantic: None,
     };
 
     let wrapper = CapturingWrapper {
@@ -426,11 +427,13 @@ fn the_loader_takes_its_thresholds_from_the_verified_manifest() {
         &verified,
         Some(&index_key()),
         &PreResolvedKey::new(fixture.payload_key),
+        None,
     )
     .expect("load");
 
-    assert_eq!(loaded.calibration.detector_version, "sentinel-0.1");
-    assert_eq!(loaded.calibration.taxonomy_version, "1.0.0");
+    let calibration = loaded.calibration.expect("sentinel table");
+    assert_eq!(calibration.detector_version, "sentinel-0.1");
+    assert_eq!(calibration.taxonomy_version, "1.0.0");
     assert_eq!(loaded.ceiling, Classification::Restricted);
     // Pattern tier plus both index tiers, all provisioned from the pack.
     assert_eq!(loaded.cascade.tier_names().len(), 3);
@@ -445,7 +448,7 @@ fn a_denied_key_yields_no_index_rather_than_plaintext() {
     let verified =
         verify_pack(&pack_root(&fixture), Some(&fixture.key.public_key())).expect("verify");
 
-    let refused = load_pack(&verified, Some(&index_key()), &DenyingKas);
+    let refused = load_pack(&verified, Some(&index_key()), &DenyingKas, None);
 
     assert!(refused.is_err(), "a denied key must not yield an index");
 }
@@ -462,6 +465,7 @@ fn the_loaded_cascade_recognizes_the_corpus_it_was_built_from() {
         &verified,
         Some(&index_key()),
         &PreResolvedKey::new(fixture.payload_key),
+        None,
     )
     .expect("load");
 
@@ -578,7 +582,7 @@ fn a_component_wrapped_under_the_wrong_policy_is_refused_before_any_key_request(
     builder.build(&root, &key).expect("build");
 
     let verified = verify_pack(&root, Some(&key.public_key())).expect("verify");
-    let refused = load_pack(&verified, Some(&index_key()), &NeverAsked);
+    let refused = load_pack(&verified, Some(&index_key()), &NeverAsked, None);
 
     let message = match refused {
         Err(e) => e.to_string(),
@@ -609,6 +613,7 @@ fn an_over_protected_component_is_accepted() {
     let indexes = PackIndexes {
         reference: reference.build(),
         near: None,
+        semantic: None,
     };
     let wrapper = CapturingWrapper {
         captured: std::sync::Mutex::new(None),
@@ -645,6 +650,7 @@ fn an_over_protected_component_is_accepted() {
         &verified,
         Some(&index_key()),
         &PreResolvedKey::new(payload_key),
+        None,
     );
 
     assert!(loaded.is_ok(), "over-protection must not be a refusal");
@@ -667,6 +673,7 @@ fn a_component_swapped_after_verification_is_refused_at_load() {
         &verified,
         Some(&index_key()),
         &PreResolvedKey::new(fixture.payload_key),
+        None,
     );
 
     let message = match refused {
@@ -697,6 +704,7 @@ fn a_ceiling_below_the_content_it_covers_is_refused() {
     let indexes = PackIndexes {
         reference: reference.build(),
         near: None,
+        semantic: None,
     };
     let wrapper = CapturingWrapper {
         captured: std::sync::Mutex::new(None),
@@ -729,7 +737,12 @@ fn a_ceiling_below_the_content_it_covers_is_refused() {
     builder.build(&root, &signing).expect("build");
 
     let verified = verify_pack(&root, Some(&signing.public_key())).expect("verify");
-    let refused = load_pack(&verified, Some(&key), &PreResolvedKey::new(payload_key));
+    let refused = load_pack(
+        &verified,
+        Some(&key),
+        &PreResolvedKey::new(payload_key),
+        None,
+    );
 
     let message = match refused {
         Err(e) => e.to_string(),
@@ -819,12 +832,137 @@ fn a_pack_without_a_tenant_key_does_not_request_the_index_payload_key() {
     }
     let kas = CountingKas(std::sync::atomic::AtomicUsize::new(0));
 
-    let loaded = load_pack(&verified, None, &kas).expect("provisioning gap is not a refusal");
+    let loaded = load_pack(&verified, None, &kas, None).expect("provisioning gap is not a refusal");
 
     assert_eq!(kas.0.load(std::sync::atomic::Ordering::SeqCst), 0);
     assert!(
         loaded.inventory.contains("index.tdf"),
         "{}",
         loaded.inventory
+    );
+}
+
+/// Most packs predate the semantic tier and will never carry one. An index
+/// envelope that omits the section entirely must still deserialize, reading
+/// back as absent rather than a parse error.
+#[test]
+fn an_index_without_a_semantic_section_still_loads() {
+    let mut reference = ReferenceIndex::builder(&index_key(), "1.0.0");
+    reference.add_document(
+        &index_key(),
+        &corpus_document(),
+        DataCategory::Internal,
+        SensitivityLevel::Confidential,
+        "board-minutes",
+    );
+    let json = serde_json::json!({ "reference": reference.build() });
+
+    let parsed: PackIndexes = serde_json::from_value(json).expect("parse");
+
+    assert!(parsed.semantic.is_none());
+}
+
+/// A minimal one-component pack with an eval-evidence file bound in, for the
+/// evidence-binding tests below — the sentinel/index/adapter wiring `build_pack`
+/// exercises is not the point here.
+fn build_pack_with_evidence(dir: &Path, evidence: &[u8]) -> (std::path::PathBuf, AgentKeypair) {
+    let evidence_path = dir.join("evidence.json");
+    std::fs::write(&evidence_path, evidence).expect("write evidence");
+    std::fs::write(dir.join("sentinel.tdf"), b"s").expect("write");
+    let mut builder = PackBuilder::new("pack-evidence", "1.0.0", "tok")
+        .with_thresholds(thresholds())
+        .with_eval_evidence_file(&evidence_path);
+    builder
+        .add_component(
+            &dir.join("sentinel.tdf"),
+            ComponentRole::Sentinel,
+            Some(Classification::Internal),
+        )
+        .expect("add");
+    let key = AgentKeypair::generate();
+    let root = dir.join("pack");
+    builder.build(&root, &key).expect("build");
+    (root, key)
+}
+
+/// The evidence travels with the manifest wherever it goes: a pack whose
+/// eval-evidence file was swapped after sealing must not verify.
+#[test]
+fn tampered_eval_evidence_fails_verification() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (root, key) = build_pack_with_evidence(dir.path(), br#"{"suite":"v1","fpr":0.01}"#);
+    std::fs::write(root.join(EVAL_EVIDENCE_FILE), b"tampered").expect("tamper");
+
+    let refused = verify_pack(&root, Some(&key.public_key()));
+
+    assert!(
+        matches!(refused, Err(VerifyError::EvalEvidenceMismatch { .. })),
+        "{refused:?}"
+    );
+}
+
+/// A manifest that records eval evidence but ships without the file is exactly
+/// as suspect as a component that fails its digest: refused, not skipped.
+#[test]
+fn missing_eval_evidence_fails_verification() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (root, key) = build_pack_with_evidence(dir.path(), br#"{"suite":"v1","fpr":0.01}"#);
+    std::fs::remove_file(root.join(EVAL_EVIDENCE_FILE)).expect("remove");
+
+    let refused = verify_pack(&root, Some(&key.public_key()));
+
+    assert!(
+        matches!(refused, Err(VerifyError::EvalEvidenceMissing)),
+        "{refused:?}"
+    );
+}
+
+/// A pack that never recorded evidence has nothing to check and must keep
+/// verifying exactly as it did before this feature existed.
+#[test]
+fn a_pack_without_recorded_evidence_verifies_as_before() {
+    let fixture = build_pack();
+
+    assert!(verify_pack(&pack_root(&fixture), Some(&fixture.key.public_key())).is_ok());
+}
+
+/// The happy path the tamper/missing tests above assume: a freshly sealed
+/// pack with untouched evidence verifies, the file on disk is byte-identical
+/// to the source that was bound in, and the manifest's recorded digest is the
+/// digest of that same source.
+#[test]
+fn untampered_eval_evidence_verifies_and_matches_its_source() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let evidence: &[u8] = br#"{"suite":"v1","fpr":0.01}"#;
+    let (root, key) = build_pack_with_evidence(dir.path(), evidence);
+
+    let verified =
+        verify_pack(&root, Some(&key.public_key())).expect("untampered evidence verifies");
+
+    let on_disk = std::fs::read(root.join(EVAL_EVIDENCE_FILE)).expect("read evidence");
+    assert_eq!(on_disk, evidence, "the bound file travels byte-for-byte");
+    assert_eq!(
+        verified.manifest.eval_evidence_digest.as_deref(),
+        Some(digest_of(evidence).as_str()),
+        "the recorded digest is the digest of the source bytes"
+    );
+}
+
+/// A non-`NotFound` I/O error reading the evidence file — here, something
+/// occupies its name that isn't a file at all — must not be collapsed into
+/// "missing". Missing and unreadable are different failures with different
+/// remedies, exactly as the component loop above already distinguishes them.
+#[test]
+fn an_unreadable_eval_evidence_file_is_reported_as_a_read_error_not_missing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (root, key) = build_pack_with_evidence(dir.path(), br#"{"suite":"v1","fpr":0.01}"#);
+    std::fs::remove_file(root.join(EVAL_EVIDENCE_FILE)).expect("remove");
+    std::fs::create_dir(root.join(EVAL_EVIDENCE_FILE)).expect("put a directory in its place");
+
+    let refused = verify_pack(&root, Some(&key.public_key()));
+
+    assert!(
+        matches!(refused, Err(VerifyError::Read { .. })),
+        "{refused:?}"
     );
 }

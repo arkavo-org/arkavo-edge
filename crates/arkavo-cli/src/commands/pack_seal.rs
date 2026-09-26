@@ -36,15 +36,20 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if let Some(digest) = &options.corpus_digest {
         builder = builder.with_corpus_digest(digest);
     }
-    if let Some(path) = &options.thresholds {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        let value: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|e| format!("the calibration table is not valid JSON: {e}"))?;
-        builder = builder.with_thresholds(value);
+    if !options.thresholds.is_empty() {
+        let mut entries = Vec::with_capacity(options.thresholds.len());
+        for spec in &options.thresholds {
+            let (tier, path) = parse_thresholds_spec(spec)?;
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            let value: serde_json::Value = serde_json::from_str(&text)
+                .map_err(|e| format!("the calibration table is not valid JSON: {e}"))?;
+            entries.push((tier, value));
+        }
+        builder = builder.with_thresholds(combine_thresholds(entries)?);
     }
-    if let Some(digest) = &options.eval_evidence {
-        builder = builder.with_eval_evidence(digest);
+    if let Some(path) = &options.eval_evidence {
+        builder = builder.with_eval_evidence_file(path);
     }
 
     for component in &options.components {
@@ -102,10 +107,7 @@ pub fn verify(args: &[String]) -> Result<(), String> {
     // extra steps.
     let anchor_path = anchor
         .ok_or("--anchor is required; a pack cannot be trusted without an organization anchor")?;
-    let anchor_bytes = std::fs::read(&anchor_path)
-        .map_err(|e| format!("cannot read the anchor {}: {e}", anchor_path.display()))?;
-    let anchor = AgentPublicKey::from_bytes(&anchor_bytes)
-        .map_err(|e| format!("the anchor key is unusable: {e}"))?;
+    let anchor = read_anchor(&anchor_path)?;
 
     let verified = verify_pack(&pack, Some(&anchor)).map_err(|e| format!("{e}"))?;
 
@@ -119,6 +121,16 @@ pub fn verify(args: &[String]) -> Result<(), String> {
         println!("Absent:   {}", verified.absent.join(", "));
     }
     Ok(())
+}
+
+/// Read an organization anchor public key from the file an operator supplied.
+///
+/// Shared by every entry point that trusts a pack, so they all accept exactly
+/// the same anchor file and refuse it with the same words.
+pub(crate) fn read_anchor(path: &Path) -> Result<AgentPublicKey, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("cannot read the anchor {}: {e}", path.display()))?;
+    AgentPublicKey::from_bytes(&bytes).map_err(|e| format!("the anchor key is unusable: {e}"))
 }
 
 /// KP-009: an index leaves the build wrapped or not at all.
@@ -153,9 +165,11 @@ struct SealOptions {
     pack_id: String,
     taxonomy_version: String,
     tokenizer: String,
-    thresholds: Option<PathBuf>,
+    /// Raw `[<tier>:]<path>` specs, one per `--thresholds` flag, resolved and
+    /// combined in `run` once every one of them has been collected.
+    thresholds: Vec<String>,
     corpus_digest: Option<String>,
-    eval_evidence: Option<String>,
+    eval_evidence: Option<PathBuf>,
     lineage: Lineage,
     components: Vec<Component>,
 }
@@ -167,7 +181,7 @@ impl SealOptions {
         let mut pack_id = None;
         let mut taxonomy_version = "1.0.0".to_string();
         let mut tokenizer = String::new();
-        let mut thresholds = None;
+        let mut thresholds = Vec::new();
         let mut corpus_digest = None;
         let mut eval_evidence = None;
         let mut lineage = Lineage::Root;
@@ -186,9 +200,9 @@ impl SealOptions {
                 "--pack-id" => pack_id = Some(value()?),
                 "--taxonomy-version" => taxonomy_version = value()?,
                 "--tokenizer" => tokenizer = value()?,
-                "--thresholds" => thresholds = Some(PathBuf::from(value()?)),
+                "--thresholds" => thresholds.push(value()?),
                 "--corpus-digest" => corpus_digest = Some(value()?),
-                "--eval-evidence" => eval_evidence = Some(value()?),
+                "--eval-evidence" => eval_evidence = Some(PathBuf::from(value()?)),
                 "--parent" => lineage = parse_parent(&value()?)?,
                 "--component" => components.push(parse_component(&value()?)?),
                 other => return Err(format!("unknown option '{other}'")),
@@ -209,6 +223,55 @@ impl SealOptions {
             components,
         })
     }
+}
+
+/// `[<tier>:]<path>`. Splitting on the first colon is only honoured when the
+/// prefix names a known tier (`sentinel`, `semantic`); any other prefix,
+/// including a Windows drive letter, leaves the whole spec as the path and
+/// the tier defaults to `sentinel`.
+fn parse_thresholds_spec(spec: &str) -> Result<(String, PathBuf), String> {
+    if let Some((prefix, rest)) = spec.split_once(':')
+        && (prefix == "sentinel" || prefix == "semantic")
+    {
+        if rest.is_empty() {
+            return Err(format!("'{spec}' names no path after the tier"));
+        }
+        return Ok((prefix.to_string(), PathBuf::from(rest)));
+    }
+    if spec.is_empty() {
+        return Err("a thresholds spec must not be empty".to_string());
+    }
+    Ok(("sentinel".to_string(), PathBuf::from(spec)))
+}
+
+/// Combine per-tier threshold JSON into the one value the manifest carries.
+///
+/// A single `sentinel` entry is written bare, so packs that calibrate only
+/// the sentinel tier keep exactly the bytes they always have. Any other
+/// combination — a semantic-only pack, or both tiers together — is written as
+/// an object keyed by tier name, which is what `thresholds.rs` reads back.
+fn combine_thresholds(
+    entries: Vec<(String, serde_json::Value)>,
+) -> Result<serde_json::Value, String> {
+    let mut seen = std::collections::BTreeSet::new();
+    for (tier, _) in &entries {
+        if tier != "sentinel" && tier != "semantic" {
+            return Err(format!("unknown threshold tier '{tier}'"));
+        }
+        if !seen.insert(tier.as_str()) {
+            return Err(format!("thresholds given twice for tier '{tier}'"));
+        }
+    }
+    if let [(tier, value)] = entries.as_slice()
+        && tier == "sentinel"
+    {
+        return Ok(value.clone());
+    }
+    let mut object = serde_json::Map::with_capacity(entries.len());
+    for (tier, value) in entries {
+        object.insert(tier, value);
+    }
+    Ok(serde_json::Value::Object(object))
 }
 
 /// `<path>:<role>[:<ceiling>]`, where an adapter's role is `adapter/<compartment>`.
@@ -380,5 +443,52 @@ mod tests {
         let err = verify(&["--pack".into(), "/tmp/x".into()]).unwrap_err();
 
         assert!(err.contains("--anchor"), "{err}");
+    }
+
+    #[test]
+    fn a_bare_thresholds_path_means_the_sentinel_tier() {
+        assert_eq!(
+            parse_thresholds_spec("t.json").unwrap(),
+            ("sentinel".into(), PathBuf::from("t.json"))
+        );
+    }
+
+    #[test]
+    fn a_tier_prefix_is_honoured_and_drive_letters_are_not_tiers() {
+        assert_eq!(
+            parse_thresholds_spec("semantic:s.json").unwrap().0,
+            "semantic"
+        );
+        assert_eq!(
+            parse_thresholds_spec(r"C:\t.json").unwrap(),
+            ("sentinel".into(), PathBuf::from(r"C:\t.json"))
+        );
+    }
+
+    #[test]
+    fn one_sentinel_table_stays_bare_and_two_tiers_become_an_object() {
+        let bare =
+            combine_thresholds(vec![("sentinel".into(), serde_json::json!({"a":1}))]).unwrap();
+        assert_eq!(bare, serde_json::json!({"a":1}));
+        let both = combine_thresholds(vec![
+            ("sentinel".into(), serde_json::json!({"a":1})),
+            ("semantic".into(), serde_json::json!({"b":2})),
+        ])
+        .unwrap();
+        assert_eq!(
+            both,
+            serde_json::json!({"sentinel":{"a":1},"semantic":{"b":2}})
+        );
+    }
+
+    #[test]
+    fn a_tier_given_twice_is_refused() {
+        assert!(
+            combine_thresholds(vec![
+                ("semantic".into(), serde_json::json!({})),
+                ("semantic".into(), serde_json::json!({})),
+            ])
+            .is_err()
+        );
     }
 }

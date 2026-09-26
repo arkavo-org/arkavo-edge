@@ -13,7 +13,8 @@
 use std::sync::Arc;
 
 use arkavo_fingerprint::{
-    IndexKey, NearDuplicateIndex, NearDuplicateTier, ReferenceIndex, ReferenceTier,
+    Embedder, IndexKey, NearDuplicateIndex, NearDuplicateTier, ReferenceIndex, ReferenceTier,
+    SemanticIndex, SemanticTier,
 };
 use arkavo_gguf_tdf::{Classification, ComponentRole, PayloadKeyUnwrapper};
 use arkavo_protocol::RegexInferencer;
@@ -22,6 +23,7 @@ use arkavo_sentinel::{CalibrationTable, Cascade, CascadeTier, PatternTier};
 use serde::{Deserialize, Serialize};
 
 use crate::blob::{SealedBlob, open_blob};
+use crate::thresholds::read_thresholds;
 use crate::verify::VerifiedPack;
 
 #[derive(Debug, thiserror::Error)]
@@ -59,21 +61,35 @@ pub enum LoadError {
     },
     #[error(transparent)]
     Key(#[from] arkavo_gguf_tdf::GgufTdfError),
+    #[error(
+        "the pack's index carries a semantic section but no embedder was provisioned to score it"
+    )]
+    EmbedderMissing,
+    #[error("the semantic tier could not be constructed: {0}")]
+    Semantic(String),
+    #[error(
+        "the pack's index carries a semantic section but the manifest has no semantic thresholds"
+    )]
+    NoSemanticThresholds,
 }
 
-/// The index component's plaintext: both tiers, built from one corpus under one
-/// tenant key, so they cannot drift apart.
+/// The index component's plaintext: every tier's section, built from one
+/// corpus under one tenant key, so they cannot drift apart.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PackIndexes {
     pub reference: ReferenceIndex,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub near: Option<NearDuplicateIndex>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<SemanticIndex>,
 }
 
 /// A pack that is ready to classify.
 pub struct LoadedPack {
     pub cascade: Arc<Cascade>,
-    pub calibration: CalibrationTable,
+    /// The sentinel tier's calibrated thresholds, if the manifest carries any.
+    /// `None` for a pack calibrated only for the semantic tier.
+    pub calibration: Option<CalibrationTable>,
     /// The ceiling anything served from this pack carries.
     pub ceiling: Classification,
     /// What this node holds, for the audit record.
@@ -90,8 +106,9 @@ pub fn load_pack(
     pack: &VerifiedPack,
     index_key: Option<&Arc<IndexKey>>,
     unwrapper: &dyn PayloadKeyUnwrapper,
+    embedder: Option<Arc<dyn Embedder>>,
 ) -> Result<LoadedPack, LoadError> {
-    let calibration = calibration_from(pack)?;
+    let thresholds = read_thresholds(&pack.manifest.thresholds, &pack.manifest.taxonomy_version)?;
 
     let mut cascade = Cascade::new(&pack.manifest.taxonomy_version)
         .with_tier(Arc::new(PatternTier::new(Arc::new(RegexInferencer::new()))));
@@ -108,6 +125,21 @@ pub fn load_pack(
                         Arc::new(near),
                         key.clone(),
                     )) as Arc<dyn CascadeTier>);
+                }
+                // SENT-013: the index's recorded digest names a specific
+                // embedder, which makes the semantic tier a declared
+                // requirement rather than an optional extra — unlike an index
+                // this node simply was not sent, a missing embedder here is
+                // refused rather than recorded as an absence.
+                if let Some(index) = indexes.semantic {
+                    let embedder = embedder.ok_or(LoadError::EmbedderMissing)?;
+                    let calibration = thresholds
+                        .semantic
+                        .clone()
+                        .ok_or(LoadError::NoSemanticThresholds)?;
+                    let tier = SemanticTier::new(Arc::new(index), calibration, embedder)
+                        .map_err(LoadError::Semantic)?;
+                    cascade = cascade.with_tier(Arc::new(tier) as Arc<dyn CascadeTier>);
                 }
             }
         }
@@ -126,7 +158,7 @@ pub fn load_pack(
 
     Ok(LoadedPack {
         cascade: Arc::new(cascade),
-        calibration,
+        calibration: thresholds.sentinel,
         ceiling: pack.manifest.ceiling(),
         inventory: pack.inventory(),
     })
@@ -182,23 +214,6 @@ fn policy_covers_ceiling(
     Ok(strongest.is_some_and(|level| level >= needed))
 }
 
-/// SENT-004: thresholds come from the verified manifest, and the pairing with
-/// the taxonomy version is checked here rather than trusted.
-fn calibration_from(pack: &VerifiedPack) -> Result<CalibrationTable, LoadError> {
-    if pack.manifest.thresholds.is_null() {
-        return Err(LoadError::NoThresholds);
-    }
-    let table: CalibrationTable = serde_json::from_value(pack.manifest.thresholds.clone())
-        .map_err(|e| LoadError::BadThresholds(e.to_string()))?;
-    if !table.accepts_taxonomy(&pack.manifest.taxonomy_version) {
-        return Err(LoadError::TaxonomyMismatch {
-            manifest: pack.manifest.taxonomy_version.clone(),
-            thresholds: table.taxonomy_version,
-        });
-    }
-    Ok(table)
-}
-
 /// Open the index component, if this node holds one.
 fn open_indexes(
     pack: &VerifiedPack,
@@ -246,13 +261,23 @@ fn open_indexes(
     // sensitive its corpus actually is, and that is computable — so a recorded
     // ceiling below the content it covers is a lie the pre-check would
     // faithfully enforce. Inference may add restrictions, never remove them.
-    let content = indexes.reference.max_sensitivity().max(
-        indexes
-            .near
-            .as_ref()
-            .map(NearDuplicateIndex::max_sensitivity)
-            .unwrap_or(SensitivityLevel::Public),
-    );
+    let content = indexes
+        .reference
+        .max_sensitivity()
+        .max(
+            indexes
+                .near
+                .as_ref()
+                .map(NearDuplicateIndex::max_sensitivity)
+                .unwrap_or(SensitivityLevel::Public),
+        )
+        .max(
+            indexes
+                .semantic
+                .as_ref()
+                .map(SemanticIndex::max_sensitivity)
+                .unwrap_or(SensitivityLevel::Public),
+        );
     if content > sensitivity_of(record.effective_ceiling()) {
         return Err(LoadError::CeilingBelowContent {
             component: record.file.clone(),

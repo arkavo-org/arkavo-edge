@@ -1,6 +1,6 @@
 # DLP Sentinel and Sealed Knowledge Packs — Capability Brief
 
-**Version:** 0.91.0 · **Phases delivered:** 0–5 · **As of:** 2026-08-31
+**Version:** 0.95.0 · **Phases delivered:** 0–5, semantic tier · **As of:** 2026-09-26
 **Features:** `taint`, `sentinel`, `knowledge-pack`
 
 One source of truth for three jobs: the golden sets Phase 7 will test against,
@@ -43,13 +43,15 @@ been built.
 | A model completion is inspected before any token is released | Enforced | SENT-007, `release_gate` (6 tests) |
 | A model above the Confidential ceiling streams nothing partial, and no caller can opt out | Enforced | SENT-009 |
 | Content is recognised even when reformatted, requoted, or lightly edited | Enforced | KP-011, SENT-006, `arkavo-fingerprint` (54 tests) |
-| A stolen index reveals nothing about the corpus it indexes | Enforced | KP-009 (keying half), demo beat 1 |
+| Pack content is recognised when paraphrased or translated — most of the time, not always | Enforced | Semantic tier; held-out recall 92.5% of rewrites, 86.2% of translations at a 1% target false-positive rate, on one corpus — [results](dlp/semantic-tier-results.md) |
+| The keyed sections of a stolen index reveal nothing about the corpus | Enforced | KP-009 (keying half), demo beat 1 |
+| The semantic section of a stolen index is protected | Enforced — by encryption, not keying | Its vectors are embeddings from a public model and can be inverted toward the text; only wrapping protects them, and `pack seal` refuses an unwrapped index |
 | Classification thresholds come from a signed manifest, not local configuration | Enforced | SENT-004, `pack_test` |
 | A tampered pack component is refused, and a tampered manifest fails earlier still | Enforced | KP-004, demo beat 7 |
 | An egress node can hold the classifier and the index without the knowledge model | Enforced | KP-005 |
 | The classifier reports evidence; the policy layer decides. Neither can do the other's job | Enforced | SENT-001/014 |
 | Denials tell the caller nothing that could be used to probe the corpus | Partial | SENT-011 — generic text ships; audit sink not yet written |
-| A verified pack provisions the running gate | Partial | KP-003 — proven end to end; no production entry point supplies a pack path yet |
+| A verified pack provisions the running gate | Enforced | KP-003 — `arkavo chat --pack`; canary pipeline test `a_verified_pack_provisions_a_gate_that_catches_its_own_corpus`; measured smoke in [results](dlp/semantic-tier-results.md) |
 | Probing the gate throttles the classifier too | Partial | SENT-010 — shared budget exists, gate keeps a private limiter |
 | A trained classifier detects sensitive content the patterns miss | Deferred | SENT-005 — Phase 6; no model artifact exists |
 | Knowledge adapters load per clearance level | Deferred | KP-007 — selection ships, loading blocked upstream |
@@ -61,19 +63,36 @@ Defensible against the code as it stands:
 
 - "Inspected before release, not after."
 - "The classifier labels. The policy engine decides. Neither can override the other."
-- "Your corpus never leaves your building — the index is keyed, and it contains no text."
-- "Adds under two microseconds to a tool call."
+- "Your corpus never leaves your building — the index contains no text." The
+  exact and near-duplicate sections are keyed, so without the tenant key they
+  cannot even be checked against a guess. A semantic section holds embeddings,
+  which can be partly inverted toward the text; it is protected by wrapping,
+  not keying, and `pack seal` refuses an unwrapped index.
+- "Adds under two microseconds to a tool call" — the egress check before a tool
+  runs. Under a pack with a semantic tier, the tool-call arguments a model emits
+  are also inspected with the rest of its completion, at the per-check latency
+  below (tens of milliseconds), before any of it is released.
 - "What the gate enforces is what somebody signed."
 - "Runs offline. No corpus is sent to a third-party model."
+- "Recognises paraphrases and translations of the documents it was given" —
+  with the measured caveat: 92.5% of held-out rewrites and 86.2% of held-out
+  translations on the Mallinckrodt pack, not all of them.
 
 Not defensible:
 
 - "AI-powered detection" — the trained classifier is Phase 6. Today's tiers are
-  patterns and keyed fingerprints.
-- "Detects any leak" — the tiers catch known corpus content and known patterns.
-  Novel paraphrase is what the sentinel is *for*, and it does not exist yet.
-- "Zero false positives" — nothing has been measured against a golden set.
-  That is Phase 7.
+  patterns, keyed fingerprints, and embedding similarity to known documents.
+- "Detects any leak" — the tiers catch known corpus content, its paraphrases
+  and translations (most, not all: 7.5% of held-out rewrites and 13.8% of
+  held-out translations got through), and known patterns. Sensitive content
+  that was never put in a pack is what the Phase 6 classifier is for.
+- "Zero false positives" — measured on held-out benign prompts, the semantic
+  tier fires on 0.86% of long ones and none of 299 short ones, but the whole
+  cascade holds 7.7% of long ones, mostly because the exact tier fires on any
+  five-word phrase shared with the corpus. The Phase 7 golden set is still to
+  come.
+- "Runs on a Raspberry Pi 5" — not measured. A pack with a semantic section
+  took 1.5 GB resident to open and 2.7 GB peak on an M4 Max.
 - "Revoke a leaked document" — revocation is capsule-side and unbuilt.
 - "Per-department model access" — adapter selection is real; adapter *loading*
   is blocked on an upstream API.
@@ -82,7 +101,9 @@ Not defensible:
 **The claim to guard hardest.** It is tempting to describe this as an AI that
 understands your sensitive data. It isn't, yet. Today it is a fast, exact,
 tamper-evident memory of documents you have already told it about — which is a
-real and defensible product, and a different one.
+real and defensible product, and a different one. The semantic tier widens
+"already told it about" to paraphrases and translations of those documents;
+it does not make the system judge content it has never seen.
 
 ## Demo beats, captured from a real terminal
 
@@ -108,6 +129,13 @@ $ grep -ci "northwind\|acquisition\|indemnity" index.json
 
 Voiceover: "Every five-word window becomes a keyed hash. Without the tenant key,
 an attacker who steals this file cannot even check a guess."
+
+That line holds for an index built without `--embedder`. With it, the index
+also carries a semantic section: no text, so the grep still comes back empty,
+but embeddings from a public model, which anyone holding the file can compare
+with a guess and can partly invert. That section is protected by wrapping
+(`arkavo pack wrap`), not by keying — which is why the next beats refuse an
+unwrapped index.
 
 ### Derive the organization anchor
 
@@ -185,23 +213,47 @@ text is cut mid-stream and the viewer sees the prefix stop. Filming it needs
 Phase 6's classifier to make it look like judgement rather than a lookup. Hold
 it for launch.
 
+A paraphrase is now filmable without it: `arkavo chat --pack` withholds a
+model repeating a held-out rewrite that shares no five-word phrase with the
+corpus (runs and commands in [the results](dlp/semantic-tier-results.md)).
+
 ## Numbers we can print
 
-Measured on the crate benches. Re-run with `cargo bench -p arkavo-sentinel` and
-`cargo bench -p arkavo-fingerprint`.
+The first four rows are measured on the crate benches — re-run with
+`cargo bench -p arkavo-sentinel` and `cargo bench -p arkavo-fingerprint`. The
+rest are from the Mallinckrodt measurement run on an Apple M4 Max; the
+commands that produced each are in
+[docs/dlp/semantic-tier-results.md](dlp/semantic-tier-results.md).
 
 | What | Measured | Budget | Reading |
 | --- | ---: | ---: | --- |
 | Synchronous cascade cost per tool call | 1.39 µs | 50 µs | 36× headroom against the sequence-integrity invariant |
-| Holdback window latency — p50 | 6.21 µs | — | What a reader waits for one window to clear |
-| Holdback window latency — p95 | 6.42 µs | — | Tail is flat; no window costs ten times the median |
-| Holdback window latency — p99 | 6.96 µs | — | Same |
 | One keyed shingle hash | 50 ns | — | BLAKE3 keyed mode, one pass |
 | Reference tier, matching span | 1.23 µs | 25 µs | A hit costs no more than a miss plus the probe |
 | Reference tier, clean span | 580 ns | 25 µs | — |
+| Holdback window latency, Internal ceiling, semantic pack — p50 | 30.46 ms | — | What a reader waits for one 256-byte window to clear; the embedding model is in the window path |
+| Holdback window latency, Internal ceiling, semantic pack — p95 | 33.90 ms | — | Tail is flat |
+| Holdback window latency, Internal ceiling, semantic pack — p99 | 34.06 ms | — | Same |
+| Per-check latency, 50-word prompt — p50 / p95 | 30.40 / 30.77 ms | — | Whole cascade, semantic tier included |
+| Per-check latency, 2000-word prompt — p50 / p95 | 885.60 / 886.78 ms | — | Grows with the number of units (96 words, at most 1536 characters each) |
+| Semantic recall, held-out rewrites | 111/120 (92.5%) | — | Threshold fitted at 1% false positives on other families |
+| Semantic recall, held-out translations | 100/116 (86.2%) | — | Spanish, French, German, Chinese |
+| Semantic false positives, held-out long / short benign prompts | 0.86% / 0.00% | 1% | 3/350 and 0/299 |
+| Whole-cascade false positives, held-out long benign prompts | 7.7% | — | 27/350; the exact tier causes 24 |
+| Resident memory after opening the pack | 1.5 GB | — | 1548 MB: decrypted index plus the loaded embedding model |
 
-Do not print a false-positive or recall figure. Neither has been measured. That
-is Phase 7's job, and its absence is the honest answer until then.
+The holdback rows replace the earlier 6.21 µs p50, which timed a cascade
+without the semantic tier. At Confidential and above nothing streams
+partially (SENT-009), and under `chat --pack` each completion is inspected
+twice: once by the critic's `SentinelCheck`, which records evidence, and once
+by the release gate. A reader therefore waits roughly twice the per-check
+latency above for the completion's length, not one inspection and not a
+window.
+
+Print the recall and false-positive figures only with their conditions: one
+corpus, one embedding model, paraphrases written by one local model, and
+generated benign prompts. They are the first golden-set numbers, not the
+Phase 7 suite.
 
 ## What the golden sets have to contain
 
@@ -219,8 +271,9 @@ will report a system far stronger than it is. Each row has a known answer today
 | Secret nested three objects deep in a tool call | Caught | Regression case — top-level-only inspection was a real bug |
 | Label straddling a stream window boundary | Caught | Windows overlap by 64 bytes for exactly this |
 | Sensitive text on the final chunk, with the done marker | Caught | Regression case — this bypassed the gate until review found it |
-| Full paraphrase in different words | Missed | What the Phase 6 classifier is for. Add it now and let it stay red. |
-| Corpus content translated to another language | Missed | Same |
+| Full paraphrase in different words | Mostly caught | Semantic tier: 111 of 120 held-out rewrites; the misses are the case to keep red |
+| Corpus content translated to another language | Mostly caught | Semantic tier: 100 of 116 held-out translations (Chinese 23/27, French 30/35, German 21/24, Spanish 26/30) |
+| Benign in-domain question sharing an ordinary phrase with the corpus | Wrongly held | Exact tier fires on any shared five-word phrase: 17 of 182 held-out in-domain long prompts |
 | Secret split across several turns | Partly | Session taint accumulates, so the second half is labelled — but no tier sees the whole |
 | Base64 or hex encoding of a secret | Partly | Taint follows the buffer; the pattern tier will not match the encoded form |
 
