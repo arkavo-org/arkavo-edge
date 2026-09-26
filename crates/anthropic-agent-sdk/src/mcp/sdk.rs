@@ -7,7 +7,8 @@
 //!
 //! ```ignore
 //! use anthropic_agent_sdk::mcp::{tool, tool_router, tool_handler};
-//! use anthropic_agent_sdk::mcp::{Parameters, CallToolResult, Content, ToolRouter, ServerHandler};
+//! use anthropic_agent_sdk::mcp::{Parameters, CallToolResult, ContentBlock, ToolRouter, ServerHandler};
+//! use anthropic_agent_sdk::mcp::{Implementation, ServerCapabilities, ServerConfig};
 //! use schemars::JsonSchema;
 //! use serde::Deserialize;
 //!
@@ -29,16 +30,17 @@
 //!
 //!     #[tool(description = "Greet someone by name")]
 //!     async fn greet(&self, params: Parameters<GreetParams>) -> Result<CallToolResult, String> {
-//!         Ok(CallToolResult::success(vec![Content::text(
-//!             format!("Hello, {}!", params.name)
+//!         Ok(CallToolResult::success(vec![ContentBlock::text(
+//!             format!("Hello, {}!", params.0.name)
 //!         )]))
 //!     }
 //! }
 //!
 //! #[tool_handler]
 //! impl ServerHandler for Greeter {
-//!     fn get_info(&self) -> rmcp::model::ServerInfo {
-//!         rmcp::model::ServerInfo::new("greeter", "1.0.0")
+//!     fn get_info(&self) -> ServerConfig {
+//!         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+//!             .with_server_info(Implementation::new("greeter", "1.0.0"))
 //!     }
 //! }
 //! ```
@@ -54,14 +56,15 @@ pub use rmcp::model::{
     // Tool types
     CallToolResult,
     // Content types
-    Content,
+    ContentBlock,
     CustomNotification,
     // Custom protocol extensions (rmcp 0.12.0+)
     CustomRequest,
     CustomResult,
-    // Server info and capabilities
+    // Server identity and capabilities
+    Implementation,
     ServerCapabilities,
-    ServerInfo,
+    ServerConfig,
     Tool,
 };
 
@@ -90,3 +93,73 @@ pub use rmcp::ServiceExt;
 /// making it usable as an SDK MCP server.
 pub trait SdkMcpServer: rmcp::ServerHandler {}
 impl<T: rmcp::ServerHandler> SdkMcpServer for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Deserialize;
+
+    // Guards the re-exported surface: an rmcp upgrade that renames or drops any
+    // of these types breaks this test instead of downstream servers.
+    #[derive(Deserialize, schemars::JsonSchema)]
+    struct AddParams {
+        a: f64,
+        b: f64,
+    }
+
+    #[derive(Clone)]
+    struct Calculator {
+        tool_router: ToolRouter<Self>,
+    }
+
+    #[tool_router]
+    impl Calculator {
+        fn new() -> Self {
+            Self {
+                tool_router: Self::tool_router(),
+            }
+        }
+
+        #[tool(description = "Add two numbers")]
+        async fn add(
+            &self,
+            Parameters(params): Parameters<AddParams>,
+        ) -> Result<CallToolResult, McpError> {
+            Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+                "{}",
+                params.a + params.b
+            ))]))
+        }
+    }
+
+    // The expansion of `#[tool_handler]` owns these async trait bodies.
+    #[allow(clippy::unused_async_trait_impl)]
+    #[tool_handler]
+    impl ServerHandler for Calculator {
+        fn get_info(&self) -> ServerConfig {
+            ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+                .with_server_info(Implementation::new("calculator", "1.0.0"))
+        }
+    }
+
+    fn assert_sdk_server<T: SdkMcpServer>(_: &T) {}
+
+    #[test]
+    fn tool_macros_register_routes() {
+        let calc = Calculator::new();
+        assert_sdk_server(&calc);
+
+        let tools = calc.tool_router.list_all();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "add");
+        assert!(calc.tool_router.has_route("add"));
+    }
+
+    #[test]
+    fn server_config_advertises_tools_and_identity() {
+        let info = Calculator::new().get_info();
+        assert!(info.capabilities.tools.is_some());
+        assert_eq!(info.server_info.name, "calculator");
+        assert_eq!(info.server_info.version, "1.0.0");
+    }
+}
