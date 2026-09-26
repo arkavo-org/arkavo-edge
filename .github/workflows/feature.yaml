@@ -319,10 +319,23 @@ jobs:
             # Pack command tests live in arkavo-cli and only compile when the
             # knowledge-pack feature (which pulls fingerprint) is on.
             cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel commands::pack
+            # Sentinel runtime wiring (provisioning, release-gate merge). One
+            # filter argument only matches one substring, so this is a
+            # separate invocation from the chat_pack line below; verified it
+            # picks up exactly the sentinel_wiring::{pack_tests,tests,
+            # provisioning_tests} submodules and nothing else in the crate.
+            cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel sentinel_wiring::
+            # `chat --pack` argument parsing and provisioning glue. Distinct
+            # from `commands::chat::` (plain chat session tests), verified
+            # above to not overlap.
+            cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel commands::chat_pack
             # Phase 4's acceptance test: a seeded canary in a completion never
             # reaches the consumer. Phase 5 extends it: the gate is provisioned
-            # from a signed pack.
-            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary --test sentinel_runtime
+            # from a signed pack. pack_provisioning and chat_pack_refusals
+            # share this feature set with no new build; pack_provisioning
+            # mutates process-global release-policy state so it stays a
+            # single-#[test] binary of its own.
+            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary --test sentinel_runtime --test pack_provisioning --test chat_pack_refusals
           fi
 
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
