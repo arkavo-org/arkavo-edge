@@ -11,8 +11,8 @@ use arkavo_gguf_tdf::{
     PreResolvedKey, WrappedKey,
 };
 use arkavo_knowledge_pack::{
-    Entitlements, Lineage, PackBuilder, PackIndexes, SelectionError, load_pack, seal_blob,
-    select_adapters, verify_pack,
+    EVAL_EVIDENCE_FILE, Entitlements, Lineage, PackBuilder, PackIndexes, SelectionError,
+    VerifyError, load_pack, seal_blob, select_adapters, verify_pack,
 };
 use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
 use arkavo_test_macros::spec;
@@ -860,4 +860,68 @@ fn an_index_without_a_semantic_section_still_loads() {
     let parsed: PackIndexes = serde_json::from_value(json).expect("parse");
 
     assert!(parsed.semantic.is_none());
+}
+
+/// A minimal one-component pack with an eval-evidence file bound in, for the
+/// evidence-binding tests below — the sentinel/index/adapter wiring `build_pack`
+/// exercises is not the point here.
+fn build_pack_with_evidence(dir: &Path, evidence: &[u8]) -> (std::path::PathBuf, AgentKeypair) {
+    let evidence_path = dir.join("evidence.json");
+    std::fs::write(&evidence_path, evidence).expect("write evidence");
+    std::fs::write(dir.join("sentinel.tdf"), b"s").expect("write");
+    let mut builder = PackBuilder::new("pack-evidence", "1.0.0", "tok")
+        .with_thresholds(thresholds())
+        .with_eval_evidence_file(&evidence_path);
+    builder
+        .add_component(
+            &dir.join("sentinel.tdf"),
+            ComponentRole::Sentinel,
+            Some(Classification::Internal),
+        )
+        .expect("add");
+    let key = AgentKeypair::generate();
+    let root = dir.join("pack");
+    builder.build(&root, &key).expect("build");
+    (root, key)
+}
+
+/// The evidence travels with the manifest wherever it goes: a pack whose
+/// eval-evidence file was swapped after sealing must not verify.
+#[test]
+fn tampered_eval_evidence_fails_verification() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (root, key) = build_pack_with_evidence(dir.path(), br#"{"suite":"v1","fpr":0.01}"#);
+    std::fs::write(root.join(EVAL_EVIDENCE_FILE), b"tampered").expect("tamper");
+
+    let refused = verify_pack(&root, Some(&key.public_key()));
+
+    assert!(
+        matches!(refused, Err(VerifyError::EvalEvidenceMismatch { .. })),
+        "{refused:?}"
+    );
+}
+
+/// A manifest that records eval evidence but ships without the file is exactly
+/// as suspect as a component that fails its digest: refused, not skipped.
+#[test]
+fn missing_eval_evidence_fails_verification() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (root, key) = build_pack_with_evidence(dir.path(), br#"{"suite":"v1","fpr":0.01}"#);
+    std::fs::remove_file(root.join(EVAL_EVIDENCE_FILE)).expect("remove");
+
+    let refused = verify_pack(&root, Some(&key.public_key()));
+
+    assert!(
+        matches!(refused, Err(VerifyError::EvalEvidenceMissing)),
+        "{refused:?}"
+    );
+}
+
+/// A pack that never recorded evidence has nothing to check and must keep
+/// verifying exactly as it did before this feature existed.
+#[test]
+fn a_pack_without_recorded_evidence_verifies_as_before() {
+    let fixture = build_pack();
+
+    assert!(verify_pack(&pack_root(&fixture), Some(&fixture.key.public_key())).is_ok());
 }
