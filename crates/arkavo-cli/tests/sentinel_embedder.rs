@@ -80,3 +80,45 @@ fn a_build_without_declared_or_given_pooling_is_refused() {
         }
     }
 }
+
+/// Regression: `arkavo chat --pack` aborted at every exit on Metal
+/// (`ggml_metal_device_free` asserting on live residency sets), because the
+/// provisioned embedder lives inside the set-once release policy and was
+/// never dropped. Unloading frees its llama.cpp resources in place; an
+/// embed after that is an error — which the semantic tier reports as
+/// `Unavailable`, a gap, so the gate holds rather than releasing unjudged.
+#[test]
+fn an_unloaded_embedder_refuses_to_embed() {
+    let Some(path) = model_path() else {
+        eprintln!("skipping: set ARKAVO_TEST_EMBED_MODEL");
+        return;
+    };
+    let embedder = LlamaEmbedder::load(&path, EmbeddingPooling::Last).unwrap();
+    assert!(embedder.embed(&["the quarterly board minutes"]).is_ok());
+
+    embedder.unload();
+    embedder.unload();
+
+    let err = embedder
+        .embed(&["the quarterly board minutes"])
+        .unwrap_err();
+    assert!(err.contains("unloaded"), "{err}");
+}
+
+#[test]
+fn dropping_the_release_guard_unloads_the_provisioned_embedder() {
+    let Some(path) = model_path() else {
+        eprintln!("skipping: set ARKAVO_TEST_EMBED_MODEL");
+        return;
+    };
+    let embedder = Arc::new(LlamaEmbedder::load(&path, EmbeddingPooling::Last).unwrap());
+    // The policy keeps its own reference for the rest of the process; the
+    // guard must release the native resources regardless.
+    let held_by_policy: Arc<dyn Embedder> = embedder.clone();
+
+    drop(arkavo_cli::commands::chat_pack::NativeRelease::new(Some(
+        embedder,
+    )));
+
+    assert!(held_by_policy.embed(&["after the session"]).is_err());
+}

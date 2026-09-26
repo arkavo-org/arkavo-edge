@@ -88,13 +88,37 @@ pub fn parse_pack_args(args: &[String]) -> Result<Option<PackArgs>, String> {
     }))
 }
 
+/// Releases a provisioned embedder's llama.cpp resources when dropped.
+///
+/// The pack's policy outlives every session (provisioning is once, upward
+/// only), so the embedder inside it is never dropped; left alone, its Metal
+/// buffers are still resident when ggml's static destructors run, and the
+/// process aborts on exit. The session holds this guard and drops it on
+/// every way out, so the native half goes first. The policy stays
+/// installed: anything it still inspects after that is a gap, and held.
+pub struct NativeRelease(Option<Arc<LlamaEmbedder>>);
+
+impl NativeRelease {
+    pub fn new(embedder: Option<Arc<LlamaEmbedder>>) -> Self {
+        Self(embedder)
+    }
+}
+
+impl Drop for NativeRelease {
+    fn drop(&mut self) {
+        if let Some(embedder) = &self.0 {
+            embedder.unload();
+        }
+    }
+}
+
 /// Verify, load and provision the pack; returns its inventory for the
-/// operator.
-pub async fn provision_from_pack(args: &PackArgs) -> Result<String, String> {
+/// operator and the guard that releases its embedder when the session ends.
+pub async fn provision_from_pack(args: &PackArgs) -> Result<(String, NativeRelease), String> {
     let anchor = read_anchor(&args.anchor)?;
     let verified = verify_pack(&args.pack, Some(&anchor)).map_err(|e| e.to_string())?;
 
-    let embedder: Option<Arc<dyn Embedder>> =
+    let loaded: Option<Arc<LlamaEmbedder>> =
         match semantic_embedder_record(&verified.manifest.thresholds) {
             Some(record) => {
                 let path = fetch_embedder(&record).await?;
@@ -102,6 +126,10 @@ pub async fn provision_from_pack(args: &PackArgs) -> Result<String, String> {
             }
             None => None,
         };
+    // Taken before anything below can fail, so an early return still frees
+    // the embedder rather than leaving it for the exit-time destructors.
+    let release = NativeRelease::new(loaded.clone());
+    let embedder = loaded.map(|e| -> Arc<dyn Embedder> { e });
 
     // Only the derived key outlives this call; the secret it came from is
     // wiped when this function returns, whether or not derivation succeeds.
@@ -126,7 +154,7 @@ pub async fn provision_from_pack(args: &PackArgs) -> Result<String, String> {
     .map_err(|e| e.to_string())?;
     let inventory = runtime.inventory.clone();
     sentinel_wiring::provision(runtime)?;
-    Ok(inventory)
+    Ok((inventory, release))
 }
 
 /// Read a raw 32-byte payload key.

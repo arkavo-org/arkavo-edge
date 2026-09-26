@@ -242,13 +242,19 @@ fn execute_a2a_chat(
     runtime.block_on(async {
         // Before anything that can complete: the first completion of the
         // session must already run under the pack's policy.
+        // Bound to this block, so the embedder's native resources are freed
+        // on every way out of the session, before process-exit destructors.
         #[cfg(feature = "sentinel")]
-        if let Some(pack) = &pack {
-            let inventory = super::chat_pack::provision_from_pack(pack)
-                .await
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-            println!("Pack provisioned: {inventory}");
-        }
+        let _release = match &pack {
+            Some(pack) => {
+                let (inventory, release) = super::chat_pack::provision_from_pack(pack)
+                    .await
+                    .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+                println!("Pack provisioned: {inventory}");
+                Some(release)
+            }
+            None => None,
+        };
 
         // Initialize engine with Router + full tool registry (including Claude SDK)
         let engine = arkavo_server::LocalEngine::new()
