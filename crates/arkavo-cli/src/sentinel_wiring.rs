@@ -443,3 +443,138 @@ mod tests {
         assert!(!may_release(&uncovered), "without coverage it still holds");
     }
 }
+
+/// What the provisionable policy hands out before and after a pack arrives.
+///
+/// Built on a local factory rather than the process-global one, so the
+/// delegation itself is under test without touching `FACTORY` or the router.
+#[cfg(test)]
+mod provisioning_tests {
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Instant;
+
+    use super::*;
+    use arkavo_fingerprint::{ReferenceIndex, ReferenceTier};
+    use arkavo_protocol::classification_evidence::TierReport;
+    use arkavo_protocol::data_classification::DataCategory;
+    use arkavo_sentinel::{CascadeTier, PatternTier};
+
+    const CANARY: &str =
+        "the northwind acquisition closes in the third quarter pending board approval";
+
+    /// Counts inspections, so a test can tell whose cascade `verify` ran:
+    /// the critic check only contributes evidence (SENT-014), so its verdict
+    /// is `Ok` either way and cannot show which pipeline answered.
+    struct Counting(Arc<AtomicUsize>);
+
+    impl CascadeTier for Counting {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+
+        fn examine_until(&self, text: &str, _deadline: Instant) -> TierReport {
+            self.examine_unbudgeted(text)
+        }
+
+        fn examine_unbudgeted(&self, _text: &str) -> TierReport {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            TierReport::matched("counting", "1", Vec::new())
+        }
+    }
+
+    fn pattern_only() -> Arc<Cascade> {
+        Arc::new(
+            Cascade::new("1.0.0").with_tier(Arc::new(PatternTier::new(Arc::new(
+                arkavo_protocol::RegexInferencer::new(),
+            )))),
+        )
+    }
+
+    /// A runtime as a pack would provision it: the pattern tier, a keyed
+    /// reference index over the canary, and a Confidential ceiling.
+    fn pack_runtime(inspections: Arc<AtomicUsize>) -> SentinelRuntime {
+        let key = Arc::new(IndexKey::derive(&[41u8; 32], "provisioning").expect("derive"));
+        let mut builder = ReferenceIndex::builder(&key, "1.0.0");
+        builder.add_document(
+            &key,
+            CANARY,
+            DataCategory::Internal,
+            SensitivityLevel::Confidential,
+            "board-minutes",
+        );
+        let reference = ReferenceTier::loaded(Arc::new(builder.build()), key);
+        let cascade = Cascade::new("1.0.0")
+            .with_tier(Arc::new(PatternTier::new(Arc::new(
+                arkavo_protocol::RegexInferencer::new(),
+            ))))
+            .with_tier(Arc::new(reference) as Arc<dyn CascadeTier>)
+            .with_tier(Arc::new(Counting(inspections)) as Arc<dyn CascadeTier>);
+        SentinelRuntime {
+            cascade: Arc::new(cascade),
+            calibration: None,
+            ceiling: SensitivityLevel::Confidential,
+            inventory: "test pack".to_string(),
+        }
+    }
+
+    /// What a consumer receives from one completion through a fresh gate;
+    /// `None` when the gate withheld it.
+    fn released(gate: &Arc<dyn ReleaseGate>, completion: &str) -> Option<String> {
+        let mut seen = String::new();
+        for outcome in [gate.admit(completion), gate.finish()] {
+            match outcome {
+                GateOutcome::Release(text) => seen.push_str(&text),
+                GateOutcome::Blocked => return None,
+            }
+        }
+        Some(seen)
+    }
+
+    fn response(content: &str) -> arkavo_llm::ProviderResponse {
+        arkavo_llm::ProviderResponse {
+            content: content.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[allow(clippy::disallowed_methods)]
+    #[tokio::test]
+    async fn a_provisioned_pack_replaces_the_baseline_for_every_later_completion() {
+        let factory = ProvisionableFactory {
+            baseline: CascadeFactory::new(pattern_only()),
+            provisioned: OnceLock::new(),
+        };
+        let completion = format!("Summary. {CANARY}. Regards.");
+
+        // The baseline is pattern-only: it has nothing that knows the corpus.
+        assert_eq!(
+            released(&factory.create("m"), &completion).as_deref(),
+            Some(completion.as_str())
+        );
+        let inspections = Arc::new(AtomicUsize::new(0));
+        let runtime = pack_runtime(inspections.clone());
+        factory
+            .verify(&response(&completion))
+            .await
+            .expect("the baseline critic passes it");
+        assert_eq!(inspections.load(Ordering::SeqCst), 0, "not the pack yet");
+
+        assert!(factory.provisioned.set(PackFactory::new(runtime)).is_ok());
+
+        assert_eq!(
+            released(&factory.create("m"), &completion),
+            None,
+            "the pack's corpus must be withheld once the pack is provisioned"
+        );
+        assert_eq!(released(&factory.create("m"), "ok").as_deref(), Some("ok"));
+        let before = inspections.load(Ordering::SeqCst);
+        factory
+            .verify(&response(&completion))
+            .await
+            .expect("the critic contributes evidence, never a verdict");
+        assert!(
+            inspections.load(Ordering::SeqCst) > before,
+            "verify must run the pack's critic pipeline"
+        );
+    }
+}
