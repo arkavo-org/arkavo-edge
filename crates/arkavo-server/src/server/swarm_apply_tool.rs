@@ -35,7 +35,10 @@ use serde_json::{Value, json};
 
 /// Default KAS endpoint when `ARKAVO_KAS_URL` is unset. Matches
 /// `arkavo_tdf::OpenTdfConfig`'s default so wrap and rewrap agree.
-const DEFAULT_KAS_URL: &str = "https://kas.arkavo.net";
+/// `platform.arkavo.net` is the only published production KAS name;
+/// `kas.arkavo.net` has no DNS record, so bundles wrapped to it could never be
+/// rewrapped.
+const DEFAULT_KAS_URL: &str = "https://platform.arkavo.net";
 
 /// Agent-callable tool that applies a SwarmKit manifest to the mesh.
 pub(super) struct SwarmApplyTool {
@@ -148,5 +151,15 @@ impl Tool for SwarmApplyTool {
             })),
             Err(e) => Ok(error_response(&format!("apply_kit failed: {e}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_kas_is_the_published_platform_host() {
+        assert_eq!(DEFAULT_KAS_URL, "https://platform.arkavo.net");
     }
 }
