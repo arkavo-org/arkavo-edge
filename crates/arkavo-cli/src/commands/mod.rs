@@ -20,6 +20,8 @@ pub mod pack_options;
 pub mod pack_seal;
 #[cfg(feature = "sentinel")]
 pub mod pack_semantic;
+#[cfg(feature = "knowledge-pack")]
+pub mod pack_wrap;
 pub mod rlm_integration;
 pub mod security_audit;
 pub mod task;

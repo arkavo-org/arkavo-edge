@@ -27,11 +27,17 @@
 #![cfg(feature = "sentinel")]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use arkavo_cli::commands::pack;
-use arkavo_cli::sentinel_embedder::sha256_file;
-use arkavo_fingerprint::{SemanticCalibration, SemanticEvalEvidence, label_key};
-use arkavo_knowledge_pack::PackIndexes;
+use arkavo_cli::sentinel_embedder::{LlamaEmbedder, sha256_file};
+use arkavo_cli::sentinel_wiring::SentinelRuntime;
+use arkavo_crypto::AgentKeypair;
+use arkavo_fingerprint::{
+    Embedder, EmbeddingPooling, IndexKey, SemanticCalibration, SemanticEvalEvidence, label_key,
+};
+use arkavo_gguf_tdf::PreResolvedKey;
+use arkavo_knowledge_pack::{PackIndexes, verify_pack};
 use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
 
 fn model_path() -> Option<PathBuf> {
@@ -290,4 +296,137 @@ fn verbatim_positives_calibrate_successfully() {
         panic!("verbatim positives repeat the indexed text; calibration must reach recall: {e}");
     }
     assert_outputs_parse(&model, &outputs);
+}
+
+/// The full CLI path a real deployment takes: `pack index` (with a semantic
+/// section) → `pack wrap` (local key custody) → `pack seal` → `verify_pack` →
+/// `SentinelRuntime::from_pack` with the recorded key and a real embedder.
+///
+/// Every earlier test in this file calls `pack::execute(["index", ..])`
+/// directly; nothing before this task turned that plaintext index into
+/// something `pack seal` would accept, so this is the first test that walks
+/// the whole producing side of `chat --pack` end to end. Verbatim positives
+/// are used (not paraphrases) so calibration succeeds unconditionally — this
+/// test is about the wrap/seal/load wiring, not about whether a tiny embedder
+/// generalizes.
+#[test]
+fn pack_index_wrap_seal_and_load_round_trip_through_sentinel_runtime() {
+    let Some(model) = model_path() else {
+        eprintln!("skipping: set ARKAVO_TEST_EMBED_MODEL");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let corpus = dir.path().join("corpus.jsonl");
+    let anchors = dir.path().join("anchors.jsonl");
+    let negatives = dir.path().join("negatives.jsonl");
+    let positives = dir.path().join("positives.jsonl");
+    write_corpus(&corpus);
+    write_anchors(&anchors);
+    write_negatives(&negatives);
+    write_verbatim_positives(&positives);
+    let tenant_key = write_key(dir.path());
+
+    let index_out = dir.path().join("index.json");
+    let thresholds_out = dir.path().join("thresholds.json");
+    let evidence_out = dir.path().join("evidence.json");
+    let index_args: Vec<String> = [
+        "index",
+        "--corpus",
+        corpus.to_str().unwrap(),
+        "--key-file",
+        tenant_key.to_str().unwrap(),
+        "--out",
+        index_out.to_str().unwrap(),
+        "--category",
+        "internal",
+        "--sensitivity",
+        "confidential",
+        "--embedder",
+        model.to_str().unwrap(),
+        "--embedder-source",
+        "test/embed/model.gguf",
+        "--pooling",
+        "last",
+        "--anchors",
+        anchors.to_str().unwrap(),
+        "--calibrate-positives",
+        positives.to_str().unwrap(),
+        "--calibrate-negatives",
+        negatives.to_str().unwrap(),
+        "--semantic-thresholds-out",
+        thresholds_out.to_str().unwrap(),
+        "--eval-evidence-out",
+        evidence_out.to_str().unwrap(),
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    pack::execute(&index_args).expect("pack index");
+
+    let wrapped_out = dir.path().join("index.json.tdf");
+    let payload_key_out = dir.path().join("payload.key");
+    pack::execute(&[
+        "wrap".to_string(),
+        "--in".to_string(),
+        index_out.to_str().unwrap().to_string(),
+        "--out".to_string(),
+        wrapped_out.to_str().unwrap().to_string(),
+        "--payload-key-out".to_string(),
+        payload_key_out.to_str().unwrap().to_string(),
+    ])
+    .expect("pack wrap");
+
+    let signing_key = AgentKeypair::generate();
+    let signing_key_path = dir.path().join("signing.key");
+    std::fs::write(&signing_key_path, signing_key.to_bytes()).unwrap();
+    let pack_dir = dir.path().join("pack");
+    pack::execute(&[
+        "seal".to_string(),
+        "--out".to_string(),
+        pack_dir.to_str().unwrap().to_string(),
+        "--signing-key".to_string(),
+        signing_key_path.to_str().unwrap().to_string(),
+        "--pack-id".to_string(),
+        "semantic-e2e".to_string(),
+        "--component".to_string(),
+        format!("{}:index:confidential", wrapped_out.to_str().unwrap()),
+        "--thresholds".to_string(),
+        format!("semantic:{}", thresholds_out.to_str().unwrap()),
+    ])
+    .expect("pack seal");
+
+    let verified = verify_pack(&pack_dir, Some(&signing_key.public_key())).expect("verify_pack");
+
+    let secret = std::fs::read(&tenant_key).unwrap();
+    let index_key = Arc::new(IndexKey::derive(&secret, "default").expect("derive tenant key"));
+    let payload_key_bytes = std::fs::read(&payload_key_out).unwrap();
+    assert_eq!(
+        payload_key_bytes.len(),
+        32,
+        "the payload key must be raw bytes"
+    );
+    let mut payload_key = [0u8; 32];
+    payload_key.copy_from_slice(&payload_key_bytes);
+
+    let embedder: Arc<dyn Embedder> =
+        Arc::new(LlamaEmbedder::load(&model, EmbeddingPooling::Last).expect("load embedder"));
+
+    let runtime = SentinelRuntime::from_pack(
+        &verified,
+        Some(&index_key),
+        &PreResolvedKey::new(payload_key),
+        Some(embedder),
+    )
+    .expect("provision the sentinel runtime from the sealed pack");
+
+    assert_eq!(runtime.ceiling, SensitivityLevel::Confidential);
+    assert!(
+        runtime.cascade().tier_names().contains(&"semantic"),
+        "{:?}",
+        runtime.cascade().tier_names()
+    );
+    // The manifest carried only a semantic thresholds table — no sentinel
+    // table was sealed — so the sentinel calibration must read back absent
+    // rather than fabricated.
+    assert!(runtime.calibration.is_none());
 }
