@@ -292,7 +292,9 @@ impl super::Router {
         use_spec_decoding: bool,
     ) -> Result<Box<dyn Provider>> {
         if let Some(substituted) = self.substituted_provider(&ModelChoice::LocalQwen3) {
-            return substituted;
+            // A substituted arm is still a model whose output reaches a caller;
+            // returning it unwrapped would bypass the release gate entirely.
+            return substituted.map(|provider| self.protect_provider(provider));
         }
         let resolved = model_discovery::resolve_gguf_path(path);
         if !resolved.exists() {
@@ -582,5 +584,40 @@ mod substitution_tests {
 
         let err = result.expect_err("the marker must be withheld");
         assert!(err.to_string().contains(arkavo_llm::GATE_BLOCKED));
+    }
+
+    /// `instantiate_gguf_path` has its own substitution check (it returns
+    /// before ever touching the filesystem), so it needs its own regression
+    /// test rather than inheriting coverage from `instantiate_provider_inner`.
+    #[cfg(feature = "llama-cpp")]
+    mod gguf_path {
+        use super::*;
+        use std::path::Path;
+
+        /// Regression: same bypass as `instantiate_provider_inner`, but on the
+        /// GGUF-path arm — a substituted provider returned before
+        /// `protect_provider` reached callers unexamined.
+        #[tokio::test]
+        async fn a_substituted_gguf_provider_is_gated() {
+            let _ = crate::response_policy::install(Arc::new(MarkerFactory));
+            let provider = CountingProvider::new(&format!("leaked {MARKER} text"));
+            let router = crate::Router::new_offline()
+                .await
+                .expect("router")
+                .with_provider_factory(provider.factory());
+
+            // Substitution short-circuits before the path is ever resolved or
+            // checked for existence, so a nonexistent path is fine here.
+            let built = router
+                .instantiate_gguf_path(Path::new("any.gguf"), false)
+                .await
+                .expect("build");
+            let result = built
+                .complete_with_options(vec![Message::user("hi")], Some(64))
+                .await;
+
+            let err = result.expect_err("the marker must be withheld");
+            assert!(err.to_string().contains(arkavo_llm::GATE_BLOCKED));
+        }
     }
 }
