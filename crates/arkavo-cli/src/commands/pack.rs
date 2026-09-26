@@ -46,6 +46,7 @@ pub struct CorpusDoc {
 pub fn execute(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("index") => build_index(&args[1..]),
+        Some("wrap") => super::pack_wrap::run(&args[1..]),
         Some("seal") => super::pack_seal::run(&args[1..]),
         Some("verify") => super::pack_seal::verify(&args[1..]),
         Some("anchor") => super::pack_seal::anchor(&args[1..]),
@@ -63,6 +64,9 @@ fn print_help() {
     println!("Build and open sealed knowledge packs.\n");
     println!("Usage:");
     println!("  arkavo pack index --corpus <DIR> --key-file <PATH> --out <PATH> [options]");
+    println!(
+        "  arkavo pack wrap --in <PATH> --out <PATH> --payload-key-out <PATH> [--taxonomy <PATH>]"
+    );
     println!(
         "  arkavo pack seal --out <DIR> --signing-key <PATH> --pack-id <ID> [--component ...]"
     );
@@ -93,6 +97,14 @@ fn print_help() {
     println!("  --target-fpr <F>      Target false-positive rate (default: 0.01)");
     println!("  --semantic-thresholds-out <PATH>  Where to write the semantic calibration");
     println!("  --eval-evidence-out <PATH>  Where to write the semantic evaluation evidence");
+    println!("\nWrap options:");
+    println!("  --in <PATH>              Plaintext index from `arkavo pack index`");
+    println!("  --out <PATH>             Where to write the wrapped index");
+    println!(
+        "  --payload-key-out <PATH> Where to write the 32-byte payload key (never overwritten; \
+         keep it like a secret)"
+    );
+    println!("  --taxonomy <PATH>        Taxonomy map (default: the embedded v1 map)");
     println!("\nSeal options:");
     println!("  --out <DIR>           Where to write the pack");
     println!("  --signing-key <PATH>  Organization signing key (32 raw bytes)");
