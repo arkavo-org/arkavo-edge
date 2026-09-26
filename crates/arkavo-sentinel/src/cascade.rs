@@ -204,7 +204,7 @@ impl CascadeTier for arkavo_fingerprint::SemanticTier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_protocol::classification_evidence::{Confidence, LabelFinding};
+    use arkavo_protocol::classification_evidence::{Confidence, LabelFinding, TierOutcome};
     use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
     use arkavo_test_macros::spec;
     use std::fmt::Write as _;
@@ -555,6 +555,16 @@ mod tests {
 
         let evidence = cascade.inspect_unbudgeted("ok");
 
+        // Not just "no gap": pin down *why* there is none, so this test fails
+        // if the near tier ever stops calling a short span out of scope, or
+        // the semantic tier stops completing on it — either of which would
+        // make `!has_gap()` pass for the wrong reason.
+        assert!(
+            evidence.tiers[1].is_out_of_scope(),
+            "expected the near-duplicate tier to call \"ok\" out of scope: {:?}",
+            evidence.tiers[1]
+        );
+        assert_eq!(evidence.tiers[2].outcome, TierOutcome::NoMatch);
         assert!(!evidence.has_gap());
     }
 }

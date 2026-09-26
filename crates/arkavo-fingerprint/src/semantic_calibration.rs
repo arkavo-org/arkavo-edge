@@ -124,27 +124,13 @@ pub fn calibrate(
 ) -> Result<(SemanticCalibration, SemanticEvalEvidence), String> {
     let labels = index.labels();
 
-    let pos_family_count = positives
-        .iter()
-        .map(|s| s.family.as_str())
-        .collect::<BTreeSet<_>>()
-        .len();
-    if pos_family_count < 2 {
-        return Err(
-            "calibration positives span fewer than two families; nothing to hold out".to_string(),
-        );
-    }
-    let neg_family_count = negatives
-        .iter()
-        .map(|s| s.family.as_str())
-        .collect::<BTreeSet<_>>()
-        .len();
-    if neg_family_count < 2 {
-        return Err(
-            "calibration negatives span fewer than two families; nothing to hold out".to_string(),
-        );
-    }
-
+    // Order matters here, not just for which `Err` wins when several checks
+    // would fire: each check below is written so the *first* one to trip on a
+    // given input is the one whose name matches the problem — a positive
+    // labelled outside the taxonomy is a label-validity problem even when it
+    // also happens to be the input's only family, and an index label with
+    // zero positives is a coverage problem even when the input has none at
+    // all to split into families.
     for p in positives {
         match &p.label {
             Some(k) if labels.contains(k) => {}
@@ -169,6 +155,27 @@ pub fn calibrate(
                 "label {k} has no calibration positives; an uncalibrated label cannot ship"
             ));
         }
+    }
+
+    let pos_family_count = positives
+        .iter()
+        .map(|s| s.family.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+    if pos_family_count < 2 {
+        return Err(
+            "calibration positives span fewer than two families; nothing to hold out".to_string(),
+        );
+    }
+    let neg_family_count = negatives
+        .iter()
+        .map(|s| s.family.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+    if neg_family_count < 2 {
+        return Err(
+            "calibration negatives span fewer than two families; nothing to hold out".to_string(),
+        );
     }
 
     let pos_scores: Vec<BTreeMap<String, f32>> = positives
@@ -396,13 +403,21 @@ mod tests {
         let (idx, _, neg) = fixture();
         let other = label_key(DataCategory::Financial, SensitivityLevel::Restricted);
         let pos = vec![sample("x y z", "f", Some(other), "rewrite")];
-        assert!(calibrate(&idx, &BagOfWords, &pos, &neg, 0.01).is_err());
+        let err = calibrate(&idx, &BagOfWords, &pos, &neg, 0.01).unwrap_err();
+        assert!(
+            err.contains("does not hold"),
+            "expected the unknown-label rejection, got: {err}"
+        );
     }
 
     #[test]
     fn an_index_label_without_positives_is_refused() {
         let (idx, _, neg) = fixture();
-        assert!(calibrate(&idx, &BagOfWords, &[], &neg, 0.01).is_err());
+        let err = calibrate(&idx, &BagOfWords, &[], &neg, 0.01).unwrap_err();
+        assert!(
+            err.contains("has no calibration positives"),
+            "expected the no-positives rejection, got: {err}"
+        );
     }
 
     #[test]
