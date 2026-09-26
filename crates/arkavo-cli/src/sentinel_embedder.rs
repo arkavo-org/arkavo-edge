@@ -24,9 +24,20 @@ use sha2::{Digest, Sha256};
 /// freed before the model it points into — declaring `model` first would
 /// free the model while the context's `Drop` still reads it, a
 /// use-after-free.
-pub struct LlamaEmbedder {
-    context: Mutex<EmbeddingContext>,
+struct Loaded {
+    context: EmbeddingContext,
     model: LlamaModel,
+}
+
+/// An `Embedder` on llama.cpp.
+///
+/// The native half sits behind an `Option` so it can be released while the
+/// `LlamaEmbedder` itself is still referenced: a provisioned pack's embedder
+/// is owned by a set-once, process-lifetime release policy and is never
+/// dropped, yet its Metal buffers must be freed before ggml's static
+/// destructors run at exit, which abort on buffers still resident.
+pub struct LlamaEmbedder {
+    loaded: Mutex<Option<Loaded>>,
     digest: String,
     pooling: EmbeddingPooling,
 }
@@ -43,11 +54,23 @@ impl LlamaEmbedder {
         let digest = sha256_file(path)?;
         let context = EmbeddingContext::new(&model, to_ffi_pooling(resolved))?;
         Ok(Self {
-            context: Mutex::new(context),
-            model,
+            loaded: Mutex::new(Some(Loaded { context, model })),
             digest,
             pooling: resolved,
         })
+    }
+
+    /// Free the model and context now. Every later `embed` is an error, so a
+    /// tier still holding this embedder reports a gap and its gate holds.
+    pub fn unload(&self) {
+        // Unlike `embed`, a poisoned lock is no reason to refuse: freeing the
+        // resources is safe whatever state a panicked decode left them in.
+        drop(
+            self.loaded
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
     }
 
     /// Pooling for a build: the GGUF's declared pooling when it has one (and
@@ -74,11 +97,14 @@ impl Embedder for LlamaEmbedder {
         // A poisoned lock means some earlier call panicked mid-decode; that
         // context is not trusted to embed the next span, so this is an
         // error rather than a recovery via `into_inner`.
-        let mut context = self
-            .context
+        self.loaded
             .lock()
-            .map_err(|_| "embedding context lock poisoned".to_string())?;
-        context.embed(&self.model, texts)
+            .map_err(|_| "embedding context lock poisoned".to_string())?
+            .as_mut()
+            .map_or_else(
+                || Err("the embedder was unloaded".to_string()),
+                |loaded| loaded.context.embed(&loaded.model, texts),
+            )
     }
 }
 
@@ -233,7 +259,7 @@ mod tests {
         let embedder = LlamaEmbedder::load(&path, EmbeddingPooling::Last).unwrap();
 
         let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _guard = embedder.context.lock().unwrap();
+            let _guard = embedder.loaded.lock().unwrap();
             panic!("poison the embedding context lock");
         }));
         assert!(poisoned.is_err());
