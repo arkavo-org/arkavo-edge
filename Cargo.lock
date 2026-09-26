@@ -1140,6 +1140,7 @@ version = "0.94.1"
 dependencies = [
  "arkavo-protocol",
  "arkavo-test-macros",
+ "base64 0.22.1",
  "blake3",
  "criterion",
  "serde",

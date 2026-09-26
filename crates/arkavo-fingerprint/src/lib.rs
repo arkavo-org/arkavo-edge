@@ -9,6 +9,7 @@
 //! the guess was in the corpus. Keying is what makes a stolen index inert, so
 //! there is no path through this crate that produces an unkeyed hash.
 
+pub mod embed;
 pub mod index;
 pub mod key;
 pub mod near_tier;
@@ -17,6 +18,10 @@ pub mod shingle;
 pub mod simhash;
 pub mod tier;
 
+pub use embed::{
+    Embedder, EmbeddingPooling, QuantizedVector, UNIT_OVERLAP, UNIT_WORDS, embed_units,
+    normalize_vector, semantic_units,
+};
 pub use index::{
     EntryMeta, INDEX_FORMAT_VERSION, IndexError, MatchSummary, ReferenceIndex,
     ReferenceIndexBuilder, SuppressionIndex, match_span,
