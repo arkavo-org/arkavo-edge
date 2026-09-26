@@ -1,4 +1,4 @@
-//! The semantic tier as the cascade sees it (spec: "SemanticTier").
+//! The semantic tier as the cascade sees it.
 //!
 //! Every other tier in this crate answers inline, inside a shared per-call
 //! deadline. This one never does: an embedding call is a model invocation, not
@@ -70,6 +70,18 @@ impl SemanticTier {
             return Err(format!(
                 "calibration taxonomy version {} does not match the index's {}",
                 calibration.taxonomy_version, index.taxonomy_version
+            ));
+        }
+        // Scoring skips a label with no threshold, so an index label the
+        // calibration left out would never fire — a hole opened silently at
+        // load rather than a gap anyone sees.
+        if let Some(missing) = index
+            .labels()
+            .into_iter()
+            .find(|label| !calibration.margins.contains_key(label))
+        {
+            return Err(format!(
+                "the index holds label {missing} but the calibration has no threshold for it"
             ));
         }
         Ok(Self {
@@ -237,6 +249,51 @@ mod tests {
         }
         let good = tier_with(0.3);
         assert!(SemanticTier::new(good.index.clone(), good.calibration, Arc::new(Other)).is_err());
+    }
+
+    #[test]
+    fn a_label_without_a_threshold_is_refused_at_construction() {
+        let mut b = SemanticIndexBuilder::new(
+            "1.0.0",
+            EmbedderRecord {
+                source: "o/m/f.gguf".into(),
+                sha256: "test-digest".into(),
+                pooling: crate::embed::EmbeddingPooling::Last,
+            },
+        );
+        b.add_document(
+            &BagOfWords,
+            SECRET,
+            DataCategory::Internal,
+            SensitivityLevel::Confidential,
+            "board",
+        )
+        .unwrap();
+        b.add_document(
+            &BagOfWords,
+            "quarterly payroll for the plant staff",
+            DataCategory::Financial,
+            SensitivityLevel::Restricted,
+            "payroll",
+        )
+        .unwrap();
+        b.add_anchor(&BagOfWords, "oxycodone prescribing information")
+            .unwrap();
+        let index = Arc::new(b.build().unwrap());
+        let calibration = SemanticCalibration {
+            detector_version: SemanticCalibration::detector_version_for("test-digest"),
+            taxonomy_version: "1.0.0".into(),
+            margins: BTreeMap::from([(
+                label_key(DataCategory::Internal, SensitivityLevel::Confidential),
+                0.3,
+            )]),
+            embedder: index.embedder.clone(),
+        };
+        let missing = label_key(DataCategory::Financial, SensitivityLevel::Restricted);
+        let err = SemanticTier::new(index, calibration, Arc::new(BagOfWords))
+            .err()
+            .expect("an uncalibrated label must be refused");
+        assert!(err.contains(&missing), "{err}");
     }
 
     #[test]
