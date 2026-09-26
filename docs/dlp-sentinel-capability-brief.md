@@ -63,7 +63,11 @@ Defensible against the code as it stands:
 
 - "Inspected before release, not after."
 - "The classifier labels. The policy engine decides. Neither can override the other."
-- "Your corpus never leaves your building — the index is keyed, and it contains no text."
+- "Your corpus never leaves your building — the index contains no text." The
+  exact and near-duplicate sections are keyed, so without the tenant key they
+  cannot even be checked against a guess. A semantic section holds embeddings,
+  which can be partly inverted toward the text; it is protected by wrapping,
+  not keying, and `pack seal` refuses an unwrapped index.
 - "Adds under two microseconds to a tool call" — the egress check before a tool
   runs. Under a pack with a semantic tier, the tool-call arguments a model emits
   are also inspected with the rest of its completion, at the per-check latency
@@ -208,6 +212,7 @@ The canary test already proves it in CI: a completion containing indexed corpus
 text is cut mid-stream and the viewer sees the prefix stop. Filming it needs
 Phase 6's classifier to make it look like judgement rather than a lookup. Hold
 it for launch.
+
 A paraphrase is now filmable without it: `arkavo chat --pack` withholds a
 model repeating a held-out rewrite that shares no five-word phrase with the
 corpus (runs and commands in [the results](dlp/semantic-tier-results.md)).

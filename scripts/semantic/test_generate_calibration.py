@@ -84,3 +84,45 @@ def test_prompt_list_parsing_strips_numbering_and_quotes():
 )
 def test_prompt_kind_is_short_for_two_to_five_words(text, kind):
     assert prompt_kind(text) == kind
+
+
+def test_a_proxy_in_the_environment_is_never_used(monkeypatch):
+    # A proxy would receive the confidential chunks the loopback check exists
+    # to keep on this machine, so the client must ignore http_proxy entirely.
+    import http.server
+    import json
+    import socket
+    import socketserver
+    import threading
+
+    class Reply(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["content-length"]))
+            body = json.dumps({"choices": [{"message": {"content": "local"}}]}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    with socket.socket() as closed:
+        closed.bind(("127.0.0.1", 0))
+        dead_port = closed.getsockname()[1]
+    for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy"):
+        monkeypatch.setenv(name, f"http://127.0.0.1:{dead_port}")
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+
+    # TCPServer, not HTTPServer: HTTPServer's bind does a reverse DNS lookup
+    # that can stall for tens of seconds on a machine with no resolver answer.
+    server = socketserver.TCPServer(("127.0.0.1", 0), Reply)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = LocalServer(f"http://127.0.0.1:{server.server_address[1]}")
+        assert client.chat("hello", max_tokens=5, temperature=0.0, seed=1) == "local"
+    finally:
+        server.shutdown()
