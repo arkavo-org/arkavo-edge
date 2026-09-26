@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 use arkavo_cli::commands::pack;
 use arkavo_cli::sentinel_embedder::{LlamaEmbedder, sha256_file};
-use arkavo_cli::sentinel_wiring::SentinelRuntime;
+use arkavo_cli::sentinel_wiring::{CascadeGate, SentinelRuntime};
 use arkavo_crypto::AgentKeypair;
 use arkavo_fingerprint::{
     Embedder, EmbeddingPooling, IndexKey, SemanticCalibration, SemanticEvalEvidence, label_key,
@@ -429,4 +429,242 @@ fn pack_index_wrap_seal_and_load_round_trip_through_sentinel_runtime() {
     // table was sealed — so the sentinel calibration must read back absent
     // rather than fabricated.
     assert!(runtime.calibration.is_none());
+}
+
+/// Where a measurement run left its sealed pack and the keys that open it.
+///
+/// Read from the environment rather than built here: the pack worth timing is
+/// the full-corpus one a measurement run produces (see
+/// `scripts/semantic/README.md`), which no test can afford to build.
+///
+///   ARKAVO_TEST_EMBED_MODEL       the embedder GGUF the pack was built with
+///   ARKAVO_TEST_PACK              sealed pack directory (`pack seal --out`)
+///   ARKAVO_TEST_PACK_ANCHOR       organization anchor, 32 raw bytes (`pack anchor --out`)
+///   ARKAVO_TEST_PACK_INDEX_KEY    tenant key the index was built under (`pack index --key-file`)
+///   ARKAVO_TEST_PACK_PAYLOAD_KEY  32-byte payload key (`pack wrap --payload-key-out`)
+///   ARKAVO_TEST_PACK_INDEX_ID     index id the tenant key derives for (default: `default`)
+struct MeasuredPack {
+    model: PathBuf,
+    pack: PathBuf,
+    anchor: PathBuf,
+    index_key: PathBuf,
+    payload_key: PathBuf,
+    index_id: String,
+}
+
+impl MeasuredPack {
+    fn from_env() -> Option<Self> {
+        let path = |name: &str| std::env::var_os(name).map(PathBuf::from);
+        Some(Self {
+            model: model_path()?,
+            pack: path("ARKAVO_TEST_PACK")?,
+            anchor: path("ARKAVO_TEST_PACK_ANCHOR")?,
+            index_key: path("ARKAVO_TEST_PACK_INDEX_KEY")?,
+            payload_key: path("ARKAVO_TEST_PACK_PAYLOAD_KEY")?,
+            index_id: std::env::var("ARKAVO_TEST_PACK_INDEX_ID")
+                .unwrap_or_else(|_| "default".to_string()),
+        })
+    }
+
+    fn open(&self) -> SentinelRuntime {
+        let anchor = arkavo_crypto::AgentPublicKey::from_bytes(
+            &std::fs::read(&self.anchor).expect("read the anchor"),
+        )
+        .expect("the anchor is a public key");
+        let verified = verify_pack(&self.pack, Some(&anchor)).expect("verify_pack");
+        let record = arkavo_knowledge_pack::semantic_embedder_record(&verified.manifest.thresholds)
+            .expect("the pack names its embedder");
+        let embedder: Arc<dyn Embedder> =
+            Arc::new(LlamaEmbedder::load(&self.model, record.pooling).expect("load the embedder"));
+        let secret = std::fs::read(&self.index_key).expect("read the tenant key");
+        let index_key =
+            Arc::new(IndexKey::derive(&secret, &self.index_id).expect("derive the tenant key"));
+        let payload_key: [u8; 32] = std::fs::read(&self.payload_key)
+            .expect("read the payload key")
+            .try_into()
+            .expect("the payload key is 32 bytes");
+        SentinelRuntime::from_pack(
+            &verified,
+            Some(&index_key),
+            &PreResolvedKey::new(payload_key),
+            Some(embedder),
+        )
+        .expect("provision the runtime from the pack")
+    }
+}
+
+/// Benign prose with no corpus content, repeated to length: the embedder's
+/// cost depends on how many units a span chunks into, not on what they say.
+fn benign_words(count: usize) -> String {
+    const PROSE: &str = "The garden club meets on the first Saturday of each month. \
+        Members trade seeds, compare notes on soil and watering, and plan the spring \
+        planting at the community plot behind the library. Newcomers are welcome and \
+        nobody needs experience to join.";
+    let words: Vec<&str> = PROSE.split_whitespace().cycle().take(count).collect();
+    words.join(" ")
+}
+
+fn resident_kb() -> u64 {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .expect("run ps");
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("ps prints resident kilobytes")
+}
+
+fn percentile(sorted: &[std::time::Duration], p: f64) -> f64 {
+    let at = ((sorted.len() as f64 * p) as usize).min(sorted.len() - 1);
+    sorted[at].as_secs_f64() * 1000.0
+}
+
+/// Per-check latency by prompt length and holdback window latency at an
+/// Internal ceiling, against a real sealed pack (spec: "Measurements").
+///
+/// Ignored because it needs a measurement run's pack and keys; see
+/// `MeasuredPack` for the environment it reads. Run with:
+///   cargo test -p arkavo-cli --features sentinel --test pack_semantic_build \
+///     -- --ignored measure_semantic_latency --nocapture
+#[test]
+#[ignore = "needs a full-corpus sealed pack; see MeasuredPack"]
+fn measure_semantic_latency() {
+    use arkavo_llm::{GateOutcome, ReleaseGate};
+    use std::time::{Duration, Instant};
+
+    let Some(measured) = MeasuredPack::from_env() else {
+        eprintln!("skipping: set ARKAVO_TEST_EMBED_MODEL and the ARKAVO_TEST_PACK* variables");
+        return;
+    };
+
+    let before_open = resident_kb();
+    let started = Instant::now();
+    let runtime = measured.open();
+    let open_time = started.elapsed();
+    let after_open = resident_kb();
+    println!(
+        "open: {:.0} ms; resident {} MB before, {} MB after",
+        open_time.as_secs_f64() * 1000.0,
+        before_open / 1024,
+        after_open / 1024
+    );
+    let cascade = runtime.cascade();
+    assert!(
+        cascade.tier_names().contains(&"semantic"),
+        "{:?}",
+        cascade.tier_names()
+    );
+
+    for words in [5usize, 50, 500, 2000] {
+        let prompt = benign_words(words);
+        let _ = cascade.inspect_unbudgeted(&prompt);
+        let mut samples: Vec<Duration> = Vec::with_capacity(50);
+        let mut findings = 0usize;
+        for _ in 0..50 {
+            let started = Instant::now();
+            let evidence = cascade.inspect_unbudgeted(&prompt);
+            samples.push(started.elapsed());
+            findings += evidence.findings().count();
+            assert!(!evidence.has_gap(), "{words} words: a tier left a gap");
+        }
+        samples.sort_unstable();
+        println!(
+            "inspect_unbudgeted {words} words: p50 {:.2} ms p95 {:.2} ms over 50 runs ({findings} findings)",
+            percentile(&samples, 0.50),
+            percentile(&samples, 0.95)
+        );
+    }
+
+    // The production gate at an Internal ceiling, which streams in windows;
+    // a Confidential pack's own ceiling holds the whole completion instead.
+    // Chunks are shorter than a window, so an admit clears at most one.
+    let completion = benign_words(2000);
+    let chunks: Vec<String> = completion
+        .split_inclusive(' ')
+        .collect::<Vec<_>>()
+        .chunks(6)
+        .map(|c| c.concat())
+        .collect();
+    let mut windows: Vec<Duration> = Vec::new();
+    for _ in 0..5 {
+        let gate = CascadeGate::new(cascade.clone(), SensitivityLevel::Internal);
+        for chunk in &chunks {
+            let started = Instant::now();
+            let outcome = gate.admit(chunk);
+            let elapsed = started.elapsed();
+            match outcome {
+                GateOutcome::Release(text) if !text.is_empty() => windows.push(elapsed),
+                GateOutcome::Release(_) => {}
+                GateOutcome::Blocked => panic!("benign text was blocked"),
+            }
+        }
+        assert!(matches!(gate.finish(), GateOutcome::Release(_)));
+    }
+    windows.sort_unstable();
+    println!(
+        "holdback window at Internal: p50 {:.2} ms p95 {:.2} ms p99 {:.2} ms over {} windows",
+        percentile(&windows, 0.50),
+        percentile(&windows, 0.95),
+        percentile(&windows, 0.99),
+        windows.len()
+    );
+    println!("resident after measurement: {} MB", resident_kb() / 1024);
+}
+
+/// Which tier judged each probe, against a real sealed pack: the attribution
+/// a chat smoke cannot show, because the gate tells its consumer nothing
+/// about why a completion was withheld (SENT-011).
+///
+/// Reads every `*.txt` file in `ARKAVO_TEST_PACK_PROBES` plus the variables
+/// `MeasuredPack` reads, and prints each tier's outcome and labels per file.
+/// Probe text is never printed: a probe is typically a paraphrase of the
+/// protected corpus.
+#[test]
+#[ignore = "needs a full-corpus sealed pack and a probe directory; see MeasuredPack"]
+fn attribute_probes_to_tiers() {
+    use arkavo_protocol::classification_evidence::TierOutcome;
+
+    let (Some(measured), Some(probes)) = (
+        MeasuredPack::from_env(),
+        std::env::var_os("ARKAVO_TEST_PACK_PROBES").map(PathBuf::from),
+    ) else {
+        eprintln!("skipping: set ARKAVO_TEST_PACK_PROBES and the MeasuredPack variables");
+        return;
+    };
+    let runtime = measured.open();
+    let cascade = runtime.cascade();
+
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&probes)
+        .expect("read the probe directory")
+        .map(|entry| entry.expect("probe entry").path())
+        .filter(|path| path.extension().is_some_and(|e| e == "txt"))
+        .collect();
+    files.sort();
+    for file in files {
+        let text = std::fs::read_to_string(&file).expect("read a probe");
+        let evidence = cascade.inspect_unbudgeted(&text);
+        let tiers: Vec<String> = evidence
+            .tiers
+            .iter()
+            .map(|report| match &report.outcome {
+                TierOutcome::Matched { findings } => {
+                    let labels: Vec<String> = findings
+                        .iter()
+                        .map(|f| format!("{:?}/{:?}", f.category, f.sensitivity))
+                        .collect();
+                    format!("{}=matched[{}]", report.tier, labels.join(","))
+                }
+                TierOutcome::NoMatch => format!("{}=no-match", report.tier),
+                TierOutcome::Unavailable { .. } => format!("{}=unavailable", report.tier),
+                TierOutcome::OutOfScope { .. } => format!("{}=out-of-scope", report.tier),
+            })
+            .collect();
+        println!(
+            "{}: {} words; {}",
+            file.file_name().unwrap().to_string_lossy(),
+            text.split_whitespace().count(),
+            tiers.join(" ")
+        );
+    }
 }
