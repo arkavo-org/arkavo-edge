@@ -15,12 +15,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use arkavo_fingerprint::{
-    EmbeddingPooling, EntryMeta, IndexKey, NearDuplicateIndex, ReferenceIndex,
-};
-use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
+use arkavo_fingerprint::{EntryMeta, IndexKey, NearDuplicateIndex, ReferenceIndex};
 use arkavo_protocol::taxonomy::TaxonomyMap;
 
+use super::pack_options::{self, Options};
 #[cfg(feature = "sentinel")]
 use super::pack_semantic;
 
@@ -31,6 +29,19 @@ const TEXT_EXTENSIONS: &[&str] = &[
     "txt", "md", "rst", "csv", "json", "yaml", "yml", "toml", "rs", "py", "go", "ts", "js", "java",
     "sql", "html", "xml",
 ];
+
+/// One corpus document ready for indexing: text plus the family id its own
+/// JSONL row (or the corpus-wide `--family` flag, for a directory corpus)
+/// recorded it under.
+///
+/// Shared by the keyed tiers built here and the semantic tier in
+/// `pack_semantic`, so a document is read once and carried as one value
+/// rather than unpacked into a tuple and rebuilt on each side.
+#[derive(Debug)]
+pub struct CorpusDoc {
+    pub text: String,
+    pub family: String,
+}
 
 pub fn execute(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -101,204 +112,8 @@ fn print_help() {
     println!("  --anchor <PATH>       Organization anchor public key (32 raw bytes)");
 }
 
-#[derive(Debug)]
-struct Options {
-    corpus: PathBuf,
-    key_file: PathBuf,
-    out: PathBuf,
-    taxonomy: Option<PathBuf>,
-    index_id: String,
-    category: DataCategory,
-    sensitivity: SensitivityLevel,
-    family: Option<String>,
-    boilerplate: Option<PathBuf>,
-    /// `None` unless `--embedder` was given; when it was, every companion
-    /// flag it requires was already checked present, so this holds them
-    /// unwrapped rather than as `Option`s a second consumer has to re-check.
-    embedder: Option<EmbedderFlags>,
-}
-
-#[derive(Debug)]
-struct EmbedderFlags {
-    embedder: PathBuf,
-    embedder_source: String,
-    pooling: Option<EmbeddingPooling>,
-    anchors: PathBuf,
-    calibrate_positives: PathBuf,
-    calibrate_negatives: PathBuf,
-    target_fpr: f32,
-    semantic_thresholds_out: PathBuf,
-    eval_evidence_out: PathBuf,
-}
-
-/// A `.jsonl` corpus carries its own per-row family and label; a directory
-/// corpus does not, which is what makes `--family` meaningful for one and
-/// nonsensical for the other.
-fn is_jsonl_corpus(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("jsonl"))
-}
-
-fn parse_pooling(name: &str) -> Result<EmbeddingPooling, String> {
-    match name.to_ascii_lowercase().as_str() {
-        "last" => Ok(EmbeddingPooling::Last),
-        "mean" => Ok(EmbeddingPooling::Mean),
-        "cls" => Ok(EmbeddingPooling::Cls),
-        other => Err(format!("unknown pooling '{other}'")),
-    }
-}
-
-fn parse_target_fpr(raw: &str) -> Result<f32, String> {
-    raw.parse()
-        .map_err(|e| format!("--target-fpr '{raw}' is not a number: {e}"))
-}
-
-fn parse(args: &[String]) -> Result<Options, String> {
-    let mut corpus = None;
-    let mut key_file = None;
-    let mut out = None;
-    let mut taxonomy = None;
-    let mut index_id = "default".to_string();
-    let mut category = DataCategory::Internal;
-    let mut sensitivity = SensitivityLevel::Confidential;
-    let mut family = None;
-    let mut boilerplate = None;
-    let mut embedder = None;
-    let mut embedder_source = None;
-    let mut pooling = None;
-    let mut anchors = None;
-    let mut calibrate_positives = None;
-    let mut calibrate_negatives = None;
-    let mut target_fpr = 0.01f32;
-    let mut semantic_thresholds_out = None;
-    let mut eval_evidence_out = None;
-
-    let mut i = 0;
-    while i < args.len() {
-        let take = |i: usize, what: &str| -> Result<String, String> {
-            args.get(i + 1)
-                .cloned()
-                .ok_or_else(|| format!("{what} requires a value"))
-        };
-        let path =
-            |i: usize, what: &str| -> Result<PathBuf, String> { take(i, what).map(PathBuf::from) };
-        match args[i].as_str() {
-            "--corpus" => corpus = Some(path(i, "--corpus")?),
-            "--key-file" => key_file = Some(path(i, "--key-file")?),
-            "--out" => out = Some(path(i, "--out")?),
-            "--taxonomy" => taxonomy = Some(path(i, "--taxonomy")?),
-            "--index-id" => index_id = take(i, "--index-id")?,
-            "--category" => category = parse_category(&take(i, "--category")?)?,
-            "--sensitivity" => sensitivity = parse_sensitivity(&take(i, "--sensitivity")?)?,
-            "--family" => family = Some(take(i, "--family")?),
-            "--boilerplate" => boilerplate = Some(path(i, "--boilerplate")?),
-            "--embedder" => embedder = Some(path(i, "--embedder")?),
-            "--embedder-source" => embedder_source = Some(take(i, "--embedder-source")?),
-            "--pooling" => pooling = Some(parse_pooling(&take(i, "--pooling")?)?),
-            "--anchors" => anchors = Some(path(i, "--anchors")?),
-            "--calibrate-positives" => {
-                calibrate_positives = Some(path(i, "--calibrate-positives")?);
-            }
-            "--calibrate-negatives" => {
-                calibrate_negatives = Some(path(i, "--calibrate-negatives")?);
-            }
-            "--target-fpr" => target_fpr = parse_target_fpr(&take(i, "--target-fpr")?)?,
-            "--semantic-thresholds-out" => {
-                semantic_thresholds_out = Some(path(i, "--semantic-thresholds-out")?);
-            }
-            "--eval-evidence-out" => eval_evidence_out = Some(path(i, "--eval-evidence-out")?),
-            other => return Err(format!("unknown option '{other}'")),
-        }
-        i += 2;
-    }
-
-    let corpus = corpus.ok_or("--corpus is required")?;
-    if family.is_some() && is_jsonl_corpus(&corpus) {
-        return Err(
-            "--family cannot be used with a JSONL corpus; its rows carry their own family"
-                .to_string(),
-        );
-    }
-    let embedder = embedder
-        .map(|embedder| {
-            Ok::<_, String>(EmbedderFlags {
-                embedder,
-                embedder_source: embedder_source.ok_or("--embedder requires --embedder-source")?,
-                pooling,
-                anchors: anchors.ok_or("--embedder requires --anchors")?,
-                calibrate_positives: calibrate_positives
-                    .ok_or("--embedder requires --calibrate-positives")?,
-                calibrate_negatives: calibrate_negatives
-                    .ok_or("--embedder requires --calibrate-negatives")?,
-                target_fpr,
-                semantic_thresholds_out: semantic_thresholds_out
-                    .ok_or("--embedder requires --semantic-thresholds-out")?,
-                eval_evidence_out: eval_evidence_out
-                    .ok_or("--embedder requires --eval-evidence-out")?,
-            })
-        })
-        .transpose()?;
-
-    Ok(Options {
-        corpus,
-        key_file: key_file.ok_or("--key-file is required")?,
-        out: out.ok_or("--out is required")?,
-        taxonomy,
-        index_id,
-        category,
-        sensitivity,
-        family,
-        boilerplate,
-        embedder,
-    })
-}
-
-fn parse_category(name: &str) -> Result<DataCategory, String> {
-    match name.to_ascii_lowercase().as_str() {
-        "pii" => Ok(DataCategory::Pii),
-        "credentials" => Ok(DataCategory::Credentials),
-        "financial" => Ok(DataCategory::Financial),
-        "healthcare" => Ok(DataCategory::Healthcare),
-        "internal" => Ok(DataCategory::Internal),
-        "public" => Ok(DataCategory::Public),
-        other => Err(format!("unknown category '{other}'")),
-    }
-}
-
-fn parse_sensitivity(name: &str) -> Result<SensitivityLevel, String> {
-    match name.to_ascii_lowercase().as_str() {
-        "public" => Ok(SensitivityLevel::Public),
-        "internal" => Ok(SensitivityLevel::Internal),
-        "confidential" => Ok(SensitivityLevel::Confidential),
-        "restricted" => Ok(SensitivityLevel::Restricted),
-        other => Err(format!("unknown sensitivity '{other}'")),
-    }
-}
-
 fn build_index(args: &[String]) -> Result<(), String> {
-    let options = parse(args)?;
-
-    // The semantic pass needs llama.cpp linked in, which only happens under
-    // `sentinel`; a `knowledge-pack`-only build must refuse the flag rather
-    // than silently building an index with no semantic section.
-    #[cfg(not(feature = "sentinel"))]
-    if let Some(flags) = &options.embedder {
-        return Err(format!(
-            "this build was compiled without the sentinel feature; cannot build the semantic \
-             tier from {} (source {}, pooling {:?}, anchors {}, positives {}, negatives {}, \
-             target-fpr {}, thresholds-out {}, evidence-out {})",
-            flags.embedder.display(),
-            flags.embedder_source,
-            flags.pooling,
-            flags.anchors.display(),
-            flags.calibrate_positives.display(),
-            flags.calibrate_negatives.display(),
-            flags.target_fpr,
-            flags.semantic_thresholds_out.display(),
-            flags.eval_evidence_out.display(),
-        ));
-    }
+    let options = pack_options::parse(args)?;
 
     let taxonomy = match &options.taxonomy {
         Some(path) => {
@@ -308,6 +123,16 @@ fn build_index(args: &[String]) -> Result<(), String> {
         }
         None => TaxonomyMap::v1().clone(),
     };
+
+    // Every tier this command can build classifies under `options.category`,
+    // so an undefined category is refused here, once, rather than only when
+    // the semantic tier happens to be requested.
+    if taxonomy.policy_for(options.category).is_none() {
+        return Err(format!(
+            "label is not defined by taxonomy {}",
+            taxonomy.version()
+        ));
+    }
 
     // KP-009 edge case: no key, no index. There is no unkeyed fallback.
     let secret = fs::read(&options.key_file).map_err(|e| {
@@ -324,19 +149,25 @@ fn build_index(args: &[String]) -> Result<(), String> {
     let mut near_documents = 0usize;
 
     let (docs, skipped) = read_documents(&options)?;
-    for (text, family) in &docs {
-        builder.add_document(&key, text, options.category, options.sensitivity, family);
+    for doc in &docs {
+        builder.add_document(
+            &key,
+            &doc.text,
+            options.category,
+            options.sensitivity,
+            &doc.family,
+        );
         // The near-duplicate tier refuses documents too short for a stable
         // fingerprint. That is not a failure to index them: the exact tier
         // covers that size well, and a fingerprint over a handful of shingles
         // would only ever match itself.
         if near.add_document(
             &key,
-            text,
+            &doc.text,
             EntryMeta {
                 category: options.category,
                 sensitivity: options.sensitivity,
-                source_family: family.clone(),
+                source_family: doc.family.clone(),
             },
         ) {
             near_documents += 1;
@@ -405,11 +236,11 @@ fn build_index(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Read corpus documents as (text, family) pairs. A `.jsonl` corpus supplies
-/// its own family per row and may skip rows filed under another label; a
-/// directory corpus applies `--family` (default `"corpus"`) to every file.
-fn read_documents(options: &Options) -> Result<(Vec<(String, String)>, usize), String> {
-    if is_jsonl_corpus(&options.corpus) {
+/// Read corpus documents. A `.jsonl` corpus supplies its own family per row
+/// and may skip rows filed under another label; a directory corpus applies
+/// `--family` (default `"corpus"`) to every file.
+fn read_documents(options: &Options) -> Result<(Vec<CorpusDoc>, usize), String> {
+    if pack_options::is_jsonl_corpus(&options.corpus) {
         return read_jsonl_documents(options);
     }
     let family = options
@@ -419,7 +250,10 @@ fn read_documents(options: &Options) -> Result<(Vec<(String, String)>, usize), S
     let mut docs = Vec::new();
     for path in text_files(&options.corpus)? {
         match fs::read_to_string(&path) {
-            Ok(text) => docs.push((text, family.clone())),
+            Ok(text) => docs.push(CorpusDoc {
+                text,
+                family: family.clone(),
+            }),
             // Unreadable or non-UTF-8 files are reported and skipped: silently
             // dropping corpus material makes the index quietly incomplete.
             Err(e) => eprintln!("skipping {}: {e}", path.display()),
@@ -429,53 +263,29 @@ fn read_documents(options: &Options) -> Result<(Vec<(String, String)>, usize), S
 }
 
 #[cfg(feature = "sentinel")]
-fn read_jsonl_documents(options: &Options) -> Result<(Vec<(String, String)>, usize), String> {
+fn read_jsonl_documents(options: &Options) -> Result<(Vec<CorpusDoc>, usize), String> {
     let label = arkavo_fingerprint::label_key(options.category, options.sensitivity);
-    let (docs, skipped) = pack_semantic::read_corpus_jsonl(&options.corpus, &label)?;
-    Ok((
-        docs.into_iter().map(|d| (d.text, d.family)).collect(),
-        skipped,
-    ))
+    pack_semantic::read_corpus_jsonl(&options.corpus, &label)
 }
 
 #[cfg(not(feature = "sentinel"))]
-fn read_jsonl_documents(_options: &Options) -> Result<(Vec<(String, String)>, usize), String> {
+fn read_jsonl_documents(_options: &Options) -> Result<(Vec<CorpusDoc>, usize), String> {
     Err("this build was compiled without the sentinel feature".to_string())
 }
 
-/// Build the semantic section, when `--embedder` was given. `EmbedderFlags`
-/// already holds every companion unwrapped, since `parse` refused to build
-/// one without them.
+/// Build the semantic section, when `--embedder` was given.
 #[cfg(feature = "sentinel")]
 fn build_semantic_section(
     options: &Options,
-    docs: &[(String, String)],
+    docs: &[CorpusDoc],
     taxonomy: &TaxonomyMap,
 ) -> Result<Option<arkavo_fingerprint::SemanticIndex>, String> {
-    let Some(flags) = &options.embedder else {
+    let Some(semantic_options) = &options.embedder else {
         return Ok(None);
     };
-    let semantic_options = pack_semantic::SemanticOptions {
-        embedder: flags.embedder.clone(),
-        embedder_source: flags.embedder_source.clone(),
-        pooling: flags.pooling,
-        anchors: flags.anchors.clone(),
-        calibrate_positives: flags.calibrate_positives.clone(),
-        calibrate_negatives: flags.calibrate_negatives.clone(),
-        target_fpr: flags.target_fpr,
-        semantic_thresholds_out: flags.semantic_thresholds_out.clone(),
-        eval_evidence_out: flags.eval_evidence_out.clone(),
-    };
-    let documents: Vec<pack_semantic::CorpusDoc> = docs
-        .iter()
-        .map(|(text, family)| pack_semantic::CorpusDoc {
-            text: text.clone(),
-            family: family.clone(),
-        })
-        .collect();
     let index = pack_semantic::run(
-        &semantic_options,
-        &documents,
+        semantic_options,
+        docs,
         options.category,
         options.sensitivity,
         taxonomy,
@@ -513,29 +323,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn category_and_sensitivity_names_are_case_insensitive() {
-        assert_eq!(parse_category("PII").unwrap(), DataCategory::Pii);
-        assert_eq!(
-            parse_sensitivity("Restricted").unwrap(),
-            SensitivityLevel::Restricted
-        );
-    }
-
-    #[test]
-    fn an_unknown_label_is_refused_rather_than_defaulted() {
-        // Defaulting would silently classify a corpus at the wrong level.
-        assert!(parse_category("nonsense").is_err());
-        assert!(parse_sensitivity("secret-ish").is_err());
-    }
-
-    #[test]
-    fn the_required_options_are_required() {
-        let err = parse(&["--corpus".into(), "/tmp/x".into()]).unwrap_err();
-
-        assert!(err.contains("--key-file"), "{err}");
-    }
-
-    #[test]
     fn only_text_extensions_are_indexed() {
         assert!(is_text(Path::new("notes.md")));
         assert!(is_text(Path::new("a/b/report.TXT")));
@@ -543,48 +330,45 @@ mod tests {
         assert!(!is_text(Path::new("archive.tar.gz")));
     }
 
-    #[test]
-    fn there_is_no_option_that_builds_without_a_key() {
-        // KP-009: an unavailable key fails the build. A flag that skipped
-        // keying would reintroduce the dictionary the design exists to avoid.
-        let err = parse(&["--no-key".into(), "x".into()]).unwrap_err();
-
-        assert!(err.contains("unknown option"), "{err}");
-    }
-
     fn args(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
     }
 
+    /// The taxonomy check runs in `build_index` itself, right after the
+    /// taxonomy loads, so it covers every corpus this command can build —
+    /// not only a build that also happens to pass `--embedder`.
     #[test]
-    fn embedder_without_its_companions_is_refused() {
-        let err = parse(&args(&[
-            "--corpus",
-            "c",
-            "--key-file",
-            "k",
-            "--out",
-            "o",
-            "--embedder",
-            "m.gguf",
-        ]))
-        .unwrap_err();
-        assert!(err.contains("--embedder-source"));
-    }
+    fn a_category_missing_from_a_custom_taxonomy_is_refused_before_any_tier_builds() {
+        let dir = tempfile::tempdir().unwrap();
+        let taxonomy_path = dir.path().join("taxonomy.json");
+        // A taxonomy with only a "public" label: DataCategory::Internal (the
+        // default `--category`) is not defined by it.
+        std::fs::write(
+            &taxonomy_path,
+            r#"{"version":"1.0.0","namespace":"https://attr.example.com/","labels":[
+                {"label":"public","category":"Public","sensitivity":"Public","unentitled":"redact"}
+            ]}"#,
+        )
+        .unwrap();
+        let corpus_dir = dir.path().join("corpus");
+        std::fs::create_dir(&corpus_dir).unwrap();
+        std::fs::write(corpus_dir.join("a.txt"), "hello world").unwrap();
+        let key_path = dir.path().join("key.bin");
+        std::fs::write(&key_path, [7u8; 32]).unwrap();
+        let out_path = dir.path().join("index.json");
 
-    #[test]
-    fn family_with_a_jsonl_corpus_is_refused() {
-        let err = parse(&args(&[
+        let err = build_index(&args(&[
             "--corpus",
-            "c.jsonl",
+            corpus_dir.to_str().unwrap(),
             "--key-file",
-            "k",
+            key_path.to_str().unwrap(),
             "--out",
-            "o",
-            "--family",
-            "x",
+            out_path.to_str().unwrap(),
+            "--taxonomy",
+            taxonomy_path.to_str().unwrap(),
         ]))
         .unwrap_err();
-        assert!(err.contains("family"), "{err}");
+        assert!(err.contains("not defined by taxonomy"), "{err}");
+        assert!(!out_path.exists(), "no index should have been written");
     }
 }

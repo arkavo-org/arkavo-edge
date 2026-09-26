@@ -13,6 +13,8 @@ pub mod model_protect;
 #[cfg(feature = "knowledge-pack")]
 pub mod pack;
 #[cfg(feature = "knowledge-pack")]
+pub mod pack_options;
+#[cfg(feature = "knowledge-pack")]
 pub mod pack_seal;
 #[cfg(feature = "sentinel")]
 pub mod pack_semantic;
