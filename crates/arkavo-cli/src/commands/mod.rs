@@ -14,6 +14,8 @@ pub mod model_protect;
 pub mod pack;
 #[cfg(feature = "knowledge-pack")]
 pub mod pack_seal;
+#[cfg(feature = "sentinel")]
+pub mod pack_semantic;
 pub mod rlm_integration;
 pub mod security_audit;
 pub mod task;
