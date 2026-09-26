@@ -318,4 +318,23 @@ mod tests {
             ))
         ));
     }
+
+    /// Regression: with a pack cascade live, the near-duplicate tier reports
+    /// every short span out of scope. Before `OutOfScope` existed that was a
+    /// gap, and every short completion was withheld forever.
+    #[test]
+    fn a_short_span_judged_clean_by_a_covering_tier_is_released() {
+        let mut semantic = TierReport::matched("semantic", "1", Vec::new());
+        semantic.covers_short_spans = true;
+        let evidence = ClassificationEvidence::new("1.0.0")
+            .with_tier(TierReport::matched("pattern", "1", Vec::new()))
+            .with_tier(TierReport::out_of_scope("near-duplicate", "1", "too short"))
+            .with_tier(semantic);
+        assert!(may_release(&evidence));
+
+        let uncovered = ClassificationEvidence::new("1.0.0")
+            .with_tier(TierReport::matched("pattern", "1", Vec::new()))
+            .with_tier(TierReport::out_of_scope("near-duplicate", "1", "too short"));
+        assert!(!may_release(&uncovered), "without coverage it still holds");
+    }
 }
