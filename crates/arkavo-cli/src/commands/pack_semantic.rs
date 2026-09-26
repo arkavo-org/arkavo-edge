@@ -1,5 +1,5 @@
 //! JSONL corpus/calibration reading and the semantic pass for
-//! `arkavo pack index` (Task 10, consumes Tasks 3, 4, 5, 9).
+//! `arkavo pack index`.
 //!
 //! `pack.rs` owns the CLI surface; everything here is either pure parsing
 //! (so it has no opinion about where its input came from) or the one place
@@ -18,16 +18,30 @@ use arkavo_fingerprint::{
 use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
 use arkavo_protocol::taxonomy::TaxonomyMap;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 use crate::sentinel_embedder::{LlamaEmbedder, sha256_file};
 
-/// One corpus document ready for the semantic index: text plus the family id
-/// its own JSONL row (or the corpus-wide `--family` flag, for a directory
-/// corpus) recorded it under.
-#[derive(Debug)]
-pub struct CorpusDoc {
-    pub text: String,
-    pub family: String,
+use super::pack::CorpusDoc;
+
+/// Read a JSONL file into `(1-indexed line number, row)` pairs, skipping
+/// blank lines. Every JSONL reader below shares this loop rather than
+/// repeating its own read/trim/skip-empty/parse pass with its own copy of
+/// the "line N" error text.
+fn read_jsonl<T: DeserializeOwned>(path: &Path) -> Result<Vec<(usize, T)>, String> {
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let mut rows = Vec::new();
+    for (line_no, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let row: T = serde_json::from_str(line)
+            .map_err(|e| format!("{}: line {}: {e}", path.display(), line_no + 1))?;
+        rows.push((line_no + 1, row));
+    }
+    Ok(rows)
 }
 
 #[derive(Deserialize)]
@@ -44,23 +58,14 @@ struct CorpusRow {
 /// rather than silently dropped, and a row filed under a different label is
 /// skipped and counted rather than mixed into this label's documents.
 pub fn read_corpus_jsonl(path: &Path, label: &str) -> Result<(Vec<CorpusDoc>, usize), String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("cannot read corpus {}: {e}", path.display()))?;
     let mut docs = Vec::new();
     let mut skipped = 0usize;
-    for (line_no, line) in content.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let row: CorpusRow = serde_json::from_str(line)
-            .map_err(|e| format!("{}: line {}: {e}", path.display(), line_no + 1))?;
+    for (line_no, row) in read_jsonl::<CorpusRow>(path)? {
         let Some(row_label) = row.label else {
             return Err(format!(
-                "{}: line {} has no label; every corpus row must carry the label_key it \
-                 was classified under",
-                path.display(),
-                line_no + 1
+                "{}: line {line_no} has no label; every corpus row must carry the label_key \
+                 it was classified under",
+                path.display()
             ));
         };
         if row_label != label {
@@ -88,24 +93,15 @@ struct SampleRow {
 /// carrying the family the held-out-by-family split needs and, for a
 /// positive, the label being calibrated.
 pub fn read_samples(path: &Path) -> Result<Vec<CalibrationSample>, String> {
-    let content =
-        fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    let mut out = Vec::new();
-    for (line_no, line) in content.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let row: SampleRow = serde_json::from_str(line)
-            .map_err(|e| format!("{}: line {}: {e}", path.display(), line_no + 1))?;
-        out.push(CalibrationSample {
+    Ok(read_jsonl::<SampleRow>(path)?
+        .into_iter()
+        .map(|(_, row)| CalibrationSample {
             text: row.text,
             family: row.family,
             label: row.label,
             kind: row.kind,
-        });
-    }
-    Ok(out)
+        })
+        .collect())
 }
 
 #[derive(Deserialize)]
@@ -116,19 +112,10 @@ struct AnchorRow {
 /// Anchor rows are `{text, family, source}`; only the text embeds, but the
 /// other two fields stay in the file as provenance for whoever curates it.
 fn read_anchor_texts(path: &Path) -> Result<Vec<String>, String> {
-    let content =
-        fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    let mut out = Vec::new();
-    for (line_no, line) in content.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let row: AnchorRow = serde_json::from_str(line)
-            .map_err(|e| format!("{}: line {}: {e}", path.display(), line_no + 1))?;
-        out.push(row.text);
-    }
-    Ok(out)
+    Ok(read_jsonl::<AnchorRow>(path)?
+        .into_iter()
+        .map(|(_, row)| row.text)
+        .collect())
 }
 
 /// An anchor that is also a negative would let calibration fit a threshold
@@ -148,6 +135,7 @@ pub fn refuse_overlap(anchors: &[String], negatives: &[CalibrationSample]) -> Re
 }
 
 /// Inputs to the semantic pass that come from the embedder-related CLI flags.
+#[derive(Debug)]
 pub struct SemanticOptions {
     pub embedder: PathBuf,
     pub embedder_source: String,
@@ -167,6 +155,10 @@ pub struct SemanticBuild {
 }
 
 /// Build and calibrate the semantic section of a pack index.
+///
+/// Every JSONL input is read, and the anchor/negative overlap check run,
+/// before the embedder is loaded: a bad path in any of those files fails
+/// before the expensive part of this call rather than after it.
 pub fn build_semantic(
     options: &SemanticOptions,
     documents: &[CorpusDoc],
@@ -174,12 +166,10 @@ pub fn build_semantic(
     sensitivity: SensitivityLevel,
     taxonomy: &TaxonomyMap,
 ) -> Result<SemanticBuild, String> {
-    if taxonomy.policy_for(category).is_none() {
-        return Err(format!(
-            "label is not defined by taxonomy {}",
-            taxonomy.version()
-        ));
-    }
+    let anchor_texts = read_anchor_texts(&options.anchors)?;
+    let positives = read_samples(&options.calibrate_positives)?;
+    let negatives = read_samples(&options.calibrate_negatives)?;
+    refuse_overlap(&anchor_texts, &negatives)?;
 
     let pooling = LlamaEmbedder::resolve_pooling(&options.embedder, options.pooling)?;
     let embedder = LlamaEmbedder::load(&options.embedder, pooling)?;
@@ -193,15 +183,9 @@ pub fn build_semantic(
     for doc in documents {
         builder.add_document(&embedder, &doc.text, category, sensitivity, &doc.family)?;
     }
-
-    let anchor_texts = read_anchor_texts(&options.anchors)?;
     for anchor in &anchor_texts {
         builder.add_anchor(&embedder, anchor)?;
     }
-
-    let positives = read_samples(&options.calibrate_positives)?;
-    let negatives = read_samples(&options.calibrate_negatives)?;
-    refuse_overlap(&anchor_texts, &negatives)?;
 
     let index = builder.build()?;
     let (calibration, evidence) = calibrate(
@@ -286,7 +270,7 @@ pub fn print_evaluation(evidence: &SemanticEvalEvidence) {
 mod tests {
     use super::*;
 
-    fn write(dir: &tempfile::TempDir, name: &str, body: &str) -> std::path::PathBuf {
+    fn write(dir: &tempfile::TempDir, name: &str, body: &str) -> PathBuf {
         let p = dir.path().join(name);
         std::fs::write(&p, body).unwrap();
         p
