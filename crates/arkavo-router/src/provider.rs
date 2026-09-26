@@ -48,12 +48,10 @@ fn sampling_config_for(
 }
 
 impl super::Router {
-    #[cfg(any(
-        feature = "llm-remote",
-        feature = "llama-cpp",
-        feature = "gemini",
-        feature = "deepseek"
-    ))]
+    // `instantiate_provider_inner` calls this unconditionally (including on
+    // the substituted-provider path), so it must compile in every feature
+    // combination that function does, not just the ones with a live remote
+    // provider arm.
     fn protect_provider(&self, provider: Box<dyn Provider>) -> Box<dyn Provider> {
         #[cfg(feature = "sentinel")]
         {
@@ -367,7 +365,9 @@ impl super::Router {
         use_spec_decoding: bool,
     ) -> Result<Box<dyn Provider>> {
         if let Some(substituted) = self.substituted_provider(model) {
-            return substituted;
+            // A substituted arm is still a model whose output reaches a caller;
+            // returning it unwrapped would bypass the release gate entirely.
+            return substituted.map(|provider| self.protect_provider(provider));
         }
         let _ = use_spec_decoding;
         tracing::debug!(model = %model.name(), use_spec_decoding, "Instantiating provider");
@@ -519,5 +519,68 @@ impl super::Router {
                 "Model {model:?} not available (feature not enabled)"
             ))),
         }
+    }
+}
+
+#[cfg(all(test, feature = "sentinel"))]
+mod substitution_tests {
+    use std::sync::Arc;
+
+    use arkavo_llm::{GateOutcome, Message, ReleaseGate, ReleaseGateFactory};
+
+    use crate::decision::ModelChoice;
+    use crate::test_support::CountingProvider;
+
+    /// Withholds only text carrying the marker, so installing it for this
+    /// process leaves every other test's provider output untouched.
+    const MARKER: &str = "SUBSTITUTED-ARM-CANARY-7f3a";
+
+    struct MarkerGate;
+    impl ReleaseGate for MarkerGate {
+        fn admit(&self, chunk: &str) -> GateOutcome {
+            if chunk.contains(MARKER) {
+                GateOutcome::Blocked
+            } else {
+                GateOutcome::Release(chunk.to_string())
+            }
+        }
+        fn finish(&self) -> GateOutcome {
+            GateOutcome::Release(String::new())
+        }
+        fn discard(&self) {}
+    }
+
+    struct MarkerFactory;
+    #[async_trait::async_trait]
+    impl ReleaseGateFactory for MarkerFactory {
+        fn create(&self, _model: &str) -> Arc<dyn ReleaseGate> {
+            Arc::new(MarkerGate)
+        }
+    }
+
+    /// Regression: a provider built by an installed `ProviderFactory` returned
+    /// before `protect_provider`, so once a real gate was installed its
+    /// completions reached the caller unexamined.
+    #[tokio::test]
+    async fn a_substituted_provider_is_gated() {
+        let _ = crate::response_policy::install(Arc::new(MarkerFactory));
+        let provider = CountingProvider::new(&format!("leaked {MARKER} text"));
+        let router = crate::Router::new_offline()
+            .await
+            .expect("router")
+            .with_provider_factory(provider.factory());
+        let model = ModelChoice::ALL_CLOUD[0].clone();
+
+        let (built, _) = router.get_provider_attributed(&model).await.expect("build");
+        // `complete_with_options` (not the `complete` convenience wrapper,
+        // which passes `max_tokens: None`) because `CountingProvider` asserts
+        // every dispatch carries an explicit output allowance — a fixture
+        // constraint unrelated to the gate this test exercises.
+        let result = built
+            .complete_with_options(vec![Message::user("hi")], Some(64))
+            .await;
+
+        let err = result.expect_err("the marker must be withheld");
+        assert!(err.to_string().contains(arkavo_llm::GATE_BLOCKED));
     }
 }
