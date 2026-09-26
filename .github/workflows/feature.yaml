@@ -7,8 +7,9 @@ name: Feature
 # - coverage tests may exclude some features due to tarpaulin limitations
 
 on:
+  # Every base branch, not just main: an upper stack layer targets the layer
+  # below it, and a stack merges only when every layer has passing checks.
   pull_request:
-    branches: [main]
     types: [opened, synchronize, reopened]
 
 permissions:
