@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arkavo_fingerprint::{Embedder, IndexKey};
-use arkavo_gguf_tdf::PreResolvedKey;
-use arkavo_knowledge_pack::{semantic_embedder_record, verify_pack};
+use arkavo_gguf_tdf::{ComponentRole, PreResolvedKey};
+use arkavo_knowledge_pack::{VerifiedPack, semantic_embedder_record, verify_pack};
 use zeroize::Zeroizing;
 
 use crate::commands::pack_seal::read_anchor;
@@ -115,11 +115,10 @@ impl Drop for NativeRelease {
 /// Verify, load and provision the pack; returns its inventory for the
 /// operator and the guard that releases its embedder when the session ends.
 pub async fn provision_from_pack(args: &PackArgs) -> Result<(String, NativeRelease), String> {
-    let anchor = read_anchor(&args.anchor)?;
-    let verified = verify_pack(&args.pack, Some(&anchor)).map_err(|e| e.to_string())?;
+    let local = open_local(args)?;
 
     let loaded: Option<Arc<LlamaEmbedder>> =
-        match semantic_embedder_record(&verified.manifest.thresholds) {
+        match semantic_embedder_record(&local.verified.manifest.thresholds) {
             Some(record) => {
                 let path = fetch_embedder(&record).await?;
                 Some(Arc::new(LlamaEmbedder::load(&path, record.pooling)?))
@@ -130,6 +129,33 @@ pub async fn provision_from_pack(args: &PackArgs) -> Result<(String, NativeRelea
     // the embedder rather than leaving it for the exit-time destructors.
     let release = NativeRelease::new(loaded.clone());
     let embedder = loaded.map(|e| -> Arc<dyn Embedder> { e });
+
+    let runtime = SentinelRuntime::from_pack(
+        &local.verified,
+        Some(&local.index_key),
+        &PreResolvedKey::new(*local.payload_key),
+        embedder,
+    )
+    .map_err(|e| e.to_string())?;
+    let inventory = runtime.inventory.clone();
+    sentinel_wiring::provision(runtime)?;
+    Ok((inventory, release))
+}
+
+/// Everything `provision_from_pack` needs that this node already holds.
+struct LocalPack {
+    verified: VerifiedPack,
+    index_key: Arc<IndexKey>,
+    payload_key: Zeroizing<[u8; 32]>,
+}
+
+/// Verify the pack and read the operator's keys, all before the embedder
+/// fetch — a download of hundreds of megabytes that a wrong path or a pack
+/// this node cannot serve should never have to wait for.
+fn open_local(args: &PackArgs) -> Result<LocalPack, String> {
+    let anchor = read_anchor(&args.anchor)?;
+    let verified = verify_pack(&args.pack, Some(&anchor)).map_err(|e| e.to_string())?;
+    require_index(&verified)?;
 
     // Only the derived key outlives this call; the secret it came from is
     // wiped when this function returns, whether or not derivation succeeds.
@@ -144,17 +170,31 @@ pub async fn provision_from_pack(args: &PackArgs) -> Result<(String, NativeRelea
             .map_err(|e| format!("the tenant index key is unusable: {e}"))?,
     );
     let payload_key = read_payload_key(&args.payload_key)?;
+    Ok(LocalPack {
+        verified,
+        index_key,
+        payload_key,
+    })
+}
 
-    let runtime = SentinelRuntime::from_pack(
-        &verified,
-        Some(&index_key),
-        &PreResolvedKey::new(*payload_key),
-        embedder,
-    )
-    .map_err(|e| e.to_string())?;
-    let inventory = runtime.inventory.clone();
-    sentinel_wiring::provision(runtime)?;
-    Ok((inventory, release))
+/// `--pack` requires index and payload keys, so the operator asked for the
+/// pack's index. Loading a pack in general treats a component this node was
+/// never sent as an absence, and would quietly provision the pattern tier
+/// alone — a far weaker policy than the one the operator named.
+fn require_index(verified: &VerifiedPack) -> Result<(), String> {
+    let pack_id = &verified.manifest.pack_id;
+    let Some(record) = verified.manifest.role(&ComponentRole::Index) else {
+        return Err(format!(
+            "pack {pack_id} has no index component; --index-key and --payload-key open one"
+        ));
+    };
+    if !verified.holds(&record.file) {
+        return Err(format!(
+            "pack {pack_id} lists index component {} but it is not held on this node",
+            record.file
+        ));
+    }
+    Ok(())
 }
 
 /// Read a raw 32-byte payload key.
