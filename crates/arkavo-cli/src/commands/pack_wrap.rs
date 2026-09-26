@@ -39,15 +39,19 @@ impl PayloadKeyWrapper for LocalCustodyWrapper {
         // an existing file would either destroy a key still in use elsewhere
         // or, worse, be mistaken for one. Either way the failure belongs here,
         // not at the first place something later tries to open the blob.
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&self.path)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        // The mode is set on the `open` syscall itself, not with a `chmod`
+        // afterward: a `set_permissions` call after `open` leaves a window
+        // where the file exists at the process's default mode (typically
+        // 0o644), which is a raw secret readable by anyone on the box for
+        // however long that window lasts.
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
+        let mut file = options.open(&self.path)?;
         file.write_all(payload_key)?;
         Ok(WrappedKey {
             kas_url: LOCAL_CUSTODY_KAS.to_string(),
@@ -117,6 +121,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let sensitivity = content_sensitivity(&indexes);
 
     let attribute = wrap_attribute(&taxonomy, sensitivity)?;
+
+    // A friendlier refusal than the generic I/O error `create_new` produces
+    // inside `wrap`, which still enforces this atomically — this check only
+    // improves the message an operator sees in the common case.
+    if options.payload_key_out.exists() {
+        return Err(format!(
+            "the payload key file {} already exists; refusing to overwrite it",
+            options.payload_key_out.display()
+        ));
+    }
 
     let wrapper = LocalCustodyWrapper::new(options.payload_key_out.clone());
     let sealed = seal_blob(
@@ -271,9 +285,25 @@ mod tests {
         ])
         .unwrap_err();
 
-        assert!(err.contains("cannot wrap"), "{err}");
+        assert!(err.contains("already exists"), "{err}");
         assert!(!out_path.exists(), "no wrapped output should be written");
         // The pre-existing key must survive untouched.
+        assert_eq!(std::fs::read(&key_path).unwrap(), vec![9u8; 32]);
+    }
+
+    /// `run`'s own `.exists()` check gives the friendlier message above, but
+    /// the actual, TOCTOU-safe guarantee is `create_new` on the wrapper
+    /// itself — checked directly here, independent of that pre-check.
+    #[test]
+    fn the_wrapper_itself_refuses_to_overwrite_via_create_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("payload.key");
+        std::fs::write(&key_path, [9u8; 32]).unwrap();
+        let wrapper = LocalCustodyWrapper::new(key_path.clone());
+
+        let err = wrapper.wrap(&[1u8; 32]).unwrap_err();
+
+        assert!(matches!(err, GgufTdfError::Io(_)), "{err:?}");
         assert_eq!(std::fs::read(&key_path).unwrap(), vec![9u8; 32]);
     }
 
