@@ -3,6 +3,8 @@ pub mod agent_config;
 pub mod agent_config_markdown;
 pub mod agent_config_yaml;
 pub mod chat;
+#[cfg(feature = "sentinel")]
+pub mod chat_pack;
 pub mod dataflow;
 pub mod login;
 pub mod mcp_proxy;
@@ -13,7 +15,13 @@ pub mod model_protect;
 #[cfg(feature = "knowledge-pack")]
 pub mod pack;
 #[cfg(feature = "knowledge-pack")]
+pub mod pack_options;
+#[cfg(feature = "knowledge-pack")]
 pub mod pack_seal;
+#[cfg(feature = "sentinel")]
+pub mod pack_semantic;
+#[cfg(feature = "knowledge-pack")]
+pub mod pack_wrap;
 pub mod rlm_integration;
 pub mod security_audit;
 pub mod task;

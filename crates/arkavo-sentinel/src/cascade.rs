@@ -42,6 +42,12 @@ pub trait CascadeTier: Send + Sync {
         true
     }
 
+    /// Whether this tier judges spans too short for other tiers. A completed
+    /// report from such a tier closes their out-of-scope gaps.
+    fn covers_short_spans(&self) -> bool {
+        false
+    }
+
     /// Examine a span, stopping at the cascade's deadline.
     fn examine_until(&self, text: &str, deadline: Instant) -> TierReport;
 
@@ -122,7 +128,9 @@ impl Cascade {
     pub fn inspect_until(&self, text: &str, deadline: Instant) -> ClassificationEvidence {
         let mut evidence = ClassificationEvidence::new(&self.taxonomy_version);
         for tier in &self.tiers {
-            evidence.push_tier(tier.examine_until(text, deadline));
+            let mut report = tier.examine_until(text, deadline);
+            report.covers_short_spans = tier.covers_short_spans();
+            evidence.push_tier(report);
         }
         evidence
     }
@@ -131,7 +139,9 @@ impl Cascade {
     pub fn inspect_unbudgeted(&self, text: &str) -> ClassificationEvidence {
         let mut evidence = ClassificationEvidence::new(&self.taxonomy_version);
         for tier in &self.tiers {
-            evidence.push_tier(tier.examine_unbudgeted(text));
+            let mut report = tier.examine_unbudgeted(text);
+            report.covers_short_spans = tier.covers_short_spans();
+            evidence.push_tier(report);
         }
         evidence
     }
@@ -173,12 +183,31 @@ impl CascadeTier for arkavo_fingerprint::NearDuplicateTier {
     }
 }
 
+impl CascadeTier for arkavo_fingerprint::SemanticTier {
+    fn name(&self) -> &str {
+        arkavo_fingerprint::SEMANTIC_TIER_NAME
+    }
+
+    fn covers_short_spans(&self) -> bool {
+        true
+    }
+
+    fn examine_until(&self, text: &str, deadline: Instant) -> TierReport {
+        arkavo_fingerprint::SemanticTier::examine_until(self, text, deadline)
+    }
+
+    fn examine_unbudgeted(&self, text: &str) -> TierReport {
+        arkavo_fingerprint::SemanticTier::examine_unbudgeted(self, text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_protocol::classification_evidence::{Confidence, LabelFinding};
+    use arkavo_protocol::classification_evidence::{Confidence, LabelFinding, TierOutcome};
     use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
     use arkavo_test_macros::spec;
+    use std::fmt::Write as _;
     use std::sync::Mutex;
 
     /// A tier that records when it was consulted, so ordering is observable.
@@ -187,6 +216,7 @@ mod tests {
         order: Arc<Mutex<Vec<String>>>,
         finding: Option<LabelFinding>,
         available: bool,
+        covers: bool,
     }
 
     impl Recording {
@@ -196,6 +226,7 @@ mod tests {
                 order,
                 finding: None,
                 available: true,
+                covers: false,
             }
         }
 
@@ -214,6 +245,11 @@ mod tests {
             self
         }
 
+        fn covering(mut self) -> Self {
+            self.covers = true;
+            self
+        }
+
         fn report(&self) -> TierReport {
             self.order.lock().expect("lock").push(self.name.clone());
             if !self.available {
@@ -226,6 +262,10 @@ mod tests {
     impl CascadeTier for Recording {
         fn name(&self) -> &str {
             &self.name
+        }
+
+        fn covers_short_spans(&self) -> bool {
+            self.covers
         }
 
         fn examine_until(&self, _text: &str, _deadline: Instant) -> TierReport {
@@ -390,5 +430,141 @@ mod tests {
 
         assert!(!evidence.has_gap());
         assert_eq!(cascade.absent_tiers().len(), 1);
+    }
+
+    #[test]
+    fn the_cascade_stamps_short_span_coverage_on_each_report() {
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let cascade = Cascade::new("1.0.0")
+            .with_tier(Arc::new(Recording::new("exact", order.clone())))
+            .with_tier(Arc::new(Recording::new("semantic", order).covering()));
+
+        let evidence = cascade.inspect_unbudgeted("ok");
+
+        assert!(!evidence.tiers[0].covers_short_spans);
+        assert!(evidence.tiers[1].covers_short_spans);
+    }
+
+    /// Deterministic stand-in for a real embedder. Arkavo-sentinel cannot see
+    /// arkavo-fingerprint's own `embed::tests::BagOfWords` (it is
+    /// `pub(crate)` there), so this is a second copy, local to this test —
+    /// hashing with `std`'s `DefaultHasher` rather than blake3 so this crate
+    /// does not need to add a dependency just to exercise the cascade wiring.
+    struct BagOfWords;
+
+    impl arkavo_fingerprint::Embedder for BagOfWords {
+        fn digest(&self) -> &'static str {
+            "test-digest"
+        }
+
+        fn pooling(&self) -> arkavo_fingerprint::EmbeddingPooling {
+            arkavo_fingerprint::EmbeddingPooling::Last
+        }
+
+        fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, String> {
+            use std::hash::{Hash, Hasher};
+            Ok(texts
+                .iter()
+                .map(|t| {
+                    let mut v = vec![0.0f32; 64];
+                    for w in t.split_whitespace() {
+                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                        w.to_lowercase().hash(&mut hasher);
+                        v[(hasher.finish() as usize) % 64] += 1.0;
+                    }
+                    v
+                })
+                .collect())
+        }
+    }
+
+    /// SENT-006/SENT-002: a span the near-duplicate tier calls out of scope
+    /// must not sit in the evidence as a gap when the semantic tier — which
+    /// covers short spans — completed on the same span.
+    #[test]
+    fn a_short_span_out_of_scope_for_near_duplicate_is_covered_by_semantic() {
+        let order = Arc::new(Mutex::new(Vec::new()));
+
+        let near_key = Arc::new(
+            arkavo_fingerprint::IndexKey::derive(&[11u8; 32], "cascade-semantic-tests")
+                .expect("derive"),
+        );
+        let long_document = (0..140).fold(String::new(), |mut text, i| {
+            let _ = write!(text, "t{i} ");
+            text
+        });
+        let mut near_builder = arkavo_fingerprint::NearDuplicateIndex::builder(&near_key, "1.0.0");
+        near_builder.add_document(
+            &near_key,
+            &long_document,
+            arkavo_fingerprint::EntryMeta {
+                category: DataCategory::Internal,
+                sensitivity: SensitivityLevel::Confidential,
+                source_family: "board".into(),
+            },
+        );
+        let near_tier =
+            arkavo_fingerprint::NearDuplicateTier::loaded(Arc::new(near_builder.build()), near_key);
+
+        let mut semantic_builder = arkavo_fingerprint::SemanticIndexBuilder::new(
+            "1.0.0",
+            arkavo_fingerprint::EmbedderRecord {
+                source: "o/m/f.gguf".into(),
+                sha256: "test-digest".into(),
+                pooling: arkavo_fingerprint::EmbeddingPooling::Last,
+            },
+        );
+        semantic_builder
+            .add_document(
+                &BagOfWords,
+                "the northwind acquisition closes in march with a hidden indemnity clause",
+                DataCategory::Internal,
+                SensitivityLevel::Confidential,
+                "board",
+            )
+            .unwrap();
+        semantic_builder
+            .add_anchor(&BagOfWords, "oxycodone prescribing information")
+            .unwrap();
+        let semantic_index = Arc::new(semantic_builder.build().unwrap());
+        let calibration = arkavo_fingerprint::SemanticCalibration {
+            detector_version: arkavo_fingerprint::SemanticCalibration::detector_version_for(
+                "test-digest",
+            ),
+            taxonomy_version: "1.0.0".into(),
+            margins: std::collections::BTreeMap::from([(
+                arkavo_fingerprint::label_key(
+                    DataCategory::Internal,
+                    SensitivityLevel::Confidential,
+                ),
+                0.3,
+            )]),
+            embedder: semantic_index.embedder.clone(),
+        };
+        let semantic_tier = arkavo_fingerprint::SemanticTier::new(
+            semantic_index,
+            calibration,
+            Arc::new(BagOfWords),
+        )
+        .unwrap();
+
+        let cascade = Cascade::new("1.0.0")
+            .with_tier(Arc::new(Recording::new("exact", order)) as Arc<dyn CascadeTier>)
+            .with_tier(Arc::new(near_tier) as Arc<dyn CascadeTier>)
+            .with_tier(Arc::new(semantic_tier) as Arc<dyn CascadeTier>);
+
+        let evidence = cascade.inspect_unbudgeted("ok");
+
+        // Not just "no gap": pin down *why* there is none, so this test fails
+        // if the near tier ever stops calling a short span out of scope, or
+        // the semantic tier stops completing on it — either of which would
+        // make `!has_gap()` pass for the wrong reason.
+        assert!(
+            evidence.tiers[1].is_out_of_scope(),
+            "expected the near-duplicate tier to call \"ok\" out of scope: {:?}",
+            evidence.tiers[1]
+        );
+        assert_eq!(evidence.tiers[2].outcome, TierOutcome::NoMatch);
+        assert!(!evidence.has_gap());
     }
 }
