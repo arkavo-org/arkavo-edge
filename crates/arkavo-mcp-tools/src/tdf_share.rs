@@ -50,7 +50,7 @@ impl TdfShareTool {
                         "kas_url": {
                             "type": "string",
                             "description": "KAS URL for key wrapping",
-                            "default": "https://100.arkavo.net"
+                            "default": "https://platform.arkavo.net"
                         }
                     },
                     "required": ["input_path"]
@@ -92,7 +92,9 @@ impl Tool for TdfShareTool {
             .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
             .unwrap_or_else(|| vec!["internal"]);
 
-        let kas_url = args["kas_url"].as_str().unwrap_or("https://100.arkavo.net");
+        let kas_url = args["kas_url"]
+            .as_str()
+            .unwrap_or("https://platform.arkavo.net");
 
         // Read input file
         let plaintext = tokio::fs::read(input_path)

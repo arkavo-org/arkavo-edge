@@ -185,7 +185,7 @@ mod tests {
             content_hash: "abc123def456".to_string(),
             size_bytes: 4096,
             policy_attributes: vec!["https://arkavo.net/attr/sensitivity".to_string()],
-            kas_url: "https://kas.arkavo.net".to_string(),
+            kas_url: "https://platform.arkavo.net".to_string(),
             sender_agent_id: "agent-sender-001".to_string(),
         }
     }

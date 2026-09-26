@@ -1,7 +1,7 @@
 //! Arkavo KAS (Key Access Service) client implementation.
 //!
 //! Provides OAuth token acquisition from identity.arkavo.net and
-//! key rewrap operations via the KAS at 100.arkavo.net.
+//! key rewrap operations via the KAS at platform.arkavo.net.
 //!
 //! Enable with the `kas` feature flag.
 
@@ -21,7 +21,7 @@ use crate::types::TdfManifest;
 pub const ARKAVO_OAUTH_URL: &str = "https://identity.arkavo.net";
 
 /// Default Arkavo KAS endpoint.
-pub const ARKAVO_KAS_URL: &str = "https://100.arkavo.net";
+pub const ARKAVO_KAS_URL: &str = "https://platform.arkavo.net";
 
 /// KAS public key endpoint path.
 pub const KAS_PUBLIC_KEY_PATH: &str = "/kas/v2/kas_public_key";
@@ -31,7 +31,7 @@ pub const KAS_PUBLIC_KEY_PATH: &str = "/kas/v2/kas_public_key";
 pub struct ArkavoKasConfig {
     /// OAuth identity provider URL (default: identity.arkavo.net)
     pub oauth_url: String,
-    /// KAS service URL (default: 100.arkavo.net)
+    /// KAS service URL (default: platform.arkavo.net)
     pub kas_url: String,
     /// OAuth client ID
     pub client_id: String,
@@ -125,7 +125,7 @@ pub struct KasPublicKey {
 ///
 /// Handles:
 /// 1. OAuth token acquisition from identity.arkavo.net
-/// 2. Key rewrap operations via KAS at 100.arkavo.net
+/// 2. Key rewrap operations via KAS at platform.arkavo.net
 /// 3. Token refresh on expiration
 #[cfg(feature = "kas")]
 pub struct ArkavoKasClient {

@@ -3,7 +3,7 @@
 //! This example shows how to:
 //! 1. Create a configuration bundle
 //! 2. Encrypt it with OpenTDF using attribute-based policies
-//! 3. Decrypt it using the Arkavo KAS at https://100.arkavo.net
+//! 3. Decrypt it using the Arkavo KAS at https://platform.arkavo.net
 //!
 //! Usage:
 //!   cargo run --example kas_encrypt_decrypt --features kas
@@ -14,7 +14,7 @@ use arkavo_config_encryption::{
 };
 use std::collections::HashMap;
 
-const KAS_URL: &str = "https://100.arkavo.net/kas/v2/rewrap";
+const KAS_URL: &str = "https://platform.arkavo.net/kas/v2/rewrap";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Arkavo Secure Agent Configuration Example ===\n");

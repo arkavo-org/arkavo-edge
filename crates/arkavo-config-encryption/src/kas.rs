@@ -6,7 +6,7 @@
 use std::env;
 
 /// Default Arkavo KAS URL for production
-pub const DEFAULT_KAS_URL: &str = "https://100.arkavo.net/kas/v2/rewrap";
+pub const DEFAULT_KAS_URL: &str = "https://platform.arkavo.net/kas/v2/rewrap";
 
 /// Default Arkavo Identity URL for authentication
 pub const DEFAULT_IDENTITY_URL: &str = "https://identity.arkavo.net";

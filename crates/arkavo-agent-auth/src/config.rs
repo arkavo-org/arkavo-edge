@@ -16,7 +16,7 @@ pub struct AgentAuthConfig {
 impl Default for AgentAuthConfig {
     fn default() -> Self {
         Self {
-            base_url: "https://100.arkavo.net".to_string(),
+            base_url: "https://platform.arkavo.net".to_string(),
             timeout: Duration::from_secs(30),
             max_retries: 3,
             retry_base_delay_ms: 100,

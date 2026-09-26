@@ -45,7 +45,7 @@ impl TdfEncryptTool {
                         "kas_url": {
                             "type": "string",
                             "description": "KAS URL for key wrapping",
-                            "default": "https://100.arkavo.net"
+                            "default": "https://platform.arkavo.net"
                         }
                     },
                     "required": ["input_path"]
@@ -81,7 +81,9 @@ impl Tool for TdfEncryptTool {
             .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
             .unwrap_or_else(|| vec!["internal"]);
 
-        let kas_url = args["kas_url"].as_str().unwrap_or("https://100.arkavo.net");
+        let kas_url = args["kas_url"]
+            .as_str()
+            .unwrap_or("https://platform.arkavo.net");
 
         let output_path = args["output_path"]
             .as_str()
