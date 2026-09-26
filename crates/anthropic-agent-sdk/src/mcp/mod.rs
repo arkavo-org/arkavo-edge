@@ -26,8 +26,8 @@
 //!
 //! ```ignore
 //! use anthropic_agent_sdk::mcp::{tool, tool_router, tool_handler};
-//! use anthropic_agent_sdk::mcp::{Parameters, CallToolResult, Content, ToolRouter};
-//! use rmcp::ServerHandler;
+//! use anthropic_agent_sdk::mcp::{Parameters, CallToolResult, ContentBlock, ToolRouter};
+//! use anthropic_agent_sdk::mcp::{Implementation, ServerCapabilities, ServerConfig, ServerHandler};
 //! use schemars::JsonSchema;
 //! use serde::Deserialize;
 //!
@@ -50,16 +50,17 @@
 //!
 //!     #[tool(description = "Add two numbers")]
 //!     async fn add(&self, params: Parameters<AddParams>) -> Result<CallToolResult, String> {
-//!         Ok(CallToolResult::success(vec![Content::text(
-//!             format!("{} + {} = {}", params.a, params.b, params.a + params.b)
+//!         Ok(CallToolResult::success(vec![ContentBlock::text(
+//!             format!("{} + {} = {}", params.0.a, params.0.b, params.0.a + params.0.b)
 //!         )]))
 //!     }
 //! }
 //!
 //! #[tool_handler]
 //! impl ServerHandler for Calculator {
-//!     fn get_info(&self) -> rmcp::model::ServerInfo {
-//!         rmcp::model::ServerInfo::new("calculator", "1.0.0")
+//!     fn get_info(&self) -> ServerConfig {
+//!         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+//!             .with_server_info(Implementation::new("calculator", "1.0.0"))
 //!     }
 //! }
 //! ```
