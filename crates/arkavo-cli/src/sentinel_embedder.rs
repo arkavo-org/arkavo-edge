@@ -155,6 +155,20 @@ fn split_source(source: &str) -> Result<(String, String), String> {
     }
 }
 
+/// The security point of pinning an embedder: refuses a fetched file whose
+/// digest does not match what the pack recorded, rather than trusting
+/// whatever HuggingFace served this time. Pure and offline so the refusal
+/// path can be tested without a download.
+fn verify_embedder_digest(fetched: &str, expected: &str) -> Result<(), String> {
+    if fetched == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "embedder digest mismatch: expected {expected}, fetched {fetched}"
+        ))
+    }
+}
+
 /// Fetch the embedder named by `record` from HuggingFace.
 ///
 /// Refuses the result if the downloaded bytes do not hash to
@@ -175,12 +189,7 @@ pub async fn fetch_embedder(record: &EmbedderRecord) -> Result<PathBuf, String> 
         .map_err(|e| format!("embedder download failed: {e}"))?;
 
     let fetched = sha256_file(&path)?;
-    if fetched != record.sha256 {
-        return Err(format!(
-            "embedder digest mismatch: expected {}, fetched {fetched}",
-            record.sha256
-        ));
-    }
+    verify_embedder_digest(&fetched, &record.sha256)?;
     Ok(path)
 }
 
@@ -258,6 +267,42 @@ mod tests {
         assert!(split_source("owner/repo/").is_err());
         assert!(split_source("owner").is_err());
         assert!(split_source("").is_err());
+    }
+
+    #[test]
+    fn verify_embedder_digest_accepts_a_match() {
+        assert!(verify_embedder_digest("abc123", "abc123").is_ok());
+    }
+
+    #[test]
+    fn verify_embedder_digest_reports_both_hashes_on_mismatch() {
+        let err = verify_embedder_digest("fetched-hash", "expected-hash").unwrap_err();
+        assert!(err.contains("expected-hash"), "{err}");
+        assert!(err.contains("fetched-hash"), "{err}");
+    }
+
+    /// The digest check is what makes a fetch trustworthy: a real file
+    /// hashed locally, checked against a wrong "expected" value, must be
+    /// refused with a message naming both hashes — no network access needed
+    /// to exercise the security-relevant path in `fetch_embedder`.
+    #[test]
+    fn a_locally_hashed_file_is_refused_against_a_wrong_expected_digest() {
+        let bytes = b"embedder verification fixture";
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "arkavo-sentinel-embedder-digest-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::write(&path, bytes).expect("write temp file");
+        let fetched = sha256_file(&path);
+        let _ = std::fs::remove_file(&path);
+        let fetched = fetched.unwrap();
+
+        let wrong_expected = "0".repeat(64);
+        let err = verify_embedder_digest(&fetched, &wrong_expected).unwrap_err();
+        assert!(err.contains(&wrong_expected), "{err}");
+        assert!(err.contains(&fetched), "{err}");
     }
 
     #[test]
