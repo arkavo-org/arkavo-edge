@@ -15,8 +15,13 @@ from urllib.parse import urlsplit
 
 UNIT_WORDS = 96
 UNIT_OVERLAP = 24
+LONG_RUN_CHARS = 64
+PIECE_CHARS = 16
+UNIT_CHARS = UNIT_WORDS * PIECE_CHARS
+OVERLAP_CHARS = UNIT_OVERLAP * PIECE_CHARS
 
-_SENTENCE = re.compile(r"[^.!?\n]*[.!?\n]|[^.!?\n]+$")
+_TERMINATORS = ".!?\n。！？；"
+_SENTENCE = re.compile(f"[^{_TERMINATORS}]*[{_TERMINATORS}]|[^{_TERMINATORS}]+$")
 
 
 def read_jsonl(path):
@@ -31,9 +36,25 @@ def write_jsonl(path, rows):
 
 
 def _sentences(text):
-    # Rust's `split_inclusive(['.', '!', '?', '\n'])`: every piece keeps its
-    # terminator, and a trailing piece without one is kept too.
+    # Rust's `split_inclusive` over the same terminators: every piece keeps
+    # its terminator, and a trailing piece without one is kept too.
     return [m.group(0) for m in _SENTENCE.finditer(text) if m.group(0)]
+
+
+def _words(sentence):
+    # Python strings index by code point, as Rust's `chars()` counts, so the
+    # pieces fall on the same boundaries.
+    words = []
+    for word in sentence.split():
+        if len(word) <= LONG_RUN_CHARS:
+            words.append(word)
+            continue
+        words.extend(word[i : i + PIECE_CHARS] for i in range(0, len(word), PIECE_CHARS))
+    return words
+
+
+def _chars(words):
+    return sum(len(w) for w in words)
 
 
 def semantic_units(text):
@@ -41,22 +62,36 @@ def semantic_units(text):
     units = []
     window = []
     for sentence in _sentences(text):
-        words = sentence.split()
+        words = _words(sentence)
         if not words:
             continue
-        if len(words) > UNIT_WORDS:
+        count, chars = len(words), _chars(words)
+        if count > UNIT_WORDS or chars > UNIT_CHARS:
             _flush(units, window)
             _split_long(words, units)
             continue
-        if len(window) + len(words) > UNIT_WORDS:
-            room = UNIT_WORDS - len(words)
-            keep = min(UNIT_OVERLAP, room)
-            carried = window[len(window) - keep :] if keep else []
+        if len(window) + count > UNIT_WORDS or _chars(window) + chars > UNIT_CHARS:
+            start = _overlap_start(window, UNIT_WORDS - count, UNIT_CHARS - chars)
+            carried = window[start:]
             _flush(units, window)
             window.extend(carried)
         window.extend(words)
     _flush(units, window)
     return units
+
+
+def _overlap_start(window, room_words, room_chars):
+    max_words = min(UNIT_OVERLAP, room_words)
+    max_chars = min(OVERLAP_CHARS, room_chars)
+    start = len(window)
+    chars = 0
+    while start > 0 and len(window) - start < max_words:
+        nxt = chars + len(window[start - 1])
+        if nxt > max_chars:
+            break
+        chars = nxt
+        start -= 1
+    return start
 
 
 def _flush(units, window):
@@ -66,14 +101,25 @@ def _flush(units, window):
 
 
 def _split_long(words, units):
-    step = UNIT_WORDS - UNIT_OVERLAP
     start = 0
     while True:
-        end = min(start + UNIT_WORDS, len(words))
+        end = _window_end(words, start)
         units.append(" ".join(words[start:end]))
         if end == len(words):
             return
-        start += step
+        start += max(_overlap_start(words[start:end], UNIT_WORDS, UNIT_CHARS), 1)
+
+
+def _window_end(words, start):
+    end = start
+    chars = 0
+    while end < len(words) and end - start < UNIT_WORDS:
+        nxt = chars + len(words[end])
+        if nxt > UNIT_CHARS:
+            break
+        chars = nxt
+        end += 1
+    return end
 
 
 def normalize(text):
