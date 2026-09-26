@@ -274,17 +274,23 @@ Keys are released at three tiers. Each has a different job, and each enforces qu
 
 | Tier | Where | Releases | Needed when |
 |---|---|---|---|
-| Network KAS | `platform.arkavo.net` (see "Platform fork") | Keys under the owner's policy, into a swarm, up to the limit the owner authorized for that swarm | A swarm is provisioned, or a workload is first authorized |
+| Network KAS | The KAS service the owner selects. Arkavo (`platform.arkavo.net`, see "Platform fork") and Virtru currently offer one. | Keys under the owner's policy, into a swarm, up to the limit the owner authorized for that swarm | A swarm is provisioned, or a workload is first authorized |
 | Swarm orchestrator KAS | The orchestrator's node, paired with an owner-enrolled authz agent's KAS for the second share, with an authn agent that pre-checks requests | Bundle and pack keys to an agent for its current flight role, within the swarm's limit | Each specialization and each pack load |
 | Agent KAS | Each agent (edge's `kas.rewrap` handler) | Keys for the agent's own outputs and state (what its role's release policy wraps), and peer-to-peer shares | Whenever a peer or the agent itself unwraps agent-produced data |
 
 **Intra-swarm release needs two shares.** A key released inside a swarm is split with the standard OpenTDF split-key scheme: one share wrapped to the orchestrator KAS, one to an independent authz agent's KAS, both under owner-signed policy. Neither can release a role's key alone. This preserves SwarmKit's guarantee that a compromised orchestrator cannot hand one role's data to another role (`docs/SWARMKIT.md`).
 
-- **The network KAS makes the split, and the orchestrator never holds an unsplit key.**
+- **The selected network KAS service makes the split, and the orchestrator never holds an unsplit key.**
   - At provisioning, the owner approves the swarm's orchestrator-KAS and authz-KAS public keys at the network KAS.
   - When a pack or bundle key enters the swarm, the network KAS unwraps it under the owner's policy and rewraps it as two shares, one to each registered swarm key. This is a new "rewrap into split" operation in `opentdf-platform`.
   - An agent obtains one share from each swarm KAS and combines them. As the intended recipient, it is the only party inside the swarm that ever holds the whole key.
   - The alternative, the owner wrapping each pack with a split once a swarm's keys exist, needs a human step per swarm, so it is not the default.
+- **What a selected service must support to host sealed-knowledge swarms:**
+  - rewrap into split shares for registered swarm keys;
+  - agent credentials with proof of possession;
+  - a workload-status check before release.
+- **The Arkavo service** gains these in the first two deliveries.
+- **Virtru's support is unverified.** Until it is confirmed, a swarm whose owner selects Virtru needs the owner to wrap with a split at provisioning. Its agent-credential and quarantine enforcement must be established separately; the first delivery targets the Arkavo service.
 - **The authz agent is independent of the orchestrator.**
   - The owner enrolls it; the orchestrator cannot appoint, reassign or restart it.
   - It runs as a separate process under a separate OS user, and on a separate device when host compromise is in scope (as for the Guardian).
