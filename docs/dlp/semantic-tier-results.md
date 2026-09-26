@@ -15,11 +15,11 @@ by kind, language and length.
 | Item | Value |
 | --- | --- |
 | Machine | Apple M4 Max, 16 cores, 128 GiB, macOS 27.0 (26A428) |
-| Toolchain | rustc 1.98.0; branch `feature/semantic-tier` at `f52cf82e` plus this change |
+| Toolchain | rustc 1.98.0; branch `feature/semantic-tier` at `efb003d5` plus the chunker change below |
 | Build profile | debug (`cargo build -p arkavo --features sentinel`); llama.cpp is built `RelWithDebInfo` in debug, and `arkavo-fingerprint` at `opt-level = 3` (see below) |
 | Embedder | `Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf`, SHA-256 `06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439`, last-token pooling, no instruction prefix |
 | Generator | Gemma 4 12B instruct, Q4_0 GGUF, on a local `llama-server` bound to 127.0.0.1, thinking disabled |
-| Chunker | 96-word units, 24-word overlap |
+| Chunker | 96-word units of at most 1536 characters, 24-word overlap of at most 384 characters; sentences end at `. ! ? \n` and `。！？；`; a whitespace-free run over 64 characters is cut into 16-character pieces |
 | Target false-positive rate | 0.01 |
 
 `arkavo-fingerprint` compiles at `opt-level = 3` in dev and test profiles
@@ -30,6 +30,73 @@ would report the profile, not the tier. Checked with
 `cargo test -p arkavo-cli --features sentinel --test pack_semantic_build --no-run -v`,
 which passes `opt-level=3` to `arkavo_fingerprint`. No `--release` build was
 used for any number here.
+
+## This run and the chunker change
+
+These numbers are from a second run, made after the chunker contract changed
+and before any pack shipped. The embedding context holds 2048 tokens and
+refuses a longer text rather than truncating it, so one oversized unit fails
+the whole embed and the gate holds that completion. Words alone did not bound
+a unit: CJK text and base64 carry no spaces. The chunker now also ends
+sentences at full-width terminators, cuts any whitespace-free run over 64
+characters into 16-character pieces, and closes a unit before its words pass
+1536 characters (96 × 16), which keeps a unit under the context at about one
+token per character. Every input — corpus, anchors, positives, negatives,
+keys — is the first run's; only the index was rebuilt and the measurements
+repeated.
+
+What the change touched, counted with the chunker port against the port as it
+was before the change (from the repository root):
+
+```
+$ mkdir -p /tmp/old && git show efb003d5:scripts/semantic/common.py > /tmp/old/common.py
+$ python3 compare_chunkers.py /tmp/old   # the script below
+corpus: 1963 rows, 73 chunk differently; units 7339 -> 7351
+anchors: 2033 rows, 7 chunk differently; units 9872 -> 9872
+positives: 483 rows, 46 chunk differently; units 677 -> 677
+negatives: 1294 rows, 0 chunk differently; units 1294 -> 1294
+positives, Chinese: 44 of 57 chunk differently
+```
+
+```python
+import sys, importlib.util
+def load(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+old = load(sys.argv[1] + "/common.py", "old"); new = load("scripts/semantic/common.py", "new")
+M = "models/oida-qa/mallinckrodt/"
+sets = {"corpus": [r for r in new.read_jsonl(M + "corpus.jsonl") if r["label"].startswith("internal")],
+        "anchors": new.read_jsonl(M + "anchors.jsonl"),
+        "positives": new.read_jsonl(M + "positives.jsonl"),
+        "negatives": new.read_jsonl(M + "negatives.jsonl")}
+for name, rows in sets.items():
+    o = sum(len(old.semantic_units(r["text"])) for r in rows)
+    n = sum(len(new.semantic_units(r["text"])) for r in rows)
+    changed = sum(old.semantic_units(r["text"]) != new.semantic_units(r["text"]) for r in rows)
+    print(f"{name}: {len(rows)} rows, {changed} chunk differently; units {o} -> {n}")
+zh = [r for r in sets["positives"] if r.get("lang") == "Chinese"]
+print(f"positives, Chinese: {sum(old.semantic_units(r['text']) != new.semantic_units(r['text']) for r in zh)} of {len(zh)} chunk differently")
+```
+
+The rebuilt index holds 7351 corpus vectors, the number the port predicts, so
+the Rust chunker and its port agree on the whole corpus:
+
+```
+$ python3 -c 'import json,base64; s=json.load(open("'$R'/index.json"))["semantic"]; \
+    print(len(base64.b64decode(s["vectors"])) // s["dimensions"], "corpus vectors,", \
+          len(base64.b64decode(s["anchors"])) // s["dimensions"], "anchor vectors")'
+7351 corpus vectors, 9872 anchor vectors
+```
+
+The results did not move: the fitted threshold (0.18130873) and the signed
+`eval-evidence.json` are byte-identical to the first run's (`diff` of each
+against the first run's copy is empty), and `attribute_probes_to_tiers` gives
+the same per-tier outcome for every held-out file. 44 of the 57 Chinese
+positives now chunk differently (per-sentence units and 16-character pieces
+instead of whole paragraphs); 23 of the 27 held out are still caught — the
+same 23. Latency and memory below are this run's; the first run's differed by
+small amounts in both directions (build 376.30 s against 362.68 s, pack open
+4148 ms against 4572 ms, 2000-word p50 884.85 ms against 885.60 ms).
 
 ## Inputs
 
@@ -53,7 +120,7 @@ wrote 1971 rows to .../corpus.jsonl
 The protected corpus is every confidential page-OCR row of
 `Arkavo/oida-mallinckrodt-rows` (`sentinel-rows/`, train and eval), labelled
 `internal:confidential`: 1963 pages in 200 archive-document families, which
-chunk into 7339 units. The eight curated public rows are labelled
+chunk into 7351 units. The eight curated public rows are labelled
 `public:public`, and `pack index` skips them. Generated rows — synthetic
 counterparts and the upstream Ministral rewrites — are not documents and are
 excluded.
@@ -81,7 +148,7 @@ ClinicalTrials.gov studies, and drug-related FDA press announcements. DEA's
 site refused this machine (HTTP 403); no source was substituted for it.
 Sections are at most 400 words, and a section sharing half its five-word
 shingles with one already kept is dropped. The 2033 rows chunk into **9872
-anchor units — more than the corpus's 7339**, which makes anchors the larger
+anchor units — more than the corpus's 7351**, which makes anchors the larger
 part of the semantic section's size and scoring cost.
 
 ### Calibration positives
@@ -145,15 +212,15 @@ Semantic label internal:confidential: threshold 0.1813
 Indexed 1963 documents, 340377 entries (1724 near-duplicate signatures)
 Classification: Confidential
 Wrap under: https://attr.arkavo.com/clearance=confidential
-      376.30 real        51.76 user        15.42 sys
-          2340061184  maximum resident set size
-          1820658136  peak memory footprint
+      362.68 real        52.71 user        16.01 sys
+          2339733504  maximum resident set size
+          1824557552  peak memory footprint
 
 $ /usr/bin/time -l target/debug/arkavo pack wrap --in $R/index.json --out $R/index.json.tdf \
     --payload-key-out $R/payload.key
 Wrapped under: https://attr.arkavo.com/clearance/confidential
-        3.28 real         3.24 user         0.03 sys
-           519438336  maximum resident set size
+        3.36 real         3.32 user         0.03 sys
+           519766016  maximum resident set size
 
 $ target/debug/arkavo pack seal --out $R/pack --signing-key $R/org-signing.key \
     --pack-id mallinckrodt-semantic --thresholds semantic:$R/semantic-thresholds.json \
@@ -167,8 +234,8 @@ Pack mallinckrodt-semantic verified
 Taxonomy: 1.0.0
 Ceiling:  confidential
 Held:     index.json.tdf
-        0.17 real         0.15 user         0.01 sys
-           115884032  maximum resident set size
+        0.18 real         0.16 user         0.01 sys
+           115556352  maximum resident set size
 ```
 
 `pack verify` checks the signature and digests; it does not open the sealed
@@ -187,7 +254,7 @@ From the signed `eval-evidence.json` sealed into the pack (threshold fitted at
 | False-positive rate, long prompts | 3 / 350 | 0.86% |
 | False-positive rate, short prompts (2–5 words) | 0 / 299 | 0.00% |
 
-The shipped threshold is the spec's 1% rule; nothing here was tuned after
+The shipped threshold follows the 1% target false-positive rate fixed before the run; nothing here was tuned after
 seeing held-out results. `calibrate` scores through the semantic index alone,
 so these are the semantic tier's numbers, not the cascade's.
 
@@ -251,7 +318,7 @@ $ target/debug/arkavo chat --model models/gemma4-12b/gemma-4-12B-it-Q4_0.gguf \
     --pack $R/pack --anchor $R/org.pub --index-key $R/tenant.key --payload-key $R/payload.key \
     --prompt "What time is it?"
 Pack provisioned: pack mallinckrodt-semantic holds [index.json.tdf], missing []
-The current time is 10:06 AM UTC on Saturday, September 26, 2026.
+The current time is 11:11 AM UTC on Saturday, September 26, 2026.
 (exit 0)
 
 $ RUST_LOG=warn target/debug/arkavo chat --model models/gemma4-12b/gemma-4-12B-it-Q4_0.gguf \
@@ -262,7 +329,19 @@ WARN completion withheld audit=block to caller-output: requester lacks:
   https://attr.arkavo.com/clearance=confidential,https://attr.arkavo.com/clearance=internal
 [Error: Failed to route message: ... response withheld by data policy]
 (exit 0)
+
+$ cp -Rp $R/pack $R/pack-noindex && rm $R/pack-noindex/index.json.tdf
+$ target/debug/arkavo chat --model models/gemma4-12b/gemma-4-12B-it-Q4_0.gguf \
+    --pack $R/pack-noindex --anchor $R/org.pub --index-key $R/tenant.key --payload-key $R/payload.key \
+    --prompt "What time is it?"
+Error: pack mallinckrodt-semantic lists index component index.json.tdf but it is not held on this node
+(exit 1, 0.01 s: refused before the embedder fetch)
 ```
+
+The benign reply is printed after the model's raw tool-call and channel
+markers (`<|tool_call>call:{}<tool_call|><|channel>thought`); the first run's
+logs show the same markers, so they are Gemma 4 chat-template output, not
+something this tier adds.
 
 | Probe | Kind | Words | Shared 5-word shingles with the corpus | Tiers that matched | Chat outcome |
 | --- | --- | ---: | ---: | --- | --- |
@@ -278,10 +357,12 @@ WARN completion withheld audit=block to caller-output: requester lacks:
 z0–z4 are held-out-family paraphrases chosen because none shares a single
 normalised five-word shingle with the corpus (40 of 120 held-out rewrites and
 63 of 116 held-out translations qualify), and `attribute_probes_to_tiers`
-confirms the semantic tier is the only tier that matched each. No phrase of a
+confirms the semantic tier is the only tier that matched each (rerun
+against the rebuilt pack: `ARKAVO_TEST_PACK_PROBES=$PWD/$R/probes`, same
+outcome for every probe). No phrase of a
 withheld probe was found in its session output (`grep -F` for four
 consecutive words from the middle of each probe: 0 occurrences; the same
-check finds the released c0 once). c1 and c2 are the
+check, run on the rerun's logs, finds the released c0 once). c1 and c2 are the
 exact-tier false positives described above, observed end to end: the semantic
 tier scored both below threshold, and the anchor margin did its job on c2.
 
@@ -306,16 +387,16 @@ $ ARKAVO_TEST_EMBED_MODEL=$PWD/models/embed/Qwen3-Embedding-0.6B-Q8_0.gguf \
   ARKAVO_TEST_PACK_INDEX_KEY=$PWD/$R/tenant.key ARKAVO_TEST_PACK_PAYLOAD_KEY=$PWD/$R/payload.key \
   /usr/bin/time -l target/debug/deps/pack_semantic_build-<hash> \
     --ignored measure_semantic_latency --nocapture --exact
-open: 4148 ms; resident 9 MB before, 1515 MB after
-inspect_unbudgeted 5 words: p50 24.25 ms p95 28.33 ms over 50 runs (0 findings)
-inspect_unbudgeted 50 words: p50 30.37 ms p95 30.57 ms over 50 runs (0 findings)
-inspect_unbudgeted 500 words: p50 221.91 ms p95 223.40 ms over 50 runs (0 findings)
-inspect_unbudgeted 2000 words: p50 884.85 ms p95 885.83 ms over 50 runs (0 findings)
-holdback window at Internal: p50 30.48 ms p95 33.92 ms p99 34.14 ms over 230 windows
-resident after measurement: 2236 MB
-       70.95 real        43.95 user         1.88 sys
-          2627747840  maximum resident set size
-          2146830952  peak memory footprint
+open: 4572 ms; resident 9 MB before, 1548 MB after
+inspect_unbudgeted 5 words: p50 24.17 ms p95 28.56 ms over 50 runs (0 findings)
+inspect_unbudgeted 50 words: p50 30.40 ms p95 30.77 ms over 50 runs (0 findings)
+inspect_unbudgeted 500 words: p50 222.26 ms p95 223.98 ms over 50 runs (0 findings)
+inspect_unbudgeted 2000 words: p50 885.60 ms p95 886.78 ms over 50 runs (0 findings)
+holdback window at Internal: p50 30.46 ms p95 33.90 ms p99 34.06 ms over 230 windows
+resident after measurement: 2263 MB
+       71.45 real        44.22 user         2.17 sys
+          2661089280  maximum resident set size
+          2180155984  peak memory footprint
 ```
 
 The test binary is the one `cargo test -p arkavo-cli --features sentinel
@@ -326,51 +407,53 @@ resident-memory figures are the test's, not cargo's.
 
 | Prompt | p50 | p95 |
 | --- | ---: | ---: |
-| 5 words | 24.25 ms | 28.33 ms |
-| 50 words | 30.37 ms | 30.57 ms |
-| 500 words | 221.91 ms | 223.40 ms |
-| 2000 words | 884.85 ms | 885.83 ms |
+| 5 words | 24.17 ms | 28.56 ms |
+| 50 words | 30.40 ms | 30.77 ms |
+| 500 words | 222.26 ms | 223.98 ms |
+| 2000 words | 885.60 ms | 886.78 ms |
 
 Cost grows with the number of units the chunker produces — 1, 1, 8 and 32
 for these four prompts (counted with the chunker port in
 `scripts/semantic/common.py`) — each of which is embedded and then scored
-against 7339 corpus and 9872 anchor vectors.
+against 7351 corpus and 9872 anchor vectors.
 
 ### Streaming holdback window, Internal ceiling
 
 `CascadeGate` at `SensitivityLevel::Internal` (256-byte windows, 64-byte
 overlap), a 2000-word benign completion admitted in six-word chunks, five
-completions: **p50 30.48 ms, p95 33.92 ms, p99 34.14 ms over 230 windows.**
-The brief's earlier holdback rows (p50 6.21 µs) measured a cascade without
-this tier. A Confidential pack — this one — holds whole completions instead
-(SENT-009), so its reader waits for one inspection of the whole completion,
-at the per-check latency above for its length.
+completions: **p50 30.46 ms, p95 33.90 ms, p99 34.06 ms over 230 windows.**
+The capability brief's earlier holdback rows (p50 6.21 µs) measured a cascade
+without this tier. A Confidential pack — this one — holds whole completions
+instead (SENT-009), and under `chat --pack` each completion is inspected
+twice: once by the critic's `SentinelCheck`, which records evidence, and once
+by the release gate. Its reader therefore waits roughly twice the per-check
+latency above for the completion's length.
 
 ### Memory and size
 
 | What | Measured | Source |
 | --- | ---: | --- |
-| Resident after opening the pack (verify, unwrap, parse, embedder load) | 1515 MB | test, `ps` RSS |
-| Time to open the pack | 4148 ms | test |
-| Resident after the latency and holdback measurements | 2236 MB | test, `ps` RSS |
-| Peak resident, open plus all measurements | 2 627 747 840 B (2.63 GB) | `/usr/bin/time -l` |
-| Peak resident, full-corpus build | 2 340 061 184 B (2.34 GB) | `/usr/bin/time -l` |
-| Build time, full corpus | 376.30 s | `/usr/bin/time -l` |
-| Plaintext index on disk (`index.json`) | 68 489 558 B | `ls -l` |
+| Resident after opening the pack (verify, unwrap, parse, embedder load) | 1548 MB | test, `ps` RSS |
+| Time to open the pack | 4572 ms | test |
+| Resident after the latency and holdback measurements | 2263 MB | test, `ps` RSS |
+| Peak resident, open plus all measurements | 2 661 089 280 B (2.66 GB) | `/usr/bin/time -l` |
+| Peak resident, full-corpus build | 2 339 733 504 B (2.34 GB) | `/usr/bin/time -l` |
+| Build time, full corpus | 362.68 s | `/usr/bin/time -l` |
+| Plaintext index on disk (`index.json`) | 68 506 470 B | `ls -l` |
 | — reference (exact) section | 46.9 MB | JSON section length |
-| — semantic section | 23.8 MB (vectors 10.0 MB, anchors 13.5 MB, base64) | JSON section length |
+| — semantic section | 23.9 MB (vectors 10.0 MB, anchors 13.5 MB, base64) | JSON section length |
 | — near-duplicate section | 0.23 MB | JSON section length |
-| Sealed index (`index.json.tdf`) | 91 320 357 B (1.33× plaintext) | `ls -l` |
+| Sealed index (`index.json.tdf`) | 91 342 909 B (1.33× plaintext) | `ls -l` |
 | Sealed pack directory | 87 MB | `du -sh` |
 
 Build time is `pack index` end to end: exact and near-duplicate indexing,
-embedding 7339 corpus and 9872 anchor units, and embedding and scoring 1777
+embedding 7351 corpus and 9872 anchor units, and embedding and scoring 1777
 calibration samples. The sealed index is larger than the plaintext because
 `SealedBlob` carries its ciphertext as base64 inside JSON, and is parsed whole
 at open.
 
 The Raspberry Pi 5 egress-node claim was **not measured**: every number here
-is from an M4 Max with Metal. The 1.5–2.6 GB resident figures are the ones a
+is from an M4 Max with Metal. The 1.5–2.7 GB resident figures are the ones a
 Pi 5 would have to fit.
 
 ## What these numbers do not show
