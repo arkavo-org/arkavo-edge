@@ -89,6 +89,7 @@ fn write_index_component(dir: &Path, key: &IndexKey) -> [u8; 32] {
     let indexes = PackIndexes {
         reference: reference.build(),
         near: Some(near.build()),
+        semantic: None,
     };
 
     let wrapper = CapturingWrapper {
@@ -426,11 +427,13 @@ fn the_loader_takes_its_thresholds_from_the_verified_manifest() {
         &verified,
         Some(&index_key()),
         &PreResolvedKey::new(fixture.payload_key),
+        None,
     )
     .expect("load");
 
-    assert_eq!(loaded.calibration.detector_version, "sentinel-0.1");
-    assert_eq!(loaded.calibration.taxonomy_version, "1.0.0");
+    let calibration = loaded.calibration.expect("sentinel table");
+    assert_eq!(calibration.detector_version, "sentinel-0.1");
+    assert_eq!(calibration.taxonomy_version, "1.0.0");
     assert_eq!(loaded.ceiling, Classification::Restricted);
     // Pattern tier plus both index tiers, all provisioned from the pack.
     assert_eq!(loaded.cascade.tier_names().len(), 3);
@@ -445,7 +448,7 @@ fn a_denied_key_yields_no_index_rather_than_plaintext() {
     let verified =
         verify_pack(&pack_root(&fixture), Some(&fixture.key.public_key())).expect("verify");
 
-    let refused = load_pack(&verified, Some(&index_key()), &DenyingKas);
+    let refused = load_pack(&verified, Some(&index_key()), &DenyingKas, None);
 
     assert!(refused.is_err(), "a denied key must not yield an index");
 }
@@ -462,6 +465,7 @@ fn the_loaded_cascade_recognizes_the_corpus_it_was_built_from() {
         &verified,
         Some(&index_key()),
         &PreResolvedKey::new(fixture.payload_key),
+        None,
     )
     .expect("load");
 
@@ -578,7 +582,7 @@ fn a_component_wrapped_under_the_wrong_policy_is_refused_before_any_key_request(
     builder.build(&root, &key).expect("build");
 
     let verified = verify_pack(&root, Some(&key.public_key())).expect("verify");
-    let refused = load_pack(&verified, Some(&index_key()), &NeverAsked);
+    let refused = load_pack(&verified, Some(&index_key()), &NeverAsked, None);
 
     let message = match refused {
         Err(e) => e.to_string(),
@@ -609,6 +613,7 @@ fn an_over_protected_component_is_accepted() {
     let indexes = PackIndexes {
         reference: reference.build(),
         near: None,
+        semantic: None,
     };
     let wrapper = CapturingWrapper {
         captured: std::sync::Mutex::new(None),
@@ -645,6 +650,7 @@ fn an_over_protected_component_is_accepted() {
         &verified,
         Some(&index_key()),
         &PreResolvedKey::new(payload_key),
+        None,
     );
 
     assert!(loaded.is_ok(), "over-protection must not be a refusal");
@@ -667,6 +673,7 @@ fn a_component_swapped_after_verification_is_refused_at_load() {
         &verified,
         Some(&index_key()),
         &PreResolvedKey::new(fixture.payload_key),
+        None,
     );
 
     let message = match refused {
@@ -697,6 +704,7 @@ fn a_ceiling_below_the_content_it_covers_is_refused() {
     let indexes = PackIndexes {
         reference: reference.build(),
         near: None,
+        semantic: None,
     };
     let wrapper = CapturingWrapper {
         captured: std::sync::Mutex::new(None),
@@ -729,7 +737,12 @@ fn a_ceiling_below_the_content_it_covers_is_refused() {
     builder.build(&root, &signing).expect("build");
 
     let verified = verify_pack(&root, Some(&signing.public_key())).expect("verify");
-    let refused = load_pack(&verified, Some(&key), &PreResolvedKey::new(payload_key));
+    let refused = load_pack(
+        &verified,
+        Some(&key),
+        &PreResolvedKey::new(payload_key),
+        None,
+    );
 
     let message = match refused {
         Err(e) => e.to_string(),
@@ -819,7 +832,7 @@ fn a_pack_without_a_tenant_key_does_not_request_the_index_payload_key() {
     }
     let kas = CountingKas(std::sync::atomic::AtomicUsize::new(0));
 
-    let loaded = load_pack(&verified, None, &kas).expect("provisioning gap is not a refusal");
+    let loaded = load_pack(&verified, None, &kas, None).expect("provisioning gap is not a refusal");
 
     assert_eq!(kas.0.load(std::sync::atomic::Ordering::SeqCst), 0);
     assert!(
@@ -827,4 +840,24 @@ fn a_pack_without_a_tenant_key_does_not_request_the_index_payload_key() {
         "{}",
         loaded.inventory
     );
+}
+
+/// Most packs predate the semantic tier and will never carry one. An index
+/// envelope that omits the section entirely must still deserialize, reading
+/// back as absent rather than a parse error.
+#[test]
+fn an_index_without_a_semantic_section_still_loads() {
+    let mut reference = ReferenceIndex::builder(&index_key(), "1.0.0");
+    reference.add_document(
+        &index_key(),
+        &corpus_document(),
+        DataCategory::Internal,
+        SensitivityLevel::Confidential,
+        "board-minutes",
+    );
+    let json = serde_json::json!({ "reference": reference.build() });
+
+    let parsed: PackIndexes = serde_json::from_value(json).expect("parse");
+
+    assert!(parsed.semantic.is_none());
 }

@@ -10,7 +10,7 @@
 use std::sync::{Arc, Mutex};
 
 use arkavo_critic::{ClassificationSource, SentinelCheck, SentinelEvidence};
-use arkavo_fingerprint::IndexKey;
+use arkavo_fingerprint::{Embedder, IndexKey};
 use arkavo_gguf_tdf::{Classification, PayloadKeyUnwrapper};
 use arkavo_knowledge_pack::{LoadError, VerifiedPack, load_pack};
 use arkavo_llm::{GateOutcome, ReleaseGate, ReleaseGateFactory};
@@ -201,9 +201,10 @@ pub fn install() {
 /// exists, so none of it can be built from content nobody vouched for.
 pub struct SentinelRuntime {
     cascade: Arc<Cascade>,
-    /// Calibrated thresholds, from the signed manifest rather than from
-    /// anything an operator can edit locally (SENT-004).
-    pub calibration: CalibrationTable,
+    /// The sentinel tier's calibrated thresholds, from the signed manifest
+    /// rather than from anything an operator can edit locally (SENT-004).
+    /// `None` for a pack calibrated only for the semantic tier.
+    pub calibration: Option<CalibrationTable>,
     /// The ceiling anything served under this pack carries.
     pub ceiling: SensitivityLevel,
     /// What this node holds, for the audit record.
@@ -216,8 +217,9 @@ impl SentinelRuntime {
         pack: &VerifiedPack,
         index_key: Option<&Arc<IndexKey>>,
         unwrapper: &dyn PayloadKeyUnwrapper,
+        embedder: Option<Arc<dyn Embedder>>,
     ) -> Result<Self, LoadError> {
-        let loaded = load_pack(pack, index_key, unwrapper)?;
+        let loaded = load_pack(pack, index_key, unwrapper, embedder)?;
         Ok(Self {
             cascade: loaded.cascade,
             calibration: loaded.calibration,
