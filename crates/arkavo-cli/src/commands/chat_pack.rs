@@ -13,6 +13,7 @@ use std::sync::Arc;
 use arkavo_fingerprint::{Embedder, IndexKey};
 use arkavo_gguf_tdf::PreResolvedKey;
 use arkavo_knowledge_pack::{semantic_embedder_record, verify_pack};
+use zeroize::Zeroizing;
 
 use crate::commands::pack_seal::read_anchor;
 use crate::sentinel_embedder::{LlamaEmbedder, fetch_embedder};
@@ -102,12 +103,14 @@ pub async fn provision_from_pack(args: &PackArgs) -> Result<String, String> {
             None => None,
         };
 
-    let secret = std::fs::read(&args.index_key).map_err(|e| {
+    // Only the derived key outlives this call; the secret it came from is
+    // wiped when this function returns, whether or not derivation succeeds.
+    let secret = Zeroizing::new(std::fs::read(&args.index_key).map_err(|e| {
         format!(
             "cannot read the tenant index key {}: {e}",
             args.index_key.display()
         )
-    })?;
+    })?);
     let index_key = Arc::new(
         IndexKey::derive(&secret, &args.index_id)
             .map_err(|e| format!("the tenant index key is unusable: {e}"))?,
@@ -117,7 +120,7 @@ pub async fn provision_from_pack(args: &PackArgs) -> Result<String, String> {
     let runtime = SentinelRuntime::from_pack(
         &verified,
         Some(&index_key),
-        &PreResolvedKey::new(payload_key),
+        &PreResolvedKey::new(*payload_key),
         embedder,
     )
     .map_err(|e| e.to_string())?;
@@ -128,15 +131,17 @@ pub async fn provision_from_pack(args: &PackArgs) -> Result<String, String> {
 
 /// Read a raw 32-byte payload key.
 ///
-/// Read into a fixed buffer rather than a growable one, so a wrong file is
-/// refused without being slurped whole and the key never lands in a heap
-/// allocation that outlives this call unzeroed.
-fn read_payload_key(path: &Path) -> Result<[u8; 32], String> {
+/// Read straight into a fixed, zeroizing buffer: a wrong file is refused
+/// without being read whole, and this function's copy of the key is wiped
+/// when the caller drops it. `PreResolvedKey::new` takes the key by value, so
+/// the one copy made for that call is a stack temporary nothing here can
+/// wipe; the key it then holds is zeroized by `PreResolvedKey` itself.
+fn read_payload_key(path: &Path) -> Result<Zeroizing<[u8; 32]>, String> {
     let unreadable =
         |e: std::io::Error| format!("cannot read the payload key {}: {e}", path.display());
     let mut file = std::fs::File::open(path).map_err(unreadable)?;
-    let mut key = [0u8; 32];
-    file.read_exact(&mut key)
+    let mut key = Zeroizing::new([0u8; 32]);
+    file.read_exact(key.as_mut())
         .map_err(|_| "the payload key file must be exactly 32 bytes".to_string())?;
     if file.read(&mut [0u8; 1]).map_err(unreadable)? != 0 {
         return Err("the payload key file must be exactly 32 bytes".to_string());
@@ -209,7 +214,7 @@ mod tests {
             }
         }
         assert_eq!(
-            read_payload_key(&dir.path().join("key-32")).unwrap(),
+            *read_payload_key(&dir.path().join("key-32")).unwrap(),
             [7u8; 32]
         );
     }

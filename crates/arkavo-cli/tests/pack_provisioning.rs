@@ -28,8 +28,8 @@ fn test_runtime() -> SentinelRuntime {
 #[test]
 fn provisioning_twice_is_refused() {
     arkavo_cli::sentinel_wiring::install();
-    let first = arkavo_cli::sentinel_wiring::provision(test_runtime());
-    assert!(first.is_ok());
+    arkavo_cli::sentinel_wiring::provision(test_runtime())
+        .expect("the first pack provisions into our policy");
     let second = arkavo_cli::sentinel_wiring::provision(test_runtime());
     assert!(second.unwrap_err().contains("already provisioned"));
 }
