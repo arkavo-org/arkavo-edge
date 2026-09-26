@@ -47,7 +47,9 @@ impl OpenTdfConfig {
 impl Default for OpenTdfConfig {
     fn default() -> Self {
         Self {
-            kas_url: "https://kas.arkavo.net".to_string(),
+            // The only published production KAS name; `kas.arkavo.net` has no
+            // DNS record, so a default pointing there wraps unrecoverable TDFs.
+            kas_url: "https://platform.arkavo.net".to_string(),
             segment_size: 2 * 1024 * 1024,
         }
     }
@@ -274,6 +276,14 @@ mod tests {
     use crate::PolicyBuilder;
     use arkavo_test_macros::spec;
     use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+
+    #[test]
+    fn default_kas_is_the_published_platform_host() {
+        assert_eq!(
+            OpenTdfConfig::default().kas_url,
+            "https://platform.arkavo.net"
+        );
+    }
 
     #[spec("TDF-001")]
     #[tokio::test]
