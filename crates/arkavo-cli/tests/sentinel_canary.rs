@@ -465,12 +465,31 @@ mod semantic_load {
         })
     }
 
-    /// A pack whose index carries a semantic section over `SEMANTIC_CANARY`,
-    /// sealed with the given manifest thresholds. Returns the temp directory
-    /// (kept alive so `load_pack` can still read the pack from disk), the
-    /// verified pack, and the payload key the index was wrapped under.
+    /// The wrap attribute a `recorded_ceiling` needs, in the taxonomy's own
+    /// vocabulary (`schemas/taxonomy-map.v1.json`'s clearance `order`), so a
+    /// fixture can wrap a component under exactly the clearance it will
+    /// record — satisfying `policy_covers_ceiling` regardless of what the
+    /// test wants the *content* check to do afterward.
+    fn clearance_attribute(ceiling: Classification) -> String {
+        let level = match ceiling {
+            Classification::Public => "public",
+            Classification::Internal => "internal",
+            Classification::Confidential => "confidential",
+            Classification::Restricted => "restricted",
+        };
+        format!("https://attr.arkavo.com/clearance/{level}")
+    }
+
+    /// A pack whose index carries a semantic section over `SEMANTIC_CANARY`
+    /// at `document_sensitivity`, sealed with the given manifest thresholds
+    /// and recorded (and wrapped) at `recorded_ceiling`. Returns the temp
+    /// directory (kept alive so `load_pack` can still read the pack from
+    /// disk), the verified pack, and the payload key the index was wrapped
+    /// under.
     fn sealed_pack_with_semantic_index(
         thresholds: serde_json::Value,
+        document_sensitivity: SensitivityLevel,
+        recorded_ceiling: Classification,
     ) -> (
         tempfile::TempDir,
         arkavo_knowledge_pack::VerifiedPack,
@@ -500,7 +519,7 @@ mod semantic_load {
                 },
                 SEMANTIC_CANARY,
                 DataCategory::Internal,
-                SensitivityLevel::Confidential,
+                document_sensitivity,
                 "board-minutes",
             )
             .expect("add document");
@@ -527,7 +546,7 @@ mod semantic_load {
         let blob = seal_blob(
             &serde_json::to_vec(&indexes).expect("serialize"),
             &wrapper,
-            &["https://attr.arkavo.com/clearance/confidential".to_string()],
+            &[clearance_attribute(recorded_ceiling)],
             "application/json",
         )
         .expect("seal");
@@ -544,7 +563,7 @@ mod semantic_load {
             .add_component(
                 &staging.join("index.tdf"),
                 ComponentRole::Index,
-                Some(Classification::Confidential),
+                Some(recorded_ceiling),
             )
             .expect("component");
         let signing = AgentKeypair::generate();
@@ -559,8 +578,11 @@ mod semantic_load {
     /// when no embedder is provisioned to score it.
     #[test]
     fn a_semantic_index_without_an_embedder_is_refused() {
-        let (_dir, verified, payload_key) =
-            sealed_pack_with_semantic_index(thresholds_with_semantic());
+        let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
+            thresholds_with_semantic(),
+            SensitivityLevel::Confidential,
+            Classification::Confidential,
+        );
         let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
 
         let refused = load_pack(
@@ -578,8 +600,11 @@ mod semantic_load {
     /// through `LoadError::Semantic` rather than panicking or swallowing it.
     #[test]
     fn a_mismatched_embedder_is_refused_as_a_semantic_load_error() {
-        let (_dir, verified, payload_key) =
-            sealed_pack_with_semantic_index(thresholds_with_semantic());
+        let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
+            thresholds_with_semantic(),
+            SensitivityLevel::Confidential,
+            Classification::Confidential,
+        );
         let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
         let wrong_embedder: Arc<dyn Embedder> = Arc::new(WordHashEmbedder {
             digest: OTHER_DIGEST,
@@ -599,8 +624,11 @@ mod semantic_load {
     /// cascade like any other.
     #[test]
     fn a_matching_embedder_adds_the_semantic_tier_to_the_cascade() {
-        let (_dir, verified, payload_key) =
-            sealed_pack_with_semantic_index(thresholds_with_semantic());
+        let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
+            thresholds_with_semantic(),
+            SensitivityLevel::Confidential,
+            Classification::Confidential,
+        );
         let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
         let embedder: Arc<dyn Embedder> = Arc::new(WordHashEmbedder {
             digest: EMBEDDER_DIGEST,
@@ -633,7 +661,11 @@ mod semantic_load {
             "taxonomy_version": "1.0.0",
             "thresholds": {},
         });
-        let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(bare_sentinel_table);
+        let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
+            bare_sentinel_table,
+            SensitivityLevel::Confidential,
+            Classification::Confidential,
+        );
         let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
         let embedder: Arc<dyn Embedder> = Arc::new(WordHashEmbedder {
             digest: EMBEDDER_DIGEST,
@@ -647,5 +679,36 @@ mod semantic_load {
         );
 
         assert!(matches!(refused, Err(LoadError::NoSemanticThresholds)));
+    }
+
+    /// KP-006: a recorded ceiling below the content it covers is a lie the
+    /// policy pre-check would faithfully enforce, so the content gets the
+    /// last word — mirroring `pack_test.rs`'s
+    /// `a_ceiling_below_the_content_it_covers_is_refused`, but for an index
+    /// whose *only* section is semantic. Without the
+    /// `.max(indexes.semantic...)` fold in `open_indexes`'s content
+    /// computation, this pack's content would read back `Public` (the empty
+    /// reference index) and the ceiling check would pass it wrongly.
+    #[test]
+    fn a_semantic_ceiling_below_its_content_is_refused() {
+        let (_dir, verified, payload_key) = sealed_pack_with_semantic_index(
+            thresholds_with_semantic(),
+            SensitivityLevel::Restricted,
+            Classification::Internal,
+        );
+        let key = Arc::new(IndexKey::derive(&[31u8; 32], "semantic-load").expect("derive"));
+
+        let refused = load_pack(
+            &verified,
+            Some(&key),
+            &PreResolvedKey::new(payload_key),
+            None,
+        );
+
+        let message = match refused {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("a semantic section recorded below its own content must not be loaded"),
+        };
+        assert!(message.contains("classified"), "{message}");
     }
 }

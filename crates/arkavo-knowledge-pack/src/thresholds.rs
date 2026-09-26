@@ -44,6 +44,13 @@ pub fn read_thresholds(
             "thresholds must be a JSON object".to_string(),
         ));
     };
+    if obj.is_empty() {
+        // `{}` names no tier at all. Before the two-tier reader existed this
+        // shape was refused too — `CalibrationTable` has no serde default, so
+        // an empty object never deserialized into one — and an object with no
+        // keys is exactly as uncalibrated as no thresholds at all.
+        return Err(LoadError::NoThresholds);
+    }
     if obj.contains_key("detector_version") {
         return Ok(PackThresholds {
             sentinel: Some(parse_sentinel(value, taxonomy_version)?),
@@ -147,6 +154,19 @@ mod tests {
     fn null_thresholds_are_still_refused() {
         assert!(matches!(
             read_thresholds(&serde_json::Value::Null, "1.0.0"),
+            Err(LoadError::NoThresholds)
+        ));
+    }
+
+    /// An empty object names no tier at all. Before the semantic tier existed
+    /// this shape was refused too, because `CalibrationTable` has no serde
+    /// default and `{}` does not deserialize into one; the two-tier reader
+    /// must not accidentally re-open that as "calibrated for nothing, and
+    /// that's fine."
+    #[test]
+    fn empty_thresholds_are_refused() {
+        assert!(matches!(
+            read_thresholds(&serde_json::json!({}), "1.0.0"),
             Err(LoadError::NoThresholds)
         ));
     }
