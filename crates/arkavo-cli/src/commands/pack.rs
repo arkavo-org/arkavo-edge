@@ -237,6 +237,10 @@ fn build_index(args: &[String]) -> Result<(), String> {
     let indexes = arkavo_knowledge_pack::PackIndexes {
         reference: index,
         near: Some(near),
+        // This command builds the keyed tiers only; the semantic section
+        // needs an embedder to produce vectors, which this command does not
+        // load.
+        semantic: None,
     };
     let encoded =
         serde_json::to_vec(&indexes).map_err(|e| format!("cannot serialize the index: {e}"))?;
