@@ -12,7 +12,7 @@ use arkavo_gguf_tdf::{
 };
 use arkavo_knowledge_pack::{
     EVAL_EVIDENCE_FILE, Entitlements, Lineage, PackBuilder, PackIndexes, SelectionError,
-    VerifyError, load_pack, seal_blob, select_adapters, verify_pack,
+    VerifyError, digest_of, load_pack, seal_blob, select_adapters, verify_pack,
 };
 use arkavo_protocol::data_classification::{DataCategory, SensitivityLevel};
 use arkavo_test_macros::spec;
@@ -924,4 +924,45 @@ fn a_pack_without_recorded_evidence_verifies_as_before() {
     let fixture = build_pack();
 
     assert!(verify_pack(&pack_root(&fixture), Some(&fixture.key.public_key())).is_ok());
+}
+
+/// The happy path the tamper/missing tests above assume: a freshly sealed
+/// pack with untouched evidence verifies, the file on disk is byte-identical
+/// to the source that was bound in, and the manifest's recorded digest is the
+/// digest of that same source.
+#[test]
+fn untampered_eval_evidence_verifies_and_matches_its_source() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let evidence: &[u8] = br#"{"suite":"v1","fpr":0.01}"#;
+    let (root, key) = build_pack_with_evidence(dir.path(), evidence);
+
+    let verified =
+        verify_pack(&root, Some(&key.public_key())).expect("untampered evidence verifies");
+
+    let on_disk = std::fs::read(root.join(EVAL_EVIDENCE_FILE)).expect("read evidence");
+    assert_eq!(on_disk, evidence, "the bound file travels byte-for-byte");
+    assert_eq!(
+        verified.manifest.eval_evidence_digest.as_deref(),
+        Some(digest_of(evidence).as_str()),
+        "the recorded digest is the digest of the source bytes"
+    );
+}
+
+/// A non-`NotFound` I/O error reading the evidence file — here, something
+/// occupies its name that isn't a file at all — must not be collapsed into
+/// "missing". Missing and unreadable are different failures with different
+/// remedies, exactly as the component loop above already distinguishes them.
+#[test]
+fn an_unreadable_eval_evidence_file_is_reported_as_a_read_error_not_missing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (root, key) = build_pack_with_evidence(dir.path(), br#"{"suite":"v1","fpr":0.01}"#);
+    std::fs::remove_file(root.join(EVAL_EVIDENCE_FILE)).expect("remove");
+    std::fs::create_dir(root.join(EVAL_EVIDENCE_FILE)).expect("put a directory in its place");
+
+    let refused = verify_pack(&root, Some(&key.public_key()));
+
+    assert!(
+        matches!(refused, Err(VerifyError::Read { .. })),
+        "{refused:?}"
+    );
 }

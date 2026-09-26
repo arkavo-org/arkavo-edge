@@ -122,9 +122,19 @@ pub fn verify_pack(
 
     if let Some(expected) = &manifest.eval_evidence_digest {
         // The evidence travels with the manifest wherever it goes: a stripped
-        // pack must not verify while claiming numbers it does not carry.
-        let bytes = std::fs::read(root.join(EVAL_EVIDENCE_FILE))
-            .map_err(|_| VerifyError::EvalEvidenceMissing)?;
+        // pack must not verify while claiming numbers it does not carry. Only
+        // a genuinely absent file is "missing" — mirrors the component loop
+        // above, so a permissions problem or other I/O failure surfaces as
+        // itself rather than being reported as if the evidence were never
+        // bound at all.
+        let path = root.join(EVAL_EVIDENCE_FILE);
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(VerifyError::EvalEvidenceMissing);
+            }
+            Err(e) => return Err(VerifyError::Read { path, source: e }),
+        };
         if &digest_of(&bytes) != expected {
             return Err(VerifyError::EvalEvidenceMismatch {
                 expected: expected.clone(),
