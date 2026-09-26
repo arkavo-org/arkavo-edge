@@ -64,6 +64,10 @@ class LocalServer:
     def __init__(self, url):
         require_loopback(url)
         self.url = url.rstrip("/") + "/v1/chat/completions"
+        # urllib's default opener honours http_proxy and friends, which would
+        # route the confidential chunks off this machine despite the check
+        # above. An empty ProxyHandler turns every proxy off.
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def chat(self, prompt, max_tokens, temperature, seed):
         body = json.dumps(
@@ -78,7 +82,7 @@ class LocalServer:
         request = urllib.request.Request(
             self.url, data=body, headers={"content-type": "application/json"}
         )
-        with urllib.request.urlopen(request, timeout=600) as response:
+        with self._opener.open(request, timeout=600) as response:
             reply = json.load(response)
         return strip_thinking(reply["choices"][0]["message"].get("content") or "")
 
