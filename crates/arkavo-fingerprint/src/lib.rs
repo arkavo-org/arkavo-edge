@@ -14,7 +14,9 @@ pub mod index;
 pub mod key;
 pub mod near_tier;
 pub mod reference_match;
+pub mod semantic_calibration;
 pub mod semantic_index;
+pub mod semantic_tier;
 pub mod shingle;
 pub mod simhash;
 pub mod tier;
@@ -29,10 +31,14 @@ pub use index::{
 };
 pub use key::{IndexKey, KeyError, MIN_SECRET_BYTES, ShingleHash};
 pub use near_tier::{NEAR_TIER_BUDGET, NEAR_TIER_NAME, NearDuplicateTier};
+pub use semantic_calibration::{
+    CalibrationSample, LabelEvidence, SemanticCalibration, SemanticEvalEvidence, calibrate,
+};
 pub use semantic_index::{
     EmbedderRecord, SEMANTIC_FORMAT_VERSION, SemanticIndex, SemanticIndexBuilder, SemanticMatch,
     label_key,
 };
+pub use semantic_tier::{SEMANTIC_CONFIDENCE, SEMANTIC_TIER_NAME, SemanticTier};
 pub use shingle::{SHINGLE_WORDS, normalize, shingle_text, shingles, windows};
 pub use simhash::{
     MAX_DOCUMENTS, MAX_HAMMING, MIN_SHINGLES, NearDuplicateIndex, NearDuplicateIndexBuilder,
