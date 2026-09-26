@@ -95,7 +95,7 @@ def main(argv=None):
     for key in sorted(counts):
         print(f"{key}: {counts[key]}")
     families = {r["family"] for r in mapped if r["label"] == CONFIDENTIAL}
-    print(f"families[{CONFIDENTIAL}]: {len(families)}")
+    print(f"confidential families: {len(families)}")
     print(f"wrote {len(mapped)} rows to {args.out}")
     return 0
 
