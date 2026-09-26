@@ -170,7 +170,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.94.1"
+version = "0.95.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -449,4 +449,11 @@ opt-level = 3
 [profile.dev.package.sha2]
 opt-level = 3
 [profile.dev.package.digest]
+opt-level = 3
+
+# Semantic tier: every check scores each prompt unit against every stored
+# int8 vector and anchor. At opt-level 0 that loop runs unvectorised, so the
+# per-check latency a debug run reports would describe the profile rather
+# than the tier.
+[profile.dev.package.arkavo-fingerprint]
 opt-level = 3
