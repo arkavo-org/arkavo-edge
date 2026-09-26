@@ -26,6 +26,9 @@ pub const PACK_MANIFEST_FILE: &str = "manifest.json";
 /// File name of the detached signature over the manifest bytes.
 pub const PACK_SIGNATURE_FILE: &str = "manifest.sig";
 
+/// File name of the bound evaluation evidence, when a pack carries one.
+pub const EVAL_EVIDENCE_FILE: &str = "eval-evidence.json";
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ManifestError {
     #[error("manifest is not valid JSON: {0}")]
@@ -120,11 +123,13 @@ pub struct PackManifest {
     /// was not trained against.
     pub tokenizer: String,
     pub components: Vec<ComponentRecord>,
-    /// Calibrated per-label thresholds, carried as the calibration table's own
-    /// wire form. Opaque here on purpose: the manifest binds and signs them;
-    /// interpreting them is the runtime's job, and a manifest that could
-    /// interpret them would need to agree with the runtime's version of the
-    /// type forever.
+    /// Calibrated per-tier thresholds, carried in whichever tier's own wire
+    /// form applies: a bare calibration table for the sentinel tier alone, or
+    /// an object keyed by tier name (`"sentinel"`, `"semantic"`) when more than
+    /// one tier is calibrated. Opaque here on purpose: the manifest binds and
+    /// signs them; interpreting them is the runtime's job, and a manifest that
+    /// could interpret them would need to agree with the runtime's version of
+    /// the type forever.
     pub thresholds: serde_json::Value,
     pub lineage: Lineage,
     #[serde(default, skip_serializing_if = "Option::is_none")]

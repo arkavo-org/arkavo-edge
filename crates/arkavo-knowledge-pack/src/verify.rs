@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 use arkavo_crypto::AgentPublicKey;
 
 use crate::manifest::{
-    ManifestError, PACK_MANIFEST_FILE, PACK_SIGNATURE_FILE, PackManifest, digest_of,
+    EVAL_EVIDENCE_FILE, ManifestError, PACK_MANIFEST_FILE, PACK_SIGNATURE_FILE, PackManifest,
+    digest_of,
 };
 use crate::sign::{SignatureError, decode_signature, verify_manifest};
 
@@ -34,6 +35,12 @@ pub enum VerifyError {
     Manifest(#[from] ManifestError),
     #[error("component {file} does not match its manifest digest (expected {expected})")]
     DigestMismatch { file: String, expected: String },
+    #[error(
+        "the manifest records eval evidence but {EVAL_EVIDENCE_FILE} is not present in the pack"
+    )]
+    EvalEvidenceMissing,
+    #[error("eval evidence does not match its manifest digest (expected {expected})")]
+    EvalEvidenceMismatch { expected: String },
 }
 
 /// A pack whose manifest verified, and what of it is actually here.
@@ -110,6 +117,18 @@ pub fn verify_pack(
             Err(e) => {
                 return Err(VerifyError::Read { path, source: e });
             }
+        }
+    }
+
+    if let Some(expected) = &manifest.eval_evidence_digest {
+        // The evidence travels with the manifest wherever it goes: a stripped
+        // pack must not verify while claiming numbers it does not carry.
+        let bytes = std::fs::read(root.join(EVAL_EVIDENCE_FILE))
+            .map_err(|_| VerifyError::EvalEvidenceMissing)?;
+        if &digest_of(&bytes) != expected {
+            return Err(VerifyError::EvalEvidenceMismatch {
+                expected: expected.clone(),
+            });
         }
     }
 

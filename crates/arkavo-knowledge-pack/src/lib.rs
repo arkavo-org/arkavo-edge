@@ -20,8 +20,8 @@ pub use assemble::{AssembleError, PackBuilder};
 pub use blob::{MAX_BLOB_BYTES, SealedBlob, open_blob, seal_blob};
 pub use load::{LoadError, LoadedPack, PackIndexes, load_pack};
 pub use manifest::{
-    ComponentRecord, Lineage, ManifestError, PACK_FORMAT_VERSION, PACK_MANIFEST_FILE,
-    PACK_SIGNATURE_FILE, PackManifest, digest_of,
+    ComponentRecord, EVAL_EVIDENCE_FILE, Lineage, ManifestError, PACK_FORMAT_VERSION,
+    PACK_MANIFEST_FILE, PACK_SIGNATURE_FILE, PackManifest, digest_of,
 };
 pub use selection::{Entitlements, Selection, SelectionError, select_adapters};
 pub use sign::{

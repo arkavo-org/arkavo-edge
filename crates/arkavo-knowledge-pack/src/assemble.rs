@@ -13,8 +13,8 @@ use arkavo_crypto::AgentKeypair;
 use arkavo_gguf_tdf::{Classification, ComponentRole};
 
 use crate::manifest::{
-    ComponentRecord, Lineage, ManifestError, PACK_FORMAT_VERSION, PACK_MANIFEST_FILE,
-    PACK_SIGNATURE_FILE, PackManifest,
+    ComponentRecord, EVAL_EVIDENCE_FILE, Lineage, ManifestError, PACK_FORMAT_VERSION,
+    PACK_MANIFEST_FILE, PACK_SIGNATURE_FILE, PackManifest, digest_of,
 };
 use crate::sign::{encode_signature, sign_manifest};
 
@@ -41,6 +41,9 @@ pub struct PackBuilder {
     manifest: PackManifest,
     /// Source paths, parallel to `manifest.components`, copied at build time.
     sources: Vec<PathBuf>,
+    /// Source path of the eval-evidence file, if bound. Read and digested at
+    /// `build` time, once the evidence's own bytes are final.
+    eval_evidence_source: Option<PathBuf>,
 }
 
 impl PackBuilder {
@@ -62,6 +65,7 @@ impl PackBuilder {
                 eval_evidence_digest: None,
             },
             sources: Vec::new(),
+            eval_evidence_source: None,
         }
     }
 
@@ -83,9 +87,13 @@ impl PackBuilder {
         self
     }
 
+    /// Bind an eval-evidence file into the pack. The file is copied to
+    /// `EVAL_EVIDENCE_FILE` at `build` time and its digest recorded in the
+    /// manifest, so a stripped pack cannot verify while still claiming the
+    /// numbers the evidence carries.
     #[must_use]
-    pub fn with_eval_evidence(mut self, digest: impl Into<String>) -> Self {
-        self.manifest.eval_evidence_digest = Some(digest.into());
+    pub fn with_eval_evidence_file(mut self, path: &Path) -> Self {
+        self.eval_evidence_source = Some(path.to_path_buf());
         self
     }
 
@@ -120,7 +128,7 @@ impl PackBuilder {
     }
 
     /// Write the pack, signing the manifest bytes exactly as written.
-    pub fn build(self, dest: &Path, key: &AgentKeypair) -> Result<PackManifest, AssembleError> {
+    pub fn build(mut self, dest: &Path, key: &AgentKeypair) -> Result<PackManifest, AssembleError> {
         self.manifest.check()?;
         std::fs::create_dir_all(dest).map_err(|e| AssembleError::Write {
             path: dest.to_path_buf(),
@@ -135,6 +143,17 @@ impl PackBuilder {
                     source: e,
                 })?;
             }
+        }
+
+        // Digested and copied before the manifest is serialized, so the
+        // recorded digest always matches the bytes actually shipped.
+        if let Some(source) = &self.eval_evidence_source {
+            let bytes = std::fs::read(source).map_err(|e| AssembleError::Read {
+                path: source.clone(),
+                source: e,
+            })?;
+            self.manifest.eval_evidence_digest = Some(digest_of(&bytes));
+            write(&dest.join(EVAL_EVIDENCE_FILE), &bytes)?;
         }
 
         // Signed after every component is in place, so a signature never

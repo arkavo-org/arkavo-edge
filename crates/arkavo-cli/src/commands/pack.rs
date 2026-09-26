@@ -68,8 +68,13 @@ fn print_help() {
     println!("  --pack-id <ID>        Identity of the pack being built");
     println!("  --taxonomy-version <V>  Taxonomy map version the pack was derived against");
     println!("  --tokenizer <NAME>    Tokenizer identity");
-    println!("  --thresholds <PATH>   Calibration table JSON bound into the manifest");
+    println!(
+        "  --thresholds [<TIER>:]<PATH>  Calibration table JSON for a tier (sentinel|semantic;"
+    );
+    println!("                        default sentinel), repeatable; one sentinel table is bound");
+    println!("                        bare, more than one tier as an object keyed by tier");
     println!("  --component <PATH>:<ROLE>[:<CEILING>]  A component and its role");
+    println!("  --eval-evidence <PATH>  Evaluation evidence file bound into the pack and digested");
     println!("  --parent <ID>:<DIGEST>  Parent pack lineage (default: root)");
     println!("\nVerify options:");
     println!("  --pack <DIR>          Pack directory to verify");
