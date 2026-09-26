@@ -92,7 +92,7 @@ Not defensible:
   five-word phrase shared with the corpus. The Phase 7 golden set is still to
   come.
 - "Runs on a Raspberry Pi 5" — not measured. A pack with a semantic section
-  took 1.5 GB resident to open and 2.6 GB peak on an M4 Max.
+  took 1.5 GB resident to open and 2.7 GB peak on an M4 Max.
 - "Revoke a leaked document" — revocation is capsule-side and unbuilt.
 - "Per-department model access" — adapter selection is real; adapter *loading*
   is blocked on an upstream API.
@@ -231,21 +231,24 @@ commands that produced each are in
 | One keyed shingle hash | 50 ns | — | BLAKE3 keyed mode, one pass |
 | Reference tier, matching span | 1.23 µs | 25 µs | A hit costs no more than a miss plus the probe |
 | Reference tier, clean span | 580 ns | 25 µs | — |
-| Holdback window latency, Internal ceiling, semantic pack — p50 | 30.48 ms | — | What a reader waits for one 256-byte window to clear; the embedding model is in the window path |
-| Holdback window latency, Internal ceiling, semantic pack — p95 | 33.92 ms | — | Tail is flat |
-| Holdback window latency, Internal ceiling, semantic pack — p99 | 34.14 ms | — | Same |
-| Per-check latency, 50-word prompt — p50 / p95 | 30.37 / 30.57 ms | — | Whole cascade, semantic tier included |
-| Per-check latency, 2000-word prompt — p50 / p95 | 884.85 / 885.83 ms | — | Grows with the number of 96-word units |
+| Holdback window latency, Internal ceiling, semantic pack — p50 | 30.46 ms | — | What a reader waits for one 256-byte window to clear; the embedding model is in the window path |
+| Holdback window latency, Internal ceiling, semantic pack — p95 | 33.90 ms | — | Tail is flat |
+| Holdback window latency, Internal ceiling, semantic pack — p99 | 34.06 ms | — | Same |
+| Per-check latency, 50-word prompt — p50 / p95 | 30.40 / 30.77 ms | — | Whole cascade, semantic tier included |
+| Per-check latency, 2000-word prompt — p50 / p95 | 885.60 / 886.78 ms | — | Grows with the number of units (96 words, at most 1536 characters each) |
 | Semantic recall, held-out rewrites | 111/120 (92.5%) | — | Threshold fitted at 1% false positives on other families |
 | Semantic recall, held-out translations | 100/116 (86.2%) | — | Spanish, French, German, Chinese |
 | Semantic false positives, held-out long / short benign prompts | 0.86% / 0.00% | 1% | 3/350 and 0/299 |
 | Whole-cascade false positives, held-out long benign prompts | 7.7% | — | 27/350; the exact tier causes 24 |
-| Resident memory after opening the pack | 1.5 GB | — | 1515 MB: decrypted index plus the loaded embedding model |
+| Resident memory after opening the pack | 1.5 GB | — | 1548 MB: decrypted index plus the loaded embedding model |
 
 The holdback rows replace the earlier 6.21 µs p50, which timed a cascade
 without the semantic tier. At Confidential and above nothing streams
-partially (SENT-009), so a reader waits for one inspection of the whole
-completion instead of a window.
+partially (SENT-009), and under `chat --pack` each completion is inspected
+twice: once by the critic's `SentinelCheck`, which records evidence, and once
+by the release gate. A reader therefore waits roughly twice the per-check
+latency above for the completion's length, not one inspection and not a
+window.
 
 Print the recall and false-positive figures only with their conditions: one
 corpus, one embedding model, paraphrases written by one local model, and
