@@ -78,8 +78,8 @@
 //!
 //! ```ignore
 //! use anthropic_agent_sdk::mcp::{
-//!     tool, tool_router, tool_handler, Parameters, ServerCapabilities, ServerHandler,
-//!     ServerInfo, ToolRouter,
+//!     tool, tool_router, tool_handler, Implementation, Parameters, ServerCapabilities,
+//!     ServerConfig, ServerHandler, ToolRouter,
 //! };
 //! use schemars::JsonSchema;
 //! use serde::Deserialize;
@@ -107,16 +107,12 @@
 //!
 //! #[tool_handler]
 //! impl ServerHandler for Calculator {
-//!     fn get_info(&self) -> ServerInfo {
-//!         ServerInfo {
-//!             capabilities: ServerCapabilities::builder().enable_tools().build(),
-//!             ..Default::default()
-//!         }
+//!     fn get_info(&self) -> ServerConfig {
+//!         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+//!             .with_server_info(Implementation::new("calculator", "1.0.0"))
 //!     }
 //! }
 //! ```
-//!
-//! See `examples/mcp_server.rs` for a complete demo.
 //!
 //! ### 4. Hooks for Custom Behavior
 //!
