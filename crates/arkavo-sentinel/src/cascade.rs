@@ -42,6 +42,12 @@ pub trait CascadeTier: Send + Sync {
         true
     }
 
+    /// Whether this tier judges spans too short for other tiers. A completed
+    /// report from such a tier closes their out-of-scope gaps.
+    fn covers_short_spans(&self) -> bool {
+        false
+    }
+
     /// Examine a span, stopping at the cascade's deadline.
     fn examine_until(&self, text: &str, deadline: Instant) -> TierReport;
 
@@ -122,7 +128,9 @@ impl Cascade {
     pub fn inspect_until(&self, text: &str, deadline: Instant) -> ClassificationEvidence {
         let mut evidence = ClassificationEvidence::new(&self.taxonomy_version);
         for tier in &self.tiers {
-            evidence.push_tier(tier.examine_until(text, deadline));
+            let mut report = tier.examine_until(text, deadline);
+            report.covers_short_spans = tier.covers_short_spans();
+            evidence.push_tier(report);
         }
         evidence
     }
@@ -131,7 +139,9 @@ impl Cascade {
     pub fn inspect_unbudgeted(&self, text: &str) -> ClassificationEvidence {
         let mut evidence = ClassificationEvidence::new(&self.taxonomy_version);
         for tier in &self.tiers {
-            evidence.push_tier(tier.examine_unbudgeted(text));
+            let mut report = tier.examine_unbudgeted(text);
+            report.covers_short_spans = tier.covers_short_spans();
+            evidence.push_tier(report);
         }
         evidence
     }
@@ -187,6 +197,7 @@ mod tests {
         order: Arc<Mutex<Vec<String>>>,
         finding: Option<LabelFinding>,
         available: bool,
+        covers: bool,
     }
 
     impl Recording {
@@ -196,6 +207,7 @@ mod tests {
                 order,
                 finding: None,
                 available: true,
+                covers: false,
             }
         }
 
@@ -214,6 +226,11 @@ mod tests {
             self
         }
 
+        fn covering(mut self) -> Self {
+            self.covers = true;
+            self
+        }
+
         fn report(&self) -> TierReport {
             self.order.lock().expect("lock").push(self.name.clone());
             if !self.available {
@@ -226,6 +243,10 @@ mod tests {
     impl CascadeTier for Recording {
         fn name(&self) -> &str {
             &self.name
+        }
+
+        fn covers_short_spans(&self) -> bool {
+            self.covers
         }
 
         fn examine_until(&self, _text: &str, _deadline: Instant) -> TierReport {
@@ -390,5 +411,18 @@ mod tests {
 
         assert!(!evidence.has_gap());
         assert_eq!(cascade.absent_tiers().len(), 1);
+    }
+
+    #[test]
+    fn the_cascade_stamps_short_span_coverage_on_each_report() {
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let cascade = Cascade::new("1.0.0")
+            .with_tier(Arc::new(Recording::new("exact", order.clone())))
+            .with_tier(Arc::new(Recording::new("semantic", order).covering()));
+
+        let evidence = cascade.inspect_unbudgeted("ok");
+
+        assert!(!evidence.tiers[0].covers_short_spans);
+        assert!(evidence.tiers[1].covers_short_spans);
     }
 }
