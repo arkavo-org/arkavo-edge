@@ -1,4 +1,4 @@
-//! Calibrating semantic margins into thresholds (spec: "Calibration").
+//! Calibrating semantic margins into thresholds.
 //!
 //! A margin is not a probability: it is a bare `cos - cos` that can be
 //! negative, has no fixed scale across labels, and means nothing until it is
@@ -40,7 +40,9 @@ impl SemanticCalibration {
 pub struct CalibrationSample {
     pub text: String,
     /// Which corpus family this sample belongs to, for the family-level
-    /// fit/held-out split. Never corpus-derived text (see constraints.md).
+    /// fit/held-out split. Never corpus-derived text: family ids are stored
+    /// in the sealed index and surface in audit evidence, so a family named
+    /// after a document title would leak that title.
     pub family: String,
     /// `Some(label_key)` for a positive; `None` for a negative.
     pub label: Option<String>,
@@ -111,7 +113,7 @@ fn score_for(scores: &BTreeMap<String, f32>, label: &str) -> f32 {
 /// Calibrate one threshold per label the index holds, at `target_fpr` measured
 /// on a held-out family split.
 ///
-/// Rules (spec, implemented exactly):
+/// Rules:
 /// - `target_fpr` must be a finite number in `(0.0, 1.0)` — a rate outside
 ///   that range has no held-out fraction it could mean, and (for 1.0
 ///   specifically) indexes one past the end of the sorted score list rather
@@ -591,7 +593,7 @@ mod tests {
         (idx, positives, negatives)
     }
 
-    /// Controller ruling: positives are split into fit/held-out families
+    /// Positives are split into fit/held-out families
     /// *per label*, not once over the whole positive set. Label A's positives
     /// live in families {a, c} and label B's live in {b, d}; a single split
     /// over all of them (sorted: a, b, c, d -> fit {a, c}, held-out {b, d})

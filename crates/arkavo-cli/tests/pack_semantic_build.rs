@@ -521,7 +521,7 @@ fn percentile(sorted: &[std::time::Duration], p: f64) -> f64 {
 }
 
 /// Per-check latency by prompt length and holdback window latency at an
-/// Internal ceiling, against a real sealed pack (spec: "Measurements").
+/// Internal ceiling, against a real sealed pack.
 ///
 /// Ignored because it needs a measurement run's pack and keys; see
 /// `MeasuredPack` for the environment it reads. Run with:

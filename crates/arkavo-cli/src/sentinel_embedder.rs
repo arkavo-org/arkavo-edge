@@ -1,9 +1,12 @@
 //! Runs the semantic tier's embedding model on llama.cpp, and fetches a
 //! pinned embedder from HuggingFace by digest.
 //!
-//! `arkavo-fingerprint` stays pure Rust (spec: "no C++, no llama dependency
-//! in the fingerprint crate"); this is the adapter that plugs a real model
-//! into its `Embedder` trait.
+//! `arkavo-fingerprint` stays pure Rust, with no llama.cpp dependency:
+//! `arkavo-knowledge-pack` and `arkavo-sentinel` build on it, and the
+//! `knowledge-pack` feature compiles without C++, so a model binding there
+//! would drag C++ into every consumer. This is the adapter that plugs a real
+//! model into its `Embedder` trait, on the `sentinel` side that already links
+//! llama.cpp.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};

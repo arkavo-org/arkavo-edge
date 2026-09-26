@@ -2,8 +2,10 @@
 //!
 //! `manifest.thresholds` is one JSON value that must serve two independent
 //! calibrations: `CalibrationTable` for the keyed tiers and
-//! `SemanticCalibration` for the embedding tier (see constraints.md — a margin
-//! is not a `Confidence` and cannot share the sentinel type). A manifest built
+//! `SemanticCalibration` for the embedding tier. They cannot share one type:
+//! `CalibrationTable` thresholds are `Confidence`s, clamped to `0.0..=1.0`,
+//! while a semantic margin is a `cos - cos` difference that can be negative
+//! and would be silently clamped into a different threshold. A manifest built
 //! before the semantic tier existed still carries a bare `CalibrationTable`,
 //! so that shape is read as the sentinel tier rather than refused. Both shapes
 //! are pinned to the manifest's own taxonomy version here, once, so `load.rs`
