@@ -12,7 +12,7 @@ use arkavo_tdf_iroh::{IrohNode, IrohTransport};
 #[tokio::test]
 async fn opentdf_encrypt_iroh_transport() {
     // Create encryption service with KAS URL
-    let tdf_service = OpenTdfService::with_kas_url("https://kas.arkavo.net");
+    let tdf_service = OpenTdfService::with_kas_url("https://platform.arkavo.net");
 
     // Create Iroh transport
     let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
