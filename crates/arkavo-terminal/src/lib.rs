@@ -904,7 +904,7 @@ fn extract_tool_calls(response: &str) -> Vec<(String, String)> {
     tool_calls
 }
 
-pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
+pub async fn run_task_view(task_id: &str) -> Result<()> {
     use crate::app::App;
     use tokio::sync::mpsc;
 
@@ -926,10 +926,10 @@ pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
 
     // Configure the app for task-specific view
     // These methods would be added to App in a full implementation
-    // app.set_title(&format!("Task: {} (Session: {})", task_id, session_id));
     // app.set_read_only(false); // Allow interaction in task view
-    let session_tag = String::from(&session_id[..8.min(session_id.len())]);
-    println!("Running task view for task: {task_id} in session: {session_tag}...");
+    // Session identifiers are credentials for the owning session, so even a
+    // prefix must stay out of terminal output and logs.
+    println!("Running task view for task: {task_id}...");
 
     // Handle task-specific events
     tokio::spawn(async move {

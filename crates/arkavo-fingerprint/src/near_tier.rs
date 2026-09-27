@@ -141,10 +141,12 @@ impl NearDuplicateTier {
 
     /// Turn a fingerprint into a report, or say why there is none.
     ///
-    /// A span too short to fingerprint reliably is reported as a gap, not as a
-    /// clean miss. The distinction matters: this tier cannot see a short span,
-    /// and letting that read as "nothing here" is how a cascade quietly stops
-    /// covering the sizes it was never able to cover.
+    /// A span too short to fingerprint reliably is out of this tier's scope,
+    /// not a clean miss: this tier cannot see a short span, and letting that
+    /// read as "nothing here" is how a cascade quietly stops covering the
+    /// sizes it was never able to cover. It is still a gap on its own — the
+    /// cascade only closes it when some tier that covers short spans judged
+    /// the same span.
     fn judge(
         &self,
         index: &NearDuplicateIndex,
@@ -162,7 +164,7 @@ impl NearDuplicateTier {
                     ),
                 }
             }
-            Some((_, shingles)) => TierReport::unavailable(
+            Some((_, shingles)) => TierReport::out_of_scope(
                 NEAR_TIER_NAME,
                 self.version(),
                 format!(
@@ -170,7 +172,7 @@ impl NearDuplicateTier {
                 ),
             ),
             None => {
-                TierReport::unavailable(NEAR_TIER_NAME, self.version(), "no words to fingerprint")
+                TierReport::out_of_scope(NEAR_TIER_NAME, self.version(), "no words to fingerprint")
             }
         }
     }
@@ -295,15 +297,17 @@ mod tests {
         assert!(tier.examine(&document(1)).is_unavailable());
     }
 
-    /// A span this tier cannot judge is a gap, not a clean miss.
+    /// A span this tier cannot judge is out of its scope — still a gap on its
+    /// own, but one a tier that covers short spans can close.
     #[spec("SENT-006")]
     #[test]
-    fn a_span_too_short_to_fingerprint_is_a_gap() {
+    fn a_span_too_short_to_fingerprint_is_out_of_scope() {
         let key = key();
 
         let report = tier(&key).examine_unbudgeted("a short line of text");
 
-        assert!(report.is_unavailable());
+        assert!(report.is_out_of_scope());
+        assert!(!report.is_unavailable());
     }
 
     #[test]

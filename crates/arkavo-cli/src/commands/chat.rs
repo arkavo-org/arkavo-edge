@@ -93,14 +93,33 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let flags = parse_cli_args(args)?;
+    #[cfg(feature = "sentinel")]
+    let pack = super::chat_pack::parse_pack_args(args)?;
+    #[cfg(not(feature = "sentinel"))]
+    if args.iter().any(|arg| arg == "--pack") {
+        return Err("this build was compiled without the sentinel feature".into());
+    }
 
     // Direct A2A chat with a specific mesh agent
     if let Some(id) = flags.agent_id {
+        // The mesh agent's completions never pass through this process's
+        // router, so a pack provisioned here would gate nothing.
+        #[cfg(feature = "sentinel")]
+        if pack.is_some() {
+            return Err(
+                "--pack gates the local router; it cannot be combined with --agent-id".into(),
+            );
+        }
         return execute_a2a_direct_chat(&id, flags.prompt.as_deref());
     }
 
     // Default: route through local in-process Router
-    execute_a2a_chat(flags.prompt.as_deref(), flags.model.as_deref())
+    execute_a2a_chat(
+        flags.prompt.as_deref(),
+        flags.model.as_deref(),
+        #[cfg(feature = "sentinel")]
+        pack,
+    )
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -163,7 +182,11 @@ fn print_usage() {
     println!("    arkavo chat                                   Interactive chat mode");
     println!("    arkavo chat --prompt \"query\"                  One-shot query");
     println!("    arkavo chat --agent-id <ID>                   Chat with a mesh agent");
-    println!("    arkavo chat --agent-id <ID> --prompt \"query\"  One-shot to mesh agent\n");
+    println!("    arkavo chat --agent-id <ID> --prompt \"query\"  One-shot to mesh agent");
+    println!("    arkavo chat --pack <DIR> --anchor <PUB> --index-key <KEY> --payload-key <KEY>");
+    println!(
+        "                                                  Chat under a sealed knowledge pack\n"
+    );
     println!("EXAMPLES:");
     println!("    arkavo chat");
     println!("    arkavo chat --prompt \"What is 2+2?\"");
@@ -179,6 +202,15 @@ fn print_usage() {
     println!("    --gguf <PATH>          Alias of --model for a .gguf / .gguf.tdf file");
     println!("    --agent-id <ID>        Chat directly with a mesh agent via A2A");
     println!("    --prompt <TEXT>         One-shot query (exits after response)");
+    println!("    --pack <DIR>            Enforce a sealed knowledge pack on every completion");
+    println!(
+        "    --anchor <PATH>         Organization anchor public key the pack must verify against"
+    );
+    println!("    --index-key <PATH>      Tenant key the pack's indexes were built under");
+    println!(
+        "    --index-id <ID>         Index id the tenant key is derived for (default: default)"
+    );
+    println!("    --payload-key <PATH>    Raw 32-byte key the pack's index is wrapped under");
     println!("    --debug                 Show debug output");
     println!("    -h, --help              Show this help\n");
     println!("INTERACTIVE COMMANDS:");
@@ -203,10 +235,27 @@ fn print_usage() {
 fn execute_a2a_chat(
     prompt: Option<&str>,
     model_name: Option<&str>,
+    #[cfg(feature = "sentinel")] pack: Option<super::chat_pack::PackArgs>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = create_runtime()?;
 
     runtime.block_on(async {
+        // Before anything that can complete: the first completion of the
+        // session must already run under the pack's policy.
+        // Bound to this block, so the embedder's native resources are freed
+        // on every way out of the session, before process-exit destructors.
+        #[cfg(feature = "sentinel")]
+        let _release = match &pack {
+            Some(pack) => {
+                let (inventory, release) = super::chat_pack::provision_from_pack(pack)
+                    .await
+                    .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+                println!("Pack provisioned: {inventory}");
+                Some(release)
+            }
+            None => None,
+        };
+
         // Initialize engine with Router + full tool registry (including Claude SDK)
         let engine = arkavo_server::LocalEngine::new()
             .await

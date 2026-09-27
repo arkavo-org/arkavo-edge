@@ -176,9 +176,12 @@ impl Executor for HostExecutor {
             latency_ms,
             "Routine primitive completed"
         );
+        // Keep the dispatch reason (policy denial, timeout, tool error) so a failed
+        // replay can be diagnosed from the step error rather than the logs.
         match result {
             Ok(value) if success => Ok(value),
-            _ => Err("Primitive failed or was denied".into()),
+            Ok(_) => Err("Primitive reported failure".into()),
+            Err(error) => Err(format!("Primitive failed or was denied: {error}")),
         }
     }
 }
@@ -352,7 +355,14 @@ mod tests {
             granted: Some(HashSet::new()),
             ..executor
         };
-        assert!(executor.execute("filesystem_tools", args).await.is_err());
+        let denied = executor
+            .execute("filesystem_tools", args)
+            .await
+            .unwrap_err();
+        assert!(
+            denied.contains("not granted"),
+            "denial reason must reach the routine step error: {denied}"
+        );
         assert!(!path.exists());
         assert!(!executor.available("routine_run"));
     }

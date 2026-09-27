@@ -353,10 +353,10 @@ mod tests {
         assert!(local.model.is_local());
         assert_eq!(local.attempts[0].cost_usd, 0.0);
         let cloud = router
-            .route_with_tools_override_attributed("summarize", prompt(), None, &ModelChoice::Grok46)
+            .route_with_tools_override_attributed("summarize", prompt(), None, &ModelChoice::Grok47)
             .await
             .unwrap();
-        assert_eq!(cloud.model, ModelChoice::Grok46);
+        assert_eq!(cloud.model, ModelChoice::Grok47);
         assert_eq!(provider.calls(), 2);
     }
 
@@ -411,7 +411,7 @@ mod tests {
                 "summarize",
                 prompt(),
                 None,
-                Some(&ModelChoice::Grok46),
+                Some(&ModelChoice::Grok47),
             )
             .await
             .unwrap_err();

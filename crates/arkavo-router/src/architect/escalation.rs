@@ -44,9 +44,9 @@ pub(super) fn next_rung(current: &ModelChoice) -> Option<ModelChoice> {
         // GLM-5.2 is a low-cost cloud arm; escalate to a stronger tier
         // when it underperforms on a task.
         ModelChoice::Glm52 => ModelChoice::ClaudeSonnet,
-        // Grok 4.6 climbs the effort ladder before leaving the family.
-        ModelChoice::Grok46 => ModelChoice::Grok46Xhigh,
-        ModelChoice::Grok46Xhigh => ModelChoice::ClaudeSonnet,
+        // Grok 4.7 climbs the effort ladder before leaving the family.
+        ModelChoice::Grok47 => ModelChoice::Grok47Xhigh,
+        ModelChoice::Grok47Xhigh => ModelChoice::ClaudeSonnet,
         // Astra steps down its documented fallback chain rather than
         // re-dispatching itself.
         ModelChoice::Gpt6Astra => ModelChoice::ClaudeSonnet,
@@ -112,11 +112,11 @@ mod tests {
         // Fable 5 is the escalation ceiling — there is nothing above it.
         assert_eq!(next_rung(&ModelChoice::ClaudeFable5), None);
         assert_eq!(
-            next_rung(&ModelChoice::Grok46),
-            Some(ModelChoice::Grok46Xhigh)
+            next_rung(&ModelChoice::Grok47),
+            Some(ModelChoice::Grok47Xhigh)
         );
         assert_eq!(
-            next_rung(&ModelChoice::Grok46Xhigh),
+            next_rung(&ModelChoice::Grok47Xhigh),
             Some(ModelChoice::ClaudeSonnet)
         );
     }

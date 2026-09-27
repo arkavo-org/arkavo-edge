@@ -393,13 +393,13 @@ mod tests {
     fn build_request_serializes_xhigh_effort() {
         let provider = ResponsesProvider::new(ResponsesConfig {
             api_key: "test".to_string(),
-            model: "grok-4.6".to_string(),
+            model: "grok-4.7".to_string(),
             reasoning_effort: ReasoningEffort::Xhigh,
             ..Default::default()
         })
         .unwrap();
         let req = provider.build_request(json!([]), None, None, false, None);
-        assert_eq!(req.model, "grok-4.6");
+        assert_eq!(req.model, "grok-4.7");
         assert_eq!(req.reasoning.unwrap()["effort"], "xhigh");
     }
 }

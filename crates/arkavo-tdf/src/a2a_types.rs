@@ -205,7 +205,7 @@ mod tests {
             content_hash: "abc123".to_string(),
             size_bytes: 1024,
             policy_attributes: vec!["https://arkavo.net/attr/sensitivity".to_string()],
-            kas_url: "https://kas.arkavo.net".to_string(),
+            kas_url: "https://platform.arkavo.net".to_string(),
             sender_agent_id: "agent-001".to_string(),
         };
 
@@ -235,7 +235,7 @@ mod tests {
                 content_hash: "abc123".to_string(),
                 size_bytes: 2048,
                 policy_attributes: vec!["https://arkavo.net/attr/role".to_string()],
-                kas_url: "https://kas.arkavo.net".to_string(),
+                kas_url: "https://platform.arkavo.net".to_string(),
                 sender_agent_id: "agent-002".to_string(),
                 received_at: "2026-03-16T12:00:00Z".to_string(),
             }],

@@ -1,8 +1,26 @@
-# Grok 4.5 / 4.6 Support Plan
+# Grok 4.5 / 4.6 / 4.7 Support Plan
+
+## Grok 4.7 update (2026-09-21)
+
+The flagship xAI arm is now **Grok 4.7**. `ModelChoice::Grok47` is the
+low-effort Thompson arm (same role as the former `Grok46`) and
+`ModelChoice::Grok47Xhigh` is the `reasoning.effort = "xhigh"` companion.
+Persisted `"Grok45"`, `"Grok46"`, and `"Grok46Xhigh"` traces deserialize onto
+the 4.7 arms. Name aliases `grok-4.6`, `grok-4.6-latest`, `grok46`, and the
+4.5 set all resolve to `Grok47`; `grok-4.6-xhigh` resolves to `Grok47Xhigh`.
+
+| Item | Value |
+|------|--------|
+| Model ID | `grok-4.7` (aliases: `grok-4.7-latest`, `grok-build-latest`, `grok`) |
+| xhigh arm | `grok-4.7-xhigh` (API model still `grok-4.7`) |
+| Pricing | inherited from 4.6 — **$2.00 / $0.50 cached / $6.00** per 1M tokens, pending xAI's published 4.7 rates |
+| Context | 500k tokens |
+| Latency budget | inherited from 4.6 — 7s on `Grok47`, 25s on `Grok47Xhigh` |
+| Arkavo reasoning default | `low` on `Grok47`; `xhigh` on `Grok47Xhigh` |
 
 ## Grok 4.6 update (2026-08-13)
 
-The flagship xAI arm is now **Grok 4.6**. `ModelChoice::Grok46` is the
+Superseded by 4.7 (above). The flagship xAI arm was **Grok 4.6**. `ModelChoice::Grok46` is the
 low-effort Thompson arm (same role as the former `Grok45`).
 `ModelChoice::Grok46Xhigh` is a companion arm that forces
 `reasoning.effort = "xhigh"` (Grok 4.6+ only; 4.5 treated `xhigh` as `high`).
@@ -20,7 +38,7 @@ accepts `low` / `medium` / `high` / `xhigh`.
 
 ## Goal
 
-Add **xAI Grok 4.5** (now superseded by 4.6) as a routable cloud model arm via the **xAI Responses API**
+Add **xAI Grok 4.5** (now superseded by 4.7) as a routable cloud model arm via the **xAI Responses API**
 (`POST /v1/responses`) using `ResponsesProvider` in `arkavo-llm`. Chat Completions
 remains available through `OpenAIProvider` for generic OpenAI-compatible hosts,
 but Grok routing intentionally uses Responses for reasoning effort, function-call
