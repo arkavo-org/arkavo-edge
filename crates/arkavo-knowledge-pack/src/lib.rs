@@ -13,17 +13,19 @@ pub mod load;
 pub mod manifest;
 pub mod selection;
 pub mod sign;
+pub mod thresholds;
 pub mod verify;
 
 pub use assemble::{AssembleError, PackBuilder};
 pub use blob::{MAX_BLOB_BYTES, SealedBlob, open_blob, seal_blob};
 pub use load::{LoadError, LoadedPack, PackIndexes, load_pack};
 pub use manifest::{
-    ComponentRecord, Lineage, ManifestError, PACK_FORMAT_VERSION, PACK_MANIFEST_FILE,
-    PACK_SIGNATURE_FILE, PackManifest, digest_of,
+    ComponentRecord, EVAL_EVIDENCE_FILE, Lineage, ManifestError, PACK_FORMAT_VERSION,
+    PACK_MANIFEST_FILE, PACK_SIGNATURE_FILE, PackManifest, digest_of,
 };
 pub use selection::{Entitlements, Selection, SelectionError, select_adapters};
 pub use sign::{
     SignatureError, decode_signature, encode_signature, sign_manifest, verify_manifest,
 };
+pub use thresholds::{PackThresholds, read_thresholds, semantic_embedder_record};
 pub use verify::{VerifiedPack, VerifyError, verify_pack};

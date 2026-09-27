@@ -98,9 +98,18 @@ impl LabelFinding {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum TierOutcome {
-    Matched { findings: Vec<LabelFinding> },
+    Matched {
+        findings: Vec<LabelFinding>,
+    },
     NoMatch,
-    Unavailable { reason: String },
+    Unavailable {
+        reason: String,
+    },
+    /// This tier cannot judge input of this shape at all — distinct from
+    /// `Unavailable`, which is a tier that owes an answer it did not give.
+    OutOfScope {
+        reason: String,
+    },
 }
 
 /// One tier's contribution, recorded whether or not it matched.
@@ -112,6 +121,10 @@ pub struct TierReport {
     pub version: String,
     #[serde(flatten)]
     pub outcome: TierOutcome,
+    /// Set by the cascade from `CascadeTier::covers_short_spans`: a completed
+    /// report from such a tier judges spans other tiers call out of scope.
+    #[serde(default)]
+    pub covers_short_spans: bool,
 }
 
 impl TierReport {
@@ -129,6 +142,7 @@ impl TierReport {
             tier: tier.into(),
             version: version.into(),
             outcome,
+            covers_short_spans: false,
         }
     }
 
@@ -143,18 +157,47 @@ impl TierReport {
             outcome: TierOutcome::Unavailable {
                 reason: reason.into(),
             },
+            covers_short_spans: false,
+        }
+    }
+
+    pub fn out_of_scope(
+        tier: impl Into<String>,
+        version: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            tier: tier.into(),
+            version: version.into(),
+            outcome: TierOutcome::OutOfScope {
+                reason: reason.into(),
+            },
+            covers_short_spans: false,
         }
     }
 
     pub fn findings(&self) -> &[LabelFinding] {
         match &self.outcome {
             TierOutcome::Matched { findings } => findings,
-            TierOutcome::NoMatch | TierOutcome::Unavailable { .. } => &[],
+            TierOutcome::NoMatch
+            | TierOutcome::Unavailable { .. }
+            | TierOutcome::OutOfScope { .. } => &[],
         }
     }
 
     pub fn is_unavailable(&self) -> bool {
         matches!(self.outcome, TierOutcome::Unavailable { .. })
+    }
+
+    pub fn is_out_of_scope(&self) -> bool {
+        matches!(self.outcome, TierOutcome::OutOfScope { .. })
+    }
+
+    fn judged(&self) -> bool {
+        matches!(
+            self.outcome,
+            TierOutcome::Matched { .. } | TierOutcome::NoMatch
+        )
     }
 }
 
@@ -190,10 +233,21 @@ impl ClassificationEvidence {
         self.tiers.iter().flat_map(TierReport::findings)
     }
 
-    /// Whether any tier could not be consulted. A gap is a reason to treat the
-    /// result as incomplete, not as clean.
+    /// Whether the evidence is incomplete. A tier that owed an answer and gave
+    /// none is always a gap. A tier that cannot judge this shape of input is a
+    /// gap only if no tier that covers such spans completed on this one —
+    /// otherwise a short span would be held forever on the account of a tier
+    /// that was never able to see it.
     pub fn has_gap(&self) -> bool {
-        self.tiers.iter().any(TierReport::is_unavailable)
+        let covered = self
+            .tiers
+            .iter()
+            .any(|t| t.covers_short_spans && t.judged());
+        self.tiers.iter().any(|t| match t.outcome {
+            TierOutcome::Unavailable { .. } => true,
+            TierOutcome::OutOfScope { .. } => !covered,
+            TierOutcome::Matched { .. } | TierOutcome::NoMatch => false,
+        })
     }
 
     /// Highest sensitivity any tier reported at or above `threshold`.
@@ -294,6 +348,51 @@ mod tests {
         let mut expected = vec![DataCategory::Healthcare, DataCategory::Internal];
         expected.sort_unstable();
         assert_eq!(evidence.categories_at(Confidence::new(0.9)), expected);
+    }
+
+    #[test]
+    fn out_of_scope_alone_is_still_a_gap() {
+        // Back-compat: without a tier that covers short spans, a span nobody
+        // could judge must not read as clean.
+        let evidence = ClassificationEvidence::new("1.0.0")
+            .with_tier(TierReport::matched("exact", "1", Vec::new()))
+            .with_tier(TierReport::out_of_scope("near-duplicate", "1", "too short"));
+        assert!(evidence.has_gap());
+    }
+
+    #[test]
+    fn out_of_scope_is_covered_when_a_short_span_tier_judged_the_span() {
+        let mut semantic = TierReport::matched("semantic", "1", Vec::new());
+        semantic.covers_short_spans = true;
+        let evidence = ClassificationEvidence::new("1.0.0")
+            .with_tier(TierReport::out_of_scope("near-duplicate", "1", "too short"))
+            .with_tier(semantic);
+        assert!(!evidence.has_gap());
+    }
+
+    #[test]
+    fn a_covering_tier_that_could_not_look_does_not_cover() {
+        let mut semantic = TierReport::unavailable("semantic", "1", "embedder failed");
+        semantic.covers_short_spans = true;
+        let evidence = ClassificationEvidence::new("1.0.0")
+            .with_tier(TierReport::out_of_scope("near-duplicate", "1", "too short"))
+            .with_tier(semantic);
+        assert!(evidence.has_gap());
+    }
+
+    #[test]
+    fn a_stored_report_without_the_coverage_field_still_deserializes() {
+        let json = r#"{"tier":"exact","version":"1","outcome":"no_match"}"#;
+        let report: TierReport = serde_json::from_str(json).expect("deserialize");
+        assert!(!report.covers_short_spans);
+    }
+
+    #[test]
+    fn out_of_scope_carries_no_findings() {
+        let report = TierReport::out_of_scope("near-duplicate", "1", "too short");
+        assert!(report.findings().is_empty());
+        assert!(report.is_out_of_scope());
+        assert!(!report.is_unavailable());
     }
 
     #[test]
