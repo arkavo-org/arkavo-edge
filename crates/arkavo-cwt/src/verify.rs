@@ -6,9 +6,11 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 /// What the caller expects the token to say, and when "now" is.
 pub struct VerifyOptions<'a> {
     pub expected_iss: &'a str,
-    /// `None` skips the audience check — appropriate where the caller does not
-    /// know the issuer's configured audiences.
-    pub expected_aud: Option<&'a str>,
+    /// The audience this verifier answers to; the token's `aud` must name it.
+    /// There is deliberately no way to skip the check: a token minted for one
+    /// resource must not verify at another (RFC 8725 §3.9). An empty value is
+    /// a misconfiguration and refuses every token.
+    pub expected_aud: &'a str,
     pub now: i64,
     pub skew_secs: i64,
 }
@@ -24,6 +26,9 @@ pub fn verify(
     keys: &KeySet,
     opts: &VerifyOptions<'_>,
 ) -> Result<Claims, CwtError> {
+    if opts.expected_aud.is_empty() {
+        return Err(CwtError::NoExpectedAudience);
+    }
     let bytes = URL_SAFE_NO_PAD
         .decode(token_b64url)
         .map_err(|e| CwtError::Base64(e.to_string()))?;
@@ -66,11 +71,9 @@ fn check_claims(claims: &Claims, opts: &VerifyOptions<'_>) -> Result<(), CwtErro
             now: opts.now,
         });
     }
-    if let Some(expected) = opts.expected_aud
-        && !claims.aud.iter().any(|aud| aud == expected)
-    {
+    if !claims.aud.iter().any(|aud| aud == opts.expected_aud) {
         return Err(CwtError::AudienceMismatch {
-            expected: expected.to_string(),
+            expected: opts.expected_aud.to_string(),
         });
     }
     Ok(())
@@ -241,7 +244,7 @@ mod tests {
         CoseKeySet(keys).to_vec().expect("encode key set")
     }
 
-    fn opts(aud: Option<&str>) -> VerifyOptions<'_> {
+    fn opts(aud: &str) -> VerifyOptions<'_> {
         VerifyOptions {
             expected_iss: ISS,
             expected_aud: aud,
@@ -259,7 +262,7 @@ mod tests {
             .expect("parse key set");
 
         let token = mint(&signer, &kid, &["arkavo-kas"], NOW + 600, true);
-        let claims = verify(&token, &keys, &opts(Some("arkavo-kas"))).expect("verify tagged CWT");
+        let claims = verify(&token, &keys, &opts("arkavo-kas")).expect("verify tagged CWT");
 
         assert_eq!(claims.iss, ISS);
         assert_eq!(claims.sub, "did:key:zAgentUnderTest");
@@ -280,7 +283,7 @@ mod tests {
 
         // The same bytes without the tag-61 prefix are equally acceptable.
         let untagged = mint(&signer, &kid, &["arkavo-kas"], NOW + 600, false);
-        assert!(verify(&untagged, &keys, &opts(Some("arkavo-kas"))).is_ok());
+        assert!(verify(&untagged, &keys, &opts("arkavo-kas")).is_ok());
     }
 
     #[test]
@@ -296,7 +299,7 @@ mod tests {
             KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())])).expect("key set");
         let token = mint(&impostor, &kid, &["arkavo-kas"], NOW + 600, true);
         assert!(matches!(
-            verify(&token, &wrong_key_set, &opts(Some("arkavo-kas"))),
+            verify(&token, &wrong_key_set, &opts("arkavo-kas")),
             Err(CwtError::BadSignature)
         ));
 
@@ -305,15 +308,105 @@ mod tests {
 
         let expired = mint(&impostor, &kid, &["arkavo-kas"], NOW - 31, true);
         assert!(matches!(
-            verify(&expired, &keys, &opts(Some("arkavo-kas"))),
+            verify(&expired, &keys, &opts("arkavo-kas")),
             Err(CwtError::Expired { .. })
         ));
 
         let good = mint(&impostor, &kid, &["arkavo-kas"], NOW + 600, true);
         assert!(matches!(
-            verify(&good, &keys, &opts(Some("some-other-service"))),
+            verify(&good, &keys, &opts("some-other-service")),
             Err(CwtError::AudienceMismatch { .. })
         ));
+    }
+
+    /// Regression for #699: a token minted for one resource must not verify at
+    /// another, including when it names several audiences but not ours.
+    #[test]
+    #[spec("ACWT-002")]
+    fn refuses_a_token_minted_for_another_audience() {
+        let signer = new_key();
+        let kid = [0x23u8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+
+        let for_a = mint(&signer, &kid, &["service-a"], NOW + 600, true);
+        assert!(verify(&for_a, &keys, &opts("service-a")).is_ok());
+        assert!(matches!(
+            verify(&for_a, &keys, &opts("service-b")),
+            Err(CwtError::AudienceMismatch { .. })
+        ));
+
+        let for_a_and_c = mint(&signer, &kid, &["service-a", "service-c"], NOW + 600, true);
+        assert!(matches!(
+            verify(&for_a_and_c, &keys, &opts("service-b")),
+            Err(CwtError::AudienceMismatch { .. })
+        ));
+    }
+
+    /// Regression for #699: a token that names no audience is bound to no
+    /// resource, so it is refused rather than accepted everywhere — whether
+    /// `aud` is an empty array or absent from the claims altogether.
+    #[test]
+    #[spec("ACWT-002")]
+    fn refuses_a_token_with_no_audience() {
+        let signer = new_key();
+        let kid = [0x24u8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+
+        let empty_aud = mint(&signer, &kid, &[], NOW + 600, true);
+        assert!(matches!(
+            verify(&empty_aud, &keys, &opts("arkavo-kas")),
+            Err(CwtError::AudienceMismatch { .. })
+        ));
+
+        let payload = claims_cbor(
+            ISS,
+            Value::Array(Vec::new()),
+            NOW + 600,
+            NOW - 60,
+            None,
+            None,
+        );
+        let Value::Map(mut fields) =
+            ciborium::from_reader(payload.as_slice()).expect("decode claims")
+        else {
+            panic!("claims_cbor always encodes a map");
+        };
+        fields.retain(|(key, _)| *key != Value::Integer(3.into()));
+        let mut without_aud = Vec::new();
+        ciborium::into_writer(&Value::Map(fields), &mut without_aud).expect("encode claims");
+        let no_aud = encode_sign1(
+            &signer,
+            es256_protected(&kid),
+            Header::default(),
+            without_aud,
+            true,
+        );
+        assert!(matches!(
+            verify(&no_aud, &keys, &opts("arkavo-kas")),
+            Err(CwtError::AudienceMismatch { .. })
+        ));
+    }
+
+    /// Regression for #699: an empty expected audience is a misconfigured
+    /// verifier, not a request to skip the check. It refuses every token,
+    /// including one whose `aud` is itself the empty string.
+    #[test]
+    #[spec("ACWT-002")]
+    fn refuses_every_token_when_the_expected_audience_is_empty() {
+        let signer = new_key();
+        let kid = [0x25u8; 32];
+        let keys = KeySet::from_cbor(&key_set_cbor(&[(&kid, *signer.verifying_key())]))
+            .expect("parse key set");
+
+        for aud in [&["arkavo-kas"][..], &[""][..], &[][..]] {
+            let token = mint(&signer, &kid, aud, NOW + 600, true);
+            assert!(matches!(
+                verify(&token, &keys, &opts("")),
+                Err(CwtError::NoExpectedAudience)
+            ));
+        }
     }
 
     #[tokio::test]
@@ -355,7 +448,7 @@ mod tests {
         // the rotated key and verifies.
         let eager = CachedKeySet::new(&url, Duration::ZERO);
         let claims = eager
-            .verify(&token, &opts(Some("arkavo-kas")))
+            .verify(&token, &opts("arkavo-kas"))
             .await
             .expect("verify after refresh");
         assert_eq!(claims.sub, "did:key:zAgentUnderTest");
@@ -367,12 +460,11 @@ mod tests {
         let before = server.received_requests().await.unwrap().len();
         let stale_kid_token = mint(&stale, &[0x44u8; 32], &["arkavo-kas"], NOW + 600, true);
         assert!(matches!(
-            lazy.verify(&stale_kid_token, &opts(Some("arkavo-kas")))
-                .await,
+            lazy.verify(&stale_kid_token, &opts("arkavo-kas")).await,
             Err(CwtError::UnknownKid(_))
         ));
         assert!(
-            lazy.verify(&stale_kid_token, &opts(Some("arkavo-kas")))
+            lazy.verify(&stale_kid_token, &opts("arkavo-kas"))
                 .await
                 .is_err()
         );
@@ -412,7 +504,7 @@ mod tests {
         let keys = std::sync::Arc::new(CachedKeySet::new(&url, Duration::from_millis(50)));
         // Prime the cache: one fetch, then the miss is suppressed by the ttl.
         assert!(matches!(
-            keys.verify(&token, &opts(Some("arkavo-kas"))).await,
+            keys.verify(&token, &opts("arkavo-kas")).await,
             Err(CwtError::UnknownKid(_))
         ));
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
@@ -424,12 +516,12 @@ mod tests {
             {
                 let keys = keys.clone();
                 let token = token.clone();
-                async move { keys.verify(&token, &opts(Some("arkavo-kas"))).await }
+                async move { keys.verify(&token, &opts("arkavo-kas")).await }
             },
             {
                 let keys = keys.clone();
                 let token = token.clone();
-                async move { keys.verify(&token, &opts(Some("arkavo-kas"))).await }
+                async move { keys.verify(&token, &opts("arkavo-kas")).await }
             }
         );
         assert!(matches!(first, Err(CwtError::UnknownKid(_))));
@@ -471,7 +563,7 @@ mod tests {
         let aud = Value::Array(vec![Value::Text("arkavo-kas".into())]);
         let token = mint_claims(&signer, &kid, aud, NOW + 600, None, Some(npe), true);
 
-        let claims = verify(&token, &keys, &opts(Some("arkavo-kas"))).expect("verify agent CWT");
+        let claims = verify(&token, &keys, &opts("arkavo-kas")).expect("verify agent CWT");
 
         assert!(
             claims.actors.is_empty(),
@@ -504,8 +596,8 @@ mod tests {
         let aud = Value::Text("arkavo-kas".into());
         let token = mint_claims(&signer, &kid, aud, NOW + 600, None, None, true);
 
-        let claims = verify(&token, &keys, &opts(Some("arkavo-kas")))
-            .expect("verify token with bare-text aud");
+        let claims =
+            verify(&token, &keys, &opts("arkavo-kas")).expect("verify token with bare-text aud");
 
         assert_eq!(claims.aud, vec!["arkavo-kas".to_string()]);
         assert!(claims.actors.is_empty());
@@ -535,7 +627,7 @@ mod tests {
             true,
         );
         assert!(matches!(
-            verify(&eddsa, &keys, &opts(Some("arkavo-kas"))),
+            verify(&eddsa, &keys, &opts("arkavo-kas")),
             Err(CwtError::UnsupportedAlgorithm(_))
         ));
 
@@ -547,7 +639,7 @@ mod tests {
             true,
         );
         assert!(matches!(
-            verify(&no_alg, &keys, &opts(Some("arkavo-kas"))),
+            verify(&no_alg, &keys, &opts("arkavo-kas")),
             Err(CwtError::UnsupportedAlgorithm(_))
         ));
     }
@@ -577,7 +669,7 @@ mod tests {
         );
 
         assert!(matches!(
-            verify(&token, &keys, &opts(Some("arkavo-kas"))),
+            verify(&token, &keys, &opts("arkavo-kas")),
             Err(CwtError::IssuerMismatch { .. })
         ));
     }
@@ -608,7 +700,7 @@ mod tests {
         );
 
         assert!(matches!(
-            verify(&token, &keys, &opts(Some("arkavo-kas"))),
+            verify(&token, &keys, &opts("arkavo-kas")),
             Err(CwtError::IssuedInFuture { .. })
         ));
     }
@@ -624,7 +716,7 @@ mod tests {
             .expect("parse key set");
 
         let token = mint(&signer, &kid, &["arkavo-kas"], NOW + 600, true);
-        assert!(verify(&token, &keys, &opts(Some("arkavo-kas"))).is_ok());
+        assert!(verify(&token, &keys, &opts("arkavo-kas")).is_ok());
 
         let bytes = URL_SAFE_NO_PAD.decode(&token).expect("decode token");
         let body = bytes.strip_prefix(&[0xD8u8, 0x3D][..]).expect("tag 61");
@@ -633,7 +725,7 @@ mod tests {
         let tampered = URL_SAFE_NO_PAD.encode(sign1.to_vec().expect("re-encode"));
 
         assert!(matches!(
-            verify(&tampered, &keys, &opts(Some("arkavo-kas"))),
+            verify(&tampered, &keys, &opts("arkavo-kas")),
             Err(CwtError::BadSignature)
         ));
     }
@@ -666,7 +758,7 @@ mod tests {
         );
 
         assert!(matches!(
-            verify(&token, &keys, &opts(Some("arkavo-kas"))),
+            verify(&token, &keys, &opts("arkavo-kas")),
             Err(CwtError::MissingKid)
         ));
     }

@@ -57,10 +57,14 @@ impl PlatformAttestor for SecureEnclaveAttestor {
     }
 
     fn get_capabilities(&self) -> AttestationCapabilities {
+        // The statement is unsigned ioreg text plus a local timestamp, which any
+        // process on the host can reproduce. Until the Secure Enclave signs a
+        // verifier-nonce-bound quote, claiming either property would let a
+        // consumer treat software-collected identifiers as hardware evidence.
         AttestationCapabilities {
             attestation_type: AttestationType::SecureEnclave,
-            supports_freshness: true,
-            supports_hardware_binding: true,
+            supports_freshness: false,
+            supports_hardware_binding: false,
         }
     }
 }
@@ -183,8 +187,14 @@ mod tests {
             Ok(attestor) => {
                 let caps = attestor.get_capabilities();
                 assert_eq!(caps.attestation_type, AttestationType::SecureEnclave);
-                assert!(caps.supports_freshness);
-                assert!(caps.supports_hardware_binding);
+                assert!(
+                    !caps.supports_freshness,
+                    "an unsigned statement with a local timestamp is not fresh evidence"
+                );
+                assert!(
+                    !caps.supports_hardware_binding,
+                    "ioreg text is not signed by the Secure Enclave"
+                );
             }
             Err(e) => {
                 println!(
