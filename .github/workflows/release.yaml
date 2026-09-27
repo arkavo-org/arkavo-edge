@@ -17,6 +17,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       upload_url: ${{ steps.create_release.outputs.upload_url }}
+      exists: ${{ steps.check_release.outputs.exists }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -87,6 +88,9 @@ jobs:
 
   build-linux-x86_64:
     needs: release
+    # Only a version bump releases; a push that keeps an already released
+    # version must not rebuild and overwrite that release's assets.
+    if: needs.release.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'
     name: Build Linux (x86_64)
     runs-on: ubuntu-22.04
     strategy:
@@ -210,6 +214,9 @@ jobs:
 
   build-linux-arm64:
     needs: release
+    # Only a version bump releases; a push that keeps an already released
+    # version must not rebuild and overwrite that release's assets.
+    if: needs.release.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'
     name: Build Linux (ARM64)
     runs-on: ubuntu-22.04
     steps:
@@ -275,6 +282,9 @@ jobs:
 
   build-macos-arm64:
     needs: release
+    # Only a version bump releases; a push that keeps an already released
+    # version must not rebuild and overwrite that release's assets.
+    if: needs.release.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'
     name: Build macOS (ARM64)
     runs-on: macos-latest
     steps:
@@ -390,6 +400,9 @@ jobs:
 
   build-macos-pkg:
     needs: release
+    # Only a version bump releases; a push that keeps an already released
+    # version must not rebuild and overwrite that release's assets.
+    if: needs.release.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'
     name: Build macOS .pkg Installer
     runs-on: macos-latest
     steps:
@@ -742,6 +755,9 @@ jobs:
 
   build-windows-x86_64:
     needs: release
+    # Only a version bump releases; a push that keeps an already released
+    # version must not rebuild and overwrite that release's assets.
+    if: needs.release.outputs.exists == 'false' || github.event_name == 'workflow_dispatch'
     name: Build Windows x86_64
     runs-on: windows-2022
     steps:

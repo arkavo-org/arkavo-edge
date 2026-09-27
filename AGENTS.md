@@ -85,16 +85,16 @@ cargo test -p arkavo-cli --lib mock_provider::
   - `main` is protected with CI checks.
 - **Commits**:
   - **NO Conventional Commits** (e.g., avoid `feat:`, `fix:`).
-  - Bump semver in `Cargo.toml` on feature completion. Every PR, including each stack layer, bumps above the one below it: every merge to `main` is a release, and CI rejects a version that isn't higher than `main`'s.
+  - **Versioning:** feature and fix PRs never change the `Cargo.toml` version. A release is its own PR that only bumps `[workspace.package] version` and `Cargo.lock`; merging it builds and publishes that version, and pushes that leave the version alone build nothing. Per-PR bumps made every open PR conflict with every other on the version line.
   - Commit `Cargo.lock` whenever `Cargo.toml` changes.
 - **PRs**:
   - **Short titles** (≤ 60 chars). One topic per PR — do not join unrelated changes with `+`, `&`, or `and`. Use the body for detail.
   - No changelog files (GitHub handles it).
-  - **Stack from creation, or don't split.** Several topics from one piece of work, or work that builds on an open PR, start as a GitHub stack (`gh stack init`, then `gh stack add` per topic), each layer based on the one below. Never open a run of standalone PRs to restack later: restacking rewrites branches other sessions own, and standalone PRs off the same `main` all conflict on the version bump.
-  - **Incidental fixes ride along.** A flaky test, stale default or typo found mid-task becomes a layer of the current stack, not a new PR.
-  - **Check the queue before opening.** Run `gh pr list` first. If an open PR touches the same crates, or the new work needs it, add a layer to that stack instead of opening beside it.
-  - **Keep the ready queue short**: at most 3 ready-for-review PRs or stacks open at once. At the limit, merge, fix or close one before marking another ready. A ready PR that stops merging cleanly is fixed the same day or moved back to draft.
-  - **Rebasing a stack:** `gh stack rebase`, then re-bump each layer above the one below it when `main` has moved. Merge the stack whole with `gh stack merge`.
+  - **One PR per piece of work.** Incidental fixes found mid-task (a flaky test, a stale default, a typo) ride along in the current PR and are noted in its body; they are not a second topic and never a new PR.
+  - **Check the queue before opening.** Run `gh pr list` first. If an open PR touches the same crates, or the new work needs it, build on that PR instead of opening beside it.
+  - **Keep the ready queue short**: at most 3 ready-for-review PRs open at once. At the limit, merge, fix or close one before marking another ready. A ready PR that stops merging cleanly is fixed the same day or moved back to draft.
+  - **Stack only dependent work that needs separate review**, such as a large change whose parts are reviewed on their own. Base each layer on the one below from the start; never retrofit independent PRs into a stack.
+  - **Never rewrite another session's branch.** Bring a PR or stack layer up to date by merging `main` (or the layer below) into it, not by rebasing and force-pushing.
 - **Docs**: Technical docs in `docs/`. 
 
 ## Agent Configuration

@@ -63,25 +63,19 @@ jobs:
             test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
           }
 
-          if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
-            echo "❌ ERROR: Version has not been incremented!"
-            echo "The version in Cargo.toml must be greater than the current version on main branch."
-            echo ""
-            echo "Current version on main: $MAIN_VERSION"
-            echo "Your PR version:        $PR_VERSION"
-            echo ""
-            echo "Please update the version in Cargo.toml to a higher version number."
-            echo "For example, if current is 0.1.0, you could use 0.1.1, 0.2.0, or 1.0.0"
-            exit 1
-          elif version_gt "$MAIN_VERSION" "$PR_VERSION"; then
+          # Feature PRs keep main's version; only a release PR raises it.
+          # A lower version means the branch is stale and would roll main back.
+          if version_gt "$MAIN_VERSION" "$PR_VERSION"; then
             echo "❌ ERROR: PR version is lower than main branch version!"
-            echo "The version in Cargo.toml must be greater than the current version on main branch."
+            echo "Merge main into this branch so it carries main's version."
             echo ""
             echo "Current version on main: $MAIN_VERSION"
             echo "Your PR version:        $PR_VERSION"
             exit 1
+          elif [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
+            echo "✅ Version unchanged ($PR_VERSION): not a release"
           else
-            echo "✅ Version has been properly incremented from $MAIN_VERSION to $PR_VERSION"
+            echo "✅ Release PR: $MAIN_VERSION -> $PR_VERSION"
           fi
 
       - name: Check version format
