@@ -4,6 +4,7 @@
 
 use arkavo_router::Error;
 use arkavo_router::preflight::{ModerationResult, PolicyId, PreflightFeature, PreflightModerator};
+use arkavo_test_macros::spec;
 use torg_core::{BoolOp, Graph, Node, Source};
 
 /// Build a NOT circuit: output = NOT(input0)
@@ -16,6 +17,7 @@ fn build_not_circuit() -> Graph {
     }
 }
 
+#[spec("ROUTER-004")]
 #[test]
 fn test_error_type_conversion() {
     let moderator = PreflightModerator::new();
@@ -37,6 +39,7 @@ fn test_error_type_conversion() {
 }
 
 /// Safety Validation Suite from requirements doc Section 3.3.3
+#[spec("ROUTER-004")]
 #[test]
 fn test_safety_validation_suite() {
     let moderator = PreflightModerator::new();
@@ -79,6 +82,7 @@ fn test_safety_validation_suite() {
 }
 
 /// Test that no circuits registered means all traffic allowed
+#[spec("ROUTER-004")]
 #[test]
 fn test_no_circuits_allows_all() {
     let moderator = PreflightModerator::new();
@@ -90,6 +94,7 @@ fn test_no_circuits_allows_all() {
 }
 
 /// Test long input with length threshold policy
+#[spec("ROUTER-004")]
 #[test]
 fn test_long_input_blocked() {
     let moderator = PreflightModerator::new();

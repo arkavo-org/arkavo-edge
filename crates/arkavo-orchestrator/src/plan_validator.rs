@@ -202,6 +202,7 @@ fn looks_mutating(step: &PlanStep) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use uuid::Uuid;
 
     fn make_plan(steps: Vec<PlanStep>) -> ExecutionPlan {
@@ -224,6 +225,7 @@ mod tests {
         }
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_valid_plan_passes() {
         let plan = make_plan(vec![ok_step(1), ok_step(2)]);
@@ -231,6 +233,7 @@ mod tests {
         assert!(report.is_valid(), "got: {}", report.summary());
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_empty_plan_rejected() {
         let plan = make_plan(vec![]);
@@ -239,6 +242,7 @@ mod tests {
         assert_eq!(report.violations[0].code, "EMPTY_PLAN");
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_bad_numbering_detected() {
         let mut s = ok_step(1);
@@ -248,6 +252,7 @@ mod tests {
         assert!(report.violations.iter().any(|v| v.code == "STEP_NUMBERING"));
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_empty_commands_detected() {
         let mut s = ok_step(1);
@@ -257,6 +262,7 @@ mod tests {
         assert!(report.violations.iter().any(|v| v.code == "NO_COMMANDS"));
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_empty_command_string_detected() {
         let mut s = ok_step(1);
@@ -266,6 +272,7 @@ mod tests {
         assert!(report.violations.iter().any(|v| v.code == "EMPTY_COMMAND"));
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_out_of_range_confidence_detected() {
         let mut s = ok_step(1);
@@ -280,6 +287,7 @@ mod tests {
         );
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_mutating_without_verification_detected() {
         let s = PlanStep {
@@ -299,6 +307,7 @@ mod tests {
         );
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_non_mutating_no_verification_ok() {
         let s = PlanStep {
@@ -313,6 +322,7 @@ mod tests {
         assert!(report.is_valid(), "got: {}", report.summary());
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_fix_in_description_does_not_trigger_mutation_check() {
         // Regression: "fix" appears in nearly every bug-fix issue's planning
@@ -336,6 +346,7 @@ mod tests {
         );
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_apply_in_command_still_triggers_mutation_check() {
         // The narrowed heuristic must still catch obvious mutating commands.
@@ -358,6 +369,7 @@ mod tests {
         );
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_command_too_long_detected() {
         let mut s = ok_step(1);

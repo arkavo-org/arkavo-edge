@@ -142,7 +142,9 @@ fn default_step() -> PlanStep {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ORCH-004")]
     #[test]
     fn parses_text_steps() {
         let resp = "\
@@ -161,6 +163,7 @@ VERIFY: lint
         assert_eq!(steps[1].commands, vec!["cmd3"]);
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn empty_text_returns_default_step() {
         let steps = parse_plan_from_response("").unwrap();
@@ -168,6 +171,7 @@ VERIFY: lint
         assert_eq!(steps[0].step_number, 1);
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn json_parse_takes_priority() {
         let json = r#"{"steps":[{"step_number":1,"description":"x","commands":["c"],"verification":["tests"],"confidence":0.5}]}"#;
@@ -176,6 +180,7 @@ VERIFY: lint
         assert_eq!(steps[0].description, "x");
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn keyword_to_check_recognizes_aliases() {
         assert!(matches!(

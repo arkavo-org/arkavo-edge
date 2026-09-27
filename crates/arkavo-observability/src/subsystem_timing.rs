@@ -18,6 +18,12 @@ pub struct SubsystemTiming {
     pub mcp_tool_p95_ms: f64,
     #[serde(rename = "inferenceAvgMs")]
     pub inference_avg_ms: f64,
+    /// Combined overhead of dispatch-gate stages (preflight moderation,
+    /// budget check, critic verification), tracked for the 25ms gate budget.
+    #[serde(rename = "dispatchGateAvgMs")]
+    pub dispatch_gate_avg_ms: f64,
+    #[serde(rename = "dispatchGateP95Ms")]
+    pub dispatch_gate_p95_ms: f64,
 }
 
 impl SubsystemTiming {
@@ -26,6 +32,7 @@ impl SubsystemTiming {
             && self.conductor_orchestration_avg_ms == 0.0
             && self.mcp_tool_avg_ms == 0.0
             && self.inference_avg_ms == 0.0
+            && self.dispatch_gate_avg_ms == 0.0
     }
 }
 
@@ -99,6 +106,24 @@ pub struct SubsystemTimingRegistry {
     pub conductor_orchestration: LatencyTracker,
     pub mcp_tools: LatencyTracker,
     pub inference: LatencyTracker,
+    /// Rolling window over dispatch-gate stage latencies. Named after the
+    /// permit gate (`docs/dispatch-gate.md`), but most writers here are not
+    /// it: preflight moderation (`Router::route`), budget reservation
+    /// (`CostOrchestrator::route_with_budget`), and the critic verification
+    /// pass (`arkavo-cli::tool_integration::verify_response_with_critic`)
+    /// all record here and none of them evaluates a permit. Only `arkavo
+    /// mcp proxy`'s `PermitPolicy` (`arkavo_mcp_proxy::permit_hook`) is the
+    /// actual permit gate. `global_timing()` is a process-wide
+    /// `LazyLock`, so which of these four a given sample came from depends
+    /// on what runs in this process: a standalone `arkavo mcp proxy`
+    /// subprocess only ever records the permit gate here, while a router/CLI
+    /// process that never spawns or embeds that proxy only ever records
+    /// preflight/budget/critic — an embedder that hosts the proxy in-process
+    /// would record both into the one shared registry, but none of the
+    /// paths documented as unwired to the gate in `docs/dispatch-gate.md`
+    /// do that. Samples are recorded in milliseconds; sub-millisecond
+    /// stages read as 0 — use the gate_latency bench for sub-ms precision.
+    pub dispatch_gate: LatencyTracker,
 }
 
 impl SubsystemTimingRegistry {
@@ -108,6 +133,7 @@ impl SubsystemTimingRegistry {
             conductor_orchestration: LatencyTracker::new(50),
             mcp_tools: LatencyTracker::new(100),
             inference: LatencyTracker::new(50),
+            dispatch_gate: LatencyTracker::new(100),
         }
     }
 
@@ -118,6 +144,8 @@ impl SubsystemTimingRegistry {
             mcp_tool_avg_ms: self.mcp_tools.avg(),
             mcp_tool_p95_ms: self.mcp_tools.p95(),
             inference_avg_ms: self.inference.avg(),
+            dispatch_gate_avg_ms: self.dispatch_gate.avg(),
+            dispatch_gate_p95_ms: self.dispatch_gate.p95(),
         }
     }
 }
@@ -180,9 +208,12 @@ mod tests {
         let registry = SubsystemTimingRegistry::new();
         registry.router_decisions.record(15);
         registry.mcp_tools.record(50);
+        registry.dispatch_gate.record(3);
         let snap = registry.snapshot();
         assert!((snap.router_decision_avg_ms - 15.0).abs() < 0.01);
         assert!((snap.mcp_tool_avg_ms - 50.0).abs() < 0.01);
+        assert!((snap.dispatch_gate_avg_ms - 3.0).abs() < 0.01);
+        assert!((snap.dispatch_gate_p95_ms - 3.0).abs() < 0.01);
     }
 
     #[test]

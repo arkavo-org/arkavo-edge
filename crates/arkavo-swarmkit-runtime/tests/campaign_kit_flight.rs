@@ -6,6 +6,9 @@
 //! described in spec §1.2 / §5 actually works end-to-end on a real
 //! manifest from arkavo-org/arkavo-edge#573.
 
+// #[tokio::test] expands to Runtime::block_on; harmless in tests.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_swarmkit::parse_yaml;
 use arkavo_swarmkit_runtime::{LaunchOptions, SwarmFlight};
 use arkavo_test_macros::spec;
@@ -147,4 +150,32 @@ async fn below_quality_gate_outcome_degrades_role_prior() {
         entry.outcome.error_type.as_deref(),
         Some("below_quality_gate")
     );
+}
+
+#[spec("SK-012")]
+#[tokio::test]
+async fn above_quality_gate_outcome_keeps_prior_unchanged() {
+    let manifest = parse_yaml(CAMPAIGN_KIT).unwrap();
+    let flight = SwarmFlight::launch(&manifest, LaunchOptions::default()).unwrap();
+
+    flight
+        .record_tool_outcome("critic", "critic.score_rubric", true, 0.95)
+        .await
+        .unwrap();
+
+    let critic_arp = flight.role("critic").unwrap().arp();
+    let snap = critic_arp.adaptation().lock().await.snapshot();
+    let prior = snap
+        .iter()
+        .find(|p| p.id == "critic.score_rubric")
+        .expect("prior recorded");
+    assert_eq!(
+        prior.beta, 1.0,
+        "above-gate outcome should not grow beta: {}",
+        prior.beta
+    );
+
+    let entry = &critic_arp.decision_trace().snapshot()[0];
+    assert_eq!(entry.outcome.success, Some(true));
+    assert!(entry.outcome.error_type.is_none());
 }

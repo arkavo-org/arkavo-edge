@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Core TDF (Trusted Data Format) abstraction layer with streaming support for Arkavo"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["tdf", "opentdf", "encryption", "streaming", "security"]
 categories = ["cryptography", "asynchronous"]
 
@@ -23,10 +23,10 @@ url = { workspace = true }
 tracing = { workspace = true }
 
 # opentdf-rs for real TDF encryption (optional)
-opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", default-features = false, features = ["rustls-tls"], optional = true }
+opentdf = { version = "0.15.0", default-features = false, features = ["rustls-tls"], optional = true }
 
 # KAS server crypto operations from opentdf-rs
-opentdf-kas = { git = "https://github.com/arkavo-org/opentdf-rs", optional = true }
+opentdf-kas = { version = "0.15.0", optional = true }
 
 # HTTP client for KAS (optional)
 reqwest = { workspace = true, optional = true }
@@ -37,6 +37,7 @@ schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [features]
 default = []

@@ -288,6 +288,7 @@ impl IssueAnalyzer {
 mod tests {
     use super::*;
     use crate::types::{Label, User};
+    use arkavo_test_macros::spec;
 
     fn create_test_issue(title: &str, body: &str, labels: Vec<&str>) -> Issue {
         Issue {
@@ -322,6 +323,7 @@ mod tests {
         }
     }
 
+    #[spec("ORCH-002")]
     #[test]
     fn test_classify_bug() {
         let issue = create_test_issue("Fix memory leak", "There is a bug", vec!["bug"]);
@@ -329,6 +331,7 @@ mod tests {
         assert_eq!(issue_type, IssueType::Bug);
     }
 
+    #[spec("ORCH-002")]
     #[test]
     fn test_classify_documentation() {
         let issue = create_test_issue("Update README", "", vec!["documentation"]);
@@ -336,6 +339,7 @@ mod tests {
         assert_eq!(issue_type, IssueType::Documentation);
     }
 
+    #[spec("ORCH-002")]
     #[test]
     fn test_assess_trivial_complexity() {
         let issue = create_test_issue("Fix typo", "Small typo fix", vec!["good first issue"]);
@@ -343,6 +347,7 @@ mod tests {
         assert_eq!(complexity, Complexity::Trivial);
     }
 
+    #[spec("ORCH-002")]
     #[test]
     fn test_detect_rust_technology() {
         let issue = create_test_issue(
@@ -354,6 +359,7 @@ mod tests {
         assert!(technologies.contains(&"rust".to_string()));
     }
 
+    #[spec("ORCH-002")]
     #[test]
     fn test_determine_capabilities_for_bug() {
         let technologies = vec!["rust".to_string()];

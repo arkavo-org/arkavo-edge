@@ -1,4 +1,5 @@
 mod a2a_server;
+mod agent_cycle_reply;
 mod agent_event;
 mod agent_loop;
 mod anti_pattern;
@@ -6,14 +7,18 @@ mod autolearn_bridge;
 mod conductor;
 mod conductor_autoresearch;
 mod conductor_evofabric;
+mod conductor_history;
 mod conductor_parallel;
 mod conductor_planner;
 mod conductor_tool_loop;
 pub mod config_helpers;
 mod consolidation;
+pub mod consolidation_teacher;
 mod contract_negotiation;
 mod conversation_window;
 mod curiosity;
+#[cfg(feature = "taint")]
+mod egress_guard;
 mod episode_buffer;
 mod event_loop;
 mod gossip_transport;
@@ -27,6 +32,8 @@ mod mcp_bridge;
 mod policy_cache;
 mod rlm_bridge;
 mod startup;
+#[cfg(feature = "swarm-apply")]
+mod swarm_apply_tool;
 mod synthesis;
 mod token_estimator;
 mod tool_memory;
@@ -39,8 +46,8 @@ mod well_known;
 
 pub use a2a_server::A2aServer;
 pub use agent_event::{
-    AgentEvent, CorrelationId, CycleId, CycleReceipt, MessageDisposition, MessagePriority,
-    PendingMessage,
+    AgentEvent, CorrelationId, CycleId, CycleOutcome, CycleReceipt, MessageDisposition,
+    MessagePriority, PendingMessage,
 };
 pub use agent_loop::{AgentLoopConfig, run_agent_loop};
 pub use arkavo_autolearn::PainSignal;
@@ -138,6 +145,11 @@ pub trait A2aRpc {
 
     #[method(name = "rpc.discover")]
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value>;
+
+    /// This agent's effective ARP document (post-applied tightenings), for
+    /// per-agent mesh audit polling.
+    #[method(name = "arp/get")]
+    async fn arp_get(&self) -> RpcResult<serde_json::Value>;
 
     // A2A Protocol Methods
 
@@ -541,6 +553,10 @@ impl A2aRpcServer for A2aRpcImpl {
 
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value> {
         handlers::discovery::handle_rpc_discover(&self.metrics).await
+    }
+
+    async fn arp_get(&self) -> RpcResult<serde_json::Value> {
+        handlers::arp::handle_arp_get().await
     }
 
     // A2A Protocol Method Implementations
@@ -1008,6 +1024,10 @@ impl A2aRpcServer for A2aRpcImpl {
         &self,
         request: AgentSpecializeRequest,
     ) -> RpcResult<AgentSpecializeResponse> {
+        #[cfg(feature = "iroh")]
+        let iroh_node = self.iroh_node.as_ref();
+        #[cfg(not(feature = "iroh"))]
+        let iroh_node: Option<&std::sync::Arc<arkavo_tdf_iroh::IrohNode>> = None;
         handlers::specialization::handle_agent_specialize(
             &self.metrics,
             &self.rate_limiter,
@@ -1015,6 +1035,9 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.agent_metadata,
             &self.role_specialization,
             self.bundle_decryptor.as_ref(),
+            &self.agent_event_tx,
+            iroh_node,
+            self.router.as_ref(),
             request,
         )
         .await

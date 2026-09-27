@@ -1,3 +1,4 @@
+pub mod cloud_consent;
 pub mod commands;
 pub mod first_run;
 pub mod hardware;
@@ -10,6 +11,13 @@ pub mod mock_llm_server;
 pub mod mock_provider;
 pub mod prompt_loader;
 pub mod secure_http;
+#[cfg(feature = "sentinel")]
+pub mod sentinel_embedder;
+#[cfg(feature = "sentinel")]
+pub mod sentinel_scorer;
+#[cfg(feature = "sentinel")]
+pub mod sentinel_wiring;
+pub mod startup_policy;
 pub mod tool_integration;
 pub mod welcome;
 
@@ -39,6 +47,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         // Initialize security controls
         // SECURITY: Egress filter prevents SSRF attacks
         secure_http::init_egress_filter();
+        #[cfg(feature = "sentinel")]
+        sentinel_wiring::install();
     });
 
     // Check for verbose flag
@@ -49,11 +59,20 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .first()
         .is_some_and(|a| matches!(a.as_str(), "-h" | "--help" | "help" | "-v" | "--version"));
 
-    // First-run experience: check if models are available
-    if !is_help_or_version && first_run::is_first_run() {
-        // Handle first-run flow in a runtime
-        let runtime = tokio::runtime::Runtime::new()?;
-        runtime.block_on(handle_first_run(verbose))?;
+    startup_policy::validate_local_backend(
+        args,
+        cfg!(any(feature = "llama-cpp", feature = "snpe")),
+    )?;
+    if !is_help_or_version && startup_policy::needs_local_setup(args) && first_run::is_first_run() {
+        match startup_policy::first_run_action() {
+            startup_policy::FirstRunAction::Prompt => {
+                let runtime = tokio::runtime::Runtime::new()?;
+                runtime.block_on(handle_first_run(verbose))?;
+            }
+            startup_policy::FirstRunAction::Skip => {
+                return Err("The agent harness requires local models. Provision them with `arkavo model download` before starting; cloud credentials do not replace local inference.".into());
+            }
+        }
     }
 
     if args.is_empty() {
@@ -66,7 +85,30 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "chat" => commands::chat::execute(&args[1..]),
         "task" => commands::task::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),
+        "mcp" => commands::mcp_proxy::execute(&args[1..]),
+        "login" | "logout" => {
+            let is_login = args[0] == "login";
+            let run_async = async {
+                if is_login {
+                    commands::login::execute_login().await
+                } else {
+                    commands::login::execute_logout().await
+                }
+            };
+
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => handle.block_on(run_async),
+                Err(_) => {
+                    let runtime = tokio::runtime::Runtime::new()?;
+                    runtime.block_on(run_async)
+                }
+            }
+        }
         // Hidden commands (still accessible, just not in main help)
+        #[cfg(feature = "knowledge-pack")]
+        "pack" => commands::pack::execute(&args[1..]).map_err(Into::into),
+        #[cfg(not(feature = "knowledge-pack"))]
+        "pack" => Err("pack is not in this build; compile with the knowledge-pack feature".into()),
         "terminal" => commands::terminal::execute(&args[1..]),
         #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         "test" => commands::test::execute(&args[1..]),
@@ -142,102 +184,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        "orchestrator" => {
-            let run_async = async {
-                use clap::Parser;
-
-                #[derive(Parser)]
-                #[command(name = "orchestrator")]
-                #[command(about = "GitHub issue orchestration")]
-                struct Cli {
-                    #[command(flatten)]
-                    command: commands::orchestrator::OrchestratorCommand,
-                }
-
-                let cli = Cli::parse_from(
-                    std::iter::once("orchestrator")
-                        .chain(args[1..].iter().map(std::string::String::as_str)),
-                );
-                commands::orchestrator::run(&cli.command)
-                    .await
-                    .map_err(std::convert::Into::into)
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
-        #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
-        "serve" | "mcp" => {
-            // Always create a new runtime for the MCP server
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async { commands::mcp::run().await })
-        }
-        #[cfg(not(all(target_os = "macos", feature = "mcp-macos")))]
-        "serve" | "mcp" => {
-            eprintln!("MCP server is not available on this platform");
-            Err("MCP server requires macOS with mcp-tools feature (uses iOS simulator)".into())
-        }
-        "tdf" => {
-            let run_async = async {
-                use clap::Parser;
-
-                #[derive(Parser)]
-                #[command(name = "tdf")]
-                #[command(about = "TDF encryption, decryption, and P2P transport")]
-                struct Cli {
-                    #[command(subcommand)]
-                    command: commands::tdf::TdfCommand,
-                }
-
-                let cli = Cli::parse_from(
-                    std::iter::once("tdf").chain(args[1..].iter().map(std::string::String::as_str)),
-                );
-                commands::tdf::handle_tdf_command(cli.command)
-                    .await
-                    .map_err(std::convert::Into::into)
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
-        #[cfg(feature = "llama-cpp")]
-        "tool-bench" => {
-            let run_async = async {
-                use clap::Parser;
-
-                #[derive(Parser)]
-                #[command(name = "tool-bench")]
-                #[command(about = "Benchmark tool calling across local models")]
-                struct Cli {
-                    #[command(flatten)]
-                    command: commands::tool_bench::ToolBenchCommand,
-                }
-
-                let cli = Cli::parse_from(
-                    std::iter::once("tool-bench")
-                        .chain(args[1..].iter().map(std::string::String::as_str)),
-                );
-                commands::tool_bench::run(&cli.command).await
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
         "help" => {
             print_usage();
             Ok(())
@@ -246,6 +192,10 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             print_usage();
             Ok(())
         }
+        // Leading options with no subcommand run the default `agent` command, so
+        // `arkavo --trust` behaves like `arkavo agent run --trust`. (`-v`/`--version`
+        // and `-h`/`--help` are handled above / in main before reaching here.)
+        flag if flag.starts_with('-') => commands::agent::execute(args),
         _ => {
             eprintln!("Error: Unknown command '{}'", args[0]);
             print_usage();
@@ -264,15 +214,16 @@ fn print_usage() {
     println!("    chat           Conversational chat");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
-    println!("    orchestrator   GitHub issue orchestration");
-    println!("    serve          Run as MCP server");
-    println!("    tdf            TDF encryption and P2P transport");
+    println!("    pack           Build sealed knowledge-pack components");
+    println!("    mcp proxy      Permit-gated stdio MCP relay");
+    println!("{}", commands::login::login_help());
     println!();
     println!("Run 'arkavo <command> --help' for detailed options");
     println!();
     println!("OPTIONS:");
     println!("    -h, --help       Show help");
     println!("    -v, --version    Show version");
+    println!("    --trust          Run the agent and show its authorization QR code (DID:key)");
 }
 
 /// Handle first-run experience for new users
@@ -286,15 +237,15 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         println!("Welcome Friend\n");
     }
 
-    // Small model for classification, large model based on system
-    let small_model = RecommendedModel::Qwen35_0_8B;
+    // Small model for fast routing, medium model for capable agentic inference.
+    let small_model = RecommendedModel::Gemma4E2B;
     let large_model = caps.recommended_model;
 
     let small_gb = small_model.size_bytes() as f64 / 1_000_000_000.0;
     let large_gb = large_model.size_bytes() as f64 / 1_000_000_000.0;
     let total_gb = small_gb + large_gb;
 
-    println!("To run AI locally, you'll need to download two models:");
+    println!("Arkavo Edge runs AI locally. First-time setup downloads two models:");
     println!();
     println!(
         "  Small (fast routing):  {} ({:.1} GB)",
@@ -302,7 +253,7 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         small_gb
     );
     println!(
-        "  Large (inference):     {} ({:.1} GB)",
+        "  Medium (inference):    {} ({:.1} GB)",
         large_model.display_name(),
         large_gb
     );
@@ -339,8 +290,6 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         println!("You can download models later with:");
         println!("  arkavo model download");
         println!();
-        println!("Or use a cloud provider with an API key:");
-        println!("  GEMINI_API_KEY=your-key arkavo chat --prompt \"Hello\"");
     }
 
     std::process::exit(0);

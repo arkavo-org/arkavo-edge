@@ -13,6 +13,7 @@ use arkavo_orchestrator::cognitive_engine::{
 use arkavo_orchestrator::issue_analyzer::{Complexity, IssueAnalyzer};
 use arkavo_orchestrator::issue_router::{ExecutionStrategy, IssueRouter, Priority};
 use arkavo_orchestrator::types::{Issue, IssueAction, IssueEvent, Label, Repository, User};
+use arkavo_test_macros::spec;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -91,6 +92,7 @@ fn create_test_issue_event() -> IssueEvent {
     }
 }
 
+#[spec("ORCH-002")]
 #[tokio::test]
 async fn test_healer_issue_analysis() {
     let event = create_test_issue_event();
@@ -110,6 +112,7 @@ async fn test_healer_issue_analysis() {
     println!("  Estimated tokens: {}", analysis.estimated_tokens);
 }
 
+#[spec("ORCH-003")]
 #[tokio::test]
 async fn test_healer_issue_routing() {
     let event = create_test_issue_event();
@@ -131,6 +134,7 @@ async fn test_healer_issue_routing() {
     println!("  Rationale: {}", routing.rationale);
 }
 
+#[spec("ORCH-006")]
 #[tokio::test]
 async fn test_healer_agent_assignment() {
     let event = create_test_issue_event();
@@ -155,6 +159,7 @@ async fn test_healer_agent_assignment() {
     println!("  Strategy: {:?}", assignment.routing_decision.strategy);
 }
 
+#[spec("ORCH-004")]
 #[tokio::test]
 async fn test_healer_execution_plan() {
     let event = create_test_issue_event();
@@ -196,6 +201,7 @@ async fn test_healer_execution_plan() {
     }
 }
 
+#[spec("ORCH-005")]
 #[tokio::test]
 #[ignore] // Run with: cargo test -p arkavo-orchestrator test_healer_full_flow -- --ignored --nocapture
 async fn test_healer_full_flow_with_pr() {
@@ -296,6 +302,7 @@ async fn test_healer_full_flow_with_pr() {
     println!("\n=== E2E Flow Complete ===\n");
 }
 
+#[spec("ORCH-005")]
 #[test]
 fn test_healer_pr_body_format() {
     let issue_number = 123;
@@ -324,6 +331,7 @@ fn test_healer_pr_body_format() {
     assert!(pr_body.contains("Arkavo Healer"));
 }
 
+#[spec("ORCH-003")]
 #[test]
 fn test_healer_routing_strategies() {
     // Test that routing strategies align with complexity levels
@@ -336,6 +344,7 @@ fn test_healer_routing_strategies() {
     assert_eq!(routing.analysis.complexity, Complexity::Trivial);
 }
 
+#[spec("ORCH-003")]
 #[test]
 fn test_healer_priority_assignment() {
     // Create a security issue event

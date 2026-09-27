@@ -170,11 +170,7 @@ pub async fn handle_tasks_list(
         .rev()
         .take(limit)
         .map(|t| {
-            let objective = if t.objective.len() > 200 {
-                format!("{}...", &t.objective[..197])
-            } else {
-                t.objective.clone()
-            };
+            let objective = objective_summary(&t.objective);
             let last_result = t.subtasks.iter().rev().find_map(|s| s.result.as_ref());
             let quality_score = last_result.and_then(|r| r.quality_score);
             let result_text = last_result.and_then(|r| {
@@ -201,4 +197,30 @@ pub async fn handle_tasks_list(
     let total_count = tasks.len() as u32;
     timer.success();
     Ok(TaskListResponse { tasks, total_count })
+}
+
+/// Shorten a task objective for the list view.
+///
+/// An objective is free-form user text, so the cut must land on a character
+/// boundary rather than mid-scalar.
+fn objective_summary(objective: &str) -> String {
+    if objective.len() > 200 {
+        format!("{}...", arkavo_llm::char_boundary_prefix(objective, 197))
+    } else {
+        objective.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn objective_summary_is_safe_for_multibyte_text() {
+        let summary = objective_summary(&"界".repeat(100));
+        // 197 bytes hold 65 whole three-byte scalars.
+        assert_eq!(summary.matches('界').count(), 65);
+        assert!(summary.ends_with("..."));
+        assert_eq!(objective_summary("short"), "short");
+    }
 }

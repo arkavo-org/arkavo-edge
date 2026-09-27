@@ -2,6 +2,9 @@
 //! skill resolution enabled, asserting every role's skill resolves with
 //! verified=true.
 
+// #[tokio::test] expands to Runtime::block_on; harmless in tests.
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 
 use arkavo_swarmkit::parse_yaml;

@@ -42,6 +42,49 @@ struct ToolDefinition {
     input_schema: Value,
 }
 
+/// `thinking` request parameter. Adaptive-surface models reject an explicit
+/// `{"type": "disabled"}` (Fable 5 returns 400), so the field is omitted
+/// entirely when thinking is off rather than sent as disabled.
+#[derive(Debug, Clone, Serialize)]
+struct ThinkingConfig {
+    #[serde(rename = "type")]
+    mode: &'static str,
+}
+
+impl ThinkingConfig {
+    fn adaptive() -> Self {
+        Self { mode: "adaptive" }
+    }
+}
+
+/// Claude models on the adaptive-thinking API surface (Fable/Mythos and
+/// Opus 4.7+). These reject sampling parameters (`temperature`, `top_p`,
+/// `top_k`) and fixed thinking budgets with HTTP 400; requests must omit them
+/// and opt into `thinking: {"type": "adaptive"}` instead.
+///
+/// The Opus cutoff is parsed from the version rather than enumerated, so a
+/// future snapshot (4.9, 5.x, ...) pinned in `ModelChoice::name()` — or set
+/// via `ANTHROPIC_MODEL` — is covered without editing this in lockstep. The
+/// model id is the only signal available here; the provider is a lower layer
+/// than the router's `ModelChoice` and also sees raw operator-set ids.
+fn uses_adaptive_thinking(model: &str) -> bool {
+    // Fable and Mythos are adaptive-thinking-only from their first release.
+    if model.starts_with("claude-fable") || model.starts_with("claude-mythos") {
+        return true;
+    }
+    // Opus removed sampling params + fixed thinking budgets starting at 4.7.
+    if let Some(rest) = model.strip_prefix("claude-opus-") {
+        let mut parts = rest.split('-');
+        if let (Some(Ok(major)), Some(Ok(minor))) = (
+            parts.next().map(str::parse::<u32>),
+            parts.next().map(str::parse::<u32>),
+        ) {
+            return major > 4 || (major == 4 && minor >= 7);
+        }
+    }
+    false
+}
+
 /// Anthropic API request structures
 #[derive(Debug, Clone, Serialize)]
 struct CreateMessageRequest {
@@ -51,6 +94,8 @@ struct CreateMessageRequest {
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<ThinkingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,6 +136,13 @@ enum ResponseContentBlock {
     Thinking { thinking: String },
     #[serde(other)]
     Other,
+}
+
+/// Token usage reported by a completion, for caller-side cost accounting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompletionUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,11 +258,19 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     /// Create provider from environment variables
     pub fn from_env() -> ProviderResult<Self> {
+        Self::from_env_with_model("claude-sonnet-4-5-20250929")
+    }
+
+    /// Create provider from environment with an explicit model id.
+    ///
+    /// `ANTHROPIC_MODEL` still wins when set so operators can pin a model
+    /// globally; otherwise the routed model id is sent to the API. Without
+    /// this, every routing decision collapses to the env/default model.
+    pub fn from_env_with_model(model: &str) -> ProviderResult<Self> {
         let api_key = env::var("ANTHROPIC_API_KEY")
             .map_err(|_| anyhow::anyhow!("ANTHROPIC_API_KEY environment variable not set"))?;
 
-        let model = env::var("ANTHROPIC_MODEL")
-            .unwrap_or_else(|_| "claude-sonnet-4-5-20250929".to_string());
+        let model = env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| model.to_string());
 
         let config = AnthropicConfig {
             api_key,
@@ -234,7 +294,9 @@ impl AnthropicProvider {
         let http_config = HttpClientConfig {
             base_url: config.base_url.clone(),
             auth_token: None, // Anthropic uses a custom header
-            timeout_secs: 60,
+            // Adaptive-thinking models (Fable 5, Opus 4.7+) can reason for tens
+            // of seconds before a non-streaming response completes.
+            timeout_secs: 120,
             max_retries: 3,
             initial_retry_delay_ms: 1000,
             backoff_factor: 2.0,
@@ -249,7 +311,40 @@ impl AnthropicProvider {
         Ok(Self { config, client })
     }
 
-    /// Convert messages to Anthropic's 3-role format
+    /// Build a request honoring the configured model's API surface.
+    ///
+    /// Adaptive-surface models get `thinking: {"type": "adaptive"}` with no
+    /// sampling parameters (sending them is a 400), plus a larger default
+    /// output ceiling because thinking tokens count toward `max_tokens` and
+    /// would truncate answers at the legacy 4096 cap.
+    fn build_request(
+        &self,
+        messages: Vec<ApiMessage>,
+        system: Option<String>,
+        stream: bool,
+        tools: Option<Vec<ToolDefinition>>,
+        max_tokens: Option<u32>,
+    ) -> CreateMessageRequest {
+        let adaptive = uses_adaptive_thinking(&self.config.model);
+        let default_max_tokens = if adaptive { 16_000 } else { 4_096 };
+
+        CreateMessageRequest {
+            model: self.config.model.clone(),
+            messages,
+            max_tokens: Some(max_tokens.unwrap_or(default_max_tokens)),
+            temperature: if adaptive { None } else { Some(0.7) },
+            thinking: adaptive.then(ThinkingConfig::adaptive),
+            system,
+            stream: Some(stream),
+            tools,
+        }
+    }
+
+    /// Convert messages to Anthropic's 3-role format.
+    ///
+    /// Anthropic accepts only `user` and `assistant`; the tool role is carried
+    /// by content blocks this converter does not model, so tool results are
+    /// attributed in user text instead (see the `Role::Tool` arm).
     fn convert_messages(&self, messages: Vec<Message>) -> (Option<String>, Vec<ApiMessage>) {
         let mut system_content = None;
         let mut api_messages = Vec::new();
@@ -280,7 +375,7 @@ impl AnthropicProvider {
                         });
                     }
                 }
-                Role::Assistant | Role::Tool => {
+                Role::Assistant => {
                     // Skip empty assistant messages (unless it's the last one)
                     if !content.is_empty() {
                         api_messages.push(ApiMessage {
@@ -288,6 +383,20 @@ impl AnthropicProvider {
                             content: content.to_string(),
                         });
                     }
+                }
+                Role::Tool => {
+                    // `ApiMessage` carries plain text, not tool_use/tool_result
+                    // blocks, so the result cannot travel as a tool turn. It
+                    // must not travel as an assistant turn either: Anthropic
+                    // continues a trailing assistant message as prefill, so the
+                    // model would finish its own tool output instead of
+                    // answering. Attribute it in user text, as Gemini does.
+                    // Never skipped when empty — a dropped result would leave
+                    // the request ending on the assistant turn that called it.
+                    api_messages.push(ApiMessage {
+                        role: "user".to_string(),
+                        content: msg.tool_result_as_user_text(),
+                    });
                 }
             }
         }
@@ -433,6 +542,69 @@ impl AnthropicProvider {
             }
         }
     }
+
+    /// Non-streaming completion that also returns the API-reported token
+    /// usage, for callers that do their own cost accounting (e.g. the
+    /// consolidation teacher's per-layer budget ledger).
+    pub async fn complete_with_usage(
+        &self,
+        messages: Vec<Message>,
+    ) -> Result<(String, CompletionUsage), crate::Error> {
+        let (system_content, api_messages) = self.convert_messages(messages);
+        let request = self.build_request(api_messages, system_content, false, None, None);
+        let url = format!("{}/v1/messages", self.config.base_url);
+
+        let result = self
+            .client
+            .execute_with_retry(|client| {
+                let config = self.config.clone();
+                let url = url.clone();
+                let request = request.clone();
+                Box::pin(async move {
+                    let response = client
+                        .post(&url)
+                        .header("x-api-key", &config.api_key)
+                        .header("anthropic-version", &config.api_version)
+                        .header("content-type", "application/json")
+                        .json(&request)
+                        .send()
+                        .await?;
+
+                    if response.status().is_success() {
+                        let message: MessageResponse = response.json().await?;
+                        let content = message
+                            .content
+                            .iter()
+                            .filter_map(|block| match block {
+                                ResponseContentBlock::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        Ok((
+                            content,
+                            CompletionUsage {
+                                input_tokens: message.usage.input_tokens,
+                                output_tokens: message.usage.output_tokens,
+                            },
+                        ))
+                    } else {
+                        let status = response.status();
+                        let error_text = response
+                            .text()
+                            .await
+                            .unwrap_or_else(|_| "Failed to read error response".to_string());
+                        Err(anyhow::anyhow!(
+                            "Anthropic API error {status}: {error_text}"
+                        ))
+                    }
+                })
+            })
+            .await
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
+
+        Ok(result)
+    }
 }
 
 #[async_trait]
@@ -444,15 +616,7 @@ impl Provider for AnthropicProvider {
     ) -> Result<String, crate::Error> {
         let (system_content, api_messages) = self.convert_messages(messages);
 
-        let request = CreateMessageRequest {
-            model: self.config.model.clone(),
-            messages: api_messages,
-            max_tokens: Some(4096),
-            temperature: Some(0.7),
-            system: system_content,
-            stream: Some(false),
-            tools: None,
-        };
+        let request = self.build_request(api_messages, system_content, false, None, None);
 
         let url = format!("{}/v1/messages", self.config.base_url);
 
@@ -514,15 +678,7 @@ impl Provider for AnthropicProvider {
     > {
         let (system_content, api_messages) = self.convert_messages(messages);
 
-        let request = CreateMessageRequest {
-            model: self.config.model.clone(),
-            messages: api_messages,
-            max_tokens: Some(4096),
-            temperature: Some(0.7),
-            system: system_content,
-            stream: Some(true),
-            tools: None,
-        };
+        let request = self.build_request(api_messages, system_content, true, None, None);
 
         let url = format!("{}/v1/messages", self.config.base_url);
 
@@ -591,9 +747,8 @@ impl Provider for AnthropicProvider {
                                     && tx
                                         .send(Ok(StreamResponse {
                                             content,
-                                            reasoning_content: None,
                                             done,
-                                            inference_timing: None,
+                                            ..Default::default()
                                         }))
                                         .await
                                         .is_err()
@@ -640,15 +795,13 @@ impl Provider for AnthropicProvider {
             .map(Self::convert_tools_to_definitions)
             .transpose()?;
 
-        let request = CreateMessageRequest {
-            model: self.config.model.clone(),
-            messages: api_messages,
-            max_tokens: Some(max_tokens.unwrap_or(4096) as u32),
-            temperature: Some(0.7),
-            system: system_content,
-            stream: Some(false),
-            tools: tool_definitions,
-        };
+        let request = self.build_request(
+            api_messages,
+            system_content,
+            false,
+            tool_definitions,
+            max_tokens.map(|t| t as u32),
+        );
 
         let url = format!("{}/v1/messages", self.config.base_url);
 
@@ -710,8 +863,7 @@ impl Provider for AnthropicProvider {
             },
             tool_calls,
             finish_reason: message.stop_reason,
-            inference_timing: None,
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 }
@@ -719,6 +871,7 @@ impl Provider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_message_conversion() {
@@ -739,6 +892,65 @@ mod tests {
         assert_eq!(api_messages[0].role, "user");
         assert_eq!(api_messages[1].role, "assistant");
         assert_eq!(api_messages[2].role, "user");
+    }
+
+    /// Anthropic reads a trailing assistant message as prefill and continues
+    /// it, so a tool result replayed under that role makes the model finish
+    /// its own tool output instead of answering. It must arrive as user text.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn tool_result_is_not_sent_as_an_assistant_turn() {
+        let provider = AnthropicProvider::new(AnthropicConfig::default()).unwrap();
+
+        let messages = vec![
+            Message::user("what is the weather in Dublin"),
+            Message::assistant_with_tool_calls(
+                "Checking the forecast.",
+                vec![crate::ToolCall {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"Dublin"}"#.to_string(),
+                    id: Some("call_1".to_string()),
+                }],
+            ),
+            Message::tool_result("sunny, 21C", "call_1", "get_weather"),
+        ];
+
+        let (_, api_messages) = provider.convert_messages(messages);
+
+        let last = api_messages.last().expect("conversation is not empty");
+        assert_ne!(last.role, "assistant");
+        assert_eq!(last.role, "user");
+        assert!(last.content.contains("sunny, 21C"), "{last:?}");
+        assert!(last.content.contains("get_weather"), "{last:?}");
+    }
+
+    /// The tool-calling assistant turn often carries no text. Dropping it
+    /// leaves two adjacent user turns, which Anthropic rejects unless the
+    /// converter merges them — and the tool output must survive that merge.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn tool_result_after_a_silent_assistant_turn_merges_into_one_user_turn() {
+        let provider = AnthropicProvider::new(AnthropicConfig::default()).unwrap();
+
+        let messages = vec![
+            Message::user("what is the weather in Dublin"),
+            Message::assistant_with_tool_calls(
+                "",
+                vec![crate::ToolCall {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"Dublin"}"#.to_string(),
+                    id: Some("call_1".to_string()),
+                }],
+            ),
+            Message::tool_result("sunny, 21C", "call_1", "get_weather"),
+        ];
+
+        let (_, api_messages) = provider.convert_messages(messages);
+
+        assert_eq!(api_messages.len(), 1, "{api_messages:?}");
+        assert_eq!(api_messages[0].role, "user");
+        assert!(api_messages[0].content.contains("Dublin"));
+        assert!(api_messages[0].content.contains("sunny, 21C"));
     }
 
     #[test]
@@ -823,6 +1035,97 @@ mod tests {
         let config = AnthropicConfig::default();
         let provider = AnthropicProvider::new(config).unwrap();
         assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn test_adaptive_thinking_surface_detection() {
+        // Current adaptive-surface ids.
+        assert!(uses_adaptive_thinking("claude-fable-5"));
+        assert!(uses_adaptive_thinking("claude-mythos-5"));
+        assert!(uses_adaptive_thinking("claude-opus-4-7"));
+        assert!(uses_adaptive_thinking("claude-opus-4-8"));
+        // Future snapshots must be covered without editing this function in
+        // lockstep with ModelChoice::name() — a non-adaptive request to one of
+        // these is a hard 400, which the prior hardcoded list would have
+        // missed.
+        assert!(uses_adaptive_thinking("claude-opus-4-9"));
+        assert!(uses_adaptive_thinking("claude-opus-4-12-20270101"));
+        assert!(uses_adaptive_thinking("claude-opus-5-0"));
+        assert!(uses_adaptive_thinking("claude-opus-6-3"));
+        // Pre-adaptive Opus and non-Opus families keep the legacy surface.
+        assert!(!uses_adaptive_thinking("claude-opus-4-6"));
+        assert!(!uses_adaptive_thinking("claude-opus-4-5-20251101"));
+        assert!(!uses_adaptive_thinking("claude-sonnet-4-6"));
+        assert!(!uses_adaptive_thinking("claude-sonnet-4-5-20250929"));
+        assert!(!uses_adaptive_thinking("kimi-k2.5"));
+        // Malformed / unparseable ids fall back to the legacy surface.
+        assert!(!uses_adaptive_thinking("claude-opus"));
+        assert!(!uses_adaptive_thinking("claude-opus-latest"));
+    }
+
+    // Regression: Fable 5 / Opus 4.7+ return HTTP 400 if `temperature` or an
+    // explicit `thinking: {"type": "disabled"}` is sent. Requests for these
+    // models must omit sampling params and opt into adaptive thinking.
+    #[test]
+    fn test_fable_request_omits_sampling_and_uses_adaptive_thinking() {
+        let config = AnthropicConfig {
+            model: "claude-fable-5".to_string(),
+            ..Default::default()
+        };
+        let provider = AnthropicProvider::new(config).unwrap();
+
+        let request = provider.build_request(
+            vec![ApiMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            }],
+            None,
+            false,
+            None,
+            None,
+        );
+
+        let json = serde_json::to_value(&request).unwrap();
+        assert!(json.get("temperature").is_none(), "must omit temperature");
+        assert_eq!(json["thinking"]["type"], "adaptive");
+        // Thinking tokens count toward max_tokens; 4096 truncates answers.
+        assert_eq!(json["max_tokens"], 16_000);
+    }
+
+    #[test]
+    fn test_legacy_model_request_keeps_sampling_without_thinking() {
+        let config = AnthropicConfig::default(); // Sonnet 4.5
+        let provider = AnthropicProvider::new(config).unwrap();
+
+        let request = provider.build_request(
+            vec![ApiMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            }],
+            None,
+            false,
+            None,
+            None,
+        );
+
+        let json = serde_json::to_value(&request).unwrap();
+        let temperature = json["temperature"].as_f64().expect("temperature present");
+        assert!((temperature - 0.7).abs() < 1e-6);
+        assert!(json.get("thinking").is_none(), "must omit thinking field");
+        assert_eq!(json["max_tokens"], 4096);
+    }
+
+    #[test]
+    fn test_explicit_max_tokens_overrides_default() {
+        let config = AnthropicConfig {
+            model: "claude-fable-5".to_string(),
+            ..Default::default()
+        };
+        let provider = AnthropicProvider::new(config).unwrap();
+
+        let request = provider.build_request(Vec::new(), None, false, None, Some(2048));
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["max_tokens"], 2048);
     }
 
     #[test]

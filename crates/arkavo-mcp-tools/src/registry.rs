@@ -12,6 +12,7 @@ use crate::github_checks::GitHubChecksTool;
 use crate::github_org_knowledge::{
     GitHubCiStatusTool, GitHubOrgOverviewTool, GitHubOrgReposTool, GitHubRelatedIssuesTool,
 };
+use crate::github_pr_watch::GitHubPrWatchTool;
 use crate::github_review::GitHubReviewTool;
 use crate::health_check::HealthCheckTool;
 use crate::osv::OsvTool;
@@ -50,6 +51,32 @@ impl Tool for McpToolWrapper {
 
     fn schema(&self) -> &ToolSchema {
         &self.tool_schema
+    }
+}
+
+/// Adapts a tool implementing `arkavo_mcp::Tool` to this crate's `server::Tool`. The two
+/// traits are near-identical — same `ToolSchema`, differing only in the execute() error type.
+//
+// TODO: unify arkavo_mcp::Tool and server::Tool. This adapter exists only because the error
+// types diverge (arkavo_mcp uses Box<dyn Error>, here ToolError). Unification is where
+// category-aware (retryable vs fatal) error handling should land, for all wrapped tools at once.
+#[cfg(feature = "code-tools")]
+struct McpToolAdapter(Box<dyn arkavo_mcp::Tool>);
+
+#[cfg(feature = "code-tools")]
+#[async_trait]
+impl Tool for McpToolAdapter {
+    async fn execute(&self, params: Value) -> crate::Result<Value> {
+        // arkavo_mcp::Tool type-erases its error to Box<dyn Error>, so no category survives to
+        // preserve here — map to the coarse Execution variant, as McpToolWrapper/mcp_bridge do.
+        self.0
+            .execute(params)
+            .await
+            .map_err(|e| crate::ToolError::Execution(e.to_string()))
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        self.0.schema()
     }
 }
 
@@ -236,6 +263,7 @@ impl ToolRegistry {
         self.register("github_pr_create", Box::new(GitHubPrCreateTool::new()));
         self.register("github_pr_list", Box::new(GitHubPrListTool::new()));
         self.register("github_pr_merge", Box::new(GitHubPrMergeTool::new()));
+        self.register("github_pr_watch", Box::new(GitHubPrWatchTool::new()));
 
         // GitHub Repository tools
         self.register("github_repo_clone", Box::new(GitHubRepoCloneKit::new()));
@@ -283,12 +311,46 @@ impl ToolRegistry {
             Box::new(ContextRestoreTool::new(storage)),
         );
 
+        // Code-search and ephemeral-workspace tools. These implement `arkavo_mcp::Tool`, so
+        // they are wrapped in `McpToolAdapter` to satisfy `server::Tool`.
+        #[cfg(feature = "code-tools")]
+        {
+            use arkavo_mcp_code_search::{CodeGrepTool, CombyTool, TreeSitterTool};
+            use arkavo_mcp_workspace::WorkspaceTool;
+            self.register(
+                "codegrep_search",
+                Box::new(McpToolAdapter(Box::new(CodeGrepTool::new()))),
+            );
+            self.register(
+                "struct_find_replace",
+                Box::new(McpToolAdapter(Box::new(CombyTool::new()))),
+            );
+            self.register(
+                "syntax_tree",
+                Box::new(McpToolAdapter(Box::new(TreeSitterTool::new()))),
+            );
+            // workspace_container needs Docker/Podman at runtime; it fails gracefully when absent.
+            self.register(
+                "workspace_container",
+                Box::new(McpToolAdapter(Box::new(WorkspaceTool::new()))),
+            );
+        }
+
         // Note: Apple platform tools (simulator, Xcode, debugger, UI automation)
         // have been moved to arkavo-mcp-macos crate for better organization.
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
         self.tools.insert(name.to_string(), tool);
+    }
+
+    /// Drop every tool whose registry key is not in `granted`, realizing a
+    /// SwarmKit role's least-privilege MCP-tool grant. Matching is by the
+    /// registry key (the bare tool name, e.g. `git_diff`) — the manifest's
+    /// `McpToolGrant.server` is a logical label and is never matched here.
+    /// Granting a tool the agent does not have is a no-op (never fabricates).
+    pub fn retain_granted(&mut self, granted: &std::collections::HashSet<String>) {
+        self.tools.retain(|name, _| granted.contains(name));
     }
 
     /// Register a `search_tools` meta-tool that lets the model discover tools by keyword.
@@ -741,6 +803,22 @@ mod tests {
         assert!(!tools.is_empty());
     }
 
+    // The code-search + workspace tools are exposed via McpToolAdapter (they implement
+    // arkavo_mcp::Tool rather than server::Tool). Guard that the wiring stays registered.
+    #[cfg(feature = "code-tools")]
+    #[tokio::test]
+    async fn test_code_tools_registered() {
+        let registry = create_test_registry().await;
+        for name in [
+            "codegrep_search",
+            "struct_find_replace",
+            "syntax_tree",
+            "workspace_container",
+        ] {
+            assert!(registry.get(name).is_some(), "{name} should be registered");
+        }
+    }
+
     #[tokio::test]
     async fn test_categorization() {
         let registry = create_test_registry().await;
@@ -955,5 +1033,61 @@ mod tests {
 
         let total = result.get("total_available").unwrap().as_u64().unwrap();
         assert!(total > 0);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod retain_granted_tests {
+    use super::*;
+    use arkavo_memory::MemoryStorage;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    fn names(reg: &ToolRegistry) -> Vec<String> {
+        let mut n: Vec<String> = reg.list_tools().into_iter().map(|t| t.name).collect();
+        n.sort();
+        n
+    }
+
+    #[tokio::test]
+    async fn retains_only_granted_tools() {
+        let storage = Arc::new(MemoryStorage::new_test().await.expect("storage"));
+        let mut reg = ToolRegistry::new(storage);
+        assert!(
+            reg.get("github_pr_create").is_some(),
+            "precondition: full catalog"
+        );
+
+        let granted: HashSet<String> = ["git_diff", "git_log", "gh_pr_review", "github_ci_status"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        reg.retain_granted(&granted);
+
+        let kept = names(&reg);
+        assert_eq!(
+            kept,
+            vec!["gh_pr_review", "git_diff", "git_log", "github_ci_status"]
+        );
+        assert!(reg.get("github_pr_create").is_none());
+    }
+
+    #[tokio::test]
+    async fn empty_grant_set_clears_registry() {
+        let storage = Arc::new(MemoryStorage::new_test().await.expect("storage"));
+        let mut reg = ToolRegistry::new(storage);
+        reg.retain_granted(&HashSet::new());
+        assert!(reg.list_tools().is_empty());
+    }
+
+    #[tokio::test]
+    async fn grant_for_absent_tool_is_a_noop_not_an_insert() {
+        let storage = Arc::new(MemoryStorage::new_test().await.expect("storage"));
+        let mut reg = ToolRegistry::new(storage);
+        let granted: HashSet<String> = ["does_not_exist".to_string()].into_iter().collect();
+        reg.retain_granted(&granted);
+        assert!(reg.get("does_not_exist").is_none());
+        assert!(reg.list_tools().is_empty());
     }
 }

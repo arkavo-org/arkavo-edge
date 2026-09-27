@@ -286,7 +286,7 @@ pub(crate) async fn broadcast_event(
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
 ) {
     let conns = connections.read().await;
-    for (_, conn_info) in conns.iter() {
+    for conn_info in conns.values() {
         let _ = conn_info._ws_tx.send(event.clone()).await;
     }
 }
@@ -376,7 +376,7 @@ pub(crate) async fn handle_request_learning_status(
     };
     let conns = agent_connections.read().await;
     let mut new_records: Vec<RoutingRecord> = Vec::new();
-    for (_id, conn) in conns.iter() {
+    for conn in conns.values() {
         if !conn.is_connected().await {
             continue;
         }
@@ -489,7 +489,7 @@ pub(crate) async fn handle_request_learning_status(
         std::collections::HashMap::new();
     {
         let conns = agent_connections.read().await;
-        for (_id, conn) in conns.iter() {
+        for conn in conns.values() {
             if !conn.is_connected().await {
                 continue;
             }

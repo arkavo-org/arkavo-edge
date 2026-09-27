@@ -5,6 +5,7 @@
 #include "arkavo_chat_wrapper.h"
 #include "llama.h"
 #include "chat.h"
+#include "log.h"
 #include "peg-parser.h"
 
 #include <cstdlib>
@@ -93,6 +94,16 @@ arkavo_chat_result arkavo_chat_templates_apply(
             }
             if (messages[i].tool_name) {
                 msg.tool_name = messages[i].tool_name;
+            }
+            for (int j = 0; j < messages[i].num_tool_calls; j++) {
+                const arkavo_tool_call &src = messages[i].tool_calls[j];
+                common_chat_tool_call tc;
+                tc.name = src.name ? src.name : "";
+                tc.arguments = src.arguments ? src.arguments : "{}";
+                if (src.id) {
+                    tc.id = src.id;
+                }
+                msg.tool_calls.push_back(std::move(tc));
             }
             inputs.messages.push_back(std::move(msg));
         }
@@ -349,6 +360,15 @@ void arkavo_sampler_free(struct llama_sampler *sampler) {
     } catch (...) {
         // Suppress exceptions from destructor
     }
+}
+
+void arkavo_set_common_log_quiet(int quiet) {
+    // The "common" library logs chat-template and speculative-decoding notices via
+    // LOG_INF/LOG_WRN, whose verbosity is the level value (ERROR=1, WARN=2, INFO=3).
+    // A line is emitted when its verbosity <= the threshold. Dropping the threshold to
+    // ERROR keeps genuine errors while silencing the info/warn chatter; quiet == 0
+    // restores the upstream default so debug runs see everything.
+    common_log_set_verbosity_thold(quiet ? LOG_LEVEL_ERROR : LOG_DEFAULT_LLAMA);
 }
 
 } // extern "C"

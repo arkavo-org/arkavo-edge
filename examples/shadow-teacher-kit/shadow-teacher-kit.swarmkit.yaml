@@ -1,0 +1,75 @@
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "Shadow Teacher Kit"
+  version: "0.1.0"
+  description: >-
+    A small data-gathering swarm for the shadow consolidation teacher.
+    Two coordination-plane workers (code reviewer, test writer) execute
+    tool-driven tasks with local models, producing episode traces in the
+    learning store. The audit-plane shadow-teacher role observes only:
+    it has no handoffs and no context writes, so the kit demonstrates the
+    plane separation rule — the teacher rides the audit plane, never the
+    coordination plane. The arkavo-shadow-consolidation job then reads
+    the gathered episodes read-only and previews the consolidation batch.
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-06-10T12:00:00Z"
+  expires: "2026-12-31T00:00:00Z"
+  nonce: "shdwTchrKit0606AAAA"
+objective:
+  goal: "Gather diverse, tool-driven episode traces for shadow consolidation."
+  success_criteria:
+    - "episodes recorded in at least two task categories"
+    - "shadow-consolidation dry-run produces at least one batch"
+roles:
+  - id: "code-reviewer"
+    role_type: "reviewer"
+    description: "Reviews sample source files for security and quality issues using filesystem tools."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "E4B"
+        backend: "llama.cpp"
+      budget:
+        max_inference_calls: 24
+        max_wallclock_ms: 1800000
+        max_total_tokens: 96000
+  - id: "test-writer"
+    role_type: "specialist"
+    description: "Generates unit tests for sample source files using filesystem tools."
+    agent_provisioning:
+      model:
+        family: "gemma-4"
+        size: "E4B"
+        backend: "llama.cpp"
+      budget:
+        max_inference_calls: 24
+        max_wallclock_ms: 1800000
+        max_total_tokens: 96000
+  - id: "shadow-teacher"
+    role_type: "auditor"
+    plane: "audit"
+    description: "Audit-plane consolidation teacher: reads episode traces offline, never drives work."
+    agent_provisioning: {}
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing: {strategy: "static"}
+constraints:
+  global_budget: {max_wallclock_seconds: 3600, max_total_tokens: 200000, max_cost_usd: 0.0}
+  data_classifications: ["public"]
+  network: {egress_allowed: false, egress_allowlist: []}
+proposal_governance:
+  accepted_origins: ["consolidation", "human"]
+  role_ceilings:
+    - {role: "code-reviewer", auto_apply_max_blast_radius: "single_agent"}
+    - {role: "test-writer", auto_apply_max_blast_radius: "single_agent"}
+  observation_window_sec: 600
+completion:
+  rules: ["episodes recorded for every submitted task category"]
+  on_failure: "abort"
+  max_retries: 0
+provenance:
+  signatures: [{signer_did: "did:web:arkavo.com", algorithm: "ed25519", signature: "AAA"}]

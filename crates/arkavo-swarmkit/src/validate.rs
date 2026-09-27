@@ -59,6 +59,25 @@ pub enum ValidationError {
     #[error("evaluation.rubric.dimensions is empty; at least one dimension is required (§4.6)")]
     EmptyRubricDimensions,
 
+    #[error(
+        "proposal_governance.role_ceilings references role {0:?} which does not resolve to a known role"
+    )]
+    UnresolvedGovernanceRole(String),
+
+    #[error(
+        "proposal_governance.role_ceilings: role {role:?} sets auto_apply_max_blast_radius=mesh; mesh-radius proposals are never auto-applied"
+    )]
+    MeshAutoApplyCeiling { role: String },
+
+    #[error(
+        "role {role:?} declares plane={plane} but has coordination outputs ({output}); learning/audit roles may emit only tightening proposals and provenance-tagged prior observations"
+    )]
+    PlaneWiringViolation {
+        role: String,
+        plane: &'static str,
+        output: &'static str,
+    },
+
     #[error("evaluation.rubric.dimensions weight sum {sum} is not 1.0 (within ±1e-6)")]
     RubricWeightsDoNotSumToOne { sum: f64 },
 
@@ -129,6 +148,7 @@ pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
         }
         validate_role_budget(role, &m.constraints.global_budget)?;
         validate_network_egress(role, m.constraints.network.egress_allowed)?;
+        validate_plane_wiring(role)?;
     }
 
     if let Some(eval) = &m.evaluation {
@@ -146,12 +166,64 @@ pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
         }
     }
 
+    validate_proposal_governance(m, &role_ids)?;
+
     validate_expiry(m)?;
 
     if !m.kit.id.is_empty() {
         validate_kit_id(m)?;
     }
 
+    Ok(())
+}
+
+/// Learning/audit roles must not have coordination outputs: no handoff
+/// delegation, no shared-context writes. The type-level half of "Fable on
+/// the audit plane, never the coordination plane".
+fn validate_plane_wiring(role: &crate::role::RoleSpec) -> Result<(), ValidationError> {
+    use crate::role::Plane;
+    let plane = match role.plane {
+        Some(Plane::Learning) => "learning",
+        Some(Plane::Audit) => "audit",
+        Some(Plane::Coordination) | None => return Ok(()),
+    };
+    if !role.handoffs.is_empty() {
+        return Err(ValidationError::PlaneWiringViolation {
+            role: role.id.clone(),
+            plane,
+            output: "handoffs (A2A delegation)",
+        });
+    }
+    if let Some(scope) = &role.context_scope
+        && !scope.can_write.is_empty()
+    {
+        return Err(ValidationError::PlaneWiringViolation {
+            role: role.id.clone(),
+            plane,
+            output: "context_scope.can_write",
+        });
+    }
+    Ok(())
+}
+
+fn validate_proposal_governance(
+    m: &Manifest,
+    role_ids: &HashSet<&str>,
+) -> Result<(), ValidationError> {
+    if let Some(gov) = &m.proposal_governance {
+        for ceiling in &gov.role_ceilings {
+            if !role_ids.contains(ceiling.role.as_str()) {
+                return Err(ValidationError::UnresolvedGovernanceRole(
+                    ceiling.role.clone(),
+                ));
+            }
+            if ceiling.auto_apply_max_blast_radius == crate::governance::ProposalBlastRadius::Mesh {
+                return Err(ValidationError::MeshAutoApplyCeiling {
+                    role: ceiling.role.clone(),
+                });
+            }
+        }
+    }
     Ok(())
 }
 
@@ -278,6 +350,7 @@ mod tests {
             roles: vec![RoleSpec {
                 id: "r1".into(),
                 role_type: "specialist".into(),
+                plane: None,
                 description: None,
                 agent_provisioning: AgentProvisioning::default(),
                 skills: vec![],
@@ -308,7 +381,9 @@ mod tests {
                     egress_allowlist: vec![],
                 },
             },
+            pricing: vec![],
             evaluation: None,
+            proposal_governance: None,
             completion: CompletionSpec {
                 rules: vec!["all deliverables present".into()],
                 on_failure: OnFailure::Abort,
@@ -343,6 +418,24 @@ mod tests {
             err,
             ValidationError::BudgetExceedsGlobal {
                 field: "max_total_tokens",
+                ..
+            }
+        ));
+    }
+
+    #[spec("SK-002")]
+    #[test]
+    fn budget_wallclock_overflow_caught() {
+        let mut m = minimal_manifest();
+        m.roles[0].agent_provisioning.budget = Some(Budget {
+            max_wallclock_ms: Some(120_000),
+            ..Default::default()
+        });
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::BudgetExceedsGlobal {
+                field: "max_wallclock_ms",
                 ..
             }
         ));
@@ -418,6 +511,37 @@ mod tests {
             err,
             ValidationError::RubricWeightsDoNotSumToOne { .. }
         ));
+    }
+
+    #[spec("SK-005")]
+    #[test]
+    fn rubric_weights_exactly_one_accepted() {
+        let mut m = minimal_manifest();
+        m.evaluation = Some(EvaluationSpec {
+            rubric: EvaluationRubric {
+                reference: None,
+                dimensions: vec![
+                    EvaluationDimension {
+                        name: "precision".into(),
+                        weight: 0.333_333,
+                        threshold: 0.5,
+                    },
+                    EvaluationDimension {
+                        name: "recall".into(),
+                        weight: 0.333_333,
+                        threshold: 0.5,
+                    },
+                    EvaluationDimension {
+                        name: "f1".into(),
+                        weight: 0.333_334,
+                        threshold: 0.5,
+                    },
+                ],
+            },
+            critic_role: "r1".into(),
+            sample_size: None,
+        });
+        validate(&m).expect("weights within 1e-6 of 1.0 should validate");
     }
 
     #[spec("SK-004")]
@@ -511,7 +635,7 @@ mod tests {
                 "https://attr.arkavo.com/jurisdiction/us-ca".into(),
                 "https://attr.arkavo.com/audit_authority/true".into(),
             ],
-            rule: ArpRule::AllOf,
+            rule: TdfReleaseRule::AllOf,
         });
         validate(&m).expect("custom attribute strings should validate");
         let attrs = &m.roles[0]
@@ -534,5 +658,116 @@ mod tests {
         ];
         validate(&m).expect("custom data_classifications should validate");
         assert_eq!(m.constraints.data_classifications.len(), 3);
+    }
+    #[test]
+    fn governance_with_known_roles_validates() {
+        use crate::governance::{
+            ProposalBlastRadius, ProposalGovernanceSpec, ProposalOriginSpec, RoleProposalCeiling,
+        };
+        let mut m = minimal_manifest();
+        m.proposal_governance = Some(ProposalGovernanceSpec {
+            accepted_origins: vec![ProposalOriginSpec::Human],
+            role_ceilings: vec![RoleProposalCeiling {
+                role: "r1".into(),
+                auto_apply_max_blast_radius: ProposalBlastRadius::SingleAgent,
+            }],
+            flight_approval: None,
+            observation_window_sec: None,
+        });
+        assert!(validate(&m).is_ok());
+    }
+
+    #[test]
+    fn governance_unknown_role_rejected() {
+        use crate::governance::{ProposalBlastRadius, ProposalGovernanceSpec, RoleProposalCeiling};
+        let mut m = minimal_manifest();
+        m.proposal_governance = Some(ProposalGovernanceSpec {
+            accepted_origins: vec![],
+            role_ceilings: vec![RoleProposalCeiling {
+                role: "ghost".into(),
+                auto_apply_max_blast_radius: ProposalBlastRadius::SingleEntity,
+            }],
+            flight_approval: None,
+            observation_window_sec: None,
+        });
+        assert!(matches!(
+            validate(&m),
+            Err(ValidationError::UnresolvedGovernanceRole(r)) if r == "ghost"
+        ));
+    }
+
+    #[test]
+    fn governance_mesh_auto_apply_rejected() {
+        use crate::governance::{ProposalBlastRadius, ProposalGovernanceSpec, RoleProposalCeiling};
+        let mut m = minimal_manifest();
+        m.proposal_governance = Some(ProposalGovernanceSpec {
+            accepted_origins: vec![],
+            role_ceilings: vec![RoleProposalCeiling {
+                role: "r1".into(),
+                auto_apply_max_blast_radius: ProposalBlastRadius::Mesh,
+            }],
+            flight_approval: None,
+            observation_window_sec: None,
+        });
+        assert!(matches!(
+            validate(&m),
+            Err(ValidationError::MeshAutoApplyCeiling { role }) if role == "r1"
+        ));
+    }
+    #[spec("SK-093")]
+    #[test]
+    fn audit_plane_role_with_handoffs_rejected() {
+        let mut m = minimal_manifest();
+        m.roles[0].plane = Some(crate::role::Plane::Audit);
+        m.roles[0].handoffs = vec![Handoff {
+            to: "r1".into(),
+            on: "done".into(),
+        }];
+        assert!(matches!(
+            validate(&m),
+            Err(ValidationError::PlaneWiringViolation { plane: "audit", .. })
+        ));
+    }
+
+    #[spec("SK-093")]
+    #[test]
+    fn learning_plane_role_with_context_writes_rejected() {
+        let mut m = minimal_manifest();
+        m.roles[0].plane = Some(crate::role::Plane::Learning);
+        m.roles[0].context_scope = Some(ContextScope {
+            can_read: vec!["*".into()],
+            can_write: vec!["lessons".into()],
+        });
+        assert!(matches!(
+            validate(&m),
+            Err(ValidationError::PlaneWiringViolation {
+                plane: "learning",
+                ..
+            })
+        ));
+    }
+
+    #[spec("SK-093")]
+    #[test]
+    fn audit_plane_role_without_outputs_validates() {
+        let mut m = minimal_manifest();
+        m.roles[0].plane = Some(crate::role::Plane::Audit);
+        m.roles[0].context_scope = Some(ContextScope {
+            can_read: vec!["*".into()],
+            can_write: vec![],
+        });
+        assert!(validate(&m).is_ok());
+    }
+
+    #[test]
+    fn coordination_role_keeps_handoffs() {
+        // Handoffs stay legal for coordination roles (declared or default).
+        let mut m = minimal_manifest();
+        m.roles[0].plane = Some(crate::role::Plane::Coordination);
+        m.roles[0].handoffs = vec![Handoff {
+            to: "r1".into(),
+            on: "done".into(),
+        }];
+        assert!(validate(&m).is_ok());
     }
 }

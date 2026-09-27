@@ -5,6 +5,7 @@
 #![allow(clippy::never_loop)] // Some loops break immediately for testing
 
 use arkavo_gemini::types::StreamChunk;
+use arkavo_test_macros::spec;
 use bytes::Bytes;
 use futures::stream;
 use std::pin::Pin;
@@ -21,6 +22,8 @@ fn create_test_stream(chunks: Vec<&str>) -> ByteStream {
     Box::pin(stream::iter(byte_chunks))
 }
 
+#[spec("GEM-003")]
+#[spec("GEM-010")]
 #[tokio::test]
 async fn test_split_json_across_chunks() {
     let chunk1 = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello";
@@ -47,6 +50,8 @@ async fn test_split_json_across_chunks() {
     assert_eq!(received_text, "Hello World");
 }
 
+#[spec("GEM-003")]
+#[spec("GEM-010")]
 #[tokio::test]
 async fn test_multiline_data_field() {
     let sse_data = "data: {\"candidates\":[{\"content\":\n\
@@ -74,6 +79,8 @@ async fn test_multiline_data_field() {
     assert_eq!(received_text, "Multi-line");
 }
 
+#[spec("GEM-003")]
+#[spec("GEM-010")]
 #[tokio::test]
 async fn test_large_response() {
     let large_text = "x".repeat(50000);
@@ -102,6 +109,9 @@ async fn test_large_response() {
     assert_eq!(received_text.len(), 50000);
 }
 
+#[spec("GEM-003")]
+#[spec("GEM-008")]
+#[spec("GEM-010")]
 #[tokio::test]
 async fn test_malformed_json_salvage() {
     // Realistic scenario: stream starts OK, then gets malformed mid-way
@@ -134,6 +144,8 @@ async fn test_malformed_json_salvage() {
     assert_eq!(received_text, "Good data");
 }
 
+#[spec("GEM-003")]
+#[spec("GEM-010")]
 #[tokio::test]
 async fn test_empty_candidates() {
     let json = "data: {\"candidates\":[]}\n\n";
@@ -157,6 +169,8 @@ async fn test_empty_candidates() {
     assert!(response_count >= 1);
 }
 
+#[spec("GEM-003")]
+#[spec("GEM-010")]
 #[tokio::test]
 async fn test_missing_optional_fields() {
     let json = "data: {\"candidates\":[{\"content\":{\"parts\":[]}}]}\n\n";
@@ -178,6 +192,7 @@ async fn test_missing_optional_fields() {
     assert!(got_response);
 }
 
+#[spec("GEM-010")]
 #[test]
 fn test_streamchunk_deserialize_with_defaults() {
     let json = r#"{"candidates":[]}"#;

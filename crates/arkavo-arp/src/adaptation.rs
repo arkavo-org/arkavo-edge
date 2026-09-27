@@ -82,6 +82,41 @@ pub struct PriorManagement {
     pub reset_on_version_change: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reset_state: Option<BetaPrior>,
+    /// Track per-observation provenance (live vs distilled). Default false:
+    /// distilled mass merges into the live prior, exactly as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance_tracking: Option<bool>,
+    /// How distilled (teacher-provided) mass decays as live evidence
+    /// accumulates. Only meaningful when `provenance_tracking` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distilled_decay: Option<DistilledDecay>,
+}
+
+/// Decay of distilled prior mass under accumulating live evidence (§6.5).
+///
+/// The `BetaPrior` wire format is unchanged: provenance exists only in
+/// engine state and snapshots; the effective prior sampled by the engine is
+/// `live + decayed distilled` mass.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DistilledDecay {
+    pub strategy: DistilledDecayStrategy,
+    /// Per-live-observation reduction of the distilled weight. The weight is
+    /// `max(floor, 1 - displacement_factor * live_observations)`. Must be in
+    /// (0, 1]. Default 0.05.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub displacement_factor: Option<f64>,
+    /// Minimum distilled weight that always survives. Must be in [0, 1].
+    /// Default 0.0 (live evidence can fully displace distilled mass).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub floor: Option<f64>,
+}
+
+/// Distilled-decay strategy (§6.5).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DistilledDecayStrategy {
+    /// Live observations linearly displace distilled mass.
+    LiveDisplacement,
 }
 
 /// How priors are bound to entity versions (§6.3).

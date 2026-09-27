@@ -117,7 +117,9 @@ pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
             url: Some("https://arkavo.com".to_string()),
         }),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        protocol_versions: vec!["0.3".to_string(), "1.0".to_string()],
+        // The A2A method surface is v0.3-era only; do not advertise versions
+        // for which no conformant handler exists.
+        protocol_versions: vec!["0.3".to_string()],
         default_input_modes: vec!["text/plain".to_string(), "application/json".to_string()],
         default_output_modes: vec!["text/plain".to_string(), "application/json".to_string()],
         capabilities,
@@ -167,6 +169,37 @@ mod tests {
         );
         assert_eq!(card.url, "http://localhost:8080");
         assert!(card.capabilities.streaming);
-        assert!(card.protocol_versions.contains(&"0.3".to_string()));
+        assert_eq!(card.protocol_versions, vec!["0.3".to_string()]);
+    }
+
+    #[spec("SRV-002")]
+    #[tokio::test]
+    async fn test_build_agent_card_empty_endpoint_fallback() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+            name: "fallback-agent".to_string(),
+            purpose: "".to_string(),
+            model: "test-model".to_string(),
+            endpoint: "".to_string(),
+            ..Default::default()
+        }));
+        let mcp_registry = Arc::new(McpRegistry::new());
+
+        #[allow(clippy::needless_update)]
+        let state = WellKnownState {
+            agent_metadata,
+            mcp_registry,
+            rpc_port: 9090,
+            rate_limiter: Arc::new(IpRateLimiter::new(
+                arkavo_protocol::rate_limit::RateLimitConfig::default(),
+            )),
+            #[cfg(feature = "kas")]
+            kas_enabled: false,
+        };
+
+        let card = build_agent_card(&state).await;
+
+        assert_eq!(card.url, "http://localhost:9090");
+        assert_eq!(card.description, None);
+        assert!(card.skills.is_empty());
     }
 }

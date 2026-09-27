@@ -17,6 +17,8 @@
 //! tool-loop call site. The CLI installs an instance once at startup; the
 //! standalone AG-UI gateway constructs its own when no agent is running.
 
+pub mod proposal_queue;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -26,8 +28,10 @@ use arkavo_arp::model::BetaPrior;
 use arkavo_arp::observability::{
     DecisionTraceConfig, SelectionMethod, TraceDecision, TraceEventType, TraceLayer, TraceOutcome,
 };
+use arkavo_arp::proposal::ProposalState;
 use arkavo_observability::decision_trace::DecisionTrace;
 use arkavo_policy_cache::{PolicyCache, PolicySource};
+pub use proposal_queue::ProposalQueue;
 use serde_json::json;
 use tokio::sync::Mutex;
 
@@ -79,6 +83,10 @@ pub struct ArpRuntime {
     adaptation: Arc<Mutex<AdaptationEngine>>,
     decision_trace: Arc<DecisionTrace>,
     quality_threshold: f64,
+    /// Tightening-proposal queue. Owns the canonical post-apply document;
+    /// an applied RaiseQualityGateThreshold takes effect on the next
+    /// outcome recorded through this runtime.
+    proposals: Arc<Mutex<ProposalQueue>>,
     /// Monotonic counter so each cache key is unique. Required because the
     /// PolicyCache hash chain doesn't tolerate same-key overwrites.
     outcome_seq: AtomicU64,
@@ -106,14 +114,31 @@ impl ArpRuntime {
                 cryptographic_signing: None,
             });
         let decision_trace = Arc::new(DecisionTrace::new(trace_cfg));
+        // Published for layers below the runtime — the conductor's egress gate
+        // among them — that cannot have it threaded through them. Behind the
+        // feature: a process-wide side channel is a behavior change, and the
+        // phase plan says none land outside `taint`.
+        #[cfg(feature = "taint")]
+        arkavo_observability::decision_trace::install(decision_trace.clone());
+        let proposals = Arc::new(Mutex::new(ProposalQueue::new(
+            doc.clone(),
+            decision_trace.clone(),
+            DEFAULT_AGENT_ID.to_string(),
+        )));
 
         Self {
             cache,
             adaptation,
             decision_trace,
             quality_threshold,
+            proposals,
             outcome_seq: AtomicU64::new(0),
         }
+    }
+
+    /// The tightening-proposal queue for this runtime.
+    pub fn proposal_queue(&self) -> Arc<Mutex<ProposalQueue>> {
+        self.proposals.clone()
     }
 
     pub fn cache(&self) -> Arc<PolicyCache> {
@@ -126,6 +151,19 @@ impl ArpRuntime {
 
     pub fn decision_trace(&self) -> Arc<DecisionTrace> {
         self.decision_trace.clone()
+    }
+
+    /// Advance proposal observation windows and return the transitions made.
+    ///
+    /// This is exposed so callers can drive evaluation from a periodic tick in
+    /// addition to the implicit evaluation that happens on every recorded tool
+    /// outcome (see [`record_tool_outcome_with`]).
+    pub async fn evaluate_observations_at(
+        &self,
+        now_epoch_sec: u64,
+    ) -> Vec<(String, ProposalState)> {
+        let mut queue = self.proposals.lock().await;
+        queue.evaluate_observations(now_epoch_sec)
     }
 
     /// Quality threshold below which an outcome is treated as a failure
@@ -157,7 +195,26 @@ impl ArpRuntime {
         ctx: &ToolOutcomeContext,
     ) {
         let q = quality.clamp(0.0, 1.0);
-        let above_gate = q >= self.quality_threshold;
+        // The proposal queue owns the post-apply document: an applied
+        // RaiseQualityGateThreshold takes effect here. The queue also tallies
+        // gate outcomes to evaluate observation windows.
+        let above_gate = {
+            let mut queue = self.proposals.lock().await;
+            let threshold = queue
+                .document()
+                .feedback_loops
+                .immediate
+                .quality_gate
+                .threshold_default;
+            let above = q >= threshold;
+            queue.record_quality_gate(above);
+            // Advance observation windows on every outcome. This wires the
+            // propose → applied → observed → confirmed | reverted lifecycle
+            // into the conductor's hot path (see #620).
+            let now = chrono::Utc::now().timestamp() as u64;
+            queue.evaluate_observations(now);
+            above
+        };
         let effective_success = success && above_gate;
 
         // Update the prior, capturing before/after for the trace entry.
@@ -250,9 +307,49 @@ pub fn current() -> Option<Arc<ArpRuntime>> {
     GLOBAL.get().cloned()
 }
 
+// Test helpers — short string forms of the trace enums for assertion-readability.
+#[cfg(test)]
+trait EnumStringRepr {
+    fn to_string_repr(&self) -> &'static str;
+}
+
+#[cfg(test)]
+impl EnumStringRepr for TraceLayer {
+    fn to_string_repr(&self) -> &'static str {
+        match self {
+            TraceLayer::Cognitive => "cognitive",
+            TraceLayer::Execution => "execution",
+            TraceLayer::DataSovereignty => "data_sovereignty",
+            TraceLayer::Network => "network",
+        }
+    }
+}
+
+#[cfg(test)]
+impl EnumStringRepr for TraceEventType {
+    fn to_string_repr(&self) -> &'static str {
+        match self {
+            TraceEventType::RoutingDecision => "routing_decision",
+            TraceEventType::QualityGate => "quality_gate",
+            TraceEventType::ToolInvocation => "tool_invocation",
+            TraceEventType::DataAccess => "data_access",
+            TraceEventType::Delegation => "delegation",
+            TraceEventType::Escalation => "escalation",
+            TraceEventType::BudgetEvent => "budget_event",
+            TraceEventType::Quarantine => "quarantine",
+            TraceEventType::HitlAction => "hitl_action",
+            TraceEventType::ProposalLifecycle => "proposal_lifecycle",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    // #[tokio::test] expands to Runtime::block_on; harmless in tests.
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
+    use arkavo_test_macros::spec;
 
     const MIN_DOC: &str = r#"{
         "arp_spec": "0.1.0",
@@ -389,6 +486,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn applied_threshold_raise_bites_on_next_outcome() {
+        // An auto-applied RaiseQualityGateThreshold must take effect on the
+        // very next recorded outcome — the queue owns the live document.
+        use arkavo_arp::proposal::{
+            BlastRadius, ProposalOrigin, ProposalState, TighteningEffect, TighteningProposal,
+            TraceRef,
+        };
+        let mut doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        doc.proposal_policy = Some(arkavo_arp::proposal::ProposalPolicy {
+            accepted_origins: vec![ProposalOrigin::Consolidation],
+            auto_apply_max_blast_radius: BlastRadius::SingleEntity,
+            review: None,
+            observation_window_sec: Some(600),
+        });
+        let rt = ArpRuntime::from_document(&doc);
+
+        // Quality 0.75 passes the original 0.7 gate.
+        rt.record_tool_outcome("tool_x", true, 0.75).await;
+        let entries = rt.decision_trace().snapshot();
+        assert_eq!(entries.last().unwrap().outcome.success, Some(true));
+
+        let state = rt.proposal_queue().lock().await.ingest(
+            TighteningProposal {
+                id: "raise-gate".into(),
+                origin: ProposalOrigin::Consolidation,
+                state: ProposalState::Proposed,
+                effect: TighteningEffect::RaiseQualityGateThreshold { new_threshold: 0.8 },
+                rationale: "0.7 admitted low-quality outcomes".into(),
+                blast_radius: BlastRadius::SingleEntity,
+                evidence: vec![TraceRef {
+                    trace_id: "t-1".into(),
+                    episode_ids: vec![],
+                }],
+                created_at: "2026-06-10T00:00:00Z".into(),
+                applied_at: None,
+                reviewed_by: None,
+                disposition_reason: None,
+            },
+            1_000,
+        );
+        assert_eq!(state, ProposalState::Observed);
+
+        // The same 0.75 quality now fails the raised 0.8 gate.
+        rt.record_tool_outcome("tool_x", true, 0.75).await;
+        let entries = rt.decision_trace().snapshot();
+        let last = entries
+            .iter()
+            .rfind(|e| e.decision.chosen.as_deref() == Some("tool_x"))
+            .unwrap();
+        assert_eq!(last.outcome.success, Some(false));
+        assert_eq!(
+            last.outcome.error_type.as_deref(),
+            Some("below_quality_gate")
+        );
+    }
+
+    #[tokio::test]
     async fn explicit_error_type_overrides_default() {
         let rt = make_runtime();
         let ctx = ToolOutcomeContext::new().with_error_type("connection_refused");
@@ -401,39 +555,157 @@ mod tests {
             Some("connection_refused")
         );
     }
-}
 
-// Test helpers — short string forms of the trace enums for assertion-readability.
-#[cfg(test)]
-trait EnumStringRepr {
-    fn to_string_repr(&self) -> &'static str;
-}
+    #[tokio::test]
+    async fn record_tool_outcome_evaluates_observation_windows() {
+        use arkavo_arp::proposal::{
+            BlastRadius, ProposalOrigin, ProposalState, TighteningEffect, TighteningProposal,
+            TraceRef,
+        };
+        let mut doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        doc.proposal_policy = Some(arkavo_arp::proposal::ProposalPolicy {
+            accepted_origins: vec![ProposalOrigin::Consolidation],
+            auto_apply_max_blast_radius: BlastRadius::SingleEntity,
+            review: None,
+            // Use a long window so the implicit evaluation during
+            // record_tool_outcome_with (real time) does not close it early.
+            observation_window_sec: Some(10_000_000_000),
+        });
+        let rt = ArpRuntime::from_document(&doc);
 
-#[cfg(test)]
-impl EnumStringRepr for TraceLayer {
-    fn to_string_repr(&self) -> &'static str {
-        match self {
-            TraceLayer::Cognitive => "cognitive",
-            TraceLayer::Execution => "execution",
-            TraceLayer::DataSovereignty => "data_sovereignty",
-            TraceLayer::Network => "network",
-        }
+        let state = rt.proposal_queue().lock().await.ingest(
+            TighteningProposal {
+                id: "observed-then-confirmed".into(),
+                origin: ProposalOrigin::Consolidation,
+                state: ProposalState::Proposed,
+                effect: TighteningEffect::RaiseQualityGateThreshold { new_threshold: 0.8 },
+                rationale: "tighten gate".into(),
+                blast_radius: BlastRadius::SingleEntity,
+                evidence: vec![TraceRef {
+                    trace_id: "t-1".into(),
+                    episode_ids: vec![],
+                }],
+                created_at: "2026-06-10T00:00:00Z".into(),
+                applied_at: None,
+                reviewed_by: None,
+                disposition_reason: None,
+            },
+            1_000,
+        );
+        assert_eq!(state, ProposalState::Observed);
+
+        // Record an outcome inside the window; the proposal should stay observed.
+        rt.record_tool_outcome_with("tool_x", true, 0.9, &ToolOutcomeContext::default())
+            .await;
+        let state = rt
+            .proposal_queue()
+            .lock()
+            .await
+            .proposal_state("observed-then-confirmed")
+            .unwrap();
+        assert_eq!(state, ProposalState::Observed);
+
+        // Advance past the window and trigger another evaluation.
+        let transitions = rt.evaluate_observations_at(10_000_001_000).await;
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0].1, ProposalState::Confirmed);
+
+        let state = rt
+            .proposal_queue()
+            .lock()
+            .await
+            .proposal_state("observed-then-confirmed")
+            .unwrap();
+        assert_eq!(state, ProposalState::Confirmed);
     }
-}
 
-#[cfg(test)]
-impl EnumStringRepr for TraceEventType {
-    fn to_string_repr(&self) -> &'static str {
-        match self {
-            TraceEventType::RoutingDecision => "routing_decision",
-            TraceEventType::QualityGate => "quality_gate",
-            TraceEventType::ToolInvocation => "tool_invocation",
-            TraceEventType::DataAccess => "data_access",
-            TraceEventType::Delegation => "delegation",
-            TraceEventType::Escalation => "escalation",
-            TraceEventType::BudgetEvent => "budget_event",
-            TraceEventType::Quarantine => "quarantine",
-            TraceEventType::HitlAction => "hitl_action",
+    #[spec("ARP-009")]
+    #[tokio::test]
+    async fn provenance_tracking_exposes_live_distilled_split() {
+        use arkavo_arp::model::BetaPrior;
+        let mut doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        doc.adaptation.prior_management = Some(arkavo_arp::adaptation::PriorManagement {
+            version_binding: None,
+            reset_on_version_change: None,
+            reset_state: None,
+            provenance_tracking: Some(true),
+            distilled_decay: Some(arkavo_arp::adaptation::DistilledDecay {
+                strategy: arkavo_arp::adaptation::DistilledDecayStrategy::LiveDisplacement,
+                displacement_factor: Some(0.05),
+                floor: Some(0.0),
+            }),
+        });
+        let rt = ArpRuntime::from_document(&doc);
+
+        // Seed distilled mass for a tool.
+        rt.adaptation().lock().await.seed_distilled(
+            "tool_x",
+            BetaPrior {
+                alpha: 4.0,
+                beta: 1.0,
+            },
+        );
+
+        // Record live outcomes.
+        rt.record_tool_outcome("tool_x", true, 0.9).await;
+        rt.record_tool_outcome("tool_x", true, 0.9).await;
+
+        let snapshot = rt.adaptation().lock().await.snapshot();
+        let entry = snapshot.iter().find(|e| e.id == "tool_x").unwrap();
+        assert!(entry.live_alpha > 0.0);
+        assert!(entry.distilled_alpha.unwrap_or(0.0) > 0.0);
+        assert!(entry.distilled_weight.unwrap_or(1.0) < 1.0);
+    }
+
+    #[spec("ARP-009")]
+    #[tokio::test]
+    async fn distilled_floor_preserves_minimum_teacher_mass() {
+        use arkavo_arp::model::BetaPrior;
+        let mut doc = arkavo_arp::parse(MIN_DOC).unwrap();
+        doc.adaptation.prior_management = Some(arkavo_arp::adaptation::PriorManagement {
+            version_binding: None,
+            reset_on_version_change: None,
+            reset_state: None,
+            provenance_tracking: Some(true),
+            distilled_decay: Some(arkavo_arp::adaptation::DistilledDecay {
+                strategy: arkavo_arp::adaptation::DistilledDecayStrategy::LiveDisplacement,
+                displacement_factor: Some(0.1),
+                floor: Some(0.25),
+            }),
+        });
+        let rt = ArpRuntime::from_document(&doc);
+
+        rt.adaptation().lock().await.seed_distilled(
+            "tool_x",
+            BetaPrior {
+                alpha: 8.0,
+                beta: 2.0,
+            },
+        );
+
+        // With displacement_factor 0.1, ten live observations would fully
+        // displace distilled mass. The 0.25 floor must keep a minimum share.
+        for _ in 0..10 {
+            rt.record_tool_outcome("tool_x", true, 0.9).await;
         }
+
+        let adaptation = rt.adaptation();
+        let eng = adaptation.lock().await;
+        let snapshot = eng.snapshot();
+        let entry = snapshot.iter().find(|e| e.id == "tool_x").unwrap();
+        let live = eng.live_prior("tool_x");
+        let distilled = eng.distilled_prior("tool_x").unwrap();
+
+        assert!((entry.distilled_weight.unwrap() - 0.25).abs() < 1e-9);
+        assert!(
+            (entry.alpha - (live.alpha + 0.25 * distilled.alpha)).abs() < 1e-9,
+            "effective alpha must combine live and floor-weighted distilled mass"
+        );
+        assert!(
+            (entry.beta - (live.beta + 0.25 * distilled.beta)).abs() < 1e-9,
+            "effective beta must combine live and floor-weighted distilled mass"
+        );
+        assert!(entry.live_alpha > 0.0);
+        assert!(entry.distilled_alpha.unwrap() > 0.0);
     }
 }

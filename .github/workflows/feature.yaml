@@ -7,8 +7,9 @@ name: Feature
 # - coverage tests may exclude some features due to tarpaulin limitations
 
 on:
+  # Every base branch, not just main: an upper stack layer targets the layer
+  # below it, and a stack merges only when every layer has passing checks.
   pull_request:
-    branches: [main]
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -170,24 +171,42 @@ jobs:
       matrix:
         group:
           - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context (32K LOC)
-          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-workspace (44K LOC)
+          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-workspace, arkavo-session, arkavo-critic, arkavo-cwt, arkavo-permit
+          - integrity   # arkavo-titan, arkavo-events, arkavo-validation (sequence-integrity tripwire tests)
           - tools       # arkavo-mcp-tools (24K LOC, I/O heavy)
           - routing     # arkavo-router, arkavo-dataflow (42K LOC)
           - ui          # arkavo-terminal, arkavo-ui-generator, arkavo-agui
           - cli         # arkavo-cli (large dep tree, needs its own disk budget)
+          - dlp         # the taint and sentinel features: off by default, so nothing else builds them
+          - benches     # bench compile-checks only: release profile doubles disk, so isolate it
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
+      # Several crates transitively pull arkavo-router's default features, which
+      # include llama-cpp, so keep the source available but shallow-fetch only
+      # the pinned commit (~180 MB instead of ~700 MB).
       - name: Setup vendor/llama.cpp
         run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          echo "Shallow-fetching llama.cpp for local inference support"
+          mkdir -p vendor/llama.cpp
           cd vendor/llama.cpp
-          # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout ef570f63087b6a5a2930210a13f87990e8113927
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+          git init
+          git remote add origin https://github.com/ggerganov/llama.cpp
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
+          git checkout FETCH_HEAD
+          echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
+
+      - name: Free disk space
+        run: |
+          # Hosted runners have ~14 GB; reclaim space from pre-installed tools
+          # we do not need for Rust builds.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                     /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                     /usr/local/share/chromium /usr/share/swift /opt/pipx \
+                     /usr/local/share/powershell /usr/share/mysql /opt/mssql-tools
+          df -h
 
       - name: Install CMake, mold linker, and build dependencies
         run: |
@@ -217,8 +236,10 @@ jobs:
         run: |
           if [ "${{ matrix.group }}" = "core" ]; then
             cargo test --locked -p arkavo-llm --lib --no-default-features --features llm-remote
+            cargo test --locked -p arkavo-llm --no-default-features --features llm-remote --test openai_responses
             cargo test --locked -p arkavo-memory --lib
             cargo test --locked -p arkavo-memory --test mcp_integration_test
+            cargo test --locked -p arkavo-memory --test sequence_integrity_test
             cargo test --locked -p arkavo-budget
             cargo test --locked -p arkavo-context
           elif [ "${{ matrix.group }}" = "protocol" ]; then
@@ -227,13 +248,30 @@ jobs:
             cargo test --locked -p arkavo-mcp-workspace
             cargo test --locked -p arkavo-session --lib
             cargo test --locked -p arkavo-critic
-            # Compile-check benchmarks to prevent bitrot (no execution)
+            cargo test --locked -p arkavo-cwt
+            cargo test --locked -p arkavo-permit
+            cargo test --locked -p arkavo-dispatch-gate
+            # Guard against tokio features that dev-dependencies would otherwise mask
+            cargo check --locked -p arkavo-mcp-proxy --lib
+            cargo test --locked -p arkavo-mcp-proxy
+          elif [ "${{ matrix.group }}" = "integrity" ]; then
+            cargo test --locked -p arkavo-titan
+            cargo test --locked -p arkavo-events
+            cargo test --locked -p arkavo-validation
+          elif [ "${{ matrix.group }}" = "benches" ]; then
+            # Compile-check benchmarks to prevent bitrot (no execution). The bench
+            # profile is release-like, so this builds a second copy of the whole
+            # dependency graph on top of any debug artifacts. Running it in its own
+            # job keeps a single runner from doing both the debug and release
+            # builds, which together overflow the hosted-runner disk budget.
             cargo bench --locked -p arkavo-protocol --no-run
             cargo bench --locked -p arkavo-critic --no-run
+            cargo bench --locked -p arkavo-router --no-run --no-default-features --features llm-remote,gemini,openai
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo test --locked -p arkavo-mcp-tools
           elif [ "${{ matrix.group }}" = "routing" ]; then
-            cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini
+            cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini,openai
+            cargo check --locked -p arkavo-router --no-default-features
             cargo test --locked -p arkavo-dataflow
           elif [ "${{ matrix.group }}" = "ui" ]; then
             cargo test --locked -p arkavo-terminal
@@ -241,9 +279,64 @@ jobs:
             cargo test --locked -p arkavo-agui --no-default-features --features mdns
           elif [ "${{ matrix.group }}" = "cli" ]; then
             cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui
+            # Orchestrator's openai-gated planning tests: arkavo-cli above
+            # already pulls in arkavo-orchestrator(llm-remote) at this same
+            # feature set, so only the openai arm is a new build, not a new
+            # feature unification.
+            cargo test --locked -p arkavo-orchestrator --lib --no-default-features --features openai,llm-remote
             # Check arkavo-cli with cef-ui feature to catch exhaustive match errors
             # Use --no-default-features to skip llama-cpp (saves disk space)
             cargo check --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui,cef-ui
+            # The cef-ui client factory builds each provider behind its own
+            # provider feature, so the line above only compiles the
+            # feature-off arms. Repeat with openai on to compile the Astra arm.
+            cargo check --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui,cef-ui,openai
+            cargo check --locked -p arkavo --no-default-features --features openai
+            # ASTRA-004: the agent harness keeps local inference alongside Astra.
+            router_llama=$(cargo tree --locked -p arkavo -e features -i arkavo-router | grep -c 'arkavo-router feature "llama-cpp"' || true)
+            if [ "$router_llama" = "0" ]; then
+              echo "default agent harness is missing local inference"
+              exit 1
+            fi
+            cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui startup_policy
+          elif [ "${{ matrix.group }}" = "dlp" ]; then
+            # `taint` and `sentinel` are off by default, so no other group
+            # compiles them and nothing else would notice them breaking.
+            cargo test --locked -p arkavo-fingerprint
+            cargo test --locked -p arkavo-sentinel
+            cargo test --locked -p arkavo-knowledge-pack
+            cargo test --locked -p arkavo-gguf-tdf --features knowledge-pack --lib --test knowledge_pack_test
+            cargo test --locked -p arkavo-protocol --features taint --test sentinel_test --test taint_propagation_test --test egress_taint_test
+            cargo test --locked -p arkavo-server --features taint,kas --lib egress_guard
+            # ASTRA-004 analyzer regression. Shares the taint-featured
+            # arkavo-server artifacts with the line above so this group does
+            # not build the crate a second time.
+            cargo test --locked -p arkavo-server --features taint,kas --lib llm_intent_analyzer
+            # KAS delegation regression (trusted roots from AGENTS.md). Same
+            # taint,kas feature set as the two lines above so it shares their
+            # arkavo-server build instead of a new feature unification.
+            cargo test --locked -p arkavo-server --features taint,kas --test kas_delegation_test
+            cargo test --locked -p arkavo-critic --features sentinel --lib checks::sentinel
+            # Pack command tests live in arkavo-cli and only compile when the
+            # knowledge-pack feature (which pulls fingerprint) is on.
+            cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel commands::pack
+            # Sentinel runtime wiring (provisioning, release-gate merge). One
+            # filter argument only matches one substring, so this is a
+            # separate invocation from the chat_pack line below; verified it
+            # picks up exactly the sentinel_wiring::{pack_tests,tests,
+            # provisioning_tests} submodules and nothing else in the crate.
+            cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel sentinel_wiring::
+            # `chat --pack` argument parsing and provisioning glue. Distinct
+            # from `commands::chat::` (plain chat session tests), verified
+            # above to not overlap.
+            cargo test --locked -p arkavo-cli --lib --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel commands::chat_pack
+            # Phase 4's acceptance test: a seeded canary in a completion never
+            # reaches the consumer. Phase 5 extends it: the gate is provisioned
+            # from a signed pack. pack_provisioning and chat_pack_refusals
+            # share this feature set with no new build; pack_provisioning
+            # mutates process-global release-policy state so it stays a
+            # single-#[test] binary of its own.
+            cargo test --locked -p arkavo-cli --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel --test sentinel_canary --test sentinel_runtime --test pack_provisioning --test chat_pack_refusals
           fi
 
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
@@ -263,6 +356,14 @@ jobs:
             cargo clippy --locked -p arkavo-mcp-workspace --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-session --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-critic --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-cwt --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-permit --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-dispatch-gate --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-proxy --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "integrity" ]; then
+            cargo clippy --locked -p arkavo-titan --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-events --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-validation --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "routing" ]; then
@@ -276,7 +377,115 @@ jobs:
             # Lint arkavo-cli with cef-ui feature (catches exhaustive match errors before release)
             # Use --no-default-features to skip llama-cpp (saves disk space)
             cargo clippy --locked -p arkavo-cli --lib --bins --no-default-features --features memory,mdns,mcp-tools,llm-remote,web-ui,cef-ui -- -D warnings
+          elif [ "${{ matrix.group }}" = "dlp" ]; then
+            cargo clippy --locked -p arkavo-fingerprint --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-sentinel --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-knowledge-pack --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-gguf-tdf --lib --bins --features knowledge-pack -- -D warnings
+            cargo clippy --locked -p arkavo-protocol --lib --bins --features taint -- -D warnings
+            cargo clippy --locked -p arkavo-critic --lib --bins --features sentinel -- -D warnings
+            cargo clippy --locked -p arkavo-cli --lib --bins --no-default-features --features memory,mdns,mcp-tools,llm-remote,sentinel -- -D warnings
           fi
+
+  # Advisory early warning for the next-generation trait solver, which nightly
+  # enables by default as of 2026-08-21. Nightly regressions must never block a
+  # merge, so this job is continue-on-error and is deliberately absent from the
+  # release-readiness gate; it exists to show breakage in the PR that introduces
+  # code the new solver rejects.
+  # https://blog.rust-lang.org/2026/08/21/enabling-next-solver-on-nightly/
+  nightly-check:
+    name: Rust Nightly (advisory)
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    env:
+      # Nightly rustc peaks higher than stable, and the default job count has
+      # cost this job a runner mid-compile more than once.
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Shallow-fetching llama.cpp for local inference support"
+          mkdir -p vendor/llama.cpp
+          cd vendor/llama.cpp
+          git init
+          git remote add origin https://github.com/ggerganov/llama.cpp
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
+          git checkout FETCH_HEAD
+          echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
+
+      - name: Free disk space
+        run: |
+          # Hosted runners have ~14 GB; reclaim space from pre-installed tools
+          # we do not need for Rust builds.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                     /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                     /usr/local/share/chromium /usr/share/swift /opt/pipx \
+                     /usr/local/share/powershell /usr/share/mysql /opt/mssql-tools
+          df -h
+
+      - name: Install CMake, mold linker, and build dependencies
+        run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Record toolchain version
+        run: |
+          # The rustc commit hash and date pin which nightly introduced a regression.
+          rustc +nightly --version --verbose
+
+      - name: Setup sccache for C++ caching
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "nightly-${{ runner.os }}"
+          prefix-key: "nightly-check"
+
+      # Checking the arkavo binary with default features pulls in nearly the whole
+      # workspace as libraries in a single compilation, which is the most solver
+      # coverage per minute of PR time. The daily Nightly workflow does the wider
+      # per-crate sweep including dependency test targets. Bench and example
+      # targets are left out for the same reason as there: stable CI does not
+      # compile them, so they would report breakage unrelated to nightly.
+      # arkavo is a binary-only package, so --lib would abort before compiling.
+      - name: Type-check on nightly
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: cargo +nightly check --locked -p arkavo --bins --tests
+
+      - name: Report runner headroom
+        if: always()
+        run: |
+          # A job killed mid-compile leaves no cargo output to read, so record
+          # what the runner had left the last time it was still alive.
+          df -h /
+          free -m
+
+      - name: Report nightly breakage
+        if: failure()
+        run: |
+          echo "::warning::This branch does not compile on the Rust nightly toolchain. Merging is not blocked."
+          echo "Nightly enables the next-generation trait solver by default:"
+          echo "  https://blog.rust-lang.org/2026/08/21/enabling-next-solver-on-nightly/"
+          echo "First decide whose bug it is:"
+          echo "  1. Re-run the same command on stable. Failing there too makes it ours."
+          echo "  2. RUSTFLAGS='-Znext-solver=coherence' re-runs with the old solver."
+          echo "     Passing only with the old solver points at the toolchain."
+          echo "If it is the toolchain, search before filing:"
+          echo "  https://github.com/rust-lang/rust/labels/WG-trait-system-refactor"
+          echo "  https://github.com/rust-lang/rust/issues?q=is%3Aissue+next-solver"
+          echo "and open one with a minimal reproduction if nothing covers it:"
+          echo "  https://github.com/rust-lang/rust/issues/new/choose"
 
   test-kimi-feature:
     name: Test Kimi Feature
@@ -397,12 +606,15 @@ jobs:
           submodules: recursive
       - name: Setup vendor/llama.cpp
         run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          echo "Shallow-fetching llama.cpp for local inference support"
+          mkdir -p vendor/llama.cpp
           cd vendor/llama.cpp
+          git init
+          git remote add origin https://github.com/ggerganov/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout ef570f63087b6a5a2930210a13f87990e8113927
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
+          git checkout FETCH_HEAD
+          echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
           # Remove Microsoft apt sources that cause 403 errors on GitHub runners
@@ -459,7 +671,7 @@ jobs:
           CXXFLAGS_x86_64_unknown_linux_musl: "-static"
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
           # For glibc build, ensure static linking of OpenMP
-          RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++"
+          RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++ --cfg aes_armv8 --cfg polyval_armv8"
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
@@ -531,12 +743,15 @@ jobs:
           submodules: recursive
       - name: Setup vendor/llama.cpp
         run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          echo "Shallow-fetching llama.cpp for local inference support"
+          mkdir -p vendor/llama.cpp
           cd vendor/llama.cpp
+          git init
+          git remote add origin https://github.com/ggerganov/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout ef570f63087b6a5a2930210a13f87990e8113927
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
+          git checkout FETCH_HEAD
+          echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
@@ -553,7 +768,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/aarch64-apple-darwin/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-ef570f63087b6a5a2930210a13f87990e8113927
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-f280b26983ad0fdb705a0d9ebf0503e76f2899b0
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -646,12 +861,15 @@ jobs:
       - name: Setup vendor/llama.cpp
         shell: bash
         run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          echo "Shallow-fetching llama.cpp for local inference support"
+          mkdir -p vendor/llama.cpp
           cd vendor/llama.cpp
+          git init
+          git remote add origin https://github.com/ggerganov/llama.cpp
           # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout ef570f63087b6a5a2930210a13f87990e8113927
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+          git fetch --depth 1 origin f280b26983ad0fdb705a0d9ebf0503e76f2899b0
+          git checkout FETCH_HEAD
+          echo "llama.cpp checked out at commit $(git rev-parse --short HEAD)"
 
       # Install C++ build tools for future llama.cpp support
       # Note: Currently building with windows-default (no C++ deps), but this
@@ -684,7 +902,7 @@ jobs:
           path: |
             vendor/llama.cpp/build
             target/x86_64-pc-windows-msvc/release/build/arkavo-llama-cpp-sys-*/out
-          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-ef570f63087b6a5a2930210a13f87990e8113927
+          key: llama-cpp-${{ runner.os }}-${{ hashFiles('crates/arkavo-llama-cpp-sys/build.rs') }}-f280b26983ad0fdb705a0d9ebf0503e76f2899b0
           restore-keys: |
             llama-cpp-${{ runner.os }}-
 
@@ -853,23 +1071,23 @@ jobs:
           echo "✅ --help works"
           
           # Verify expected commands are present
-          grep -q "serve" help.txt || { echo "❌ 'serve' command missing"; exit 1; }
-          grep -q "task" help.txt || { echo "❌ 'task' command missing"; exit 1; }
           grep -q "chat" help.txt || { echo "❌ 'chat' command missing"; exit 1; }
+          grep -q "task" help.txt || { echo "❌ 'task' command missing"; exit 1; }
+          grep -q "ui" help.txt || { echo "❌ 'ui' command missing"; exit 1; }
           echo "✅ Expected commands present"
-      
-      - name: Test server startup
+
+      - name: Test UI startup
         run: |
-          echo "=== Testing Server Startup ==="
-          
-          # Try to start the server and check it responds
-          timeout 5 ./arkavo-x86_64-linux serve 2>&1 | tee server.log || true
-          
+          echo "=== Testing UI Startup ==="
+
+          # Try to start the UI gateway and check it responds
+          timeout 5 ./arkavo-x86_64-linux ui 2>&1 | tee server.log || true
+
           # Check for expected startup messages
-          if grep -qE "Starting|Listening|serve|Server" server.log; then
-            echo "✅ Server startup messages detected"
+          if grep -qE "Starting|Listening|Arkavo UI|Server" server.log; then
+            echo "✅ UI startup messages detected"
           else
-            echo "⚠️ Server might not have started properly"
+            echo "⚠️ UI might not have started properly"
             cat server.log
           fi
       
@@ -918,25 +1136,6 @@ jobs:
           fi
           
           echo "✅ Dependency check complete"
-
-  e2e-kimi-remote:
-    name: E2E KIMI Remote API
-    needs: [build-linux]
-    runs-on: ubuntu-22.04
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: arkavo-x86_64-linux
-          path: ./
-      - name: Run KIMI e2e tests
-        env:
-          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-        run: |
-          chmod +x tests/e2e_kimi_remote_test.sh
-          ./tests/e2e_kimi_remote_test.sh ./arkavo-x86_64-linux
 
   # Schema validation jobs
   validate-openrpc:
@@ -1184,22 +1383,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Setup vendor/llama.cpp
-        run: |
-          echo "Cloning llama.cpp for local inference support"
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp
-          # GDN fused ops, Metal/Vulkan kernels, Qwen3.5 NVFP4 support
-          git checkout ef570f63087b6a5a2930210a13f87990e8113927
-          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+      # xtask is pure Rust; skip the llama.cpp vendor and C++ toolchain setup.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -1243,7 +1427,7 @@ jobs:
 
           # Check for env::var calls that require configuration
           # Exclude build.rs files and test files, and allow standard env vars and optional API keys
-          if grep -r 'env::var("[A-Z_]*")\.\(expect\|unwrap\)' crates/ --include="*.rs" --exclude="build.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP\|USER\|OUT_DIR\|OPENAI_API_KEY\|ANTHROPIC_API_KEY\|MOONSHOT_API_KEY\|DEEPSEEK_API_KEY\|DEEPSEEK_MODEL\|GEMINI_API_KEY\|GEMINI_MODEL\|KIMI_API_KEY\|KIMI_MODEL"; then
+          if grep -r 'env::var("[A-Z_]*")\.\(expect\|unwrap\)' crates/ --include="*.rs" --exclude="build.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP\|USER\|OUT_DIR\|OPENAI_API_KEY\|ANTHROPIC_API_KEY\|MOONSHOT_API_KEY\|DEEPSEEK_API_KEY\|DEEPSEEK_MODEL\|GEMINI_API_KEY\|GEMINI_MODEL\|KIMI_API_KEY\|KIMI_MODEL\|ANTHROPIC_MODEL\|ANTHROPIC_BASE_URL\|ARKAVO_KAS_URL\|XAI_API_KEY\|XAI_BASE_URL\|GLM_API_KEY\|GLM_BASE_URL"; then
             echo "::error::Found required environment variables"
             exit 1
           fi
@@ -1520,17 +1704,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup vendor/llama.cpp
-        run: |
-          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
-          cd vendor/llama.cpp && git checkout ef570f63087b6a5a2930210a13f87990e8113927
-
-      - name: Install build dependencies
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-
+      # xtask is pure Rust; skip the llama.cpp vendor and C++ toolchain setup.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -1540,9 +1714,19 @@ jobs:
       - name: Generate coverage report
         id: coverage
         run: |
+          # --fail-under stays at 1 for now; target is to raise the overall
+          # threshold incrementally (e.g. 50+) as coverage improves. The xtask
+          # supports --critical-required to gate on uncovered critical/high
+          # scenarios, but it is not enabled yet: as of 2026-08 it fails with
+          # 272 uncovered critical/high scenarios, so adding it would break
+          # the build. Enable it once critical/high coverage reaches zero gaps.
           cargo run -p xtask -- spec-test coverage --markdown --fail-under 1 > report.md 2>gate_result.txt || true
           echo "gate_exit_code=$?" >> "$GITHUB_OUTPUT"
           cat report.md
+
+      - name: Validate spec-to-code refs
+        run: |
+          cargo run -p xtask -- spec-test validate-refs --skip-wip --fail
 
       - name: Generate traceability report and coverage diff
         run: |

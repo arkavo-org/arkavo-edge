@@ -52,7 +52,7 @@ scenarios:
       - Circuit evaluated (<1μs)
       - Pass/fail determined
       - Result returned
-    refs: [crates/arkavo-critic/src/checks.rs:1-50]
+    refs: [crates/arkavo-critic/src/checks/circuit.rs:130-168]
     changed: "2025-01-31"
     edge_cases:
       - condition: Circuit violation
@@ -69,7 +69,7 @@ scenarios:
       - Parameters validated
       - Types checked
       - Result returned (<1ms)
-    refs: [crates/arkavo-critic/src/checks.rs:50-100]
+    refs: [crates/arkavo-critic/src/checks/schema.rs:50-88]
     changed: "2025-01-31"
     edge_cases:
       - condition: Missing required field
@@ -88,7 +88,7 @@ scenarios:
       - Coherence analyzed (<50ms)
       - Score computed
       - Result returned
-    refs: [crates/arkavo-critic/src/checks.rs:100-150]
+    refs: [crates/arkavo-critic/src/checks/semantic.rs:124-177]
     changed: "2025-01-31"
 
   - id: CRIT-006
@@ -184,7 +184,7 @@ scenarios:
       - Category formatted as "model:{family}:{issue}"
       - Episode stored in LearningStore
       - Issue type returned for caller handling
-    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:82-169]
+    refs: [crates/arkavo-router/src/prompt_advisor.rs:277-325]
     changed: "2025-02-05"
 
   - id: CRIT-012
@@ -200,7 +200,7 @@ scenarios:
       - Loop episode count checked for model family
       - PatternAdjustment returned if threshold met
       - Suggested max_tokens reduced for loopy models
-    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:252-299]
+    refs: [crates/arkavo-router/src/prompt_advisor.rs:158-223]
     changed: "2025-02-05"
     edge_cases:
       - condition: No loop history for model
@@ -248,7 +248,7 @@ scenarios:
       - Timeout episode created
       - Category set as "model:{family}:timeout"
       - Episode stored in LearningStore
-    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:172-210]
+    refs: [crates/arkavo-router/src/prompt_advisor.rs:277-289]
     changed: "2025-02-05"
 
   - id: CRIT-016
@@ -262,7 +262,7 @@ scenarios:
       - Returns counts for each issue category
       - "Categories: loop, code_fence, timeout, wrong_expert, hallucinated_tool"
       - Empty categories omitted from results
-    refs: [crates/arkavo-cli/src/feedback_analyzer.rs:213-240]
+    refs: [crates/arkavo-router/src/prompt_advisor.rs:379-395]
     changed: "2025-02-05"
 
   - id: CRIT-017

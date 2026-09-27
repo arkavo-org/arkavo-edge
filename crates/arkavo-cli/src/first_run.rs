@@ -32,6 +32,15 @@ impl std::fmt::Display for DeviceProfile {
 /// Recommended model based on device capabilities
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecommendedModel {
+    /// Gemma 4 E2B - small default, 2.3B active (~2.9GB). Best small model in
+    /// the Gemma 4 capability comparison (passes tool calling).
+    Gemma4E2B,
+    /// Gemma 4 E4B - edge medium, 4.5B active (~5GB). Used as the medium model
+    /// on memory-constrained devices that cannot run the 12B.
+    Gemma4E4B,
+    /// Gemma 4 12B - dense, the most capable Gemma 4 for agentic use (~6.9GB).
+    /// Default medium model on any machine with the RAM to run it.
+    Gemma4_12B,
     /// Qwen3.5 0.8B - smallest, for RPi5 (~550MB)
     Qwen35_0_8B,
     /// Ministral 3B - medium, for desktops (~2GB)
@@ -49,6 +58,9 @@ impl RecommendedModel {
     fn model_choice(self) -> arkavo_router::decision::ModelChoice {
         use arkavo_router::decision::ModelChoice;
         match self {
+            Self::Gemma4E2B => ModelChoice::LocalGemma4E2B,
+            Self::Gemma4E4B => ModelChoice::LocalGemma4E4B,
+            Self::Gemma4_12B => ModelChoice::LocalGemma4_12B,
             Self::Qwen35_0_8B => ModelChoice::LocalQwen3,
             Self::Ministral3B => ModelChoice::LocalMinistral3B,
             Self::Ministral8B => ModelChoice::LocalMinistral8B,
@@ -101,6 +113,9 @@ pub fn is_first_run() -> bool {
     // Quick check for preferred model directories
     use arkavo_router::decision::ModelChoice;
     let preferred_repos: Vec<String> = [
+        ModelChoice::LocalGemma4E2B,
+        ModelChoice::LocalGemma4E4B,
+        ModelChoice::LocalGemma4_12B,
         ModelChoice::LocalQwen3,
         ModelChoice::LocalMinistral3B,
         ModelChoice::LocalMinistral8B,
@@ -163,6 +178,21 @@ fn get_hf_cache_dir() -> Option<PathBuf> {
 pub use crate::hardware::calculate_glm_max_context;
 use crate::hardware::{detect_unified_memory, get_total_ram_gb};
 
+/// Default "medium" model for a device profile.
+///
+/// Gemma 4 12B is the most capable Gemma 4 for agentic use (see the
+/// `gemma4_compare_test` benchmark — larger models did not beat it), so it is
+/// the default on any machine with the RAM to run it. Memory-constrained
+/// devices fall back to the edge-sized E4B.
+pub fn recommended_model_for(profile: DeviceProfile) -> RecommendedModel {
+    match profile {
+        DeviceProfile::RaspberryPi5 => RecommendedModel::Gemma4E4B,
+        DeviceProfile::Desktop
+        | DeviceProfile::Workstation
+        | DeviceProfile::HighMemoryWorkstation => RecommendedModel::Gemma4_12B,
+    }
+}
+
 /// Detect system capabilities
 pub fn detect_capabilities() -> SystemCapabilities {
     let cpu_cores = std::thread::available_parallelism()
@@ -188,21 +218,7 @@ pub fn detect_capabilities() -> SystemCapabilities {
         DeviceProfile::Desktop
     };
 
-    let recommended_model = match device_profile {
-        DeviceProfile::RaspberryPi5 => RecommendedModel::Qwen35_0_8B,
-        DeviceProfile::Desktop => RecommendedModel::Ministral8B,
-        DeviceProfile::Workstation => RecommendedModel::Glm47Flash,
-        DeviceProfile::HighMemoryWorkstation => RecommendedModel::Qwen35_27B,
-    };
-
-    // Warn about MoE performance on CPU-only systems
-    if matches!(
-        device_profile,
-        DeviceProfile::Workstation | DeviceProfile::HighMemoryWorkstation
-    ) && !has_unified_memory
-    {
-        eprintln!("Note: GLM-4.7-Flash is a 30B MoE model. On CPU RAM, expect 1-3 tokens/sec.");
-    }
+    let recommended_model = recommended_model_for(device_profile);
 
     let available_disk_gb = get_available_disk_space();
 
@@ -385,6 +401,46 @@ mod tests {
         let glm = RecommendedModel::Glm47Flash;
         assert!(glm.repo_id().contains("unsloth"));
         assert!(glm.size_bytes() > 10_000_000_000);
+    }
+
+    #[test]
+    fn test_gemma4_default_model_info() {
+        // Default install pair: small=E2B, medium=12B. Both must resolve to a
+        // real HF repo + GGUF so the first-run downloader can fetch them.
+        for m in [RecommendedModel::Gemma4E2B, RecommendedModel::Gemma4_12B] {
+            assert!(!m.repo_id().is_empty(), "{m:?} repo_id empty");
+            assert!(m.filename().ends_with(".gguf"), "{m:?} filename");
+            assert!(m.size_bytes() > 0, "{m:?} size");
+        }
+        assert!(
+            RecommendedModel::Gemma4_12B
+                .repo_id()
+                .contains("gemma-4-12B")
+        );
+        assert_eq!(RecommendedModel::Gemma4E2B.display_name(), "Gemma 4 E2B");
+        assert_eq!(RecommendedModel::Gemma4_12B.display_name(), "Gemma 4 12B");
+    }
+
+    #[test]
+    fn test_recommended_model_for_profile() {
+        // 12B is the default medium on any machine that can run it; edge
+        // devices fall back to E4B (12B is impractical under 16GB RAM).
+        assert_eq!(
+            recommended_model_for(DeviceProfile::Desktop),
+            RecommendedModel::Gemma4_12B
+        );
+        assert_eq!(
+            recommended_model_for(DeviceProfile::Workstation),
+            RecommendedModel::Gemma4_12B
+        );
+        assert_eq!(
+            recommended_model_for(DeviceProfile::HighMemoryWorkstation),
+            RecommendedModel::Gemma4_12B
+        );
+        assert_eq!(
+            recommended_model_for(DeviceProfile::RaspberryPi5),
+            RecommendedModel::Gemma4E4B
+        );
     }
 
     #[test]

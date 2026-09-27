@@ -18,12 +18,12 @@ kimi = ["dep:arkavo-kimi", "dep:reqwest"]
 deepseek = ["dep:arkavo-deepseek", "dep:reqwest"]
 qwen = ["dep:arkavo-qwen", "dep:reqwest"]
 gemini = ["dep:arkavo-gemini"]
-llama-cpp = ["dep:arkavo-llama-cpp", "dep:arkavo-kv-cache", "dep:scopeguard", "dep:tokio-util"]
+llama-cpp = ["dep:arkavo-llama-cpp", "dep:arkavo-gguf-tdf", "dep:arkavo-kv-cache", "dep:scopeguard", "dep:tokio-util"]
 snpe = ["dep:arkavo-snpe"]
 
 [dependencies]
 # Core dependencies - always needed for public API
-tokio = { workspace = true, features = ["rt", "macros", "sync"] }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 futures = { workspace = true }
@@ -50,6 +50,7 @@ arkavo-deepseek = { path = "../arkavo-deepseek", optional = true }
 arkavo-qwen = { path = "../arkavo-qwen", optional = true }
 arkavo-gemini = { path = "../arkavo-gemini", optional = true }
 arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
+arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf", optional = true }
 arkavo-kv-cache = { path = "../arkavo-kv-cache", optional = true }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-memory = { path = "../arkavo-memory" }
@@ -64,10 +65,17 @@ arkavo-snpe = { path = "../arkavo-snpe", optional = true }
 
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tempfile = { workspace = true }
 serial_test = "3"
 criterion = { version = "0.5", features = ["async_tokio"] }
 arkavo-gossip = { path = "../arkavo-gossip" }
+# Used only by the gated GLM cost e2e to reconcile real usage -> cost -> budget.
+arkavo-budget = { path = "../arkavo-budget" }
+# Used only by the gated co-resident harness to drive each model with the
+# canonical per-model tuning (ModelChoice) and classification primitives.
+# default-features off so feature-isolated CI (kimi) does not need vendor/llama.cpp.
+arkavo-router = { path = "../arkavo-router", default-features = false }
 
 [[bench]]
 name = "concurrent_inference_benchmark"

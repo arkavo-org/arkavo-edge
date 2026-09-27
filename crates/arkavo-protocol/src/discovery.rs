@@ -253,7 +253,9 @@ impl DiscoveryService {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("PROTO-004")]
     #[test]
     fn test_static_endpoint_registration() {
         let service = DiscoveryService::new(DiscoveryConfig::default());
@@ -271,6 +273,7 @@ mod tests {
         assert_eq!(found.unwrap().url, "http://localhost:8080");
     }
 
+    #[spec("PROTO-004")]
     #[test]
     fn test_static_discovery() {
         let service = DiscoveryService::new(DiscoveryConfig {
@@ -291,6 +294,7 @@ mod tests {
         assert_eq!(result.unwrap().url, "http://localhost:8080");
     }
 
+    #[spec("PROTO-004")]
     #[test]
     fn test_agent_not_found() {
         let service = DiscoveryService::new(DiscoveryConfig::default());
@@ -300,6 +304,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
 
+    #[spec("PROTO-004")]
     #[test]
     fn test_discover_all() {
         let service = DiscoveryService::new(DiscoveryConfig::default());

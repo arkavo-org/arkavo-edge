@@ -158,6 +158,123 @@ impl SpecParser {
     }
 }
 
+// --- RefsValidator ---
+
+#[derive(Debug, Clone)]
+pub struct StaleRef {
+    pub scenario_id: String,
+    pub raw_ref: String,
+    pub resolved_path: PathBuf,
+    pub wip: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpecStaleRefs {
+    pub spec_file: PathBuf,
+    pub stale_refs: Vec<StaleRef>,
+}
+
+pub struct RefsValidator;
+
+impl RefsValidator {
+    pub fn validate(specs: &[(PathBuf, Spec)]) -> Vec<SpecStaleRefs> {
+        let mut result = Vec::new();
+        for (spec_file, spec) in specs {
+            let mut stale = Vec::new();
+            for scenario in &spec.scenarios {
+                // Carry the last explicit file path across refs in the same scenario
+                // so that bare line-range entries (e.g., "141-151") reuse the prior path.
+                let mut current_path: Option<String> = None;
+                for raw_ref in &scenario.refs {
+                    let parts = Self::split_ref_parts(raw_ref);
+                    for part in parts {
+                        if part.is_empty() {
+                            continue;
+                        }
+                        let path = if part.contains('/')
+                            || part.contains('.')
+                            || !Self::is_line_range(part)
+                        {
+                            Self::extract_path(part)
+                        } else if let Some(ref _path) = current_path {
+                            // Bare line range continuing previous path
+                            continue;
+                        } else {
+                            part.to_string()
+                        };
+                        current_path = Some(path.clone());
+                        let path_obj = Path::new(&path);
+                        if !path_obj.exists() {
+                            stale.push(StaleRef {
+                                scenario_id: scenario.id.clone(),
+                                raw_ref: raw_ref.clone(),
+                                resolved_path: path_obj.to_path_buf(),
+                                wip: scenario.wip,
+                            });
+                        }
+                    }
+                }
+            }
+            if !stale.is_empty() {
+                result.push(SpecStaleRefs {
+                    spec_file: spec_file.clone(),
+                    stale_refs: stale,
+                });
+            }
+        }
+        result
+    }
+
+    fn split_ref_parts(raw_ref: &str) -> Vec<&str> {
+        // Split on commas, but ignore commas inside parentheses or brackets
+        // so annotations like "path.rs (a, b)" stay as one part.
+        let mut parts = Vec::new();
+        let mut start = 0;
+        let mut paren_depth = 0i32;
+        let mut bracket_depth = 0i32;
+        for (i, c) in raw_ref.char_indices() {
+            match c {
+                '(' => paren_depth += 1,
+                ')' => paren_depth -= 1,
+                '[' => bracket_depth += 1,
+                ']' => bracket_depth -= 1,
+                ',' if paren_depth == 0 && bracket_depth == 0 => {
+                    let part = raw_ref[start..i].trim();
+                    if !part.is_empty() {
+                        parts.push(part);
+                    }
+                    start = i + c.len_utf8();
+                }
+                _ => {}
+            }
+        }
+        let last = raw_ref[start..].trim();
+        if !last.is_empty() {
+            parts.push(last);
+        }
+        parts
+    }
+
+    fn extract_path(part: &str) -> String {
+        // Split off line-range marker first, then strip any trailing
+        // annotation like " (foo)" or " [bar]".
+        let before_colon = part.find(':').map(|idx| &part[..idx]).unwrap_or(part);
+        let stripped = if let Some((p, _)) = before_colon.split_once(" (") {
+            p
+        } else if let Some((p, _)) = before_colon.split_once(" [") {
+            p
+        } else {
+            before_colon
+        }
+        .trim();
+        stripped.to_string()
+    }
+
+    fn is_line_range(s: &str) -> bool {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '-')
+    }
+}
+
 // --- CoverageAnalyzer ---
 
 pub struct CoverageAnalyzer;
@@ -328,6 +445,54 @@ scenarios:
         assert_eq!(CoverageStatus::Missing.emoji(), "🔴");
         assert_eq!(Criticality::Critical.priority(), 4);
         assert_eq!(Criticality::Low.priority(), 1);
+    }
+
+    #[test]
+    fn test_refs_validator_skips_bare_line_ranges() {
+        let spec = Spec {
+            feature: "Test".into(),
+            module: "test".into(),
+            version: "0.1.0".into(),
+            invariants: vec![],
+            scenarios: vec![Scenario {
+                id: "TEST-001".into(),
+                name: "Test".into(),
+                criticality: Criticality::High,
+                given: vec![],
+                when: "action".into(),
+                then: vec![],
+                refs: vec![
+                    "crates/arkavo-crypto/src/lib.rs:335-339".into(),
+                    "350-355".into(),
+                ],
+                edge_cases: vec![],
+                wip: false,
+                issue: None,
+            }],
+        };
+        let stale = RefsValidator::validate(&[(PathBuf::from("test.spec.yaml"), spec)]);
+        // The crypto lib.rs file may or may not exist; we only care that the bare
+        // line range 350-355 is not reported as a missing path.
+        for spec_stale in &stale {
+            for r in &spec_stale.stale_refs {
+                assert!(
+                    r.resolved_path.to_str() != Some("350-355"),
+                    "bare line range should not be reported as missing path: {:?}",
+                    r
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_split_ref_parts_respects_parentheses() {
+        let parts = RefsValidator::split_ref_parts(
+            "crates/a/src/lib.rs:1-10, crates/b/src/lib.rs (foo, bar), 20-30",
+        );
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], "crates/a/src/lib.rs:1-10");
+        assert_eq!(parts[1], "crates/b/src/lib.rs (foo, bar)");
+        assert_eq!(parts[2], "20-30");
     }
 
     #[test]

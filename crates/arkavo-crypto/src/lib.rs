@@ -335,6 +335,18 @@ impl P256SigningKeypair {
         let signature: Signature = self.signing_key.sign(message);
         signature.to_der().as_bytes().to_vec()
     }
+
+    /// Sign a message and return the fixed-size IEEE P1363 `r || s` encoding.
+    ///
+    /// This is the form COSE ES256 requires (RFC 8152 section 8.1) and JWS
+    /// uses. It is the same signature [`sign`](Self::sign) produces, written
+    /// out as 64 bytes rather than DER, so no conversion — and no conversion
+    /// failure — sits between signing and the wire.
+    pub fn sign_p1363(&self, message: &[u8]) -> [u8; 64] {
+        use p256::ecdsa::{Signature, signature::Signer};
+        let signature: Signature = self.signing_key.sign(message);
+        signature.to_bytes().into()
+    }
 }
 
 /// P-256 ECDSA public key for verifying iOS Secure Enclave signatures.
@@ -604,6 +616,27 @@ mod tests {
         assert!(public_key.verify(message, &signature).is_ok());
     }
 
+    /// COSE ES256 and JWS both want the 64-byte `r || s` encoding, not DER.
+    /// Producing it directly is what lets callers avoid a DER conversion
+    /// that could fail on the signing path.
+    #[test]
+    fn test_p256_sign_p1363_is_fixed_size_and_verifies() {
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+        let message = b"COSE Sig_structure bytes";
+
+        let fixed = keypair.sign_p1363(message);
+        assert_eq!(fixed.len(), 64);
+        assert!(public_key.verify(message, &fixed).is_ok());
+        assert!(public_key.verify(b"other message", &fixed).is_err());
+
+        // The same signature the DER path produces, in the other encoding:
+        // P-256 signing here is deterministic (RFC 6979).
+        let der = keypair.sign(message);
+        let from_der = p256::ecdsa::Signature::from_der(&der).expect("DER signature");
+        assert_eq!(from_der.to_bytes().as_slice(), fixed.as_slice());
+    }
+
     #[test]
     fn test_p256_verify_wrong_message_fails() {
         let keypair = P256SigningKeypair::generate();
@@ -759,6 +792,33 @@ mod tests {
             let signature = keypair.sign(&message);
             assert!(public_key.verify(&message, &signature).is_ok());
         }
+    }
+
+    /// Second test for CRYPTO-007 - P-256 signature is DER-encoded
+    #[spec("CRYPTO-007")]
+    #[test]
+    fn test_p256_signature_is_valid_der() {
+        let keypair = P256SigningKeypair::generate();
+        let public_key = keypair.public_key();
+        let message = b"ios ecdsaSignatureMessageX962SHA256 compatible";
+
+        let signature = keypair.sign(message);
+
+        // DER-encoded ECDSA signatures begin with ASN.1 SEQUENCE marker 0x30
+        assert_eq!(
+            signature[0], 0x30,
+            "signature must start with DER SEQUENCE marker"
+        );
+
+        // DER format is variable-length and longer than the raw 64-byte fixed encoding
+        assert!(
+            signature.len() > 64,
+            "DER P-256 signature should exceed 64 bytes, got {}",
+            signature.len()
+        );
+
+        // The produced signature verifies with the corresponding public key
+        assert!(public_key.verify(message, &signature).is_ok());
     }
 
     /// Second test for CRYPTO-009: SEC1 encoding consistency

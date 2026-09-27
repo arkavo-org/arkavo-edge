@@ -349,7 +349,9 @@ pub fn create_rlm_manager_with_config(config: RlmConfig) -> SharedRlmManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-009")]
     #[tokio::test]
     async fn test_rlm_decompose() {
         let manager = RlmContextManager::new();
@@ -362,6 +364,7 @@ mod tests {
         assert!(result.total_tokens > 0);
     }
 
+    #[spec("ROUTER-009")]
     #[tokio::test]
     async fn test_rlm_probe() {
         let manager = RlmContextManager::new();
@@ -375,6 +378,7 @@ mod tests {
         assert_eq!(result.chunks[0].index, 0);
     }
 
+    #[spec("ROUTER-009")]
     #[tokio::test]
     async fn test_rlm_search() {
         let manager = RlmContextManager::new();
@@ -391,6 +395,7 @@ mod tests {
         assert!(result.match_count > 0);
     }
 
+    #[spec("ROUTER-009")]
     #[tokio::test]
     async fn test_should_activate() {
         let manager = RlmContextManager::new();
@@ -400,6 +405,7 @@ mod tests {
         assert!(manager.should_activate(8000, 10000));
     }
 
+    #[spec("ROUTER-009")]
     #[tokio::test]
     async fn test_system_prompt_generation() {
         let manager = RlmContextManager::new();

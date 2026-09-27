@@ -165,7 +165,7 @@ class SocketServer {
             "id": json["id"] ?? "",
             "success": false,
             "error": "iOS 26 beta minimal mode - operations not supported",
-            "note": "Use IDB or AppleScript for actual automation"
+            "note": "Use simctl or AppleScript for actual automation"
         ]
         
         if let responseData = try? JSONSerialization.data(withJSONObject: response),

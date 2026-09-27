@@ -255,6 +255,120 @@ async fn test_ca_certificate_loading() {
     assert!(!transport.is_connected());
 }
 
+fn is_certificate_verification_error(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    e.contains("certificate")
+        || e.contains("unknownissuer")
+        || e.contains("unknown issuer")
+        || e.contains("notvalidforname")
+        || e.contains("invalid peer")
+        || e.contains("cert")
+}
+
+async fn spawn_self_signed_tls_listener() -> (u16, tokio::task::JoinHandle<()>) {
+    use rustls::ServerConfig;
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use std::sync::Arc;
+    use tokio_rustls::TlsAcceptor;
+
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let certs_dir = test_certs_dir();
+    let cert_file = fs::File::open(certs_dir.join("server.crt")).expect("server.crt");
+    let key_file = fs::File::open(certs_dir.join("server.key")).expect("server.key");
+    let certs: Vec<CertificateDer> = CertificateDer::pem_reader_iter(cert_file)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .expect("parse server cert");
+    let key = PrivateKeyDer::from_pem_reader(key_file).expect("parse server key");
+    let server_config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .expect("tls server config");
+    let acceptor = TlsAcceptor::from(Arc::new(server_config));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let port = listener.local_addr().expect("local addr").port();
+    let handle = tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let _ = acceptor.accept(stream).await;
+        }
+    });
+    (port, handle)
+}
+
+/// `verify_cert: false` must not disable verification: a self-signed server
+/// is still rejected (CWE-295 / CodeQL rust/disabled-certificate-check).
+#[tokio::test]
+async fn test_http_verify_cert_false_still_rejects_self_signed() {
+    let (port, server) = spawn_self_signed_tls_listener().await;
+    let config = TransportConfig {
+        timeout_ms: 3000,
+        max_retries: 0,
+        retry_delay_ms: 0,
+        tls_config: TlsConfig {
+            verify_cert: false,
+            require_tls: true,
+            ..Default::default()
+        },
+    };
+    let transport = HttpTransport::new(config).unwrap();
+    let endpoint = A2aEndpoint {
+        url: format!("https://127.0.0.1:{port}"),
+        agent_id: "test-agent".to_string(),
+        public_key: None,
+    };
+    transport.connect(&endpoint).await.unwrap();
+    let err = transport
+        .send_request(A2aRequest::new("test_method", serde_json::json!([])))
+        .await
+        .expect_err("self-signed HTTPS must fail certificate verification");
+    server.abort();
+    let mut msg = String::new();
+    for cause in err.chain() {
+        msg.push_str(&cause.to_string());
+        msg.push(' ');
+        msg.push_str(&format!("{cause:?}"));
+        msg.push(' ');
+    }
+    assert!(
+        is_certificate_verification_error(&msg),
+        "expected certificate verification failure, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_websocket_verify_cert_false_still_rejects_self_signed() {
+    let (port, server) = spawn_self_signed_tls_listener().await;
+    let config = TransportConfig {
+        timeout_ms: 3000,
+        max_retries: 0,
+        retry_delay_ms: 0,
+        tls_config: TlsConfig {
+            verify_cert: false,
+            require_tls: true,
+            ..Default::default()
+        },
+    };
+    let transport = WebSocketTransport::new(config);
+    let endpoint = A2aEndpoint {
+        url: format!("wss://127.0.0.1:{port}"),
+        agent_id: "test-agent".to_string(),
+        public_key: None,
+    };
+    let err = transport
+        .connect(&endpoint)
+        .await
+        .expect_err("self-signed WSS must fail certificate verification");
+    server.abort();
+    let msg = err.to_string();
+    assert!(
+        is_certificate_verification_error(&msg),
+        "expected certificate verification failure, got: {msg}"
+    );
+}
+
 #[test]
 fn test_certificates_exist() {
     let certs_dir = test_certs_dir();

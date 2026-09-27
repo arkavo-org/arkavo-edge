@@ -14,16 +14,18 @@
 
 pub mod derive;
 pub mod flight;
+pub mod flight_apply;
 pub mod path_dispatch;
 pub mod skill_resolver;
 #[cfg(feature = "tdf")]
 pub mod tdf;
 
-pub use derive::{DeriveOptions, derive_arp_for_role};
+pub use derive::{DeriveOptions, derive_arp_for_role, derive_arp_for_role_with_governance};
 pub use flight::{
     DispatchHandle, FlightError, LaunchError, LaunchOptions, RoleRuntime, RoleTaskEnvelope,
     RoleTaskTransport, SwarmFlight,
 };
+pub use flight_apply::{FlightApplyError, apply_flight_proposal, reconcile_flight_proposal};
 pub use path_dispatch::{KitPathKind, classify_kit_path, is_tdf_path};
 pub use skill_resolver::{
     DidWebPublicKeyResolver, MockPublicKeyResolver, PublicKeyResolver, ResolveError, ResolvedSkill,
@@ -66,6 +68,9 @@ pub fn canonical_full_manifest(
 
 #[cfg(test)]
 mod tests {
+    // #[tokio::test] expands to Runtime::block_on; harmless in tests.
+    #![allow(clippy::disallowed_methods)]
+
     use crate::{LaunchOptions, SwarmFlight};
     use arkavo_swarmkit::parse_yaml;
     use arkavo_test_macros::spec;

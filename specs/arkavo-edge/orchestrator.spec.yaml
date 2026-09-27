@@ -155,7 +155,7 @@ scenarios:
       - Subtasks defined
       - Dependencies mapped
       - TaskPlan created
-    refs: [crates/arkavo-orchestrator/src/task_executor.rs:1-80]
+    refs: [crates/arkavo-orchestrator/src/task_executor/planning.rs:1-214]
     changed: "2025-01-31"
 
   - id: ORCH-010

@@ -11,12 +11,13 @@ impl ModelSelector {
         classification: &Classification,
     ) -> String {
         let category_reason = match (classification.category, model) {
-            (TaskCategory::FrontendUI, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
-                "Frontend task: Claude Sonnet excellent for UI development"
-            }
+            (
+                TaskCategory::FrontendUI,
+                ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5,
+            ) => "Frontend task: Claude excellent for UI development",
             (TaskCategory::FrontendUI, _) => "Frontend task: Gemini Flash ranks #1 on WebDev Arena",
-            (TaskCategory::BackendAPI, ModelChoice::ClaudeOpus) => {
-                "Backend API: Claude Opus for highest quality code"
+            (TaskCategory::BackendAPI, ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5) => {
+                "Backend API: top-tier Claude for highest quality code"
             }
             (TaskCategory::BackendAPI, ModelChoice::ClaudeSonnet) => {
                 "Backend API: Claude Sonnet for fast, high-quality code"
@@ -25,16 +26,17 @@ impl ModelSelector {
             (TaskCategory::CodeSearch, _) => "Code search: Local Gemma 4B is fast and free",
             (TaskCategory::SecurityScan, _) => "Security scan: Local Gemma 4B for privacy",
             (TaskCategory::CodeReview, _) => "Code review: Capable model for thorough analysis",
-            (TaskCategory::TestGeneration, ModelChoice::ClaudeOpus) => {
-                "Test generation: Claude Opus for comprehensive tests"
+            (TaskCategory::TestGeneration, ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5) => {
+                "Test generation: top-tier Claude for comprehensive tests"
             }
             (TaskCategory::TestGeneration, _) => {
                 "Test generation: Gemini Pro for comprehensive tests"
             }
             (TaskCategory::Documentation, _) => "Documentation: Local Gemma 4B sufficient",
-            (TaskCategory::Refactoring, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
-                "Refactoring: Claude for excellent code transformations"
-            }
+            (
+                TaskCategory::Refactoring,
+                ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5,
+            ) => "Refactoring: Claude for excellent code transformations",
             (TaskCategory::Refactoring, _) => "Refactoring: Gemini Flash for quick iterations",
             (TaskCategory::CodeGeneration, ModelChoice::DeepSeekV32) => {
                 "Code generation: DeepSeek V3.2 with tool support for code generation"
@@ -70,7 +72,10 @@ impl ModelSelector {
             }
             ModelChoice::GeminiPro => "Highest quality, comprehensive output ($0.009)",
             ModelChoice::ClaudeSonnet => "Fast (5s), excellent quality ($0.018-0.045)",
-            ModelChoice::ClaudeOpus => "Premium quality, complex reasoning ($0.090-0.225)",
+            ModelChoice::ClaudeOpus => "Premium quality, complex reasoning ($0.030-0.075)",
+            ModelChoice::ClaudeFable5 => {
+                "Most capable tier, adaptive deep reasoning ($0.060-0.150)"
+            }
             ModelChoice::LocalQwen3 => "Ultra-fast (<1s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral3B => "Fast (2s), zero cost, TØRG-compatible",
             ModelChoice::LocalMinistral8B => "High quality (4s), zero cost, TØRG-compatible",
@@ -88,6 +93,9 @@ impl ModelSelector {
             ModelChoice::LocalGemma4_31B => {
                 "Gemma 4 dense (12s), zero cost, vision, 31B params, strong reasoning"
             }
+            ModelChoice::LocalGemma4_12B => {
+                "Gemma 4 dense (6s), zero cost, vision, 12B params, strong reasoning"
+            }
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",
@@ -97,6 +105,10 @@ impl ModelSelector {
             ModelChoice::DeepSeekV32 => "Fast (5s), cost-effective ($0.001), excellent for code",
             ModelChoice::DeepSeekV32Speciale => "Planning-optimized (5s), reasoning-only, no tools",
             ModelChoice::KimiK2 => "Fast (5s), 256K context, thinking mode support",
+            ModelChoice::Glm52 => "GLM-5.2 (8s), low-cost cloud reasoning, OpenAI-compatible",
+            ModelChoice::Gpt6Astra => "GPT-6 Astra, OpenAI Responses, tools and reasoning",
+            ModelChoice::Grok47 => "Grok 4.7 (7s), xAI Responses API, tools + low-effort reasoning",
+            ModelChoice::Grok47Xhigh => "Grok 4.7 xhigh (25s), maximum reasoning depth, tools",
         };
 
         format!(
@@ -240,9 +252,13 @@ impl ModelSelector {
             feasible.retain(|m| !excluded.iter().any(|e| e == m.name()));
         }
 
-        // Ensure at least one model
+        // Every gate above can empty the set, and this function must still
+        // name an arm. Name the device's own default — a cached arm where
+        // there is one, the first-run model otherwise — rather than a fixed
+        // `LocalQwen3` whose weights nobody checked. When nothing is cached
+        // the name is what the dispatch guard reports as unprovisioned.
         if feasible.is_empty() {
-            feasible.push(ModelChoice::LocalQwen3);
+            feasible.push(self.fastest_local_model());
         }
 
         let excluded_names: Vec<String> = excluded.to_vec();
@@ -251,7 +267,7 @@ impl ModelSelector {
             let model = feasible
                 .into_iter()
                 .next()
-                .unwrap_or(ModelChoice::LocalQwen3);
+                .unwrap_or_else(|| self.fastest_local_model());
             let reasoning = format!("Single feasible model: {}", model.name());
             let trace = DecisionTrace::single_feasible(
                 classification.category,
@@ -279,7 +295,21 @@ impl ModelSelector {
             "Thompson Sampling: evaluating feasible models"
         );
 
-        let ranked = learning.rank_agents(&model_ids, category).await;
+        // Cost-aware ranking: discount each quality sample by the model's
+        // authored per-call cost (see #637). Local models hit COST_FLOOR rather
+        // than $0, so free arms get a bounded, not infinite, advantage.
+        let cost_by_model: std::collections::HashMap<String, f64> = feasible
+            .iter()
+            .map(|m| {
+                (
+                    m.name().to_string(),
+                    RoutingDecision::estimate_cost(m, classification.category),
+                )
+            })
+            .collect();
+        let ranked = learning
+            .rank_agents_cost_aware(&model_ids, category, &cost_by_model)
+            .await;
 
         for (i, (name, score)) in ranked.iter().enumerate() {
             tracing::info!(
@@ -314,6 +344,12 @@ impl ModelSelector {
                 budget_usage,
                 excluded_names,
             );
+            // NOTE: the persisted `thompson_scores` here are RANK-LOCAL — each
+            // score is the quality sample discounted by cost relative to the
+            // cheapest model in *this* feasible set. The value depends on which
+            // other models were feasible this call, so it is not a stable
+            // cross-call quality estimate and must not be regressed against as
+            // one. Compare ranks across calls, not raw scores.
             Ok(RoutingDecision::with_trace(
                 model,
                 classification.category,
@@ -393,7 +429,7 @@ pub fn compute_response_quality(
     };
     if response.len() < min_expected {
         let ratio = response.len() as f64 / min_expected as f64;
-        score -= 0.3 * (1.0 - ratio);
+        score = 0.3_f64.mul_add(-(1.0 - ratio), score);
     }
 
     let lines: Vec<&str> = response.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -466,6 +502,13 @@ fn static_model_priors(model: &ModelChoice) -> Vec<(&'static str, f64, f64)> {
         ModelChoice::ClaudeOpus => {
             vec![("test_generation", 5.0, 2.0), ("backend_api", 5.0, 2.0)]
         }
+        // Seeded below Opus so the cheaper tier wins ties; real feedback must
+        // earn Fable 5 its premium slot per category.
+        ModelChoice::ClaudeFable5 => vec![
+            ("test_generation", 4.0, 2.0),
+            ("backend_api", 4.0, 2.0),
+            ("code_review", 4.0, 2.0),
+        ],
         ModelChoice::GeminiFlash => vec![("frontend_ui", 5.0, 2.0)],
         // Gemini 3.5 Flash: pro-tier reasoning + agentic; warm-start for code & agent tasks.
         ModelChoice::Gemini35Flash => vec![
@@ -501,6 +544,7 @@ mod tests {
     use crate::classifier::Classification;
     use crate::learning::BurstFeedback;
     use crate::selector::ProviderAvailability;
+    use arkavo_test_macros::spec;
 
     fn gemini_only() -> ProviderAvailability {
         ProviderAvailability {
@@ -508,12 +552,56 @@ mod tests {
             anthropic: false,
             deepseek: false,
             kimi: false,
+            glm: false,
+            xai: false,
+            openai: false,
         }
     }
 
+    /// Seed every locally-cached model with failures so it drops out of
+    /// contention. `feasible_models()` adds whichever local models happen to be
+    /// cached on the host; without this, free local arms (cost-discount
+    /// multiplier 1.0) can outscore seeded paid arms and obscure the behavior a
+    /// test intends to exercise.
+    async fn weaken_local_models(learning: &LearningModule) {
+        let locals = [
+            "qwen3.5-0.8b",
+            "ministral-3b",
+            "ministral-8b",
+            "qwen3.5-9b",
+            "qwen3.5-27b",
+            "qwen3.6-35b-a3b",
+            "glm-4.7-flash",
+            "gemma-4-e2b",
+            "gemma-4-e4b",
+            "gemma-4-26b-a4b",
+            "gemma-4-31b",
+            "gemma-4-12b",
+            "gemma-3-270m-it",
+            "gemma-3-4b-it",
+            "gemma-3-12b-it",
+            "deepseek-coder-v2-lite-instruct",
+        ];
+        for agent in locals {
+            for _ in 0..20 {
+                learning
+                    .immediate_update(
+                        agent,
+                        &BurstFeedback::failure(
+                            uuid::Uuid::new_v4(),
+                            "frontend_ui".to_string(),
+                            100,
+                        ),
+                    )
+                    .await;
+            }
+        }
+    }
+
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_budget_constraint() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
         let decision = selector
@@ -524,9 +612,10 @@ mod tests {
         assert!(decision.reasoning.contains("Budget constrained"));
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_select_adaptive_uses_thompson_sampling() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let learning = LearningModule::new();
 
         // Feed positive evidence for both Flash variants and negative for Pro,
@@ -553,6 +642,10 @@ mod tests {
                 )
                 .await;
         }
+        // Locally-cached models enter the feasible set on this host; weaken them
+        // so the assertion exercises Thompson Sampling among the Gemini tiers
+        // (its actual intent), not a cost contest with free locals.
+        weaken_local_models(&learning).await;
 
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
@@ -579,16 +672,23 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_select_adaptive_reasoning_contains_thompson() {
         // Need both Gemini and Anthropic so feasible set has >1 model
         // (single-model path skips Thompson Sampling)
-        let selector = ModelSelector::with_availability(ProviderAvailability {
-            gemini: true,
-            anthropic: true,
-            deepseek: false,
-            kimi: false,
-        });
+        let selector = ModelSelector::with_availability(
+            ProviderAvailability {
+                gemini: true,
+                anthropic: true,
+                deepseek: false,
+                kimi: false,
+                glm: false,
+                xai: false,
+                openai: false,
+            },
+            false,
+        );
         let learning = LearningModule::new();
         let classification =
             Classification::new(TaskCategory::General, 0.70, "General task".to_string());
@@ -599,9 +699,11 @@ mod tests {
         assert!(decision.reasoning.contains("Thompson Sampling"));
     }
 
+    #[spec("ROUTER-001")]
+    #[spec("ROUTER-003")]
     #[tokio::test]
     async fn test_select_adaptive_budget_excludes_cloud() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let learning = LearningModule::new();
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
@@ -616,9 +718,10 @@ mod tests {
         );
     }
 
+    #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_select_adaptive_exclusions() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let learning = LearningModule::new();
         let classification =
             Classification::new(TaskCategory::General, 0.70, "General task".to_string());
@@ -631,6 +734,79 @@ mod tests {
             decision.recommended_model,
             ModelChoice::GeminiFlash,
             "Excluded model should not be selected"
+        );
+    }
+
+    #[spec("ROUTER-018")]
+    #[tokio::test]
+    async fn test_select_adaptive_prefers_cheaper_at_equal_quality() {
+        // Isolate the cost signal across two 3.5 Flash tiers with very different
+        // authored cost (Minimal: 0x thinking ≈ $0.019 vs High: 8x ≈ $0.163 on
+        // FrontendUI). Both are seeded to the same strong prior (equal quality).
+        // Every other model that can enter the feasible set — the other Gemini
+        // tiers AND any locally-cached model — is seeded with failures so it
+        // cannot contaminate the Minimal-vs-High comparison. At equal quality
+        // the cheaper tier must be selected more often than the expensive one.
+        let selector = ModelSelector::with_availability(gemini_only(), false);
+        let learning = LearningModule::new();
+
+        for _ in 0..50 {
+            learning
+                .immediate_update(
+                    "gemini-3.5-flash-minimal",
+                    &BurstFeedback::success(uuid::Uuid::new_v4(), "frontend_ui".to_string(), 100),
+                )
+                .await;
+            learning
+                .immediate_update(
+                    "gemini-3.5-flash-high",
+                    &BurstFeedback::success(uuid::Uuid::new_v4(), "frontend_ui".to_string(), 100),
+                )
+                .await;
+        }
+        // Push everything else that may be feasible out of contention: the
+        // remaining Gemini tiers plus the locally-cached model set (which
+        // feasible_models() adds on this host).
+        for weak_gemini in [
+            "gemini-flash-latest",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-medium",
+        ] {
+            for _ in 0..50 {
+                learning
+                    .immediate_update(
+                        weak_gemini,
+                        &BurstFeedback::failure(
+                            uuid::Uuid::new_v4(),
+                            "frontend_ui".to_string(),
+                            100,
+                        ),
+                    )
+                    .await;
+            }
+        }
+        weaken_local_models(&learning).await;
+
+        let classification =
+            Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
+        let mut minimal_count = 0;
+        let mut high_count = 0;
+        for _ in 0..40 {
+            let decision = selector
+                .select_adaptive(&learning, &classification, 0.0, &[])
+                .await
+                .unwrap();
+            match decision.recommended_model {
+                ModelChoice::Gemini35FlashMinimal => minimal_count += 1,
+                ModelChoice::Gemini35FlashHigh => high_count += 1,
+                _ => {}
+            }
+        }
+
+        assert!(
+            minimal_count > high_count,
+            "At equal quality the cheaper tier should outrank the expensive one; \
+             minimal={minimal_count} high={high_count}"
         );
     }
 
@@ -838,7 +1014,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_seed_model_learning() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let learning = LearningModule::new();
         seed_model_learning(&selector, &learning).await;
         let stats = learning.get_category_stats("gemini-flash-latest").await;

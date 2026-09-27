@@ -208,13 +208,13 @@ The current published spec drafts are `swarmkit-spec-draft-00` and `swarmkit-spe
 | `McpToolGrant.auth` (AuthMode) | stable | |
 | `AuthMode` (enum: Delegated, Passthrough, None) | stable | Runtime grant issuance is aspirational; field set stable. |
 
-## TdfAttributeReleasePolicy / ArpRule
+## TdfAttributeReleasePolicy / TdfReleaseRule
 
 | Field | Tier | Note |
 |---|---|---|
 | `TdfAttributeReleasePolicy.attributes` (Vec<String>) | stable | Free-form FQN strings (SK-008). Each must be `<fqn>/<value>` form. |
-| `TdfAttributeReleasePolicy.rule` (ArpRule) | stable | |
-| `ArpRule` (enum: AllOf, AnyOf, Hierarchy) | stable | Hierarchy semantics evaluated KAS-side at attribute-definition time. |
+| `TdfAttributeReleasePolicy.rule` (TdfReleaseRule) | stable | |
+| `TdfReleaseRule` (enum: AllOf, AnyOf, Hierarchy) | stable | Hierarchy semantics evaluated KAS-side at attribute-definition time. Renamed from `ArpRule` (it is a TDF attribute-release rule, not Agent Runtime Policy); wire format unchanged — only camelCase variant names are serialized. A deprecated `ArpRule` type alias remains for one release. |
 
 ## Handoff / ContextScope
 
@@ -276,7 +276,7 @@ The current published spec drafts are `swarmkit-spec-draft-00` and `swarmkit-spe
 | `CompletionSpec.rules` (Vec<String>) | stable | Free-form completion conditions. |
 | `CompletionSpec.on_failure` (OnFailure) | stable | |
 | `CompletionSpec.max_retries` | stable | |
-| `OnFailure` (enum: Abort, Retry, Continue) | stable | |
+| `OnFailure` (enum: Retry, Abort, Escalate, Partial) | stable | |
 
 ## ProvenanceSpec / Signature / C2paAssertion
 

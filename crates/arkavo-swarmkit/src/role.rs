@@ -2,11 +2,30 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Which plane a role operates on. Coordination roles drive work;
+/// learning and audit roles observe it. The wiring rule is type-level:
+/// learning/audit roles may not have coordination outputs — no handoff
+/// delegation and no shared-context writes (enforced by validation). They
+/// emit only tightening proposals and provenance-tagged prior observations.
+/// This is the encoding of "the teacher rides the audit plane, never the
+/// coordination plane."
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Plane {
+    Coordination,
+    Learning,
+    Audit,
+}
+
 /// RoleSpec per §4.3. `role_type` is free-form per Appendix C.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RoleSpec {
     pub id: String,
     pub role_type: String,
+    /// Plane declaration. Absent means coordination (the historical
+    /// default for every existing manifest).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane: Option<Plane>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub agent_provisioning: AgentProvisioning,
@@ -257,16 +276,25 @@ pub enum AuthMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TdfAttributeReleasePolicy {
     pub attributes: Vec<String>,
-    pub rule: ArpRule,
+    pub rule: TdfReleaseRule,
 }
 
+/// TDF attribute-release rule (allOf/anyOf/hierarchy), evaluated KAS-side.
+///
+/// Unrelated to Agent Runtime Policy — renamed from `ArpRule` so the name
+/// can't collide with ARP proposal vocabulary. The wire format is only the
+/// camelCase variant names, so existing manifests are unaffected.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum ArpRule {
+pub enum TdfReleaseRule {
     AllOf,
     AnyOf,
     Hierarchy,
 }
+
+/// Compatibility alias for the pre-rename name.
+#[deprecated(since = "0.79.0", note = "renamed to TdfReleaseRule")]
+pub type ArpRule = TdfReleaseRule;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Handoff {
@@ -306,9 +334,23 @@ mod tests {
     }
 
     #[test]
-    fn arp_rule_serializes_camel_case() {
-        let r = ArpRule::AllOf;
+    fn tdf_release_rule_serializes_camel_case() {
+        let r = TdfReleaseRule::AllOf;
         assert_eq!(serde_json::to_string(&r).unwrap(), "\"allOf\"");
+    }
+
+    #[test]
+    fn tdf_release_rule_wire_format_unchanged_by_rename() {
+        // Regression for the ArpRule → TdfReleaseRule rename: manifests
+        // serialized before the rename must still deserialize.
+        for (json, expected) in [
+            ("\"allOf\"", TdfReleaseRule::AllOf),
+            ("\"anyOf\"", TdfReleaseRule::AnyOf),
+            ("\"hierarchy\"", TdfReleaseRule::Hierarchy),
+        ] {
+            let parsed: TdfReleaseRule = serde_json::from_str(json).unwrap();
+            assert_eq!(parsed, expected);
+        }
     }
 
     #[spec("SK-016")]

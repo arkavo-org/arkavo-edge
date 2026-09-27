@@ -5,7 +5,7 @@ edition.workspace = true
 authors = ["Arkavo Contributors"]
 license = "Apache-2.0"
 description = "Communication session management for the Arkavo agentic CLI tool - chat, websocket, HTTP sessions, and push notifications"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["session", "chat", "websocket", "http", "communication"]
 categories = ["network-programming", "web-programming::websocket"]
 

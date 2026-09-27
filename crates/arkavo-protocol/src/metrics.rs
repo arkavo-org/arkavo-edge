@@ -297,7 +297,9 @@ impl RpcTimer {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("PROTO-009")]
     #[test]
     fn test_metrics_collector_creation() {
         let collector = MetricsCollector::new(true);
@@ -307,6 +309,7 @@ mod tests {
         assert!(!collector.enabled);
     }
 
+    #[spec("PROTO-009")]
     #[test]
     fn test_metrics_noop_when_disabled() {
         let collector = MetricsCollector::new(false);
@@ -318,6 +321,7 @@ mod tests {
         collector.update_rate_limit_entries(100);
     }
 
+    #[spec("PROTO-009")]
     #[test]
     fn test_rpc_timer() {
         let collector = Arc::new(MetricsCollector::new(true));

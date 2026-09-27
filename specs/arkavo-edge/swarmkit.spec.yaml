@@ -2,7 +2,7 @@
 
 feature: SwarmKit Manifest, Runtime, and Gateway Integration
 module: arkavo_swarmkit
-version: 0.73.0
+version: 0.87.0
 
 invariants:
   - SwarmKit manifest is parser+validator only — no runtime side effects
@@ -584,8 +584,7 @@ scenarios:
       - The returned RoleBinding records (role_id, role_type, agent_did, rationale)
       - When no agent in the pool covers any required capability for some role, ApplyKitError::RoleUncoverable is returned naming the unmatched role
     refs:
-      - crates/arkavo-orchestrator/src/swarmkit_apply.rs:155-205
-      - crates/arkavo-orchestrator/src/swarmkit_apply.rs:218-260
+      - crates/arkavo-orchestrator/src/swarmkit_apply.rs
     changed: "2026-05-02"
 
   - id: SK-071
@@ -600,9 +599,8 @@ scenarios:
       - The bundle is wrapped via BundleEncryptor::wrap with the assigned agent's DID
       - The receiving side's verify_dissemination_includes rejects the wrap when a different DID attempts unwrap
     refs:
-      - crates/arkavo-orchestrator/src/swarmkit_apply.rs:262-320
-      - crates/arkavo-protocol/src/agent_specialization.rs:123-141
-      - crates/arkavo-protocol/src/agent_specialization.rs:162-176
+      - crates/arkavo-orchestrator/src/swarmkit_apply.rs
+      - crates/arkavo-protocol/src/agent_specialization.rs
     changed: "2026-05-02"
 
   - id: SK-072
@@ -618,8 +616,8 @@ scenarios:
       - The bundle's RoleContext is stored in RoleSpecializationStore so subsequent tool outcomes can be tagged with flight_id + role_id
       - When the bundle's policy dissemination list does not include this agent's DID, the handler returns -32603 and no metadata changes are applied
     refs:
-      - crates/arkavo-server/src/server/handlers/specialization.rs:65-185
-      - crates/arkavo-server/src/server/config_helpers.rs:8-30
+      - crates/arkavo-server/src/server/handlers/specialization.rs
+      - crates/arkavo-server/src/server/config_helpers.rs
     changed: "2026-05-02"
 
   - id: SK-073
@@ -635,9 +633,8 @@ scenarios:
       - dispatch_initial_tasks calls the transport once per bound role with a RoleTaskEnvelope carrying flight_id, role_id, role_type, agent_did, and the role's first task
       - record_tool_outcome thereafter tags DecisionTrace entries with the bound agent DID rather than the bare role_id
     refs:
-      - crates/arkavo-orchestrator/src/swarmkit_apply.rs:322-352
-      - crates/arkavo-swarmkit-runtime/src/flight.rs:280-325
-      - crates/arkavo-swarmkit-runtime/src/flight.rs:235-260
+      - crates/arkavo-orchestrator/src/swarmkit_apply.rs
+      - crates/arkavo-swarmkit-runtime/src/flight.rs
     changed: "2026-05-02"
 
   - id: SK-080
@@ -794,5 +791,79 @@ scenarios:
       - On hit, ResolvedSkill returned with verified=true
       - On miss (id not in cache), ResolveError::RegistryMiss returned with cache_path
     refs:
-      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs (t8_registry_cache_hit, t9_registry_cache_miss)
-    changed: "2026-05-08"
+      - crates/arkavo-swarmkit-runtime/src/skill_resolver/mod.rs:209-235
+    changed: "2026-06-12"
+
+  # --- Plane governance and flight proposal apply ---------------------------
+
+  - id: SK-093
+    name: Audit-plane roles cannot ride the coordination plane
+    criticality: critical
+    given:
+      - A kit manifest with a role declaring plane learning or audit
+    when: manifest validation runs
+    then:
+      - A learning/audit role with handoffs fails validation
+      - A learning/audit role with context_scope.can_write fails validation
+      - Coordination roles are unaffected
+    refs: [crates/arkavo-swarmkit/src/validate.rs, crates/arkavo-swarmkit/src/governance.rs]
+    changed: "2026-06-10"
+
+  - id: SK-094
+    name: Flight-wide proposal apply is all-or-reverted
+    criticality: critical
+    given:
+      - A flight whose roles each hold a ProposalQueue
+      - A flight-radius tightening proposal
+    when: apply_flight_proposal runs
+    then:
+      - Phase one prechecks every role side-effect-free before any apply
+      - A precheck failure rejects the whole flight with no role touched
+      - A phase-two failure force-reverts the roles already applied
+      - Success applies to every role with reviewer recorded
+    refs: [crates/arkavo-swarmkit-runtime/src/flight_apply.rs]
+    changed: "2026-06-10"
+
+  - id: SK-095
+    name: Reconciliation converges a crash-partial flight apply
+    criticality: high
+    given:
+      - Some flight roles hold an applied proposal and others never saw it
+    when: reconcile_flight_proposal runs
+    then:
+      - Roles holding the proposal in a revertible state are force-reverted
+      - The reverted role ids are returned for the audit trail
+      - A converged flight reconciles to a no-op
+    refs: [crates/arkavo-swarmkit-runtime/src/flight_apply.rs, crates/arkavo-swarmkit-runtime/tests/flight_proposal_apply.rs]
+    changed: "2026-06-10"
+
+  - id: SK-096
+    name: Manifest pricing block parses and converts to budget PricingEntry
+    criticality: high
+    given:
+      - Manifest with a pricing table keyed by model name
+    when: parse_yaml and pricing conversion run
+    then:
+      - Pricing table deserializes into typed entries
+      - Entries convert to arkavo_budget::PricingEntry losslessly
+      - Optional cache and speed fields default appropriately
+    refs:
+      - crates/arkavo-swarmkit/src/pricing.rs
+      - crates/arkavo-swarmkit/src/manifest.rs
+    changed: "2026-06-28"
+
+  - id: SK-097
+    name: Per-role specialization bundle carries manifest_pricing through TDF
+    criticality: high
+    given:
+      - Orchestrator builds an AgentSpecializationBundle
+      - Manifest includes a pricing table
+    when: build_bundle wraps the bundle for an agent DID
+    then:
+      - manifest_pricing field is populated from manifest.pricing
+      - Bundle serializes with backward-compatible default when pricing is absent
+      - Bundle round-trips through TDF unwrap
+    refs:
+      - crates/arkavo-protocol/src/agent_specialization.rs
+      - crates/arkavo-orchestrator/src/swarmkit_apply.rs
+    changed: "2026-06-28"

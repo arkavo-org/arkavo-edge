@@ -67,9 +67,7 @@ pub(super) fn emit_token(
     if special_text == "<think>" || special_text == "</think>" {
         let _ = tx.send(Ok(StreamResponse {
             content: special_text,
-            reasoning_content: None,
-            done: false,
-            inference_timing: None,
+            ..Default::default()
         }));
     }
 
@@ -79,9 +77,7 @@ pub(super) fn emit_token(
             if !piece.is_empty() {
                 let _ = tx.send(Ok(StreamResponse {
                     content: piece,
-                    reasoning_content: None,
-                    done: false,
-                    inference_timing: None,
+                    ..Default::default()
                 }));
             }
         }
@@ -100,9 +96,7 @@ pub(super) fn emit_token(
     if !piece.is_empty() {
         let _ = tx.send(Ok(StreamResponse {
             content: piece,
-            reasoning_content: None,
-            done: false,
-            inference_timing: None,
+            ..Default::default()
         }));
     }
 
@@ -174,7 +168,6 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                 .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?
         };
 
-        let eos_token = model.get_eos_token();
         // Pooled path is always sequence 0; there is no caller-provided
         // seq_id option (unlike the non-pooled context-reuse variant).
         let seq_id: i32 = 0;
@@ -222,15 +215,13 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                 None => sampler.sample(&ctx, -1),
             };
 
-            if target_token == eos_token {
-                tracing::info!("Generation stopped at EOS token (pooled spec)");
+            if model.is_eog(target_token) {
+                tracing::info!("Generation stopped at EOG token (pooled spec)");
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -337,7 +328,7 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                     tokens_generated += 1;
                     history.push(accepted_tok);
                     pos += 1;
-                    if accepted_tok == eos_token || e.stopped {
+                    if model.is_eog(accepted_tok) || e.stopped {
                         early_stop = true;
                         break;
                     }
@@ -384,9 +375,7 @@ pub(super) async fn generate_tokens_pooled_with_spec(
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -396,6 +385,8 @@ pub(super) async fn generate_tokens_pooled_with_spec(
         let perf = perf_context(&ctx);
         drop(ctx);
         let timing = InferenceTiming {
+            n_cached_prompt_eval: None,
+            n_cache_write_prompt_eval: None,
             prompt_eval_ms: perf.t_p_eval_ms,
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
@@ -404,6 +395,7 @@ pub(super) async fn generate_tokens_pooled_with_spec(
             n_draft: Some(n_draft_total),
             n_accepted: Some(n_accepted_total),
             spec_bypassed: None,
+            avg_logprob: None,
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
@@ -418,10 +410,9 @@ pub(super) async fn generate_tokens_pooled_with_spec(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
                 inference_timing: Some(timing),
+                ..Default::default()
             }));
         }
         Err(e) => {
@@ -502,7 +493,6 @@ pub(super) async fn generate_tokens_with_spec(
                 .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?
         };
 
-        let eos_token = model.get_eos_token();
         let seq_id = context_options.seq_id.unwrap_or(0);
 
         let initial_pos = if let Some(start_pos) = context_options.start_position {
@@ -570,15 +560,13 @@ pub(super) async fn generate_tokens_with_spec(
                 None => sampler.sample(&ctx, -1),
             };
 
-            if target_token == eos_token {
-                tracing::info!("Generation stopped at EOS token (spec)");
+            if model.is_eog(target_token) {
+                tracing::info!("Generation stopped at EOG token (spec)");
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -684,7 +672,7 @@ pub(super) async fn generate_tokens_with_spec(
                     tokens_generated += 1;
                     history.push(accepted_tok);
                     pos += 1;
-                    if accepted_tok == eos_token || e.stopped {
+                    if model.is_eog(accepted_tok) || e.stopped {
                         early_stop = true;
                         break;
                     }
@@ -731,9 +719,7 @@ pub(super) async fn generate_tokens_with_spec(
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -742,6 +728,8 @@ pub(super) async fn generate_tokens_with_spec(
 
         let perf = perf_context(&ctx);
         let timing = InferenceTiming {
+            n_cached_prompt_eval: None,
+            n_cache_write_prompt_eval: None,
             prompt_eval_ms: perf.t_p_eval_ms,
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
@@ -750,6 +738,7 @@ pub(super) async fn generate_tokens_with_spec(
             n_draft: Some(n_draft_total),
             n_accepted: Some(n_accepted_total),
             spec_bypassed: None,
+            avg_logprob: None,
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
@@ -764,10 +753,9 @@ pub(super) async fn generate_tokens_with_spec(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
                 inference_timing: Some(timing),
+                ..Default::default()
             }));
         }
         Err(e) => {

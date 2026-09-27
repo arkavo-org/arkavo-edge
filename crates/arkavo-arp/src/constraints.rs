@@ -54,6 +54,11 @@ pub struct PerLayerBudget {
     pub data: Option<LayerBudget>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<LayerBudget>,
+    /// Offline learning spend (§7.4). Required when the consolidation
+    /// teacher is non-local; exhaustion yields partial output plus a
+    /// budget_exhausted trace, never borrowing from runtime budgets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consolidation: Option<LayerBudget>,
 }
 
 /// Budget limit for a single layer.

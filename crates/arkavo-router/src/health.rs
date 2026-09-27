@@ -231,7 +231,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_healthy_router() {
-        let reporter = RouterHealthReporter::default();
+        let reporter =
+            RouterHealthReporter::new(Arc::new(crate::ConnectivityChecker::assume(true)));
 
         // Record healthy provider
         reporter
@@ -248,7 +249,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_degraded_high_fallback() {
-        let reporter = RouterHealthReporter::default();
+        let reporter =
+            RouterHealthReporter::new(Arc::new(crate::ConnectivityChecker::assume(true)));
 
         // Record many fallback activations
         for _ in 0..5 {
@@ -265,7 +267,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_unhealthy_provider_failures() {
-        let reporter = RouterHealthReporter::default();
+        let reporter =
+            RouterHealthReporter::new(Arc::new(crate::ConnectivityChecker::assume(true)));
 
         // Record consecutive failures
         for _ in 0..4 {

@@ -1,0 +1,293 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: OIDC Identity Session (arkavo login / logout via Arkavo Creator)
+module: arkavo_identity
+version: 0.91.0
+
+invariants:
+  - The CLI is public client "arkavo-edge"; no client_secret is ever sent to the token endpoint
+  - The loopback listener binds numeric 127.0.0.1 only (never "localhost"), on the first free port of LOOPBACK_PORTS [52171..52178], and only answers GET /cb
+  - A callback is accepted only when its state query parameter equals the session's PKCE state; everything else gets HTTP 400 and the listener keeps waiting
+  - Tokens persist as JSON at <data dir>/arkavo/identity_token (macOS) written atomically via a sibling .tmp file with unix mode 0o600
+  - Access tokens are CWTs; the CLI extracts sub (claim key 2) without verifying the signature and never logs the token
+  - Freshness is judged with a 60-second clock skew (now + 60 < expires_at); a dead refresh token deletes the token file, a transport blip does not
+  - The pairing code is base32 of the first 5 bytes of SHA-256(state), formatted XXXX-XXXX, and matches the code shown by Arkavo Creator (Creator spec CRE-102)
+
+scenarios:
+  - id: IDS-001
+    name: arkavo login dispatches to IdentitySession and prints the subject
+    criticality: high
+    given:
+      - CLI invoked as "arkavo login"
+    when: run matches "login" | "logout" and execute_login() runs
+    then:
+      - A tokio runtime is reused (Handle::try_current) or created to block on the async call
+      - IdentitySession::new().login() runs bearer(Prompt::Interactive) and extracts sub from the access CWT
+      - On success stdout prints "logged in as {sub}"
+      - Any IdentityError propagates as the command's error result
+    refs: [crates/arkavo-cli/src/lib.rs:69-86,crates/arkavo-cli/src/commands/login.rs:7-12,crates/arkavo-identity/src/session.rs:173-176]
+    wip: true
+
+  - id: IDS-002
+    name: arkavo logout clears cache and deletes the token file
+    criticality: high
+    given:
+      - CLI invoked as "arkavo logout"
+    when: execute_logout() calls IdentitySession::new().logout()
+    then:
+      - The ceremony mutex is taken, the in-memory access cache is cleared, and force_refresh is reset to false
+      - store::delete removes the identity_token file; a missing file is not an error
+      - The IdP is never contacted; logout is purely local
+      - Nothing is printed on success
+    refs: [crates/arkavo-cli/src/commands/login.rs:14-18,crates/arkavo-identity/src/session.rs:178-184,crates/arkavo-identity/src/store.rs:91-97]
+    wip: true
+
+  - id: IDS-003
+    name: Discover identity endpoints from the platform well-known document
+    criticality: high
+    given:
+      - platform_url from ARKAVO_PLATFORM_URL or default "https://platform.arkavo.net" (empty env value falls back to the default)
+      - identity_host from ARKAVO_IDENTITY_HOST or default "identity.arkavo.net"
+    when: discover() fetches the OpenTDF well-known configuration (GET {platform_url}/.well-known/opentdf-configuration)
+    then:
+      - idp.authorization_endpoint and idp.token_endpoint are both required; a missing idp or endpoint field yields IdentityError::Transport with a descriptive message
+      - The reqwest client uses rustls, a 30-second timeout, and redirect policy none
+      - Fetch/parse failures map to IdentityError::Transport
+    refs: [crates/arkavo-identity/src/discovery.rs:4-36,crates/arkavo-identity/src/session.rs:83-99,269-274]
+
+  - id: IDS-004
+    name: Pin discovered endpoints to the identity host over https
+    criticality: critical
+    given:
+      - Discovered authorization_endpoint and token_endpoint URLs
+    when: pin_host validates each endpoint
+    then:
+      - The URL host must equal identity_host case-insensitively, else IdentityError::UntrustedIdentityEndpoint(host)
+      - The scheme must be "https" unless the host is "127.0.0.1" or "localhost" (loopback exemption exists for tests)
+      - 'Plain http on the identity host is refused: "http://identity.arkavo.net/..." yields UntrustedIdentityEndpoint'
+      - Each endpoint is checked independently; a foreign token_endpoint alone fails discovery
+    refs: [crates/arkavo-identity/src/discovery.rs:30-31,46-60]
+
+  - id: IDS-005
+    name: Generate PKCE verifier, S256 challenge, and state
+    criticality: critical
+    given:
+      - An interactive login ceremony begins
+    when: Pkce::generate() runs
+    then:
+      - verifier and state are each 32 random bytes encoded unpadded base64url (43 chars, no "=", "+", or "/")
+      - challenge is SHA-256(verifier) encoded unpadded base64url (code_challenge_method S256; RFC 7636 appendix B vector holds)
+      - verifier, challenge, and state are independent per ceremony
+    refs: [crates/arkavo-identity/src/pkce.rs:14-29,38-42]
+
+  - id: IDS-006
+    name: Pairing code derives from state and prints before launch
+    criticality: high
+    given:
+      - A generated Pkce with state
+    when: interactive_login prints the pairing code
+    then:
+      - 'stdout shows "Pairing code: XXXX-XXXX" where the 8 characters are RFC 4648 base32 (alphabet A-Z2-7, no padding) of the first 5 bytes of SHA-256(state)'
+      - 'The derivation vector holds: pairing_code("test-state") == "DFRA-BZGI"'
+      - The code is printed before the Creator launch so the user can compare it with the consent sheet (Creator spec CRE-102/CRE-157 own the display side)
+    refs: [crates/arkavo-identity/src/pkce.rs:31-35,44-58,crates/arkavo-identity/src/session.rs:237-240]
+
+  - id: IDS-007
+    name: Build the authorize URL with exact query parameters
+    criticality: high
+    given:
+      - Discovered endpoints, a Pkce, and the loopback redirect_uri
+    when: authorize_url() builds the authorization request URL
+    then:
+      - Query carries response_type=code, client_id=arkavo-edge, redirect_uri, scope="openid offline_access" (space encoded %20, never form-urlencoded "+"), code_challenge, code_challenge_method=S256, and state
+      - Percent-encoding leaves only [A-Za-z0-9-._~] unescaped
+      - An authorization_endpoint already containing "?" gets the query appended with "&", otherwise with "?"
+    refs: [crates/arkavo-identity/src/broker.rs:9-46]
+
+  - id: IDS-008
+    name: Hand off to Arkavo Creator via the arkavocreator URL scheme
+    criticality: high
+    given:
+      - A built authorize URL
+    when: creator_url() rewrites it and launch_creator() opens it
+    then:
+      - The URL becomes "arkavocreator://oauth/authorize?<original query verbatim>" — the https scheme and authority are dropped, the query (including the percent-encoded redirect_uri) is preserved
+      - On macOS the launch runs `open -b com.arkavo.ArkavoCreator <url>` (CREATOR_BUNDLE_ID)
+      - A failed open maps to IdentityError::LoginRequired("install Arkavo Creator and run 'arkavo login'")
+      - Off macOS the launch always fails with IdentityError::Unsupported
+      - The CLI never GETs the authorize endpoint itself; Creator performs that request (Creator spec CRE-156 owns the approve/deny network behavior)
+    refs: [crates/arkavo-identity/src/broker.rs:48-75,crates/arkavo-identity/src/session.rs:61-70,crates/arkavo-identity/tests/bearer_flow.rs:108-112]
+    wip: true
+
+  - id: IDS-009
+    name: Bind the loopback callback listener on registered ports
+    criticality: critical
+    given:
+      - An interactive login ceremony begins
+    when: loopback::bind() runs
+    then:
+      - Ports LOOPBACK_PORTS [52171, 52172, 52173, 52174, 52175, 52176, 52177, 52178] are tried in order; the first successful bind wins
+      - The bind address is numeric 127.0.0.1 (never "localhost")
+      - redirect_uri is exactly "http://127.0.0.1:{port}/cb"
+      - If all eight ports are busy the error is IdentityError::Transport("all loopback ports 52171-52178 are busy")
+    refs: [crates/arkavo-identity/src/loopback.rs:8,26-65]
+    edge_cases:
+      - condition: Creator-side validation (Creator spec CRE-102) accepts only redirect_uri matching ^http://127\.0\.0\.1:\d+/cb$
+        expected: The CLI redirect_uri always satisfies that regex by construction
+
+  - id: IDS-010
+    name: Accept only a state-matching GET /cb callback
+    criticality: critical
+    given:
+      - A bound listener and the expected PKCE state
+    when: wait_for_callback processes incoming HTTP requests
+    then:
+      - The request line must be exactly "GET <target> HTTP/1.1" (three parts; anything else is rejected)
+      - The target path must be "/cb"; query keys and values are percent-decoded
+      - A request with state != expected state, a missing state, a non-/cb path, or undecodable input gets an HTTP 400 with an empty body and the listener keeps accepting
+      - A state-matching request with code= yields Callback::Code { code, state }; with error= (and no code) yields Callback::Error { error, state }
+      - The accepted request gets HTTP 200 with body "You can close this window." and Content-Type text/plain
+      - Header reads are capped at MAX_HEADERS 8192 bytes
+    refs: [crates/arkavo-identity/src/loopback.rs:11-12,72-201]
+
+  - id: IDS-011
+    name: Callback wait times out after 300 seconds
+    criticality: medium
+    given:
+      - A bound listener awaiting the Creator callback
+    when: CALLBACK_DEADLINE (Duration::from_secs(300)) elapses without a matching callback
+    then:
+      - wait_for_callback returns IdentityError::TimedOut
+      - Display text is "timed out waiting for Arkavo Creator"
+    refs: [crates/arkavo-identity/src/loopback.rs:9,37-46,crates/arkavo-identity/src/session.rs:244-249]
+
+  - id: IDS-012
+    name: Exchange code and refresh tokens as a public client
+    criticality: critical
+    given:
+      - An authorization code, the exact redirect_uri, and the PKCE verifier; or a stored refresh token
+    when: exchange_code() or refresh() POSTs a form to the token endpoint
+    then:
+      - exchange_code sends grant_type=authorization_code, code, client_id=arkavo-edge, redirect_uri (exact string), and code_verifier; no client_secret is sent
+      - refresh sends grant_type=refresh_token, refresh_token, and client_id=arkavo-edge; no client_secret is sent
+      - A non-2xx response yields IdentityError::Token containing the raw response body
+      - A 2xx response without a non-empty access_token yields IdentityError::Token("missing access_token")
+      - expires_at is wall-clock now plus expires_in (missing/invalid expires_in counts as 0); this computation does not use the session's injected Clock
+    refs: [crates/arkavo-identity/src/token.rs:6-100]
+
+  - id: IDS-013
+    name: Interactive login orchestrates the full ceremony
+    criticality: high
+    given:
+      - No usable cached, stored, or refreshable token and Prompt::Interactive
+    when: interactive_login() runs
+    then:
+      - Order is discover → loopback bind → Pkce::generate → print pairing code → authorize_url → creator_url → launcher.launch (awaited) → wait_for_callback → token exchange → store::save → cache
+      - The launcher future is awaited before wait_for_callback begins, so the Launcher must not block on its own callback GET
+      - Callback::Error maps to IdentityError::AccessDenied regardless of the error value (e.g. error=access_denied from a user denial)
+      - On success the tokens are saved to the token file and the access token is cached
+      - Any failure before the callback leaves no token file behind
+    refs: [crates/arkavo-identity/src/session.rs:231-266,crates/arkavo-identity/tests/bearer_flow.rs:1-7,92-157]
+
+  - id: IDS-014
+    name: Store tokens atomically at mode 0o600 under the platform data dir
+    criticality: critical
+    given:
+      - Tokens to persist
+    when: token_path(), save(), load(), or delete() run
+    then:
+      - token_path is dirs::data_dir()/arkavo/identity_token on macOS, dirs::data_local_dir()/arkavo/identity_token on Windows, and dirs::data_dir() (or home)/.arkavo/identity_token elsewhere; an indeterminate base yields IdentityError::Store("Could not determine data directory")
+      - StoredTokens serializes as pretty JSON with access_token, optional refresh_token, and expires_at (unix seconds)
+      - save creates parent directories, writes to a sibling "<path>.tmp" with create_new and unix mode 0o600 (a stale leftover .tmp is removed first so it cannot keep a 0o644 mode), then renames over the destination (on Windows the destination is removed first)
+      - A failed open, write, or rename removes the .tmp and never leaves the destination empty
+      - 'load returns Ok(None) for a missing file and IdentityError::Store("parse token file: ...") for malformed JSON'
+    refs: [crates/arkavo-identity/src/store.rs:8-97]
+
+  - id: IDS-015
+    name: bearer() resolves cache, store, refresh, then prompt-gated login
+    criticality: high
+    given:
+      - A session with a token_path and a Prompt (Interactive or Never)
+    when: bearer(prompt) runs under the ceremony mutex
+    then:
+      - A cached access token is returned when force_refresh is false and is_fresh holds (now + 60 < expires_at)
+      - Stored tokens are returned when force_refresh is false, access_token is non-empty, and is_fresh holds; they are then cached
+      - A stored non-empty refresh_token triggers refresh when the access token is stale, empty, or force_refresh is set
+      - Prompt::Never with no usable token fails with IdentityError::LoginRequired("run 'arkavo login'") and never runs the launcher
+      - Prompt::Interactive falls through to the interactive ceremony
+      - The cache mutex tolerates poisoning (into_inner on a poisoned lock)
+    refs: [crates/arkavo-identity/src/session.rs:122-171,193-216]
+
+  - id: IDS-016
+    name: Refresh rotates and persists tokens; failure class decides file fate
+    criticality: critical
+    given:
+      - Stored tokens with a refresh_token and a stale or invalidated access token
+    when: refresh_and_persist() runs
+    then:
+      - A successful refresh saves the new tokens; when the response omits refresh_token the previous refresh token is kept
+      - The new access token is cached and force_refresh is cleared
+      - IdentityError::Token from the token endpoint (e.g. HTTP 400 invalid_grant) deletes the token file and clears the cache, then Prompt::Never surfaces LoginRequired
+      - IdentityError::Transport (connection drop, timeout) propagates unchanged and the token file is preserved
+    refs: [crates/arkavo-identity/src/session.rs:146-162,218-229]
+
+  - id: IDS-017
+    name: Corrupt token file self-heals by deletion
+    criticality: high
+    given:
+      - A token file whose contents fail to parse ("parse token file" store error)
+    when: bearer() loads the store
+    then:
+      - The file is deleted, the cache is cleared, and the session proceeds as if logged out (refresh is skipped because no tokens remain)
+      - Other store errors (e.g. read failures) propagate without deleting the file
+    refs: [crates/arkavo-identity/src/session.rs:129-137]
+
+  - id: IDS-018
+    name: invalidate() forces a refresh while keeping the token file
+    criticality: high
+    given:
+      - A session whose access token was rejected downstream (KAS 401)
+    when: invalidate() runs
+    then:
+      - force_refresh is set and the in-memory cache is cleared; the token file is deliberately left intact so the next bearer() refreshes (or logs in) instead of reloading the rejected access token
+      - The next bearer() skips both the cache and the stored access token even when it still looks fresh
+      - 'The router''s protected-model loader calls invalidate() and retries bearer() exactly once after a KAS 401; a second 401 fails with "GGUFTDF_KAS_DENIED: identity token rejected by KAS"'
+    refs: [crates/arkavo-identity/src/session.rs:186-191,crates/arkavo-router/src/provider_protected.rs:100-123,170-178]
+
+  - id: IDS-019
+    name: Extract sub from the access CWT without signature verification
+    criticality: high
+    given:
+      - A base64url-unpadded access token obtained from login
+    when: cwt::sub() parses it
+    then:
+      - CBOR tags are unwrapped (CWT tag 61 around COSE_Sign1); a 4-element array reads its payload at index 2; byte-string wrappers are decoded recursively
+      - The claims map's integer key 2 (sub) must hold non-empty text
+      - The signature is not verified — the platform is the verifier (mirrors Creator spec CRE-103)
+      - Any decode, structure, or missing-claim failure yields IdentityError::Token("access token has no sub")
+      - The token is never logged
+    refs: [crates/arkavo-identity/src/cwt.rs:1-64,crates/arkavo-identity/src/session.rs:173-176]
+
+  - id: IDS-020
+    name: IdentityError taxonomy maps to GGUFTDF_KAS_DENIED messages
+    criticality: medium
+    given:
+      - Any IdentityError variant (LoginRequired, AccessDenied, Unsupported, UntrustedIdentityEndpoint, Transport, Token, Store, TimedOut)
+    when: kas_denied_message() formats it for protected-model load failures
+    then:
+      - 'The output is "GGUFTDF_KAS_DENIED: <rest>"'
+      - Unsupported maps to "login required; install Arkavo Creator and run 'arkavo login'"; LoginRequired to "login required; <reason>"; TimedOut to "login required; timed out waiting for Arkavo Creator"; AccessDenied to "access denied by user"
+      - UntrustedIdentityEndpoint drops the offending host, reporting only "untrusted identity endpoint"
+      - Transport, Token, and Store pass their message through verbatim
+    refs: [crates/arkavo-identity/src/error.rs:9-43,crates/arkavo-router/src/provider_protected.rs:100-103]
+
+  - id: IDS-021
+    name: Concurrent bearer() calls share one login ceremony
+    criticality: medium
+    given:
+      - Two concurrent bearer(Prompt::Interactive) calls on the same session with no usable tokens
+    when: Both contend on the ceremony tokio Mutex
+    then:
+      - Exactly one interactive ceremony runs (one Creator launch, one loopback bind)
+      - The second call observes the first call's freshly cached access token and returns it without launching again
+    refs: [crates/arkavo-identity/src/session.rs:44-48,crates/arkavo-identity/src/session.rs:122-124,crates/arkavo-identity/tests/bearer_flow.rs:118-137]

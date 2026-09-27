@@ -5,7 +5,7 @@ edition.workspace = true
 authors = ["Arkavo Contributors"]
 license = "Apache-2.0"
 description = "Security consolidation crate for the Arkavo agentic CLI - auth, OAuth2, rate limiting, JWT, and data classification"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["security", "auth", "oauth2", "jwt", "rate-limiting"]
 categories = ["authentication", "web-programming"]
 

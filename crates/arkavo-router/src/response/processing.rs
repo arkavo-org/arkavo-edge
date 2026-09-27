@@ -110,7 +110,9 @@ pub fn sanitize_response(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ROUTER-011")]
     #[test]
     fn test_strip_think_blocks() {
         let content = "Let me think...<think>internal reasoning</think>The answer is 4.";
@@ -120,6 +122,7 @@ mod tests {
         assert!(stripped.contains("The answer is 4"));
     }
 
+    #[spec("ROUTER-011")]
     #[test]
     fn test_strip_unclosed_think_block() {
         let content = "Start<think>never closed...";
@@ -129,6 +132,7 @@ mod tests {
         assert!(!stripped.contains("never closed"));
     }
 
+    #[spec("ROUTER-012")]
     #[test]
     fn test_strip_tool_blocks() {
         let content = "Result: <tool>execute(x=1)</tool>Done.";
@@ -138,6 +142,7 @@ mod tests {
         assert!(stripped.contains("Done."));
     }
 
+    #[spec("ROUTER-012")]
     #[test]
     fn test_strip_unclosed_tool_block() {
         let content = "Start<tool>never closed";
@@ -146,6 +151,7 @@ mod tests {
         assert!(stripped.contains("Start"));
     }
 
+    #[spec("ROUTER-013")]
     #[test]
     fn test_sanitize_response_removes_prefixes() {
         let content = "Human: hi\nAssistant: hello";
@@ -154,6 +160,8 @@ mod tests {
         assert!(!sanitized.contains("Assistant:"));
     }
 
+    #[spec("ROUTER-011")]
+    #[spec("ROUTER-013")]
     #[test]
     fn test_sanitize_response_full() {
         let content = "<think>reasoning</think>Human: ignored\nThe answer is 42.";
@@ -163,6 +171,7 @@ mod tests {
         assert!(sanitized.contains("42"));
     }
 
+    #[spec("ROUTER-013")]
     #[test]
     fn test_sanitize_response_cleans_whitespace() {
         let content = "Line 1\n\n\n\nLine 2";
@@ -170,6 +179,7 @@ mod tests {
         assert!(!sanitized.contains("\n\n\n"));
     }
 
+    #[spec("ROUTER-011")]
     #[test]
     fn test_multiple_think_blocks() {
         let content = "<think>first</think>middle<think>second</think>end";
@@ -179,6 +189,7 @@ mod tests {
         assert!(stripped.contains("end"));
     }
 
+    #[spec("ROUTER-012")]
     #[test]
     fn test_nested_tool_blocks() {
         let content = "before<tool>inner</tool>between<tool>inner2</tool>after";

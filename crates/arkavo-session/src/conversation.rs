@@ -52,6 +52,9 @@ pub struct ConversationMessage {
     pub token_count: usize,
     /// Whether this is a summary message
     pub is_summary: bool,
+    /// Hydrated from private replay storage, never serialized into public memory.
+    #[serde(skip)]
+    pub provider_message: Option<Message>,
 }
 
 /// A conversation session containing multiple messages
@@ -217,10 +220,35 @@ impl ConversationManager {
             .search("conversation_session", 10, Some("conversation"))
             .await?;
 
-        if let Some(latest_session) = sessions.first()
-            && let Ok(session) =
-                serde_json::from_str::<ConversationSession>(&latest_session.memory.content)
-        {
+        // `search` ranks hits by vector-similarity score, not recency:
+        // every conversation-session memory is stored with the same
+        // placeholder zero-vector embedding, so ties in that score are
+        // broken by internal search order, which is not the same as
+        // insertion order and is not stable across runs (this is what let
+        // `sessions.first()` pick a stale-but-compatible session over a
+        // newer, incompatible one). Pick the newest session by its own
+        // (updated_at, created_at) instead. On a full tie, fall back to
+        // the storage-level `memory.created_at`: it is set by a second,
+        // later `Utc::now()` call at store time (see
+        // `start_session_with_metadata`), so it still separates
+        // same-tick sessions in practice. `memory.id` is a random UUIDv4
+        // and carries no ordering information, so it is not used as a
+        // tiebreak. `max_by_key` returns the *last* equally-maximal
+        // element, so a fully tied pair still resolves deterministically,
+        // to whichever hit is last among the (also tied) search results.
+        let session = sessions
+            .iter()
+            .filter_map(|hit| {
+                serde_json::from_str::<ConversationSession>(&hit.memory.content)
+                    .ok()
+                    .map(|parsed| (parsed, hit.memory.created_at))
+            })
+            .max_by_key(|(parsed, memory_created_at)| {
+                (parsed.updated_at, parsed.created_at, *memory_created_at)
+            })
+            .map(|(parsed, _)| parsed);
+
+        if let Some(session) = session {
             // Check compatibility if metadata provided
             let mut compatible = true;
             let mut incompatibility_reason = String::new();
@@ -299,6 +327,10 @@ impl ConversationManager {
             timestamp: Utc::now(),
             token_count,
             is_summary: false,
+            provider_message: (!message.provider_state.is_empty()
+                || !message.tool_calls.is_empty()
+                || message.role == arkavo_llm::Role::Tool)
+                .then(|| message.clone()),
         };
 
         let memory = Memory {
@@ -317,7 +349,14 @@ impl ConversationManager {
             updated_at: conv_message.timestamp,
         };
 
-        self.memory_storage.store(memory).await?;
+        let replay_state = conv_message
+            .provider_message
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()?;
+        self.memory_storage
+            .store_with_replay_state(memory, replay_state.as_deref())
+            .await?;
         Ok(())
     }
 
@@ -419,25 +458,38 @@ impl ConversationManager {
 
         // Add recent messages within token budget and history limit
         let mut total_tokens = self.count_message_tokens(&context_messages);
-        let recent_messages: Vec<_> = messages.iter().rev().take(history_limit).rev().collect();
+        let recent_messages = super::history_window::select_history(
+            &messages,
+            history_limit,
+            MAX_CONTEXT_TOKENS.saturating_sub(total_tokens),
+        );
+
+        // Only the window is replayed, and one statement covers all of it: a
+        // query per message turns restoring a session into an N+1.
+        let window_ids: Vec<Uuid> = recent_messages.iter().map(|msg| msg.id).collect();
+        let replay_states = self.memory_storage.load_replay_states(&window_ids).await?;
 
         for (idx, msg) in recent_messages.iter().enumerate() {
             let msg_tokens = msg.token_count;
-            if total_tokens + msg_tokens > MAX_CONTEXT_TOKENS {
-                break;
-            }
-
             let sanitized_content = if idx == recent_messages.len() - 1 {
                 Self::sanitize_message_content(&msg.content)
             } else {
                 msg.content.clone()
             };
 
-            let message = match msg.role.as_str() {
-                "user" => Message::user(&sanitized_content),
-                "assistant" => Message::assistant(&sanitized_content),
-                "system" => Message::system(&sanitized_content),
-                _ => continue,
+            let provider_message = replay_states
+                .get(&msg.id)
+                .map(|state| serde_json::from_slice::<Message>(state))
+                .transpose()?;
+            let message = if let Some(message) = provider_message {
+                message
+            } else {
+                match msg.role.as_str() {
+                    "user" => Message::user(&sanitized_content),
+                    "assistant" => Message::assistant(&sanitized_content),
+                    "system" => Message::system(&sanitized_content),
+                    _ => continue,
+                }
             };
 
             context_messages.push(message);
@@ -523,6 +575,7 @@ impl ConversationManager {
             timestamp: Utc::now(),
             token_count: self.count_tokens(&summary),
             is_summary: true,
+            provider_message: None,
         };
 
         let memory = Memory {
@@ -588,16 +641,16 @@ impl ConversationManager {
 
     /// List all sessions
     pub async fn list_sessions(&self) -> anyhow::Result<Vec<ConversationSession>> {
-        let results = self
+        // Exact category listing, not vector search. Session memories all
+        // share a placeholder zero-vector, so HNSW can omit one of them.
+        let memories = self
             .memory_storage
-            .search("conversation_session", 50, Some("conversation"))
+            .list_by_category("conversation", 50)
             .await?;
 
-        let mut sessions: Vec<ConversationSession> = results
+        let mut sessions: Vec<ConversationSession> = memories
             .into_iter()
-            .filter_map(|result| {
-                serde_json::from_str::<ConversationSession>(&result.memory.content).ok()
-            })
+            .filter_map(|memory| serde_json::from_str::<ConversationSession>(&memory.content).ok())
             .collect();
 
         sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
@@ -606,18 +659,26 @@ impl ConversationManager {
 
     /// Switch to a different session
     pub async fn switch_session(&mut self, session_id: Uuid) -> anyhow::Result<()> {
+        // Perform a targeted lookup for the session and accept it only if the
+        // returned memory deserializes to a ConversationSession with a matching
+        // id. This avoids both false positives from unrelated memories and
+        // false negatives from a capped global list.
         let query = format!("session_id:{session_id}");
         let results = self
             .memory_storage
-            .search(&query, 1, Some("conversation"))
+            .search(&query, 5, Some("conversation"))
             .await?;
+        let found = results.into_iter().any(|result| {
+            serde_json::from_str::<ConversationSession>(&result.memory.content)
+                .is_ok_and(|session| session.id == session_id)
+        });
 
-        if results.is_empty() {
-            return Err(anyhow::anyhow!("Session not found"));
+        if found {
+            self.current_session_id = Some(session_id);
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Session not found"))
         }
-
-        self.current_session_id = Some(session_id);
-        Ok(())
     }
 
     /// Count tokens in a string
@@ -637,8 +698,46 @@ impl ConversationManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+
+    // Mock-provider support for summary tests
+    use async_trait::async_trait;
+
+    #[derive(Clone)]
+    struct MockSummaryProvider {
+        response: String,
+    }
+
+    #[async_trait]
+    impl arkavo_llm::Provider for MockSummaryProvider {
+        async fn complete_with_options(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+            _max_tokens: Option<usize>,
+        ) -> arkavo_llm::Result<String> {
+            Ok(self.response.clone())
+        }
+
+        async fn stream(
+            &self,
+            _messages: Vec<arkavo_llm::Message>,
+        ) -> arkavo_llm::Result<
+            Box<
+                dyn futures::Stream<Item = arkavo_llm::Result<arkavo_llm::StreamResponse>>
+                    + Send
+                    + Unpin,
+            >,
+        > {
+            Ok(Box::new(futures::stream::empty()))
+        }
+
+        fn name(&self) -> &str {
+            "mock-summary-provider"
+        }
+    }
 
     #[test]
+    #[spec("CHAT-024")]
     fn test_sanitize_message_content_balances_fences() {
         // Arrange - odd number of fences
         let content = "Here is code:\n```rust\nfn main() {}";
@@ -652,6 +751,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("CHAT-024")]
     fn test_sanitize_message_content_even_fences_unchanged() {
         let content = "```rust\nfn main() {}\n```";
         let sanitized = ConversationManager::sanitize_message_content(content);
@@ -660,6 +760,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("CHAT-024")]
     fn test_sanitize_removes_trailing_role_markers() {
         let content = "Some text\nAssistant:";
         let sanitized = ConversationManager::sanitize_message_content(content);
@@ -682,6 +783,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-014")]
     async fn test_conversation_manager_new() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let manager = ConversationManager::new(storage);
@@ -690,6 +792,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-015")]
     async fn test_start_session_with_metadata() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let mut manager = ConversationManager::new(storage).unwrap();
@@ -703,6 +806,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-017")]
     async fn test_add_message() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let mut manager = ConversationManager::new(storage).unwrap();
@@ -713,6 +817,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-022")]
     async fn test_get_session_stats() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let mut manager = ConversationManager::new(storage).unwrap();
@@ -728,6 +833,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("CHAT-023")]
     async fn test_clear_session() {
         let storage = Arc::new(MemoryStorage::new().await.unwrap());
         let mut manager = ConversationManager::new(storage).unwrap();
@@ -736,6 +842,569 @@ mod tests {
 
         manager.clear_session().unwrap();
         assert!(manager.current_session_id().is_none());
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-016")]
+    async fn test_restore_last_session_with_compatibility() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage.clone()).unwrap();
+
+        let compatible_id = manager
+            .start_session_with_metadata(
+                "test-model-v1",
+                Some("chat-template-v1"),
+                Some("system-prompt-v1"),
+                Some("7B".to_string()),
+            )
+            .await
+            .unwrap();
+
+        // Restoring with matching metadata should return the session.
+        let restored = manager
+            .restore_last_session_with_compatibility(
+                Some("chat-template-v1"),
+                Some("system-prompt-v1"),
+                Some("test-model-v2"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(restored, Some(compatible_id));
+        assert_eq!(manager.current_session_id(), Some(compatible_id));
+
+        // Create a newer, incompatible session.
+        let _incompatible_id = manager
+            .start_session_with_metadata(
+                "other-model-v1",
+                Some("chat-template-v2"),
+                Some("system-prompt-v2"),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Restoring with the older compatible metadata should now fail
+        // because the latest session is incompatible.
+        let incompatible_restore = manager
+            .restore_last_session_with_compatibility(
+                Some("chat-template-v1"),
+                Some("system-prompt-v1"),
+                Some("test-model-v2"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(incompatible_restore, None);
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-016")]
+    async fn test_restore_last_session_with_compatibility_ties_pick_newest() {
+        // Regression test for CI runs 33285570140 / 33285930549: when two
+        // sessions share the same (updated_at, created_at) tick,
+        // `memory_storage.search(..)` does not return them in insertion
+        // order (it ranks by vector-similarity score, and every
+        // conversation-session memory shares the same placeholder
+        // zero-vector embedding, so the tie is broken by internal search
+        // order, not recency). `sessions.first()` therefore could pick
+        // the older, compatible session instead of the newer,
+        // incompatible one.
+        //
+        // Build both sessions by hand, with identical session-level
+        // timestamps, and store them via the same `Memory` shape
+        // `start_session_with_metadata` uses (see that function), in
+        // compatible-first order. The incompatible session is the true
+        // latest (it was stored second, and its storage-level
+        // `memory.created_at` is later), so restoring with the
+        // compatible-only metadata must return `None`.
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage.clone()).unwrap();
+
+        let tied_at = Utc::now();
+
+        let compatible_id = Uuid::new_v4();
+        let compatible_session = ConversationSession {
+            id: compatible_id,
+            created_at: tied_at,
+            updated_at: tied_at,
+            model: "test-model-v1".to_string(),
+            title: None,
+            chat_template_hash: Some(ConversationManager::calculate_hash("chat-template-v1")),
+            system_prompt_hash: Some(ConversationManager::calculate_hash("system-prompt-v1")),
+            model_size_hint: Some("7B".to_string()),
+        };
+        let compatible_memory_at = tied_at;
+        storage
+            .store(Memory {
+                id: Uuid::new_v4(),
+                content: serde_json::to_string(&compatible_session).unwrap(),
+                metadata: Some(json!({
+                    "type": "conversation_session",
+                    "session_id": compatible_id,
+                    "model": compatible_session.model,
+                })),
+                category: Some("conversation".to_string()),
+                embedding: vec![0.0; 384],
+                created_at: compatible_memory_at,
+                updated_at: compatible_memory_at,
+            })
+            .await
+            .unwrap();
+
+        let incompatible_id = Uuid::new_v4();
+        let incompatible_session = ConversationSession {
+            id: incompatible_id,
+            created_at: tied_at,
+            updated_at: tied_at,
+            model: "other-model-v1".to_string(),
+            title: None,
+            chat_template_hash: Some(ConversationManager::calculate_hash("chat-template-v2")),
+            system_prompt_hash: Some(ConversationManager::calculate_hash("system-prompt-v2")),
+            model_size_hint: None,
+        };
+        // Stored second: its own Utc::now() call at store time lands
+        // strictly after the compatible session's, exactly as it would
+        // via two sequential `start_session_with_metadata` calls.
+        let incompatible_memory_at = tied_at + chrono::Duration::seconds(1);
+        storage
+            .store(Memory {
+                id: Uuid::new_v4(),
+                content: serde_json::to_string(&incompatible_session).unwrap(),
+                metadata: Some(json!({
+                    "type": "conversation_session",
+                    "session_id": incompatible_id,
+                    "model": incompatible_session.model,
+                })),
+                category: Some("conversation".to_string()),
+                embedding: vec![0.0; 384],
+                created_at: incompatible_memory_at,
+                updated_at: incompatible_memory_at,
+            })
+            .await
+            .unwrap();
+
+        let restored = manager
+            .restore_last_session_with_compatibility(
+                Some("chat-template-v1"),
+                Some("system-prompt-v1"),
+                Some("test-model-v2"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(restored, None);
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-018")]
+    async fn test_get_context_messages_with_limits() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+        manager.start_session("test-model").await.unwrap();
+
+        // Seed 12 short messages alternating user/assistant.
+        for i in 0..6 {
+            manager
+                .add_message_str("user", &format!("question {i}"))
+                .await
+                .unwrap();
+            manager
+                .add_message_str("assistant", &format!("answer {i}"))
+                .await
+                .unwrap();
+        }
+
+        let system = arkavo_llm::Message::system("You are helpful.");
+        let context = manager
+            .get_context_messages_with_limits(Some(system.clone()), Some(5))
+            .await
+            .unwrap();
+
+        // System message + at most 5 history turns (10 messages).
+        assert!(context.len() <= 11);
+        assert_eq!(context.first().map(|m| &m.content), Some(&system.content));
+        assert_eq!(
+            context.first().map(|m| m.role.clone()),
+            Some(arkavo_llm::Role::System)
+        );
+        // The newest user message should be present.
+        assert!(context.iter().any(|m| m.content.contains("question 5")));
+
+        // A smaller explicit limit should further reduce the returned history.
+        let limited_context = manager
+            .get_context_messages_with_limits(None, Some(2))
+            .await
+            .unwrap();
+        // Up to 2 turns (4 messages) when no system message is supplied.
+        assert!(limited_context.len() <= 4);
+        assert!(
+            limited_context
+                .iter()
+                .any(|m| m.content.contains("question 5"))
+        );
+    }
+
+    #[tokio::test]
+    #[spec("ASTRA-002")]
+    async fn native_response_state_survives_session_storage() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+        manager.start_session("gpt-6-astra").await.unwrap();
+        let mut assistant = Message::assistant_with_tool_calls(
+            "",
+            vec![arkavo_llm::ToolCall {
+                name: "clock".into(),
+                arguments: "{}".into(),
+                id: Some("call_1".into()),
+            }],
+        );
+        assistant.provider_state = arkavo_llm::ProviderState::openai_responses(vec![
+            json!({"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque-test-state"}),
+            json!({"type": "function_call", "call_id": "call_1", "name": "clock", "arguments": "{}"}),
+        ]);
+        manager.add_message(&assistant).await.unwrap();
+        manager
+            .add_message(&Message::tool_result("noon", "call_1", "clock"))
+            .await
+            .unwrap();
+        let context = manager
+            .get_context_messages_with_limits(None, Some(10))
+            .await
+            .unwrap();
+        assert_eq!(context.len(), 2);
+        assert_eq!(context[0].provider_state, assistant.provider_state);
+        assert_eq!(context[0].tool_calls[0].id.as_deref(), Some("call_1"));
+        assert_eq!(context[1].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(context[1].role, arkavo_llm::Role::Tool);
+    }
+
+    /// What `arkavo-cli`'s terminal loop writes after a turn, read back the way
+    /// a later process start reads it.
+    ///
+    /// The turn must round-trip *complete*: the assistant's provider state
+    /// replays verbatim, so a `function_call` persisted without its
+    /// `function_call_output` would make every later request fail with "No tool
+    /// output found" — and persisting it makes that failure outlive the process.
+    #[tokio::test]
+    #[spec("ASTRA-002")]
+    async fn a_persisted_terminal_turn_replays_complete_on_the_next_session_start() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+
+        let mut first_run = ConversationManager::new(storage.clone()).unwrap();
+        first_run.start_session("gpt-6-astra").await.unwrap();
+        let response = arkavo_llm::ProviderResponse {
+            content: "checked the clock".to_string(),
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![
+                json!({"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque"}),
+                json!({
+                    "type": "function_call", "call_id": "call_1",
+                    "name": "clock", "arguments": "{}"
+                }),
+            ]),
+            tool_calls: vec![arkavo_llm::ParsedToolCall {
+                tool_name: "clock".into(),
+                arguments: json!({}),
+                call_id: Some("call_1".into()),
+            }],
+            ..Default::default()
+        };
+
+        // Exactly what the terminal loop persists: the user message, then the
+        // turn with an output for every call it issued.
+        let turn = response
+            .recorded_turn(&response.unanswered_tool_results("this session cannot run tools"));
+        first_run
+            .add_message(&Message::user("what time is it?"))
+            .await
+            .unwrap();
+        for message in &turn {
+            first_run.add_message(message).await.unwrap();
+        }
+
+        // A fresh process: restore the session and rebuild the context window.
+        let mut second_run = ConversationManager::new(storage).unwrap();
+        assert_eq!(
+            second_run.restore_last_session().await.unwrap(),
+            first_run.current_session_id()
+        );
+        let context = second_run
+            .get_context_messages_with_limits(None, Some(10))
+            .await
+            .unwrap();
+
+        let assistant = context
+            .iter()
+            .find(|message| message.role == arkavo_llm::Role::Assistant)
+            .expect("the first turn's assistant message is replayed");
+        assert_eq!(assistant.provider_state, response.provider_state);
+        assert_eq!(assistant.tool_calls[0].id.as_deref(), Some("call_1"));
+
+        // No call may be replayed without its output.
+        for call_id in assistant.provider_state.native_call_ids() {
+            assert!(
+                context.iter().any(|message| {
+                    message.role == arkavo_llm::Role::Tool
+                        && message.tool_call_id.as_deref() == Some(call_id)
+                }),
+                "persisted call {call_id} replays with no paired output"
+            );
+        }
+        assert!(
+            context
+                .iter()
+                .any(|message| message.content == "what time is it?")
+        );
+    }
+
+    /// The terminal has no tool executor, so a turn ending in a tool call must
+    /// never be persisted as a bare assistant message.
+    #[tokio::test]
+    #[spec("ASTRA-002")]
+    async fn an_unanswered_tool_call_is_never_persisted_alone() {
+        let response = arkavo_llm::ProviderResponse {
+            provider_state: arkavo_llm::ProviderState::openai_responses(vec![json!({
+                "type": "function_call", "call_id": "call_1",
+                "name": "clock", "arguments": "{}"
+            })]),
+            tool_calls: vec![arkavo_llm::ParsedToolCall {
+                tool_name: "clock".into(),
+                arguments: json!({}),
+                call_id: Some("call_1".into()),
+            }],
+            ..Default::default()
+        };
+        let turn = response
+            .recorded_turn(&response.unanswered_tool_results("this session cannot run tools"));
+        assert_eq!(
+            turn.len(),
+            2,
+            "the call must be answered, not left orphaned"
+        );
+        assert_eq!(turn[1].role, arkavo_llm::Role::Tool);
+        assert_eq!(turn[1].tool_call_id.as_deref(), Some("call_1"));
+        assert!(turn[1].content.contains("unavailable"));
+
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+        manager.start_session("gpt-6-astra").await.unwrap();
+        for message in &turn {
+            manager.add_message(message).await.unwrap();
+        }
+        let context = manager
+            .get_context_messages_with_limits(None, Some(10))
+            .await
+            .unwrap();
+        assert_eq!(context.len(), 2);
+        assert_eq!(context[1].tool_call_id.as_deref(), Some("call_1"));
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-019")]
+    async fn test_create_summary() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage.clone()).unwrap();
+        let session_id = manager.start_session("test-model").await.unwrap();
+
+        manager
+            .add_message_str("user", "What is Rust?")
+            .await
+            .unwrap();
+        manager
+            .add_message_str("assistant", "Rust is a systems language.")
+            .await
+            .unwrap();
+
+        let messages = vec![
+            ConversationMessage {
+                id: Uuid::new_v4(),
+                session_id,
+                role: "user".to_string(),
+                content: "What is Rust?".to_string(),
+                timestamp: Utc::now(),
+                token_count: 4,
+                is_summary: false,
+                provider_message: None,
+            },
+            ConversationMessage {
+                id: Uuid::new_v4(),
+                session_id,
+                role: "assistant".to_string(),
+                content: "Rust is a systems language.".to_string(),
+                timestamp: Utc::now(),
+                token_count: 5,
+                is_summary: false,
+                provider_message: None,
+            },
+        ];
+
+        let provider = MockSummaryProvider {
+            response: "Summary of Rust discussion".to_string(),
+        };
+        let client = arkavo_llm::LlmClient::new(Box::new(provider));
+
+        let summary = manager.create_summary(&client, messages).await.unwrap();
+        assert_eq!(summary, "Summary of Rust discussion");
+
+        // Verify the summary was persisted and tagged as a summary.
+        let results = storage
+            .search("type:conversation_summary", 10, Some("conversation"))
+            .await
+            .unwrap();
+        let summary_messages: Vec<ConversationMessage> = results
+            .into_iter()
+            .filter_map(|r| serde_json::from_str::<ConversationMessage>(&r.memory.content).ok())
+            .filter(|m| m.is_summary)
+            .collect();
+        assert!(!summary_messages.is_empty());
+        assert!(
+            summary_messages
+                .iter()
+                .any(|m| m.content.contains("Summary of Rust discussion"))
+        );
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-020")]
+    async fn test_list_sessions() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+
+        let id_a = manager.start_session("model-a").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let id_b = manager.start_session("model-b").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let id_c = manager.start_session("model-c").await.unwrap();
+
+        let sessions = manager.list_sessions().await.unwrap();
+        let ids: std::collections::HashSet<Uuid> = sessions.iter().map(|s| s.id).collect();
+        assert!(ids.contains(&id_a), "session a should be listed");
+        assert!(ids.contains(&id_b), "session b should be listed");
+        assert!(ids.contains(&id_c), "session c should be listed");
+
+        // Sessions should be sorted by updated_at descending (newest first).
+        assert_eq!(sessions[0].id, id_c);
+        assert_eq!(sessions[1].id, id_b);
+        assert_eq!(sessions[2].id, id_a);
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-021")]
+    async fn test_switch_session() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+
+        let id_a = manager.start_session("model-a").await.unwrap();
+        let id_b = manager.start_session("model-b").await.unwrap();
+        assert_eq!(manager.current_session_id(), Some(id_b));
+
+        manager.switch_session(id_a).await.unwrap();
+        assert_eq!(manager.current_session_id(), Some(id_a));
+
+        let missing = Uuid::new_v4();
+        let result = manager.switch_session(missing).await;
+        assert!(result.is_err());
+        assert_eq!(manager.current_session_id(), Some(id_a));
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-014")]
+    async fn test_conversation_manager_shares_storage() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager_a = ConversationManager::new(storage.clone()).unwrap();
+        let mut manager_b = ConversationManager::new(storage.clone()).unwrap();
+
+        let session_id = manager_a.start_session("shared-model").await.unwrap();
+        let restored = manager_b.restore_last_session().await.unwrap();
+        assert_eq!(restored, Some(session_id));
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-015")]
+    async fn test_start_session_metadata_persisted() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+
+        let session_id = manager
+            .start_session_with_metadata(
+                "test-model-v2",
+                Some("template-a"),
+                Some("prompt-a"),
+                Some("7B".to_string()),
+            )
+            .await
+            .unwrap();
+
+        let sessions = manager.list_sessions().await.unwrap();
+        let session = sessions
+            .into_iter()
+            .find(|s| s.id == session_id)
+            .expect("session listed");
+        assert_eq!(session.model, "test-model-v2");
+        assert_eq!(
+            session.chat_template_hash,
+            Some(ConversationManager::calculate_hash("template-a"))
+        );
+        assert_eq!(
+            session.system_prompt_hash,
+            Some(ConversationManager::calculate_hash("prompt-a"))
+        );
+        assert_eq!(session.model_size_hint, Some("7B".to_string()));
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-016")]
+    async fn test_restore_last_session_with_no_sessions_returns_none() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+
+        let restored = manager
+            .restore_last_session_with_compatibility(None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(restored, None);
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-017")]
+    async fn test_add_message_without_session_fails() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let manager = ConversationManager::new(storage).unwrap();
+
+        let result = manager.add_message_str("user", "Hello").await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No active conversation session")
+        );
+    }
+
+    #[tokio::test]
+    #[spec("CHAT-018")]
+    async fn test_get_context_messages_respects_token_budget() {
+        let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+        let mut manager = ConversationManager::new(storage).unwrap();
+        manager.start_session("test-model").await.unwrap();
+
+        // Seed many long messages that exceed the token budget.
+        for _ in 0..20 {
+            manager
+                .add_message_str("user", &"token ".repeat(200))
+                .await
+                .unwrap();
+        }
+
+        let context = manager
+            .get_context_messages_with_limits(None, None)
+            .await
+            .unwrap();
+        let total_tokens: usize = context
+            .iter()
+            .map(|m| manager.count_tokens(&m.content))
+            .sum();
+        assert!(
+            total_tokens <= MAX_CONTEXT_TOKENS,
+            "context must stay within token budget"
+        );
     }
 
     #[test]

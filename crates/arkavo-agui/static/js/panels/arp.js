@@ -89,6 +89,7 @@ function renderArp() {
     }
 
     html += renderArpDocumentSection(selected);
+    html += renderArpProposalsSection(selected);
     html += renderArpViolationsSection(selected.decisionTraces);
     html += renderArpPolicyCacheSection(selected.policyCache);
     html += renderArpAdaptationSection(selected.adaptation);
@@ -114,6 +115,28 @@ function renderArp() {
             if (!id) return;
             AppState.arpSelectedAgent = id;
             renderArp();
+        });
+    });
+
+    // Findings-inbox approve/reject buttons. The gateway applies the
+    // decision through the proposal queue and answers with a fresh
+    // ArpStatusUpdate, so the card re-renders in its new state.
+    var proposalBtns = document.querySelectorAll('.arp-proposal-action');
+    Array.prototype.forEach.call(proposalBtns, function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var pid = btn.getAttribute('data-proposal-id');
+            var agentId = btn.getAttribute('data-agent-id');
+            var action = btn.getAttribute('data-action');
+            if (!pid || !agentId || !action) return;
+            btn.disabled = true;
+            btn.textContent = action === 'approve' ? 'Approving…' : 'Rejecting…';
+            wsSend({
+                type: 'requestArpProposalAction',
+                agentId: agentId,
+                proposalId: pid,
+                action: action
+            });
         });
     });
 
@@ -342,6 +365,65 @@ function renderArpDocumentSection(snap) {
     return html;
 }
 
+var PROPOSAL_STATE_CLASS = {
+    proposed: 'status-warn',
+    reviewed: 'status-warn',
+    applied: 'status-ok',
+    observed: 'status-ok',
+    confirmed: 'status-ok',
+    reverted: 'status-warn',
+    rejected: 'status-warn'
+};
+
+function renderArpProposalsSection(snap) {
+    var proposals = snap.proposals || [];
+    var pending = proposals.filter(function(p) { return p.state === 'proposed'; }).length;
+    var html = '<div class="section-title">Findings Inbox' +
+        (pending > 0 ? ' <span class="status-warn">(' + pending + ' awaiting review)</span>' : '') +
+        '</div>';
+    if (proposals.length === 0) {
+        html += '<div class="empty-state"><p>No tightening proposals. ' +
+            'Audit-plane findings (consolidation teacher, critic, historian) land here for review.</p></div>';
+        return html;
+    }
+
+    html += '<div class="arp-proposal-cards">';
+    proposals.slice().reverse().forEach(function(p) {
+        var stateClass = PROPOSAL_STATE_CLASS[p.state] || '';
+        html += '<div class="cost-table arp-proposal-card"><table><tbody>';
+        html += '<tr><td>Effect</td><td><code>' + escapeHtml(p.effectKind || '') + '</code> ' +
+            escapeHtml(p.effectSummary || '') + '</td></tr>';
+        html += '<tr><td>Rationale</td><td>' + escapeHtml(p.rationale || '') + '</td></tr>';
+        html += '<tr><td>State</td><td><span class="' + stateClass + '">' + escapeHtml(p.state) + '</span>' +
+            (p.dispositionReason ? ' — ' + escapeHtml(p.dispositionReason) : '') + '</td></tr>';
+        html += '<tr><td>Origin / Radius</td><td><code>' + escapeHtml(p.origin) + '</code> / <code>' +
+            escapeHtml(p.blastRadius) + '</code></td></tr>';
+        var ev = (p.evidence || []).map(function(t) {
+            var eps = (t.episodeIds && t.episodeIds.length) ? ' (' + t.episodeIds.length + ' episodes)' : '';
+            return '<code>' + escapeHtml(t.traceId) + '</code>' + eps;
+        }).join(', ');
+        html += '<tr><td>Evidence</td><td>' + (ev || '--') + '</td></tr>';
+        if (p.state === 'proposed') {
+            html += '<tr><td>Review</td><td>' +
+                '<button type="button" class="arp-proposal-action"' +
+                ' data-action="approve" data-proposal-id="' + escapeHtml(p.id) + '"' +
+                ' data-agent-id="' + escapeHtml(snap.agentId) + '">Approve</button> ' +
+                '<button type="button" class="arp-proposal-action"' +
+                ' data-action="reject" data-proposal-id="' + escapeHtml(p.id) + '"' +
+                ' data-agent-id="' + escapeHtml(snap.agentId) + '">Reject</button>' +
+                '</td></tr>';
+        } else if (p.state === 'observed') {
+            html += '<tr><td>Review</td><td><span class="status-ok">auto-applied</span> — ' +
+                'in observation window; reverts automatically on quality-gate regression</td></tr>';
+        } else if (p.reviewedBy) {
+            html += '<tr><td>Reviewed by</td><td>' + escapeHtml(p.reviewedBy) + '</td></tr>';
+        }
+        html += '</tbody></table></div>';
+    });
+    html += '</div>';
+    return html;
+}
+
 function renderArpViolationsSection(traces) {
     var violations = (traces || []).filter(isViolation);
     var html = '<div class="section-title">Violations <span class="status-warn">(' + violations.length + ')</span></div>';
@@ -410,15 +492,19 @@ function renderArpAdaptationSection(adaptation) {
     html += '</tbody></table></div>';
 
     if (adaptation.entities && adaptation.entities.length) {
-        html += '<table class="cost-table"><thead><tr><th>Entity</th><th>alpha</th><th>beta</th><th>Mean</th><th>Obs</th><th>Warmup</th></tr></thead><tbody>';
+        html += '<table class="cost-table"><thead><tr>' +
+            '<th>Entity</th><th>Beta(α, β)</th><th>Distribution</th><th>Mean</th>' +
+            '<th>Evidence</th><th>Obs</th><th>Health</th>' +
+            '</tr></thead><tbody>';
         adaptation.entities.forEach(function(e) {
             html += '<tr>' +
                 '<td><code>' + escapeHtml(e.id) + '</code></td>' +
-                '<td>' + e.alpha.toFixed(2) + '</td>' +
-                '<td>' + e.beta.toFixed(2) + '</td>' +
+                '<td>' + e.alpha.toFixed(2) + ' / ' + e.beta.toFixed(2) + '</td>' +
+                '<td>' + betaCurveSvg(e.alpha, e.beta) + '</td>' +
                 '<td>' + e.mean.toFixed(3) + '</td>' +
+                '<td>' + evidenceSplitCell(e) + '</td>' +
                 '<td>' + e.observations + '</td>' +
-                '<td>' + (e.inWarmup ? 'yes' : 'no') + '</td>' +
+                '<td>' + banditHealthCell(e) + '</td>' +
                 '</tr>';
         });
         html += '</tbody></table>';
@@ -452,4 +538,59 @@ function renderArpTracesSection(traces) {
     });
     html += '</tbody></table>';
     return html;
+}
+
+// Unnormalized Beta(a,b) density rendered as an inline SVG sparkline.
+// Normalization is irrelevant for shape comparison, so the gamma function
+// is unnecessary: scale the peak to the viewbox height instead.
+function betaCurveSvg(alpha, beta) {
+    var W = 90, H = 24, N = 40;
+    var pts = [];
+    var maxY = 0;
+    for (var i = 0; i <= N; i++) {
+        var x = (i + 0.5) / (N + 1);
+        var y = Math.pow(x, alpha - 1) * Math.pow(1 - x, beta - 1);
+        if (!isFinite(y)) y = 0;
+        pts.push(y);
+        if (y > maxY) maxY = y;
+    }
+    if (maxY <= 0) maxY = 1;
+    var path = '';
+    for (var j = 0; j <= N; j++) {
+        var px = (j / N) * W;
+        var py = H - 2 - (pts[j] / maxY) * (H - 4);
+        path += (j === 0 ? 'M' : 'L') + px.toFixed(1) + ',' + py.toFixed(1);
+    }
+    return '<svg class="arp-beta-curve" width="' + W + '" height="' + H + '"' +
+        ' viewBox="0 0 ' + W + ' ' + H + '" aria-label="Beta(' +
+        alpha.toFixed(2) + ', ' + beta.toFixed(2) + ')">' +
+        '<path d="' + path + '" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+        '</svg>';
+}
+
+// Live vs distilled evidence split (prior provenance). Entities without
+// distilled mass — or gateways predating provenance — render as all-live.
+function evidenceSplitCell(e) {
+    if (e.distilledAlpha == null) {
+        return '<span title="all evidence is live">live</span>';
+    }
+    var w = e.distilledWeight != null ? e.distilledWeight : 1.0;
+    return 'live ' + e.liveAlpha.toFixed(1) + '/' + e.liveBeta.toFixed(1) +
+        ' · <span title="distilled mass × current displacement weight">distilled ' +
+        e.distilledAlpha.toFixed(1) + '/' + e.distilledBeta.toFixed(1) +
+        ' @ ' + (w * 100).toFixed(0) + '%</span>';
+}
+
+// High-variance arms are curiosity targets: the posterior is too wide to
+// trust, so the engine (and the operator) should want more samples there.
+function banditHealthCell(e) {
+    if (e.inWarmup) return '<span class="status-warn">warmup</span>';
+    var a = e.alpha, b = e.beta;
+    var variance = (a * b) / ((a + b) * (a + b) * (a + b + 1));
+    var sd = Math.sqrt(variance);
+    if (sd > 0.15) {
+        return '<span class="status-warn" title="posterior sd ' + sd.toFixed(3) +
+            ' — wide credible interval">curiosity target</span>';
+    }
+    return '<span class="status-ok" title="posterior sd ' + sd.toFixed(3) + '">converged</span>';
 }

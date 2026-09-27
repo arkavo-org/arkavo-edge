@@ -25,8 +25,8 @@ scenarios:
       - Server initialized
       - Transports bound
       - Ready for connections
-    refs: [crates/arkavo-protocol/src/server.rs:1-60]
-    changed: "2025-01-31"
+    refs: [crates/arkavo-server/src/server/a2a_server.rs:33-148]
+    changed: "2026-06-12"
 
   - id: PROTO-002
     name: Establish WebSocket transport

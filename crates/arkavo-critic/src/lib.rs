@@ -45,6 +45,8 @@ pub use checks::{
     CheckResult, CircuitCheck, CodeVerificationCheck, LintCheck, PolicyCheck, PolicyId,
     RubricCheck, SchemaCheck, SemanticCheck, VerificationCheck, VerificationInput,
 };
+#[cfg(feature = "sentinel")]
+pub use checks::{ClassificationSource, SENTINEL_PRIORITY, SentinelCheck, SentinelEvidence};
 pub use config::CriticConfig;
 pub use error::{Error, Result};
 pub use evidence::{CheckSeverity, VerificationEvidence, VerificationStatus};

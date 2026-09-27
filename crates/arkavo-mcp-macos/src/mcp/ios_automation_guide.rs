@@ -48,7 +48,7 @@ impl Tool for IosAutomationGuide {
             "getting_started" => serde_json::json!({
                 "workflow": "iOS UI Automation Quick Start",
                 "overview": "arkavo-edge provides fast, reliable iOS automation using Apple's private AXP APIs",
-                "critical": "⚠️ ALWAYS BUILD AXP HARNESS FIRST! Without it, taps take 300ms+ and may fail with IDB errors.",
+                "critical": "⚠️ ALWAYS BUILD AXP HARNESS FIRST! Without it, taps take 300ms+ via simctl/AppleScript fallback.",
                 "steps": [
                     {
                         "step": 1,
@@ -71,7 +71,7 @@ impl Tool for IosAutomationGuide {
                         "critical": "THIS IS REQUIRED! Without AXP harness:",
                         "problems_without_axp": [
                             "❌ Taps take 300ms+ (vs <30ms with AXP)",
-                            "❌ IDB may fail with port conflicts",
+                            "❌ simctl/AppleScript fallbacks are slower and less precise",
                             "❌ Fallback methods are unreliable",
                             "❌ Tests will be 10x slower"
                         ],
@@ -112,7 +112,7 @@ impl Tool for IosAutomationGuide {
                 "summary": "1) BUILD_TEST_HARNESS FIRST, 2) Use coordinates from screenshots, 3) Enjoy fast, reliable automation",
                 "important": "ALWAYS use coordinates! They're fast and reliable.",
                 "avoid": [
-                    "DO NOT skip build_test_harness - it prevents IDB failures",
+                    "DO NOT skip build_test_harness - it keeps taps on the fast AXP path",
                     "DO NOT use text-based tapping - unreliable and slow",
                     "DO NOT use setup_xcuitest - deprecated"
                 ]
@@ -260,7 +260,7 @@ impl Tool for IosAutomationGuide {
                 "ios26_beta_issues": [
                     "AXP symbols not available - this is expected",
                     "build_test_harness will use minimal mode automatically",
-                    "IDB (idb_companion) will be used for touch injection",
+                    "simctl/AppleScript will be used for touch injection",
                     "Performance: ~100ms taps instead of <30ms",
                     "Solution: Install Xcode 16 beta or use iOS 18 simulator"
                 ]

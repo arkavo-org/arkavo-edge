@@ -1,4 +1,9 @@
 /target
+# Private measurement inputs, generated calibration text and run keys.
+# No trailing slash: in a worktree `models` is a symlink, which a
+# directory-only pattern does not match.
+/models
+__pycache__/
 .claude/
 .mcp.json
 .arkavo/
@@ -6,6 +11,7 @@
 
 # Generated reports
 docs/traceability.html
+traceability.json
 
 # IDE files
 .idea/
@@ -80,8 +86,6 @@ crates/arkavo-llm/assets/gemma_tokenizer.model
 !.env.example
 !.env.*.example
 /STATUS.md
-vendor/idb/
-vendor/idb-prebuilt/
 vendor/cef/
 vendor/cef_binary*/
 vendor/*.tar.bz2

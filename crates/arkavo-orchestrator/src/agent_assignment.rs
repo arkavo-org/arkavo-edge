@@ -121,7 +121,10 @@ impl AgentAssigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ORCH-006")]
+    #[spec("ORCH-011")]
     #[tokio::test]
     #[allow(clippy::disallowed_methods)]
     async fn test_agent_assignment_creation() {

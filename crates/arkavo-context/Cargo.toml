@@ -23,3 +23,6 @@ tiktoken-rs = { workspace = true }
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }

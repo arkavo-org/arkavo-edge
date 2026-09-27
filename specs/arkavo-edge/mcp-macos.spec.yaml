@@ -41,7 +41,7 @@ scenarios:
       - Background steps are associated
       - Tags are preserved
       - Data tables are parsed
-    refs: [crates/arkavo-mcp-macos/src/gherkin.rs:1-50]
+    refs: [crates/arkavo-mcp-macos/src/gherkin/parser.rs:1-153]
     changed: "2025-01-31"
     edge_cases:
       - condition: Syntax error in feature
@@ -61,7 +61,7 @@ scenarios:
       - When action is performed
       - Then assertions are verified
       - Results are recorded
-    refs: [crates/arkavo-mcp-macos/src/execution.rs:1-60]
+    refs: [crates/arkavo-mcp-macos/src/execution/runner.rs:1-184]
     changed: "2025-01-31"
     edge_cases:
       - condition: Step definition missing
@@ -95,7 +95,7 @@ scenarios:
       - Simulator boots
       - Application installs
       - Bridge connection established
-    refs: [crates/arkavo-mcp-macos/src/bridge.rs:1-60]
+    refs: [crates/arkavo-mcp-macos/src/mcp/simulator_manager.rs:109-124, crates/arkavo-mcp-macos/src/mcp/simulator_manager.rs:142-200, crates/arkavo-mcp-macos/src/bridge/ios_ffi.rs:1-60]
     changed: "2025-01-31"
     edge_cases:
       - condition: Device type unavailable
@@ -115,7 +115,7 @@ scenarios:
       - Results are formatted as MCP responses
       - Progress updates are streamed
       - Errors are properly serialized
-    refs: [crates/arkavo-mcp-macos/src/mcp.rs:1-50, crates/arkavo-mcp-macos/src/integration.rs:1-40]
+    refs: [crates/arkavo-mcp-macos/src/mcp/server.rs:66-200]
     changed: "2025-01-31"
 
   - id: MCPM-007
@@ -130,7 +130,7 @@ scenarios:
       - Duration metrics included
       - Failed scenarios detailed
       - Export to multiple formats
-    refs: [crates/arkavo-mcp-macos/src/reporting.rs:1-50]
+    refs: [crates/arkavo-mcp-macos/src/reporting/business_report.rs:1-110]
     changed: "2025-01-31"
 
   - id: MCPM-008
@@ -145,7 +145,7 @@ scenarios:
       - Suggestions are generated
       - Step definitions can be proposed
       - Results are integrated
-    refs: [crates/arkavo-mcp-macos/src/ai.rs:1-40]
+    refs: [crates/arkavo-mcp-macos/src/ai/analysis_engine.rs:1-120]
     changed: "2025-01-31"
     edge_cases:
       - condition: AI service unavailable

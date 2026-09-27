@@ -67,7 +67,7 @@ impl Tool for Ios26BetaGuidance {
                     "Automatic iOS 26 beta detection from device runtime",
                     "Minimal templates compiled in via include_str!",
                     "Three-strategy compilation fallback system",
-                    "IDB automatic fallback for touch events",
+                    "simctl/AppleScript automatic fallback for touch events",
                     "No external files or manual fixes needed"
                 ],
                 "implementation": {
@@ -131,7 +131,7 @@ The minimal templates avoid these symbols by:
 - Not importing XCTest
 - Using direct UIKit methods
 - Returning stub responses for AXP calls
-- Delegating to IDB for actual automation
+- Delegating to simctl/AppleScript for actual automation
 ";
 
 const WORKAROUNDS_GUIDANCE: &str = r#"
@@ -151,7 +151,7 @@ swiftc -sdk /path/to/sdk \
 ```
 
 ### 3. Runtime Alternatives
-- IDB (idb_companion): ~100ms taps, reliable
+- simctl: ~100ms taps
 - AppleScript: ~200ms taps, last resort
 - Direct HID events: Requires entitlements
 
@@ -161,7 +161,7 @@ let is_ios26_beta = device.runtime.contains("iOS-26");
 if is_ios26_beta {
     // Use minimal templates
     // Skip XCTest framework
-    // Fall back to IDB
+    // Fall back to simctl/AppleScript
 }
 ```
 "#;
@@ -194,14 +194,14 @@ This is automatically handled by the embedded fix in axp_harness_builder.rs.
 
 5. **Runtime** (lines 229-275)
    - Report iOS 26 beta in capabilities
-   - Recommend IDB for automation
+   - Recommend simctl/AppleScript for automation
    - Warn about performance impact
 
 ### Best Practices
 
 1. **Development**
    - Test on iOS 18 simulators when possible
-   - Use IDB for iOS 26 beta automation
+   - Use simctl/AppleScript for iOS 26 beta automation
    - Monitor Xcode beta releases
 
 2. **CI/CD**
@@ -218,7 +218,7 @@ This is automatically handled by the embedded fix in axp_harness_builder.rs.
 | Method | iOS 18 | iOS 26 Beta |
 |--------|---------|-------------|
 | AXP    | <30ms   | N/A         |
-| IDB    | ~100ms  | ~100ms      |
+| simctl | ~100ms  | ~100ms      |
 | Script | ~200ms  | ~200ms      |
 
 ### Embedded Implementation

@@ -141,6 +141,7 @@ impl CognitiveEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn parse_repository_splits_owner_and_name() {
@@ -149,6 +150,7 @@ mod tests {
         assert_eq!(repo, "arkavo-edge");
     }
 
+    #[spec("ORCH-011")]
     #[test]
     fn parse_repository_rejects_unqualified() {
         assert!(CognitiveEngine::parse_repository("invalid").is_err());

@@ -15,11 +15,24 @@ struct llama_model;
 // Opaque handle to common_chat_templates
 typedef struct arkavo_chat_templates arkavo_chat_templates;
 
+// A tool call: used both for parsed model output and for carrying an
+// assistant message's prior tool calls back into the chat template.
+typedef struct {
+    const char *name;
+    const char *arguments;   // JSON string
+    const char *id;
+} arkavo_tool_call;
+
 typedef struct {
     const char *role;
     const char *content;
     const char *tool_call_id;
     const char *tool_name;
+    // Structured tool calls made by this (assistant) message. Required by
+    // templates that render tool calls from a structured list rather than
+    // from inline content markup (e.g. Gemma 4's convert_tool_responses_gemma4).
+    const arkavo_tool_call *tool_calls;
+    int num_tool_calls;
 } arkavo_chat_msg;
 
 typedef struct {
@@ -65,13 +78,6 @@ arkavo_chat_result arkavo_chat_templates_apply(
 
 void arkavo_chat_result_free(arkavo_chat_result *result);
 
-// Parsed tool call from model output
-typedef struct {
-    const char *name;
-    const char *arguments;   // JSON string
-    const char *id;
-} arkavo_tool_call;
-
 // Result from parsing model output
 typedef struct {
     char *content;
@@ -102,6 +108,13 @@ struct llama_sampler *arkavo_sampler_init_grammar_lazy_with_tokens(
     int num_trigger_patterns,
     const int32_t *trigger_tokens,
     int num_trigger_tokens);
+
+// Quiet llama.cpp's "common" library logging — the chat-template and
+// speculative-decoding notices emitted as LOG_INF/LOG_WRN. When quiet != 0,
+// only errors are emitted; when quiet == 0, the upstream default verbosity is
+// restored so debug runs see everything. This is a separate logging system from
+// the ggml/llama_log_set callback, so it needs its own control.
+void arkavo_set_common_log_quiet(int quiet);
 
 #ifdef __cplusplus
 }

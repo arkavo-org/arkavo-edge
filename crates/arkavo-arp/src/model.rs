@@ -7,6 +7,7 @@ use crate::constraints::{Budget, Escalation, Hitl, Quarantine, Session};
 use crate::feedback::FeedbackLoops;
 use crate::layers::{Cognitive, DataSovereignty, Execution, Network};
 use crate::observability::{Observability, StateStorage};
+use crate::proposal::ProposalPolicy;
 
 /// Top-level ARP document per §4.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +41,9 @@ pub struct ArpDocument {
     pub state_storage: Option<StateStorage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observability: Option<Observability>,
+    /// Governs which tightening proposals this agent ingests (§18.2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal_policy: Option<ProposalPolicy>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
 }

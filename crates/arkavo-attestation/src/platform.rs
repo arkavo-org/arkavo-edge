@@ -108,8 +108,40 @@ pub fn create_attestor(
 mod tests {
     use super::*;
     use crate::detect_platform_code;
+    use arkavo_test_macros::spec;
 
     const TEST_APP_VERSION: &str = "0.38.2";
+
+    #[test]
+    #[spec("ATT-003")]
+    fn test_collect_evidence_via_platform_attestor() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let platform_code = detect_platform_code();
+        let attestor = FallbackAttestor::new(identity, platform_code);
+
+        let evidence = attestor
+            .collect_evidence()
+            .expect("collect_evidence should succeed");
+
+        assert!(
+            !evidence.evidence_blob.is_empty(),
+            "Evidence blob populated"
+        );
+        assert_eq!(
+            evidence.attestation_type,
+            AttestationType::SoftwareFingerprint
+        );
+        assert!(
+            matches!(
+                evidence.platform_state,
+                SecurityState::Trusted
+                    | SecurityState::Suspicious
+                    | SecurityState::Compromised
+                    | SecurityState::Unknown
+            ),
+            "Security state assessed"
+        );
+    }
 
     #[test]
     fn test_fallback_attestor_creation() {

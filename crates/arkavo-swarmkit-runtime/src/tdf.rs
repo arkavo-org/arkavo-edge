@@ -13,8 +13,10 @@
 //! format is implemented via [`write_kit_tdf`] / [`read_kit_tdf`] and
 //! their path-based / one-shot variants. KAS-gated unwrap (spec §6.3)
 //! is implemented via [`unwrap_manifest_kas_gated`] with embedded-policy
-//! verification + KAS health check before decrypt. Out of scope for
-//! now: `.tdf`-aware auto-launch — that lands in the final slice.
+//! verification + KAS health check before decrypt. `.tdf`-aware
+//! auto-launch landed with SK-061/062 in `arkavo-agui`'s swarm flight
+//! registry (`launch_from_tdf_path`), which dispatches through this
+//! module's unwrap helpers.
 //!
 //! Agent identity binding: every policy builder accepts an optional
 //! agent DID that is added to the policy's dissemination list. Callers
@@ -546,6 +548,7 @@ provenance:
         swarmkit_orchestrator_policy(None, None).unwrap()
     }
 
+    #[spec("TDFS-001")]
     #[spec("SK-050")]
     #[tokio::test]
     async fn wrap_then_unwrap_round_trips_manifest() {
@@ -575,6 +578,7 @@ provenance:
         assert_eq!(a.payload.value, b.payload.value);
     }
 
+    #[spec("TDFS-006")]
     #[spec("SK-051")]
     #[tokio::test]
     async fn unwrap_runs_cross_block_validation() {
@@ -598,6 +602,24 @@ provenance:
             ),
             "expected Parse / Utf8 / Decrypt error, got {err:?}"
         );
+    }
+
+    #[spec("SK-051")]
+    #[tokio::test]
+    async fn unwrap_rejects_non_utf8_plaintext() {
+        // Replace the ciphertext with bytes that XOR-decrypt to invalid UTF-8.
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0x22);
+        let pol = policy();
+
+        let mut tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+        // Encrypted bytes are base64(XOR(plaintext, 0x22)). Build a payload
+        // whose decoded bytes are all 0xFF — XOR with 0x22 yields 0xDD,
+        // which is never valid UTF-8 when repeated.
+        tdf.payload.value = B64.encode(vec![0xDDu8; 64]);
+
+        let err = unwrap_manifest(&tdf, &svc).await.unwrap_err();
+        assert!(matches!(err, TdfEnvelopeError::Utf8(_)));
     }
 
     #[spec("SK-052")]
@@ -634,13 +656,13 @@ provenance:
     #[spec("SK-053")]
     #[test]
     fn role_policy_splits_attributes_at_last_slash() {
-        use arkavo_swarmkit::ArpRule;
+        use arkavo_swarmkit::TdfReleaseRule;
         let arp = TdfAttributeReleasePolicy {
             attributes: vec![
                 "https://attr.arkavo.com/role/planner".to_string(),
                 "https://attr.arkavo.com/clearance/internal".to_string(),
             ],
-            rule: ArpRule::AllOf,
+            rule: TdfReleaseRule::AllOf,
         };
         let pol = role_policy("planner-1", &arp, None).unwrap();
         assert_eq!(pol.attributes.len(), 2);
@@ -662,13 +684,13 @@ provenance:
     #[spec("SK-053")]
     #[test]
     fn role_policy_merges_repeated_fqns() {
-        use arkavo_swarmkit::ArpRule;
+        use arkavo_swarmkit::TdfReleaseRule;
         let arp = TdfAttributeReleasePolicy {
             attributes: vec![
                 "https://attr.arkavo.com/role/planner".to_string(),
                 "https://attr.arkavo.com/role/critic".to_string(),
             ],
-            rule: ArpRule::AnyOf,
+            rule: TdfReleaseRule::AnyOf,
         };
         let pol = role_policy("multi", &arp, None).unwrap();
         assert_eq!(pol.attributes.len(), 1);
@@ -680,10 +702,10 @@ provenance:
     #[spec("SK-053")]
     #[test]
     fn role_policy_binds_to_agent_did_via_dissemination() {
-        use arkavo_swarmkit::ArpRule;
+        use arkavo_swarmkit::TdfReleaseRule;
         let arp = TdfAttributeReleasePolicy {
             attributes: vec!["https://attr.arkavo.com/clearance/public".to_string()],
-            rule: ArpRule::AllOf,
+            rule: TdfReleaseRule::AllOf,
         };
         let pol = role_policy("worker", &arp, Some("did:web:specialist.example.com")).unwrap();
         assert_eq!(
@@ -695,11 +717,11 @@ provenance:
     #[spec("SK-054")]
     #[test]
     fn role_policy_rejects_malformed_attribute() {
-        use arkavo_swarmkit::ArpRule;
+        use arkavo_swarmkit::TdfReleaseRule;
         let arp = TdfAttributeReleasePolicy {
             // Missing a slash → cannot split into (fqn, value).
             attributes: vec!["malformed".to_string()],
-            rule: ArpRule::AllOf,
+            rule: TdfReleaseRule::AllOf,
         };
         let err = role_policy("r1", &arp, None).unwrap_err();
         assert!(matches!(err, TdfError::Policy(_)));
@@ -835,6 +857,31 @@ provenance:
         assert_eq!(manifest, recovered);
     }
 
+    #[spec("SK-059")]
+    #[tokio::test]
+    async fn unwrap_manifest_kas_gated_requires_all_attributes() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0xD4);
+        let pol =
+            swarmkit_orchestrator_policy(Some("internal"), Some("did:web:orchestrator.arkavo.net"))
+                .unwrap();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let kas = MockKasClient::new();
+        let recovered = unwrap_manifest_kas_gated(
+            &tdf,
+            &svc,
+            &kas,
+            &[
+                "https://attr.arkavo.com/role",
+                "https://attr.arkavo.com/clearance",
+            ],
+        )
+        .await
+        .expect("both required attributes present");
+        assert_eq!(manifest, recovered);
+    }
+
     #[spec("SK-060")]
     #[tokio::test]
     async fn unwrap_manifest_kas_gated_fails_fast_when_kas_unhealthy() {
@@ -887,6 +934,22 @@ provenance:
         assert_eq!(a, b);
     }
 
+    #[spec("SK-055")]
+    #[tokio::test]
+    async fn write_kit_tdf_produces_valid_json_with_top_level_keys() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0x34);
+        let pol = policy();
+        let tdf = wrap_manifest(&manifest, &svc, &pol).await.unwrap();
+
+        let mut buf: Vec<u8> = Vec::new();
+        write_kit_tdf(&tdf, &mut buf).expect("write");
+        let value: serde_json::Value = serde_json::from_slice(&buf).expect("valid JSON");
+        assert!(value.get("payload").is_some());
+        assert!(value.get("encryptionInformation").is_some());
+        assert!(value["payload"]["value"].as_str().is_some());
+    }
+
     #[spec("SK-056")]
     #[tokio::test]
     async fn wrap_unwrap_via_path_round_trips_manifest() {
@@ -905,6 +968,29 @@ provenance:
             .expect("unwrap from path");
 
         assert_eq!(manifest, recovered);
+    }
+
+    #[spec("SK-056")]
+    #[tokio::test]
+    async fn wrap_to_path_can_be_read_back_as_tdf_manifest() {
+        let manifest = parse_yaml(KIT).unwrap();
+        let svc = MockTdfService::new(0x78);
+        let pol = policy();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kit.swarmkit.tdf");
+
+        wrap_manifest_to_path(&manifest, &svc, &pol, &path)
+            .await
+            .expect("wrap to path");
+        assert!(path.exists());
+
+        // Read the file directly as a TdfManifest (not unwrapping), then
+        // compare serde values with the wrapped manifest.
+        let from_file = read_kit_tdf_from_path(&path).expect("read TdfManifest from path");
+        let a = serde_json::to_value(&wrap_manifest(&manifest, &svc, &pol).await.unwrap()).unwrap();
+        let b = serde_json::to_value(&from_file).unwrap();
+        assert_eq!(a, b);
     }
 
     #[spec("SK-057")]

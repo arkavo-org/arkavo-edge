@@ -91,6 +91,7 @@ impl A2aMcpBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
     // Each test gets an isolated SQLite path via MemoryStorage::new_test() —
@@ -106,6 +107,7 @@ mod tests {
         }
     }
 
+    #[spec("PROTO-005")]
     #[tokio::test]
     async fn test_bridge_creation() {
         let bridge = test_bridge().await;
@@ -113,6 +115,7 @@ mod tests {
         assert!(!tools.is_empty());
     }
 
+    #[spec("PROTO-005")]
     #[tokio::test]
     async fn test_call_get_agent_time() {
         let bridge = test_bridge().await;
@@ -127,6 +130,7 @@ mod tests {
         assert!(response.result["unix_seconds"].is_number());
     }
 
+    #[spec("PROTO-005")]
     #[tokio::test]
     async fn test_call_nonexistent_tool() {
         let bridge = test_bridge().await;
@@ -141,6 +145,7 @@ mod tests {
         assert!(response.error.unwrap().contains("not found"));
     }
 
+    #[spec("PROTO-005")]
     #[tokio::test]
     async fn test_list_tools_includes_time_tools() {
         let bridge = test_bridge().await;
@@ -151,6 +156,7 @@ mod tests {
         assert!(tools.contains(&"get_time_status".to_string()));
     }
 
+    #[spec("PROTO-005")]
     #[tokio::test]
     async fn test_get_tool_schema() {
         let bridge = test_bridge().await;

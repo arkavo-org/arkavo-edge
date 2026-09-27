@@ -116,13 +116,8 @@ impl CalibrationAgentImpl {
                 );
             }
 
-            // Use enhanced tap with retry and fallback
-            eprintln!("[CalibrationAgentImpl::execute_tap] Attempting enhanced tap...");
+            eprintln!("[CalibrationAgentImpl::execute_tap] Attempting simulator tap...");
 
-            // Import the enhanced tap module
-            use crate::mcp::idb_tap_enhanced::IdbTapEnhanced;
-
-            // Block on the async operation with a timeout
             let runtime = tokio::runtime::Runtime::new()
                 .map_err(|e| CalibrationError::InteractionFailed(e.to_string()))?;
 
@@ -130,7 +125,7 @@ impl CalibrationAgentImpl {
             let tap_result = runtime.block_on(async {
                 tokio::time::timeout(
                     tokio::time::Duration::from_secs(10),
-                    IdbTapEnhanced::tap_with_verification(&self.device_id, x, y, 3),
+                    crate::mcp::simulator_tap::SimulatorTap::tap(&self.device_id, x, y),
                 )
                 .await
             });
@@ -138,11 +133,11 @@ impl CalibrationAgentImpl {
             match tap_result {
                 Ok(Ok(result)) => {
                     eprintln!(
-                        "[CalibrationAgentImpl::execute_tap] Enhanced tap successful! Result: {result:?}"
+                        "[CalibrationAgentImpl::execute_tap] Simulator tap successful! Result: {result:?}"
                     );
                 }
                 Ok(Err(e)) => {
-                    eprintln!("[CalibrationAgentImpl::execute_tap] Enhanced tap failed: {e}");
+                    eprintln!("[CalibrationAgentImpl::execute_tap] Simulator tap failed: {e}");
                     return Err(CalibrationError::InteractionFailed(format!(
                         "Failed to tap at ({x}, {y}): {e}"
                     )));

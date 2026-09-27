@@ -111,7 +111,7 @@ scenarios:
     then:
       - Key bindings loaded
       - Modal editing active
-    refs: [crates/arkavo-terminal/src/vim.rs:1-50]
+    refs: [crates/arkavo-terminal/src/vim/mod.rs:1-12, crates/arkavo-terminal/src/vim/keybindings.rs:1-60, crates/arkavo-terminal/src/vim/mode.rs:1-80, crates/arkavo-terminal/src/ui/widgets/vim_input.rs:1-40]
     changed: "2025-01-31"
 
   - id: TERM-008
@@ -123,5 +123,5 @@ scenarios:
     then:
       - Tree-sitter highlighting
       - Selection model active
-    refs: [crates/arkavo-terminal/src/helix.rs:1-50]
+    refs: [crates/arkavo-terminal/src/helix/mod.rs:1-90]
     changed: "2025-01-31"

@@ -125,6 +125,21 @@ impl ClientContent {
             turn_complete: true,
         }
     }
+
+    pub fn from_audio(audio_base64: String, mime_type: String) -> Self {
+        Self {
+            turns: vec![Turn {
+                role: "USER".to_string(),
+                parts: vec![Part::InlineData {
+                    inline_data: InlineData {
+                        mime_type,
+                        data: audio_base64,
+                    },
+                }],
+            }],
+            turn_complete: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

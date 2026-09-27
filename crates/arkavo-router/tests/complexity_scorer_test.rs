@@ -7,8 +7,10 @@
 //! - Savings estimation is calculated correctly
 
 use arkavo_router::ComplexityScorer;
+use arkavo_test_macros::spec;
 
 /// Simple conversational prompts should NOT trigger architect mode
+#[spec("ROUTER-010")]
 #[test]
 fn test_simple_conversational_prompts() {
     let scorer = ComplexityScorer::new();
@@ -33,6 +35,7 @@ fn test_simple_conversational_prompts() {
 }
 
 /// Simple factual questions should NOT trigger architect mode
+#[spec("ROUTER-010")]
 #[test]
 fn test_simple_factual_questions() {
     let scorer = ComplexityScorer::new();
@@ -57,6 +60,7 @@ fn test_simple_factual_questions() {
 
 /// Complex multi-step development tasks SHOULD trigger architect mode
 /// The scorer requires: subtasks >= 3, output_tokens >= 2000, and (keywords OR multi_step >= 2)
+#[spec("ROUTER-010")]
 #[test]
 fn test_complex_development_tasks() {
     let scorer = ComplexityScorer::new();
@@ -85,6 +89,7 @@ fn test_complex_development_tasks() {
 }
 
 /// Tasks with multiple explicit steps should trigger architect
+#[spec("ROUTER-010")]
 #[test]
 fn test_multi_step_explicit_tasks() {
     let scorer = ComplexityScorer::new();
@@ -107,6 +112,7 @@ fn test_multi_step_explicit_tasks() {
 }
 
 /// Subtask estimation should be reasonable
+#[spec("ROUTER-010")]
 #[test]
 fn test_subtask_estimation_bounds() {
     let scorer = ComplexityScorer::new();
@@ -138,6 +144,7 @@ fn test_subtask_estimation_bounds() {
 }
 
 /// Savings estimation should be positive for complex tasks
+#[spec("ROUTER-010")]
 #[test]
 fn test_savings_estimation() {
     let scorer = ComplexityScorer::new();
@@ -159,6 +166,7 @@ fn test_savings_estimation() {
 }
 
 /// Edge cases - empty and very short prompts
+#[spec("ROUTER-010")]
 #[test]
 fn test_edge_cases() {
     let scorer = ComplexityScorer::new();
@@ -186,6 +194,7 @@ fn test_edge_cases() {
 }
 
 /// Keywords that suggest complexity
+#[spec("ROUTER-010")]
 #[test]
 fn test_complexity_keywords() {
     let scorer = ComplexityScorer::new();

@@ -1,0 +1,7 @@
+logs/
+out/
+.agent_pids
+code-reviewer/.arkavo/
+test-writer/.arkavo/
+code-reviewer/workspace/
+test-writer/workspace/

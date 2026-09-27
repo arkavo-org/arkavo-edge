@@ -2,6 +2,7 @@
 
 use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
 use arkavo_llm::{Message, Provider, Role};
+use arkavo_test_macros::spec;
 use base64::Engine;
 use std::fs;
 use std::path::Path;
@@ -10,6 +11,7 @@ use std::path::Path;
 mod common;
 use common::ensure_api_key;
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and GPT-5 access"]
 async fn test_gpt4o_vision_basic() {
@@ -33,8 +35,7 @@ async fn test_gpt4o_vision_basic() {
         role: Role::User,
         content: "What color is this image? Reply with just the color name.".to_string(),
         images: Some(vec![test_image_base64.to_string()]),
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let response = provider
@@ -51,6 +52,7 @@ async fn test_gpt4o_vision_basic() {
     );
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and GPT-5 access"]
 async fn test_gpt4o_vision_with_text() {
@@ -75,16 +77,13 @@ async fn test_gpt4o_vision_with_text() {
         Message {
             role: Role::System,
             content: "You are an image analysis assistant.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
+            ..Default::default()
         },
         Message {
             role: Role::User,
             content: "Describe this image in one sentence.".to_string(),
             images: Some(vec![test_image_base64]),
-            tool_call_id: None,
-            tool_name: None,
+            ..Default::default()
         },
     ];
 
@@ -97,6 +96,7 @@ async fn test_gpt4o_vision_with_text() {
     assert!(!response.is_empty());
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and GPT-5 access"]
 async fn test_gpt4o_multiple_images() {
@@ -123,8 +123,7 @@ async fn test_gpt4o_multiple_images() {
             "I'm showing you two images. Are they the same color? Reply with just 'yes' or 'no'."
                 .to_string(),
         images: Some(vec![red_pixel.to_string(), blue_pixel.to_string()]),
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let response = provider
@@ -139,6 +138,7 @@ async fn test_gpt4o_multiple_images() {
     );
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and GPT-5 access"]
 async fn test_gpt4o_vision_streaming() {
@@ -163,8 +163,7 @@ async fn test_gpt4o_vision_streaming() {
             "Describe this image in detail, mentioning its color, size, and any patterns you see."
                 .to_string(),
         images: Some(vec![test_image_base64.to_string()]),
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     use futures::StreamExt;
@@ -197,6 +196,7 @@ async fn test_gpt4o_vision_streaming() {
     assert!(!full_response.is_empty());
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable"]
 async fn test_non_vision_model_with_image_fails() {
@@ -219,8 +219,7 @@ async fn test_non_vision_model_with_image_fails() {
         role: Role::User,
         content: "What do you see in this image?".to_string(),
         images: Some(vec![test_image_base64.to_string()]),
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let result = provider.complete(messages).await;
@@ -245,6 +244,7 @@ async fn test_non_vision_model_with_image_fails() {
     }
 }
 
+#[spec("ROUTER-015")]
 #[tokio::test]
 #[ignore = "Requires OPENAI_API_KEY environment variable and local test image"]
 async fn test_gpt4o_with_local_image_file() {
@@ -278,8 +278,7 @@ async fn test_gpt4o_with_local_image_file() {
         role: Role::User,
         content: "What's in this image? Describe it briefly.".to_string(),
         images: Some(vec![encoded_image]),
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let response = provider

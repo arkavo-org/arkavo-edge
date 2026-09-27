@@ -6,6 +6,7 @@ use arkavo_protocol::types::{
     AgentConfigValidateRequest, AgentConfigValidateResponse, ChatOpenRequest, ChatSession,
     MessageDelta, MessageDeltaContent, UserMessage,
 };
+use futures::Stream;
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
 use serde_json::Value;
@@ -1287,6 +1288,83 @@ impl AgentConnection {
             .await?;
 
         Ok(response)
+    }
+
+    /// Wait until the underlying agent connection is established or a timeout is reached.
+    pub async fn wait_until_connected(
+        &self,
+        timeout: Duration,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            match *self.status.read().await {
+                ConnectionStatus::Connected => return Ok(()),
+                ConnectionStatus::Failed { ref reason } => return Err(reason.clone().into()),
+                _ => {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err("Timed out waiting for agent connection".into());
+                    }
+                    sleep(Duration::from_millis(200)).await;
+                }
+            }
+        }
+    }
+
+    /// Open a fresh chat session for a spec-compliant agent run.
+    pub async fn open_run_session(
+        &self,
+        auth_token: Option<String>,
+    ) -> Result<ChatSession, Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+        let request = ChatOpenRequest {
+            token: auth_token,
+            context: None,
+            metadata: None,
+        };
+        client
+            .request::<ChatSession, _>("chat_open", rpc_params![request])
+            .await
+            .map_err(|e| format!("Failed to open chat session: {e}").into())
+    }
+
+    /// Subscribe to the agent's `chat_stream` for the given session.
+    pub async fn subscribe_message_deltas(
+        &self,
+        session_id: &str,
+    ) -> Result<
+        impl Stream<Item = Result<MessageDelta, serde_json::Error>>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+        let subscription = client
+            .subscribe::<MessageDelta, _>(
+                "chat_stream",
+                rpc_params![session_id.to_string()],
+                "chat_stream_unsubscribe",
+            )
+            .await?;
+        Ok(subscription)
+    }
+
+    /// Send a text message within a specific chat session.
+    pub async fn send_session_message(
+        &self,
+        session_id: &str,
+        text: String,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+        let user_message = UserMessage {
+            content: text,
+            attachments: None,
+            metadata: None,
+        };
+        client
+            .request::<(), _>("chat_send", rpc_params![session_id, user_message])
+            .await
+            .map_err(|e| format!("Failed to send message: {e}").into())
     }
 }
 

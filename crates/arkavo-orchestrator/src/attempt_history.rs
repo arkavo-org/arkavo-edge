@@ -229,6 +229,7 @@ impl AttemptHistory {
 mod tests {
     use super::*;
     use crate::cognitive_engine_core::VerificationCheck;
+    use arkavo_test_macros::spec;
 
     fn failed_result(detail: &str) -> VerificationResult {
         VerificationResult {
@@ -238,6 +239,7 @@ mod tests {
         }
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn test_empty_history_returns_none() {
         let h = AttemptHistory::new();
@@ -245,6 +247,7 @@ mod tests {
         assert!(h.get("owner/repo", 1).is_empty());
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn test_record_and_retrieve() {
         let h = AttemptHistory::new();
@@ -262,6 +265,7 @@ mod tests {
         assert!(block.contains("step 3 failed"));
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn test_classified_failure_renders_label() {
         let h = AttemptHistory::new();
@@ -279,6 +283,7 @@ mod tests {
         assert!(block.contains("step 2 hit timeout"));
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn test_multiple_attempts_increment() {
         let h = AttemptHistory::new();
@@ -291,6 +296,7 @@ mod tests {
         assert_eq!(attempts[2].attempt_number, 3);
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn test_clear_removes_history() {
         let h = AttemptHistory::new();
@@ -300,6 +306,7 @@ mod tests {
         assert!(h.to_prompt_block("owner/repo", 1).is_none());
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn test_bounded_cap_fifo_evicts() {
         let h = AttemptHistory::new();
@@ -326,6 +333,7 @@ mod tests {
         );
     }
 
+    #[spec("ORCH-005")]
     #[test]
     fn test_total_records_tracks_sum() {
         let h = AttemptHistory::new();

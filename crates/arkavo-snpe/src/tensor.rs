@@ -126,11 +126,8 @@ impl SnpeTensor {
         }
 
         let mut result = Vec::with_capacity(self.shape.total_elements());
-        for chunk in self.data.chunks_exact(4) {
-            let bytes: [u8; 4] = chunk
-                .try_into()
-                .map_err(|_| SnpeError::Internal("Invalid float32 data alignment".to_string()))?;
-            result.push(f32::from_le_bytes(bytes));
+        for chunk in self.data.as_chunks::<4>().0 {
+            result.push(f32::from_le_bytes(*chunk));
         }
 
         Ok(result)

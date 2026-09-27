@@ -4,6 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use arkavo_gemini::{LiveSessionClient, ToolDispatcher, ToolRegistry};
+use arkavo_test_macros::spec;
 use serde_json::json;
 
 #[tokio::test]
@@ -12,6 +13,7 @@ async fn test_client_creation() {
     assert!(!client.is_connected());
 }
 
+#[spec("GEM-007")]
 #[tokio::test]
 async fn test_client_with_tools() {
     let dispatcher = ToolDispatcher::new(2);
@@ -30,6 +32,7 @@ async fn test_client_with_tools() {
     assert!(!client.is_connected());
 }
 
+#[spec("GEM-007")]
 #[tokio::test]
 async fn test_dispatcher_with_tools() {
     let dispatcher = ToolDispatcher::new(4);
@@ -62,6 +65,7 @@ async fn test_dispatcher_with_tools() {
     assert_eq!(tools[0]["name"], "create_stream");
 }
 
+#[spec("GEM-007")]
 #[tokio::test]
 async fn test_tool_execution() {
     let dispatcher = ToolDispatcher::new(2);

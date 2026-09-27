@@ -554,6 +554,7 @@ Your answer:"#,
 mod tests {
     use super::*;
     use arkavo_llm::tool_parser::ParsedToolCall;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
     struct MockJudgeProvider {
@@ -604,6 +605,7 @@ mod tests {
         }
     }
 
+    #[spec("CRIT-007")]
     #[tokio::test]
     async fn test_judgment_pass() {
         let provider = Arc::new(MockJudgeProvider {
@@ -624,6 +626,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result = judge
@@ -634,6 +637,7 @@ mod tests {
         assert_eq!(result.issue_type, IssueType::None);
     }
 
+    #[spec("CRIT-007")]
     #[tokio::test]
     async fn test_judgment_fail_hallucinated() {
         let provider = Arc::new(MockJudgeProvider {
@@ -655,6 +659,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let result = judge
@@ -666,6 +671,7 @@ mod tests {
         assert!(result.reason.is_some());
     }
 
+    #[spec("CRIT-007")]
     #[tokio::test]
     async fn test_tool_error_ignored_claims_success() {
         let provider = Arc::new(MockJudgeProvider {
@@ -683,6 +689,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         // Tool execution failed

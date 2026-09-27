@@ -34,8 +34,11 @@ scenarios:
       - ClientHandle created
       - State tracked
       - Capabilities exchanged
-    refs: [crates/arkavo-mcp-runtime/src/client.rs:1-60]
-    changed: "2025-01-31"
+    refs:
+      - crates/arkavo-mcp-runtime/src/runtime.rs:39-89
+      - crates/arkavo-mcp-runtime/src/client/handle.rs:1-16
+      - crates/arkavo-mcp-runtime/src/client/mcp_client.rs:24-96
+    changed: "2026-06-12"
     edge_cases:
       - condition: Duplicate client ID
         expected: Reject or replace existing
@@ -54,8 +57,10 @@ scenarios:
       - Tool executes with deadline
       - Result or timeout returned
       - Cancellation supported
-    refs: [crates/arkavo-mcp-runtime/src/runtime.rs:1-60, crates/arkavo-mcp-runtime/src/tools.rs:1-50]
-    changed: "2025-01-31"
+    refs:
+      - crates/arkavo-mcp-runtime/src/runtime.rs:178-220
+      - crates/arkavo-mcp-runtime/src/transport/stdio.rs:99-152
+    changed: "2026-06-12"
     edge_cases:
       - condition: Tool panics
         expected: Error response, isolation
@@ -72,8 +77,8 @@ scenarios:
       - stdin/stdout wrapped
       - JSON-RPC framing applied
       - Transport ready
-    refs: [crates/arkavo-mcp-runtime/src/transport.rs:1-50]
-    changed: "2025-01-31"
+    refs: [crates/arkavo-mcp-runtime/src/transport/stdio.rs:14-95]
+    changed: "2026-06-12"
 
   - id: MCPR-005
     name: Create SSE transport
@@ -86,8 +91,8 @@ scenarios:
       - Server-sent events configured
       - Bidirectional over HTTP
       - Connection managed
-    refs: [crates/arkavo-mcp-runtime/src/transport.rs:50-100]
-    changed: "2025-01-31"
+    refs: [crates/arkavo-mcp-runtime/src/transport/sse.rs:11-98]
+    changed: "2026-06-12"
 
   - id: MCPR-006
     name: Poll endpoint with adaptive backoff

@@ -139,7 +139,7 @@ impl AgUiGateway {
             tokio::spawn(async move {
                 while let Some(event) = budget_rx.recv().await {
                     let conns = connections.read().await;
-                    for (_, conn_info) in conns.iter() {
+                    for conn_info in conns.values() {
                         let _ = conn_info._ws_tx.send(event.clone()).await;
                     }
                 }
@@ -240,7 +240,7 @@ impl AgUiGateway {
         tokio::spawn(async move {
             while let Some(alert_event) = health_alert_rx.recv().await {
                 let conns = connections_for_health.read().await;
-                for (_, conn_info) in conns.iter() {
+                for conn_info in conns.values() {
                     let _ = conn_info._ws_tx.send(alert_event.clone()).await;
                 }
             }
@@ -342,7 +342,7 @@ impl AgUiGateway {
                     }
                 };
                 let conns = connections_for_telemetry.read().await;
-                for (_, conn_info) in conns.iter() {
+                for conn_info in conns.values() {
                     let _ = conn_info._ws_tx.send(ui_event.clone()).await;
                 }
             }
@@ -431,6 +431,13 @@ impl AgUiGateway {
             HealthRegistry::global().register(reporter).await;
         }
 
+        // Per-agent A2A ARP polling: mesh agents report their own effective
+        // documents instead of everything keying off the synthetic "(local)".
+        crate::gateway_monitors::spawn_arp_poller(
+            state.agent_connections.clone(),
+            state.arp_handler.clone(),
+        );
+
         // Sync agent-internal HRM tasks into the UI dashboard
         crate::gateway_task_sync::spawn_agent_task_sync(
             state.connections.clone(),
@@ -444,6 +451,11 @@ impl AgUiGateway {
         // Rate-limited API routes
         let api_routes = Router::new()
             .route("/ws", get(crate::gateway_ws::websocket_handler))
+            .route("/api/agent", post(crate::gateway_agent::run_agent_handler))
+            .route(
+                "/api/agent/capabilities",
+                get(crate::gateway_agent::capabilities_handler),
+            )
             .route(
                 "/agent/:id",
                 post(crate::gateway_proxy::agent_proxy_handler),
@@ -464,6 +476,8 @@ impl AgUiGateway {
         // Static file routes (no rate limiting — browser loads many files at once)
         let static_routes = Router::new()
             .route("/", get(crate::gateway_static::index_handler))
+            .route("/healthz", get(crate::gateway_health::healthz_handler))
+            .route("/readyz", get(crate::gateway_health::readyz_handler))
             .route(
                 "/static/*path",
                 get(crate::gateway_static::static_file_handler),
@@ -474,9 +488,18 @@ impl AgUiGateway {
             .layer(crate::gateway_security::security_headers())
             .with_state(state);
 
-        let addr: SocketAddr = ([0, 0, 0, 0], self.port).into();
-        println!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
-        println!("Open http://127.0.0.1:{} in your web browser", self.port);
+        let addr = crate::gateway_bind::resolve_bind_addr(self.port);
+        if addr.ip().is_loopback() {
+            println!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
+            println!("Open http://127.0.0.1:{} in your web browser", self.port);
+        } else {
+            println!("Starting AG-UI Gateway on http://{addr}");
+            eprintln!(
+                "AG-UI: WARNING — gateway has no authentication and is reachable from the network ({}={})",
+                crate::gateway_bind::BIND_ENV_VAR,
+                addr.ip()
+            );
+        }
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
         axum::serve(
@@ -502,6 +525,13 @@ fn load_budget_config_from_agents_md() -> arkavo_budget::BudgetConfig {
             if let Some(daily_cost) = budget_yaml.max_cost_per_day {
                 config.limits.daily_limit =
                     Some(arkavo_budget::TokenCost::from_dollars(daily_cost));
+            }
+            if let Some(policy) = budget_yaml
+                .cloud_policy
+                .as_deref()
+                .and_then(arkavo_budget::CloudPolicy::parse)
+            {
+                config.cloud_policy = policy;
             }
             tracing::info!(
                 "AG-UI: Budget config loaded from AGENTS.md (session={:?}, daily={:?})",

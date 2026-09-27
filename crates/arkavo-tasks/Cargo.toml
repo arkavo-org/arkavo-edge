@@ -5,7 +5,7 @@ edition.workspace = true
 authors = ["Arkavo Contributors"]
 license = "Apache-2.0"
 description = "Task management system for the Arkavo agentic CLI - execution, planning, and storage"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["task", "execution", "planning", "orchestration", "agent"]
 categories = ["asynchronous", "data-structures"]
 

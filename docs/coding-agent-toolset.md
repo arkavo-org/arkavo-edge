@@ -478,12 +478,6 @@ let grep = CodeGrepTool::new();
 let result = grep.execute(params).await?;
 ```
 
-### Via MCP Server
-```bash
-# Start MCP server with all tools
-arkavo mcp --tools code-search,security,test
-```
-
 ## Dependencies
 
 External tools required:

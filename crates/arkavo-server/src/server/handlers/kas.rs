@@ -6,8 +6,57 @@ use arkavo_protocol::types::{
     KasPublicKeyRequest, KasPublicKeyResponse, KasRewrapRequest, KasRewrapResponse,
 };
 use arkavo_tdf::KasA2aHandler;
+use base64::{Engine as _, engine::general_purpose};
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
+
+/// Convert trusted roots from the AGENTS.md KAS YAML config into
+/// delegation verifier roots.
+///
+/// Roots with an undecodable `public_key` are still trusted by DID (the
+/// verifying key is recovered from the DID:key at verification time), but
+/// the decode failure is logged since it likely indicates a config mistake.
+/// A `public_key` that decodes but does not match the DID:key-embedded key
+/// would be silently ignored by the verifier, so the root is dropped as a
+/// config error instead of being trusted under false pretenses.
+pub fn trusted_roots_from_config(
+    config: &arkavo_router::KasYamlConfig,
+) -> Vec<arkavo_tdf::TrustedRoot> {
+    config
+        .trusted_roots
+        .iter()
+        .filter_map(|root| {
+            let public_key_bytes = match &root.public_key {
+                Some(encoded) => general_purpose::STANDARD
+                    .decode(encoded)
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(
+                            did = %root.did,
+                            error = %e,
+                            "Invalid base64 public_key for KAS trusted root; trusting by DID only"
+                        );
+                        Vec::new()
+                    }),
+                None => Vec::new(),
+            };
+            if !public_key_bytes.is_empty()
+                && let Ok(did_key) = arkavo_crypto::AgentPublicKey::from_did_key(&root.did)
+                && did_key.to_bytes() != public_key_bytes
+            {
+                tracing::warn!(
+                    did = %root.did,
+                    "KAS trusted root public_key does not match the DID:key-embedded \
+                     key; dropping root (config error)"
+                );
+                return None;
+            }
+            Some(arkavo_tdf::TrustedRoot {
+                did: root.did.clone(),
+                public_key_bytes,
+            })
+        })
+        .collect()
+}
 
 /// Handle kas.rewrap RPC method.
 ///
@@ -143,6 +192,56 @@ mod tests {
 
     fn create_test_rate_limiter() -> RateLimiter {
         RateLimiter::new(RateLimitConfig::default())
+    }
+
+    fn kas_config_with_root(
+        did: String,
+        public_key: Option<String>,
+    ) -> arkavo_router::KasYamlConfig {
+        arkavo_router::KasYamlConfig {
+            enabled: true,
+            key_id: None,
+            algorithm: None,
+            trusted_roots: vec![arkavo_router::KasTrustedRootYaml {
+                did,
+                name: None,
+                public_key,
+            }],
+        }
+    }
+
+    #[test]
+    fn test_trusted_root_matching_public_key_kept() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let did = keypair.public_key().to_did_key();
+        let encoded = general_purpose::STANDARD.encode(keypair.public_key().to_bytes());
+        let roots = trusted_roots_from_config(&kas_config_with_root(did, Some(encoded)));
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].public_key_bytes, keypair.public_key().to_bytes());
+    }
+
+    #[test]
+    fn test_trusted_root_mismatched_public_key_dropped() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let other = arkavo_crypto::AgentKeypair::generate();
+        let did = keypair.public_key().to_did_key();
+        // public_key belongs to a different key than the DID:key embeds
+        let encoded = general_purpose::STANDARD.encode(other.public_key().to_bytes());
+        let roots = trusted_roots_from_config(&kas_config_with_root(did, Some(encoded)));
+        assert!(
+            roots.is_empty(),
+            "a public_key contradicting the DID:key must drop the root"
+        );
+    }
+
+    #[test]
+    fn test_trusted_root_invalid_base64_trusted_by_did_only() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let did = keypair.public_key().to_did_key();
+        let roots =
+            trusted_roots_from_config(&kas_config_with_root(did, Some("!!not-base64!!".into())));
+        assert_eq!(roots.len(), 1);
+        assert!(roots[0].public_key_bytes.is_empty());
     }
 
     #[tokio::test]

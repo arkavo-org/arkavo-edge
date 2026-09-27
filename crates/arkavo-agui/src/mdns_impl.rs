@@ -263,7 +263,7 @@ pub mod mdns {
                                         .insert(cache_agent_id.clone(), details.clone());
                                 }
                                 let conns = browser_conns.read().await;
-                                for (_, ci) in conns.iter() {
+                                for ci in conns.values() {
                                     let _ = ci._ws_tx.send(event.clone()).await;
                                 }
                             }

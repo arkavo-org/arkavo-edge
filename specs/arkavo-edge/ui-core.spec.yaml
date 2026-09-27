@@ -65,5 +65,8 @@ scenarios:
       - Backend-specific rendering
       - Content formatted
       - Display updated
-    refs: [crates/arkavo-ui-core/src/adapters.rs:1-50]
-    changed: "2025-01-31"
+    refs:
+      - crates/arkavo-ui-core/src/adapters/mod.rs:1-11
+      - crates/arkavo-ui-core/src/adapters/cef.rs:15-75
+      - crates/arkavo-ui-core/src/adapters/web.rs:5-67
+    changed: "2026-06-12"

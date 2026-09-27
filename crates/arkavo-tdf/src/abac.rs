@@ -118,7 +118,9 @@ impl AbacEvaluator {
 mod tests {
     use super::*;
     use crate::types::Attribute;
+    use arkavo_test_macros::spec;
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_permit_with_matching_entitlements() {
         let evaluator = AbacEvaluator::new();
@@ -141,6 +143,7 @@ mod tests {
         assert_eq!(result, Decision::Permit);
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_deny_with_missing_entitlement() {
         let evaluator = AbacEvaluator::new();
@@ -159,6 +162,7 @@ mod tests {
         assert_eq!(result, Decision::Deny);
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_permit_with_empty_policy() {
         let evaluator = AbacEvaluator::new();
@@ -171,6 +175,7 @@ mod tests {
         assert_eq!(result, Decision::Permit);
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_deny_with_empty_entitlements() {
         let evaluator = AbacEvaluator::new();
@@ -187,6 +192,7 @@ mod tests {
         assert_eq!(result, Decision::Deny);
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_multiple_attributes_all_required() {
         let evaluator = AbacEvaluator::new();
@@ -222,6 +228,7 @@ mod tests {
         assert_eq!(result, Decision::Permit);
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_parse_entitlement_fqn() {
         let fqn = "https://arkavo.net/attr/role/value/admin";
@@ -232,6 +239,7 @@ mod tests {
         assert_eq!(value, "admin");
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_parse_entitlement_fqn_invalid() {
         let invalid = "https://arkavo.net/role/admin";
@@ -239,6 +247,7 @@ mod tests {
         assert!(matches!(result, Err(AbacError::InvalidEntitlement(_))));
     }
 
+    #[spec("TDFS-008")]
     #[test]
     fn test_alternative_values_any_match() {
         let evaluator = AbacEvaluator::new();
@@ -257,5 +266,43 @@ mod tests {
 
         let result = evaluator.evaluate(&entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Permit);
+    }
+
+    #[spec("TDF-004")]
+    #[test]
+    fn tdf_004_abac_evaluation_permit_and_deny() {
+        let evaluator = AbacEvaluator::new();
+        let policy = Policy {
+            id: Some("tdf-004-policy".to_string()),
+            attributes: vec![
+                Attribute::new("https://arkavo.net/attr/role", &["admin"]),
+                Attribute::new("https://arkavo.net/attr/clearance", &["secret"]),
+            ],
+            dissemination: vec![],
+        };
+
+        let entitlements = vec![
+            "https://arkavo.net/attr/role/value/admin".to_string(),
+            "https://arkavo.net/attr/clearance/value/secret".to_string(),
+        ];
+        assert_eq!(
+            evaluator.evaluate(&entitlements, &policy).unwrap(),
+            Decision::Permit
+        );
+
+        let entitlements = vec!["https://arkavo.net/attr/role/value/admin".to_string()];
+        assert_eq!(
+            evaluator.evaluate(&entitlements, &policy).unwrap(),
+            Decision::Deny
+        );
+
+        let entitlements = vec![
+            "https://arkavo.net/attr/role/value/user".to_string(),
+            "https://arkavo.net/attr/clearance/value/secret".to_string(),
+        ];
+        assert_eq!(
+            evaluator.evaluate(&entitlements, &policy).unwrap(),
+            Decision::Deny
+        );
     }
 }

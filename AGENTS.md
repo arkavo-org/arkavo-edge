@@ -19,7 +19,7 @@
   - No numbered headings in Markdown.
 - **Performance**:
   - Router response ≤ 50ms.
-  - Binary ≤ 60MB.
+  - Binary ≤ 65MB.
   - No `--release` builds during development (use debug).
 
 ## Testing & Quality
@@ -50,7 +50,7 @@ cargo clippy -- -D warnings
 cargo test -p arkavo-protocol --test security_vulnerabilities
 
 ## Mock provider unit tests
-cargo test -p arkavo-cli mock_provider
+cargo test -p arkavo-cli --lib mock_provider::
 
 ## E2E DLP/PII leak detection tests
 ./tests/e2e_security_test.sh
@@ -85,9 +85,16 @@ cargo test -p arkavo-cli mock_provider
   - `main` is protected with CI checks.
 - **Commits**:
   - **NO Conventional Commits** (e.g., avoid `feat:`, `fix:`).
-  - Bump semver in `Cargo.toml` on feature completion.
+  - Bump semver in `Cargo.toml` on feature completion. Every PR, including each stack layer, bumps above the one below it: every merge to `main` is a release, and CI rejects a version that isn't higher than `main`'s.
   - Commit `Cargo.lock` whenever `Cargo.toml` changes.
-- **PRs**: Short titles. No changelog files (GitHub handles it).
+- **PRs**:
+  - **Short titles** (≤ 60 chars). One topic per PR — do not join unrelated changes with `+`, `&`, or `and`. Use the body for detail.
+  - No changelog files (GitHub handles it).
+  - **Stack from creation, or don't split.** Several topics from one piece of work, or work that builds on an open PR, start as a GitHub stack (`gh stack init`, then `gh stack add` per topic), each layer based on the one below. Never open a run of standalone PRs to restack later: restacking rewrites branches other sessions own, and standalone PRs off the same `main` all conflict on the version bump.
+  - **Incidental fixes ride along.** A flaky test, stale default or typo found mid-task becomes a layer of the current stack, not a new PR.
+  - **Check the queue before opening.** Run `gh pr list` first. If an open PR touches the same crates, or the new work needs it, add a layer to that stack instead of opening beside it.
+  - **Keep the ready queue short**: at most 3 ready-for-review PRs or stacks open at once. At the limit, merge, fix or close one before marking another ready. A ready PR that stops merging cleanly is fixed the same day or moved back to draft.
+  - **Rebasing a stack:** `gh stack rebase`, then re-bump each layer above the one below it when `main` has moved. Merge the stack whole with `gh stack merge`.
 - **Docs**: Technical docs in `docs/`. 
 
 ## Agent Configuration
@@ -96,13 +103,12 @@ cargo test -p arkavo-cli mock_provider
 
 ## Local Model Support
 
-### Ministral 3 (Recommended for Edge)
-Mistral's edge-optimized models with vision capabilities:
-- **3B**: Raspberry Pi 5, 8GB RAM minimum
-- **8B**: Desktop/laptop, 12GB VRAM recommended
-- **14B**: Server/workstation, 16GB+ VRAM
+### Local edge models
+First run auto-downloads Gemma 4 sized to the device (E2B + 12B on desktop/workstation; E4B on a Raspberry Pi 5). Ministral 3B/8B (Mistral's edge models, with vision) are also supported:
+- **Ministral 3B**: Raspberry Pi 5 / low-memory, 8GB RAM minimum
+- **Ministral 8B**: Desktop/laptop, 12GB VRAM recommended
 
-Models auto-download from HuggingFace on first use via `Ministral3ModelLoader`.
+Local models auto-download from HuggingFace on first use. The canonical model registry is `ModelChoice` in `crates/arkavo-router/src/decision.rs`.
 
 ### Reasoning Mode
 For complex tasks requiring step-by-step thinking, use Ministral Reasoning variants or add a system prompt:
@@ -130,4 +136,6 @@ ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1 cargo run -p arkavo -- chat --prompt "What ti
 ## 7. Environment Variables
 - `ARKAVO_DEBUG=1`: General debug logging.
 - `ARKAVO_DEBUG_CHAT=1`: Chat/Template/Token debug.
+- `ARKAVO_DELEGATION_PUBLIC_KEY_PEM`: Trusted authnz-rs ES256 public key (inline PEM or path to PEM file) used to verify delegation JWTs at registration. Unset → delegation entitlements are never granted (fail-closed).
+- `ARKAVO_ALLOW_UNVERIFIED_DELEGATION=1`: INSECURE dev/test escape hatch — accepts delegation JWTs without signature verification. Never set in production.
 - ccache must be installed for development builds

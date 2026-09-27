@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arkavo_llm::{LlamaCppProvider, Message, Provider, Role};
+use arkavo_llm::{LlamaCppProvider, Message, Provider};
 use arkavo_ui_generator::vision::{ModelSize, Qwen25VLModelLoader};
 use base64::Engine;
 use std::env;
@@ -42,21 +42,9 @@ async fn main() -> Result<()> {
     }
 
     let message = if let Some(img) = test_image {
-        Message {
-            role: Role::User,
-            content: "Describe what you see in this image in detail.".to_string(),
-            images: Some(vec![img]),
-            tool_call_id: None,
-            tool_name: None,
-        }
+        Message::user_with_images("Describe what you see in this image in detail.", vec![img])
     } else {
-        Message {
-            role: Role::User,
-            content: "What is 2+2?".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-        }
+        Message::user("What is 2+2?")
     };
 
     println!("\nSending message to model...");

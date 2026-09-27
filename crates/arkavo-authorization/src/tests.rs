@@ -2,6 +2,7 @@
 
 use crate::types::McpToolMapping;
 use crate::*;
+use arkavo_test_macros::spec;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -323,4 +324,159 @@ fn test_safe_diagnostic_detection() {
 
     assert!(!McpToolMapping::is_safe_diagnostic("git_commit"));
     assert!(!McpToolMapping::is_safe_diagnostic("filesystem_write"));
+}
+
+#[spec("AUTHZ-001")]
+#[tokio::test]
+async fn test_authz_001_get_decision_permit() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/authorization.v2.AuthorizationService/GetDecision"))
+        .and(header("Content-Type", "application/json"))
+        .and(header("Connect-Protocol-Version", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "decision": "permit"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let config = AuthorizationConfig::default()
+        .with_base_url(&mock_server.uri())
+        .unwrap();
+    let client = AuthorizationClient::new(config).unwrap();
+
+    let entity = EntityIdentifier {
+        id: "user123".to_string(),
+        entity_type: types::EntityType::Subject,
+        attributes: None,
+    };
+    let action = Action::execute_tool();
+    let resource = Resource::mcp_tool("git.commit");
+
+    let decision = client
+        .get_decision(&entity, &action, &resource)
+        .await
+        .unwrap();
+    assert_eq!(decision, Decision::Permit);
+}
+
+#[spec("AUTHZ-001")]
+#[tokio::test]
+async fn test_authz_001_get_decision_deny() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/authorization.v2.AuthorizationService/GetDecision"))
+        .and(header("Content-Type", "application/json"))
+        .and(header("Connect-Protocol-Version", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "decision": "deny"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let config = AuthorizationConfig::default()
+        .with_base_url(&mock_server.uri())
+        .unwrap();
+    let client = AuthorizationClient::new(config).unwrap();
+
+    let entity = EntityIdentifier {
+        id: "user123".to_string(),
+        entity_type: types::EntityType::Subject,
+        attributes: None,
+    };
+    let action = Action::execute_tool();
+    let resource = Resource::mcp_tool("filesystem.write");
+
+    let decision = client
+        .get_decision(&entity, &action, &resource)
+        .await
+        .unwrap();
+    assert_eq!(decision, Decision::Deny);
+}
+
+#[spec("AUTHZ-001")]
+#[tokio::test]
+async fn test_authz_001_get_decision_service_unavailable() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/authorization.v2.AuthorizationService/GetDecision"))
+        .respond_with(ResponseTemplate::new(503).append_header("content-type", "application/json"))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let config = AuthorizationConfig::default()
+        .with_base_url(&mock_server.uri())
+        .unwrap()
+        .with_timeout(std::time::Duration::from_millis(100));
+    let mut config = config;
+    config.max_retries = 0;
+    let client = AuthorizationClient::new(config).unwrap();
+
+    let entity = EntityIdentifier {
+        id: "user123".to_string(),
+        entity_type: types::EntityType::Subject,
+        attributes: None,
+    };
+    let action = Action::execute_tool();
+    let resource = Resource::mcp_tool("git.commit");
+
+    let result = client.get_decision(&entity, &action, &resource).await;
+    assert!(result.is_err());
+}
+
+#[spec("AUTHZ-001")]
+#[tokio::test]
+async fn test_authz_001_get_decision_caches_with_ttl() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/entityresolution.v2.EntityResolutionService/CreateEntityChainsFromTokens",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "entity_chains": [{
+                "id": "chain1",
+                "entities": [{
+                    "id": "user123",
+                    "type": "subject"
+                }]
+            }]
+        })))
+        .expect(2)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/authorization.v2.AuthorizationService/GetDecision"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "decision": "permit"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let config = AuthorizationConfig::default()
+        .with_base_url(&mock_server.uri())
+        .unwrap();
+    let client = AuthorizationClient::new(config).unwrap();
+
+    // First call fetches and caches the decision.
+    let decision1 = client
+        .authorize_mcp_tool("test_token", "git.commit")
+        .await
+        .unwrap();
+    assert_eq!(decision1, Decision::Permit);
+
+    // Second call hits the cache; no new authorization request is made.
+    let decision2 = client
+        .authorize_mcp_tool("test_token", "git.commit")
+        .await
+        .unwrap();
+    assert_eq!(decision2, Decision::Permit);
 }

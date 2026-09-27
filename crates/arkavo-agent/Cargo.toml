@@ -5,7 +5,7 @@ edition.workspace = true
 authors = ["Arkavo Contributors"]
 license = "Apache-2.0"
 description = "Agent lifecycle management for the Arkavo agentic CLI tool - handles configuration, registry, discovery, and registration"
-repository = "https://github.com/arkavo-com/arkavo-edge"
+repository.workspace = true
 keywords = ["agent", "lifecycle", "registry", "discovery", "management"]
 categories = ["development-tools", "network-programming"]
 

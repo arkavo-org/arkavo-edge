@@ -101,7 +101,9 @@ fn is_incomplete_utf8_start(buffer: &[u8]) -> bool {
 fn stop_sequences_for_format(format: ModelFormat) -> &'static [&'static str] {
     match format {
         ModelFormat::Qwen3 => &["<|im_start|>user"],
-        ModelFormat::Gemma3 | ModelFormat::Gemma4 => &["<start_of_turn>user"],
+        ModelFormat::Gemma3 => &["<start_of_turn>user"],
+        // Gemma 4 uses <|turn>role markers rather than <start_of_turn>.
+        ModelFormat::Gemma4 => &["<|turn>user"],
         ModelFormat::MistralV3 => &["[INST]"],
         ModelFormat::GLM4 => &["<|user|>"],
     }
@@ -349,7 +351,6 @@ async fn generate_tokens_pooled_baseline(
             }
         }
 
-        let eos_token = model.get_eos_token();
         process_input_tokens(&ctx, &input_tokens)?;
         let start_pos = i32::try_from(input_tokens.len()).unwrap_or(0);
         // Clamp generation to KV cache capacity: the allocated n_ctx (safe_ctx)
@@ -370,19 +371,22 @@ async fn generate_tokens_pooled_baseline(
 
         let mut pos = start_pos;
         let end_pos = start_pos.saturating_add(i32::try_from(max_generation).unwrap_or(i32::MAX));
+        // Per-token confidence accumulation for the quality plane's
+        // LowConfidence signal: mean log-probability of the sampled tokens.
+        let n_vocab = model.n_vocab().max(0) as usize;
+        let mut logprob_sum = 0.0f64;
+        let mut logprob_count = 0u32;
         while pos < end_pos {
             validate_logits(&ctx)?;
             let token = sampler.sample(&ctx, -1);
 
-            if token == eos_token {
-                tracing::info!("Generation stopped at EOS token");
+            if model.is_eog(token) {
+                tracing::info!("Generation stopped at EOG token");
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -405,9 +409,7 @@ async fn generate_tokens_pooled_baseline(
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -423,13 +425,26 @@ async fn generate_tokens_pooled_baseline(
             }
             tokens_generated += 1;
 
+            // Accumulate the sampled token's log-probability from the logits
+            // that produced it (still valid until the next decode_batch below).
+            if n_vocab > 0 && token >= 0 {
+                let logits_ptr = ctx.get_logits_ith(-1);
+                if !logits_ptr.is_null() {
+                    // SAFETY: get_logits_ith(-1) returns a row of n_vocab f32s
+                    // for the just-sampled position; valid before the next decode.
+                    let logits = unsafe { std::slice::from_raw_parts(logits_ptr, n_vocab) };
+                    if let Some(lp) = token_logprob(logits, token as usize) {
+                        logprob_sum += f64::from(lp);
+                        logprob_count += 1;
+                    }
+                }
+            }
+
             if !piece.is_empty()
                 && tx
                     .send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }))
                     .is_err()
             {
@@ -453,9 +468,7 @@ async fn generate_tokens_pooled_baseline(
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -465,6 +478,8 @@ async fn generate_tokens_pooled_baseline(
         let perf = perf_context(&ctx);
         drop(ctx);
         let timing = InferenceTiming {
+            n_cached_prompt_eval: None,
+            n_cache_write_prompt_eval: None,
             prompt_eval_ms: perf.t_p_eval_ms,
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
@@ -473,6 +488,8 @@ async fn generate_tokens_pooled_baseline(
             n_draft: None,
             n_accepted: None,
             spec_bypassed: spec_bypass_reason.map(|s| s.to_string()),
+            avg_logprob: (logprob_count > 0)
+                .then(|| (logprob_sum / f64::from(logprob_count)) as f32),
         };
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((
             tokens_generated,
@@ -486,10 +503,9 @@ async fn generate_tokens_pooled_baseline(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
                 inference_timing: Some(timing),
+                ..Default::default()
             }));
         }
         Err(e) => {
@@ -701,16 +717,14 @@ async fn generate_tokens_baseline(
                 eprintln!("Sampled token: {token} at pos {pos}");
             }
 
-            if token == eos_token {
-                tracing::info!("Generation stopped at EOS token");
+            if model.is_eog(token) {
+                tracing::info!("Generation stopped at EOG token");
                 // Flush any remaining buffer as lossy UTF-8
                 if !utf8_buffer.is_empty() {
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -731,9 +745,7 @@ async fn generate_tokens_baseline(
             if special_text == "<think>" || special_text == "</think>" {
                 let _ = tx.send(Ok(StreamResponse {
                     content: special_text,
-                    reasoning_content: None,
-                    done: false,
-                    inference_timing: None,
+                    ..Default::default()
                 }));
             }
 
@@ -753,9 +765,7 @@ async fn generate_tokens_baseline(
                     if !piece.is_empty() {
                         let _ = tx.send(Ok(StreamResponse {
                             content: piece,
-                            reasoning_content: None,
-                            done: false,
-                            inference_timing: None,
+                            ..Default::default()
                         }));
                     }
                 }
@@ -776,9 +786,7 @@ async fn generate_tokens_baseline(
                     if !piece.is_empty() {
                         let _ = tx.send(Ok(StreamResponse {
                             content: piece,
-                            reasoning_content: None,
-                            done: false,
-                            inference_timing: None,
+                            ..Default::default()
                         }));
                     }
                 }
@@ -805,9 +813,7 @@ async fn generate_tokens_baseline(
             if !piece.is_empty() {
                 let response = StreamResponse {
                     content: piece,
-                    reasoning_content: None,
-                    done: false,
-                    inference_timing: None,
+                    ..Default::default()
                 };
 
                 if tx.send(Ok(response)).is_err() {
@@ -839,9 +845,7 @@ async fn generate_tokens_baseline(
                     let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
                     let _ = tx.send(Ok(StreamResponse {
                         content: piece,
-                        reasoning_content: None,
-                        done: false,
-                        inference_timing: None,
+                        ..Default::default()
                     }));
                 }
                 break;
@@ -850,6 +854,8 @@ async fn generate_tokens_baseline(
 
         let perf = perf_context(&ctx);
         let timing = InferenceTiming {
+            n_cached_prompt_eval: None,
+            n_cache_write_prompt_eval: None,
             prompt_eval_ms: perf.t_p_eval_ms,
             generation_ms: perf.t_eval_ms,
             n_prompt_eval: perf.n_p_eval.max(0) as u32,
@@ -858,6 +864,8 @@ async fn generate_tokens_baseline(
             n_draft: None,
             n_accepted: None,
             spec_bypassed: spec_bypass_reason.map(|s| s.to_string()),
+            // This path does not accumulate per-token logprobs.
+            avg_logprob: None,
         };
 
         Ok::<(u32, Option<Instant>, InferenceTiming), Error>((tokens_generated, first_token_time, timing))
@@ -868,10 +876,9 @@ async fn generate_tokens_baseline(
         Ok((tokens_generated, first_token_time, timing)) => {
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
                 inference_timing: Some(timing),
+                ..Default::default()
             }));
         }
         Err(e) => {
@@ -930,6 +937,55 @@ fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> 
     }
 
     Ok(())
+}
+
+/// Log-probability of `token` under `logits` (length n_vocab): the log-softmax
+/// value, computed stably as `logits[token] - logsumexp(logits)`. Returns
+/// `None` if the token is out of range or the distribution is degenerate.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn token_logprob(logits: &[f32], token: usize) -> Option<f32> {
+    let chosen = *logits.get(token)?;
+    if !chosen.is_finite() {
+        return None;
+    }
+    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    if !max.is_finite() {
+        return None;
+    }
+    let sum_exp: f64 = logits.iter().map(|&l| f64::from(l - max).exp()).sum();
+    if sum_exp <= 0.0 {
+        return None;
+    }
+    let logsumexp = f64::from(max) + sum_exp.ln();
+    Some((f64::from(chosen) - logsumexp) as f32)
+}
+
+#[cfg(all(test, feature = "llama-cpp", not(target_env = "musl")))]
+mod logprob_tests {
+    use super::token_logprob;
+
+    #[test]
+    fn two_equal_logits_give_ln_half() {
+        let lp = token_logprob(&[1.0, 1.0], 0).unwrap();
+        assert!((lp - 0.5f32.ln()).abs() < 1e-4, "got {lp}");
+    }
+
+    #[test]
+    fn dominant_token_is_high_confidence() {
+        let lp = token_logprob(&[20.0, 0.0, 0.0], 0).unwrap();
+        assert!(lp > -0.01, "dominant token ≈ 0 logprob, got {lp}");
+    }
+
+    #[test]
+    fn unlikely_token_is_low_confidence() {
+        let lp = token_logprob(&[20.0, 0.0, 0.0], 1).unwrap();
+        assert!(lp < -10.0, "unlikely token very negative, got {lp}");
+    }
+
+    #[test]
+    fn out_of_range_token_is_none() {
+        assert!(token_logprob(&[1.0, 2.0], 5).is_none());
+    }
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -1078,6 +1134,23 @@ mod tests {
     fn test_stop_sequences_glm4() {
         let seqs = stop_sequences_for_format(ModelFormat::GLM4);
         assert!(seqs.contains(&"<|user|>"));
+    }
+
+    #[test]
+    fn test_stop_sequences_gemma4() {
+        // Gemma 4 uses <|turn>role markers, not Gemma 3's <start_of_turn>.
+        let seqs = stop_sequences_for_format(ModelFormat::Gemma4);
+        assert!(seqs.contains(&"<|turn>user"));
+        assert!(!seqs.contains(&"<start_of_turn>user"));
+    }
+
+    #[test]
+    fn test_detect_self_prompting_gemma4() {
+        let text = "The weather is sunny.\n<|turn>user\nAnother prompt";
+        let pos = detect_self_prompting(text, ModelFormat::Gemma4);
+        assert!(pos.is_some());
+        // Gemma 3's marker must not match Gemma 4 output.
+        assert!(detect_self_prompting("no markers here", ModelFormat::Gemma4).is_none());
     }
 
     #[test]

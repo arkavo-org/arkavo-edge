@@ -33,41 +33,56 @@ pub struct AgentLoopConfig {
     pub inference_active: Arc<std::sync::atomic::AtomicBool>,
     /// Published snapshot of the ConversationWindow for @context introspection
     pub context_snapshot: Arc<tokio::sync::RwLock<Option<serde_json::Value>>>,
+    /// Shared agent metadata — read each cycle for the SwarmKit grant set
+    /// so the registry can be filtered after specialization (design D9).
+    pub agent_metadata: Arc<tokio::sync::RwLock<crate::server::config_helpers::AgentMetadata>>,
     #[cfg(feature = "iroh")]
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
 }
 
-// --- Pending message drain helper ---
+// --- Registry build helpers ---
 
-fn drain_pending_messages(
-    pending: &mut Vec<super::agent_event::PendingMessage>,
-    cycle_id: super::agent_event::CycleId,
-) -> (
-    String,
-    Vec<(
-        tokio::sync::oneshot::Sender<super::agent_event::CycleReceipt>,
-        super::agent_event::CycleReceipt,
-    )>,
-) {
-    let mut block = String::new();
-    let mut receipts = Vec::new();
-    for mut msg in pending.drain(..) {
-        if !block.is_empty() {
-            block.push('\n');
-        }
-        block.push_str(&msg.content);
-        if let Some(reply) = msg.reply.take() {
-            receipts.push((
-                reply,
-                super::agent_event::CycleReceipt {
-                    cycle_id,
-                    correlation_id: msg.correlation_id,
-                    disposition: super::agent_event::MessageDisposition::Incorporated { cycle_id },
-                },
-            ));
+/// Build the full (unfiltered) tool registry from config sources.
+async fn build_full_registry(config: &AgentLoopConfig) -> arkavo_mcp_tools::ToolRegistry {
+    use arkavo_mcp_tools::ToolRegistry;
+    let mut registry = ToolRegistry::empty();
+    if let Ok(mcp_tools) = config.mcp_registry.list_all_tools().await {
+        for tool in mcp_tools {
+            let tool_name = tool.name.clone();
+            let bridge = super::mcp_bridge::McpBridgeTool::new(config.mcp_registry.clone(), tool);
+            registry.register(&tool_name, Box::new(bridge));
         }
     }
-    (block, receipts)
+    arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
+    #[cfg(feature = "iroh")]
+    if let Some(ref node) = config.iroh_node {
+        arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut registry, node.clone());
+    }
+    // Agent-driven SwarmKit apply: the swarm-apply feature brings the
+    // KAS-backed encryptor and the long-lived Iroh data-plane node, so staged
+    // bundles stay fetchable for the agent process's lifetime.
+    #[cfg(feature = "swarm-apply")]
+    if let Some(ref node) = config.iroh_node {
+        registry.register(
+            "apply_swarmkit",
+            Box::new(super::swarm_apply_tool::SwarmApplyTool::new(
+                config.mesh_state.clone(),
+                node.clone(),
+                config.self_agent_id.clone(),
+            )),
+        );
+    }
+    registry
+}
+
+/// Derive a registry filtered to the SwarmKit grant set.
+async fn derive_filtered_registry(
+    config: &AgentLoopConfig,
+    granted: &std::collections::HashSet<String>,
+) -> Arc<arkavo_mcp_tools::ToolRegistry> {
+    let mut registry = build_full_registry(config).await;
+    registry.retain_granted(granted);
+    Arc::new(registry)
 }
 
 // --- Main event loop ---
@@ -82,6 +97,9 @@ pub async fn run_agent_loop(
     config: AgentLoopConfig,
     mut agent_event_rx: tokio::sync::mpsc::Receiver<super::agent_event::AgentEvent>,
 ) {
+    use super::agent_cycle_reply::{
+        answer_waiters, drain_pending_messages, outcome_for_cycle, reject_pending,
+    };
     use super::agent_event::{AgentEvent, CycleId, MessagePriority, PendingMessage};
     use std::sync::atomic::Ordering::Relaxed;
 
@@ -114,33 +132,15 @@ pub async fn run_agent_loop(
     conversation.set_system_message(arkavo_llm::Message::system(&config.purpose));
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
 
-    // Build tool registry once — same tools every cycle, no need to rebuild
-    let cached_registry = {
-        use arkavo_mcp_tools::ToolRegistry;
-        let mut registry = ToolRegistry::empty();
-
-        if let Ok(mcp_tools) = config.mcp_registry.list_all_tools().await {
-            for tool in mcp_tools {
-                let tool_name = tool.name.clone();
-                let bridge =
-                    super::mcp_bridge::McpBridgeTool::new(config.mcp_registry.clone(), tool);
-                registry.register(&tool_name, Box::new(bridge));
-            }
-        }
-
-        arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
-
-        #[cfg(feature = "iroh")]
-        if let Some(ref node) = config.iroh_node {
-            arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut registry, node.clone());
-        }
-
-        info!(
-            "Agent loop: cached {} tools for reuse across cycles",
-            registry.list_tools().len()
-        );
-        Arc::new(registry)
-    };
+    // Build initial tool registry (unfiltered). Filtering by grant set is done
+    // lazily on first cycle after specialization (design D9).
+    let full_registry = build_full_registry(&config).await;
+    info!(
+        "Agent loop: cached {} tools for reuse across cycles",
+        full_registry.list_tools().len()
+    );
+    let mut active_registry = Arc::new(full_registry);
+    let mut active_grant_hash: u64 = 0; // 0 = unfiltered
 
     // Adaptive tick interval
     let mut cycle_interval_secs: u64 = 5;
@@ -167,10 +167,24 @@ pub async fn run_agent_loop(
                     error!(
                         "Agent reached absolute cycle limit ({MAX_AGENT_CYCLES}), shutting down loop"
                     );
+                    reject_pending(
+                        &mut pending_messages,
+                        CycleId(cycle),
+                        "agent loop reached its cycle limit and is shutting down",
+                    );
                     break;
                 }
 
+                // Requests cannot be served without an identity to serve them
+                // under, and cannot be served at all once the compute budget is
+                // gone. Both are terminal for anything already queued: leaving
+                // it queued is what makes a requester wait on silence.
                 if config.purpose.is_empty() {
+                    reject_pending(
+                        &mut pending_messages,
+                        CycleId(cycle),
+                        "agent has no configured purpose",
+                    );
                     continue;
                 }
 
@@ -180,8 +194,41 @@ pub async fn run_agent_loop(
                     let snapshot = budget.snapshot();
                     if !snapshot.has_remaining {
                         drop(budget);
+                        reject_pending(
+                            &mut pending_messages,
+                            CycleId(cycle),
+                            "compute budget exhausted",
+                        );
                         continue;
                     }
+                }
+
+                // 1b. Re-derive the registry to the agent's granted tool set when
+                // specialization has set/changed it. Memoized on a grant hash so
+                // this is not per-cycle work when the set hasn't changed.
+                let (granted_set, specialized): (std::collections::HashSet<String>, bool) = {
+                    let meta = config.agent_metadata.read().await;
+                    (meta.granted_tools.iter().cloned().collect(), meta.specialized)
+                };
+                let grant_hash = {
+                    use std::hash::{Hash, Hasher};
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    // Sort names for deterministic hash regardless of HashSet order
+                    let mut names: Vec<&str> = granted_set.iter().map(String::as_str).collect();
+                    names.sort_unstable();
+                    for name in &names {
+                        name.hash(&mut h);
+                    }
+                    h.finish()
+                };
+                if specialized && grant_hash != active_grant_hash {
+                    active_registry = derive_filtered_registry(&config, &granted_set).await;
+                    active_grant_hash = grant_hash;
+                    info!(
+                        granted = granted_set.len(),
+                        tools = active_registry.list_tools().len(),
+                        "Specialized: registry filtered to granted tool set"
+                    );
                 }
 
                 // 2. Drain gossip completions into specialist_context
@@ -246,10 +293,13 @@ pub async fn run_agent_loop(
                     ctx
                 };
 
-                // 3. Drain pending_messages into message block + send CycleReceipts
-                let (message_block, receipts) =
-                    drain_pending_messages(&mut pending_messages, CycleId(cycle));
-                for (sender, receipt) in receipts {
+                // 3. Drain pending_messages into message block + send CycleReceipts.
+                // The outcome channels stay open until this cycle ends: whatever
+                // happens next, these requesters get an answer.
+                let drained = drain_pending_messages(&mut pending_messages, CycleId(cycle));
+                let message_block = drained.block;
+                let cycle_waiters = drained.waiters;
+                for (sender, receipt) in drained.receipts {
                     let _ = sender.send(receipt);
                 }
 
@@ -257,6 +307,10 @@ pub async fn run_agent_loop(
                 let memory_guard = config.agent_memory.read().await;
                 let control_signals = memory_guard.format_control_signals();
                 let memory_entry_count = memory_guard.entry_count();
+                // Baseline for "did *this* cycle run any tools", read again after
+                // the cycle. ToolMemory spans cycles, so its summary only stands
+                // in as this cycle's answer when the count moved.
+                let tools_recorded_before = memory_guard.total_recorded();
                 drop(memory_guard);
                 if let Some(ref signals) = control_signals {
                     info!(
@@ -316,7 +370,11 @@ pub async fn run_agent_loop(
                 // Skip empty cycles for toolless specialists — "Continue." with no
                 // new information just burns inference. Wait for incoming messages
                 // or state broadcasts from the orchestrator.
-                if !config.has_mcp_tools && cycle_prompt == "Continue." && cycle > 1 {
+                if !config.has_mcp_tools
+                    && cycle_prompt == "Continue."
+                    && cycle > 1
+                    && cycle_waiters.is_empty()
+                {
                     info!(
                         "Agent cycle {cycle}: skipping empty specialist cycle (no incoming state)"
                     );
@@ -333,7 +391,10 @@ pub async fn run_agent_loop(
                     consecutive_no_action_cycles.min(5).hash(&mut hasher);
                     hasher.finish()
                 };
-                if prompt_hash == last_cycle_prompt_hash && consecutive_no_action_cycles >= 2 {
+                if prompt_hash == last_cycle_prompt_hash
+                    && consecutive_no_action_cycles >= 2
+                    && cycle_waiters.is_empty()
+                {
                     consecutive_duplicate_prompts += 1;
                     if !consecutive_duplicate_prompts.is_multiple_of(5) {
                         info!(
@@ -367,6 +428,8 @@ pub async fn run_agent_loop(
                 } else {
                     Some(&config.compute_budget)
                 };
+                let granted_opt: Option<&std::collections::HashSet<String>> =
+                    if !specialized { None } else { Some(&granted_set) };
                 match super::conductor::execute_with_conductor_and_learning(
                     &config.conductor,
                     &config.router,
@@ -383,7 +446,8 @@ pub async fn run_agent_loop(
                     tool_loop_budget,
                     Some(messages),
                     true, // skip complexity — orchestrator cycles are always single tasks
-                    Some(cached_registry.clone()),
+                    Some(active_registry.clone()),
+                    granted_opt,
                     #[cfg(feature = "iroh")]
                     config.iroh_node.as_ref(),
                 )
@@ -396,12 +460,26 @@ pub async fn run_agent_loop(
                         // When the conductor returns empty text (tool-only response),
                         // build a summary from ToolMemory so the ConversationWindow
                         // retains what happened — enabling cross-cycle planning.
-                        let assistant_content = if result.is_empty() {
+                        let (assistant_content, ran_tools_this_cycle) = {
                             let mem = config.agent_memory.read().await;
-                            mem.format_recent_for_context()
-                                .unwrap_or_default()
+                            let ran = mem.total_recorded() > tools_recorded_before;
+                            let content = if result.is_empty() {
+                                mem.format_recent_for_context().unwrap_or_default()
+                            } else {
+                                result.clone()
+                            };
+                            (content, ran)
+                        };
+                        // The requester gets the assistant text, or the same
+                        // tool-activity summary the window records when the
+                        // model answered with tool calls only. That summary
+                        // covers earlier cycles too, so it is only an answer
+                        // when this cycle actually ran tools; otherwise the
+                        // cycle had nothing to show and says so.
+                        let cycle_answer = if result.is_empty() && !ran_tools_this_cycle {
+                            String::new()
                         } else {
-                            result.clone()
+                            assistant_content.clone()
                         };
                         conversation
                             .push(arkavo_llm::Message::assistant(&assistant_content));
@@ -534,12 +612,14 @@ pub async fn run_agent_loop(
                             elapsed.as_secs_f64(),
                             result.len(),
                         );
+                        answer_waiters(cycle_waiters, &outcome_for_cycle(&Ok(cycle_answer)));
                     }
                     Err(e) => {
                         // User msg already pushed (step 7), no assistant response
                         consecutive_no_action_cycles += 1;
                         consecutive_timeouts += 1;
                         warn!("Agent cycle {cycle} failed: {e}");
+                        answer_waiters(cycle_waiters, &outcome_for_cycle(&Err(e)));
                     }
                 }
                 config.inference_active.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -568,6 +648,7 @@ pub async fn run_agent_loop(
                         task_id,
                         correlation_id,
                         reply,
+                        outcome,
                     } => {
                         pending_messages.push(PendingMessage {
                             content: format!(
@@ -577,6 +658,7 @@ pub async fn run_agent_loop(
                             task_id: Some(task_id),
                             correlation_id,
                             reply: Some(reply),
+                            outcome: Some(outcome),
                             priority: MessagePriority::Normal,
                         });
                         tick_interval.reset();
@@ -585,6 +667,7 @@ pub async fn run_agent_loop(
                         instruction,
                         correlation_id,
                         reply,
+                        outcome,
                     } => {
                         pending_messages.insert(
                             0,
@@ -596,6 +679,7 @@ pub async fn run_agent_loop(
                                 task_id: None,
                                 correlation_id,
                                 reply: Some(reply),
+                                outcome: Some(outcome),
                                 priority: MessagePriority::Override,
                             },
                         );
@@ -611,15 +695,31 @@ pub async fn run_agent_loop(
                             task_id: None,
                             correlation_id,
                             reply: None,
+                            // Push notifications have no requester to answer.
+                            outcome: None,
                             priority: MessagePriority::Normal,
                         });
                         // Don't reset tick — let events accumulate and coalesce
                     }
-                    AgentEvent::Shutdown => break,
+                    AgentEvent::Shutdown => {
+                        reject_pending(
+                            &mut pending_messages,
+                            CycleId(cycle),
+                            "agent loop is shutting down",
+                        );
+                        break;
+                    }
                 }
             }
         }
     }
+    // The channel receivers outlive this loop, so anything still queued has to
+    // be refused here rather than dropped without a word.
+    reject_pending(
+        &mut pending_messages,
+        CycleId(cycle),
+        "agent loop exited before serving this message",
+    );
     info!("Agent loop exiting");
 }
 
@@ -677,11 +777,12 @@ pub(super) fn compact_observation(obs: &str, max_chars: usize) -> String {
             }
         }
     }
-    // Fallback: truncate with a note
+    // Fallback: truncate with a note. An observation is JSON built from tool
+    // output and can end anywhere in a UTF-8 scalar.
     let cut = max_chars.saturating_sub(30);
     format!(
         "{}...(truncated {} bytes)",
-        &obs[..cut.min(obs.len())],
+        arkavo_llm::char_boundary_prefix(obs, cut),
         obs.len()
     )
 }
@@ -1098,5 +1199,50 @@ mod urgency_tests {
     fn test_detect_urgency_json_without_alerts_key() {
         let data = r#"{"colonists":3,"resources":{"wood":50}}"#;
         assert_eq!(detect_urgency(data), UrgencyLevel::Low);
+    }
+
+    /// The truncating fallback runs on arbitrary tool output, which can end
+    /// anywhere in a UTF-8 scalar.
+    #[test]
+    fn compact_observation_is_safe_for_multibyte_text() {
+        let compacted = compact_observation(&"界".repeat(200), 130);
+        // The note reserves 30 bytes, so 100 remain: 33 whole three-byte scalars.
+        assert_eq!(compacted.matches('界').count(), 33);
+        assert!(compacted.ends_with("...(truncated 600 bytes)"));
+        assert_eq!(compact_observation("small", 130), "small");
+    }
+}
+
+#[cfg(test)]
+mod grant_hash_tests {
+    use std::collections::HashSet;
+    use std::hash::{Hash, Hasher};
+
+    fn hash_of(set: &HashSet<String>) -> u64 {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut sorted: Vec<&String> = set.iter().collect();
+        sorted.sort();
+        sorted.hash(&mut h);
+        h.finish()
+    }
+
+    #[test]
+    fn grant_hash_is_order_independent() {
+        let a: HashSet<String> = ["git_diff", "gh_pr_review"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let b: HashSet<String> = ["gh_pr_review", "git_diff"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(hash_of(&a), hash_of(&b));
+    }
+
+    #[test]
+    fn different_grants_differ() {
+        let a: HashSet<String> = ["git_diff"].iter().map(|s| s.to_string()).collect();
+        let b: HashSet<String> = ["github_pr_create"].iter().map(|s| s.to_string()).collect();
+        assert_ne!(hash_of(&a), hash_of(&b));
     }
 }

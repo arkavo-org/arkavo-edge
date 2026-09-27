@@ -28,9 +28,7 @@ async fn test_openai_streaming_basic() {
     let messages = vec![Message {
         role: Role::User,
         content: "List the numbers from 1 to 5, separated by spaces.".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let mut stream = provider
@@ -88,9 +86,7 @@ async fn test_openai_streaming_performance() {
     let messages = vec![Message {
         role: Role::User,
         content: "Write a 3-sentence story about a robot.".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let start = Instant::now();
@@ -157,9 +153,7 @@ async fn test_openai_streaming_interruption() {
     let messages = vec![Message {
         role: Role::User,
         content: "Count from 1 to 100, one number per line.".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let mut stream = provider
@@ -209,16 +203,12 @@ async fn test_openai_streaming_with_system_message() {
         Message {
             role: Role::System,
             content: "You are a poet. Respond only in haiku format.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
+            ..Default::default()
         },
         Message {
             role: Role::User,
             content: "Describe streaming data".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
+            ..Default::default()
         },
     ];
 
@@ -286,9 +276,7 @@ async fn test_openai_streaming_concurrent() {
             let messages = vec![Message {
                 role: Role::User,
                 content: prompt_owned.clone(),
-                images: None,
-                tool_call_id: None,
-                tool_name: None,
+                ..Default::default()
             }];
 
             let mut stream = provider
@@ -357,9 +345,7 @@ async fn test_openai_streaming_error_handling() {
     let messages = vec![Message {
         role: Role::User,
         content: "Hello".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let result = provider.stream(messages).await;

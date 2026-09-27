@@ -23,6 +23,7 @@ pub use crate::cognitive_engine_types::{
 };
 
 pub struct CognitiveEngine {
+    pub(crate) budget_tracker: Arc<BudgetTracker>,
     pub(crate) event_writer: Arc<EventWriter>,
     pub(crate) github_ops: Arc<IssueOperations>,
     pub(crate) router: Arc<Router>,
@@ -75,7 +76,7 @@ impl CognitiveEngine {
         attempt_history: Arc<AttemptHistory>,
     ) -> Self {
         let planner = Planner::new_with_history(
-            budget_tracker,
+            budget_tracker.clone(),
             router.clone(),
             plan_store.clone(),
             attempt_history.clone(),
@@ -88,6 +89,7 @@ impl CognitiveEngine {
         );
 
         Self {
+            budget_tracker,
             event_writer,
             github_ops,
             router,
@@ -184,7 +186,13 @@ impl CognitiveEngine {
 
             let tokens = match timeout(
                 step_timeout,
-                do_step(&self.router, &self.tool_registry, step, command_timeout),
+                do_step(
+                    &self.router,
+                    &self.tool_registry,
+                    &self.budget_tracker,
+                    step,
+                    command_timeout,
+                ),
             )
             .await
             {
@@ -318,6 +326,7 @@ impl CognitiveEngine {
             do_step(
                 &self.router,
                 &self.tool_registry,
+                &self.budget_tracker,
                 &adjusted,
                 command_timeout,
             ),

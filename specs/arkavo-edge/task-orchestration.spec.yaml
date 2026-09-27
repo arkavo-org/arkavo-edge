@@ -24,7 +24,7 @@ scenarios:
       - Subtasks generated if needed
       - Dependencies identified
       - Execution plan created
-    refs: [crates/arkavo-protocol/src/task_planner.rs]
+    refs: [crates/arkavo-tasks/src/task_planner.rs:74-129]
 
   - id: ORCH-002
     name: Execute task with executor
@@ -80,7 +80,7 @@ scenarios:
       - Human notified
       - Task paused
       - Resumes after response
-    refs: [crates/arkavo-hrm/src/conductor.rs]
+    refs: [crates/arkavo-orchestrator/src/issue_router.rs:7-12, crates/arkavo-orchestrator/src/issue_router.rs:51-131, crates/arkavo-orchestrator/src/orchestrator.rs:391-397, crates/arkavo-orchestrator/src/orchestrator.rs:431-436]
 
   - id: ORCH-006
     name: Parallel subtask execution

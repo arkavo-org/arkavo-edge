@@ -1,6 +1,7 @@
 #![allow(clippy::collection_is_never_read, clippy::disallowed_methods)]
 
 use arkavo_gemini::{FunctionDeclaration, RestClient};
+use arkavo_test_macros::spec;
 use serde_json::{Value, json};
 
 fn get_api_key() -> String {
@@ -66,6 +67,9 @@ fn create_mock_calculator_tool() -> FunctionDeclaration {
     }
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-002")]
+#[spec("GEM-003")]
 #[tokio::test]
 async fn test_parallel_tool_execution() {
     if should_skip_integration_tests() {
@@ -123,6 +127,9 @@ async fn test_parallel_tool_execution() {
     );
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-003")]
+#[spec("GEM-010")]
 #[tokio::test]
 async fn test_json_mode_reliability() {
     if should_skip_integration_tests() {
@@ -169,6 +176,9 @@ Only respond with valid JSON, no other text."#;
     assert!(json.get("name").is_some(), "Missing 'name' field");
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-002")]
+#[spec("GEM-003")]
 #[tokio::test]
 async fn test_tool_orchestration_complexity() {
     if should_skip_integration_tests() {
@@ -210,6 +220,10 @@ async fn test_tool_orchestration_complexity() {
     );
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-002")]
+#[spec("GEM-003")]
+#[spec("GEM-008")]
 #[tokio::test]
 async fn test_error_recovery_malformed_tool() {
     if should_skip_integration_tests() {
@@ -259,6 +273,8 @@ async fn test_error_recovery_malformed_tool() {
     );
 }
 
+#[spec("GEM-001")]
+#[spec("GEM-003")]
 #[tokio::test]
 async fn test_multi_turn_consistency() {
     if should_skip_integration_tests() {

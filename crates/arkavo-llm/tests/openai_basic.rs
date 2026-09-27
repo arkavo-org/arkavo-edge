@@ -27,9 +27,7 @@ async fn test_openai_basic_connectivity() {
     let messages = vec![Message {
         role: Role::User,
         content: "Say 'test successful' and nothing else.".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let response = provider
@@ -59,9 +57,7 @@ async fn test_openai_authentication_error() {
     let messages = vec![Message {
         role: Role::User,
         content: "Hello".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
+        ..Default::default()
     }];
 
     let result = provider.complete(messages).await;
@@ -99,9 +95,7 @@ async fn test_openai_rate_limiting() {
             let messages = vec![Message {
                 role: Role::User,
                 content: format!("Count to {i} and respond with just the numbers"),
-                images: None,
-                tool_call_id: None,
-                tool_name: None,
+                ..Default::default()
             }];
             provider.complete(messages).await
         });
@@ -179,16 +173,12 @@ async fn test_openai_system_message() {
         Message {
             role: Role::System,
             content: "You are a pirate. Always respond in pirate speak.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
+            ..Default::default()
         },
         Message {
             role: Role::User,
             content: "Say hello".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
+            ..Default::default()
         },
     ];
 
@@ -227,23 +217,17 @@ async fn test_openai_multi_turn_conversation() {
         Message {
             role: Role::User,
             content: "My favorite color is blue. Remember this.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
+            ..Default::default()
         },
         Message {
             role: Role::Assistant,
             content: "I'll remember that your favorite color is blue.".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
+            ..Default::default()
         },
         Message {
             role: Role::User,
             content: "What's my favorite color?".to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
+            ..Default::default()
         },
     ];
 

@@ -133,7 +133,7 @@ impl FileTransferManager {
         let mut uploads = self.active_uploads.write().await;
 
         let session = uploads.entry(file_id.clone()).or_insert_with(|| {
-            let temp_path = self.temp_dir.join(format!("{}.tmp", &file_id));
+            let temp_path = self.temp_dir.join(format!("{file_id}.tmp"));
             TransferSession {
                 metadata: request.metadata.clone(),
                 chunks: HashMap::new(),

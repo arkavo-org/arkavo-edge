@@ -19,8 +19,8 @@ scenarios:
       - Store connected
       - Conductor ready
       - State management active
-    refs: [crates/arkavo-hrm/src/lib.rs:22-30, crates/arkavo-hrm/src/conductor.rs:1-50]
-    changed: "2025-01-31"
+    refs: [crates/arkavo-hrm/src/lib.rs:22-30, crates/arkavo-hrm/src/conductor/orchestrator.rs:43-55]
+    changed: "2026-06-12"
 
   - id: HRM-002
     name: Create task with budget
@@ -35,8 +35,8 @@ scenarios:
       - Subtasks decomposed
       - Budget allocated
       - Task persisted
-    refs: [crates/arkavo-hrm/src/conductor.rs:50-100, crates/arkavo-hrm/src/schemas.rs:1-50]
-    changed: "2025-01-31"
+    refs: [crates/arkavo-hrm/src/conductor/orchestrator.rs:161-179, crates/arkavo-hrm/src/schemas.rs:70-95, crates/arkavo-hrm/src/schemas.rs:133-163]
+    changed: "2026-06-12"
     edge_cases:
       - condition: Budget insufficient for task
         expected: Warning or rejection
@@ -55,8 +55,8 @@ scenarios:
       - Execution bounded
       - Result or partial result returned
       - State updated
-    refs: [crates/arkavo-hrm/src/burst.rs:1-60, crates/arkavo-hrm/src/conductor.rs:100-150]
-    changed: "2025-01-31"
+    refs: [crates/arkavo-hrm/src/burst/contract.rs:55-146, crates/arkavo-hrm/src/burst/result.rs:35-117, crates/arkavo-hrm/src/conductor/orchestrator.rs:254-360]
+    changed: "2026-06-12"
     edge_cases:
       - condition: Budget exceeded mid-execution
         expected: Graceful termination
@@ -74,8 +74,8 @@ scenarios:
       - Loop signature detected
       - Strategic thrashing flagged
       - Intervention triggered
-    refs: [crates/arkavo-hrm/src/conductor.rs:150-200]
-    changed: "2025-01-31"
+    refs: [crates/arkavo-hrm/src/conductor/loop_detector.rs:45-105, crates/arkavo-hrm/src/conductor/orchestrator.rs:203-230]
+    changed: "2026-06-12"
     edge_cases:
       - condition: Similar but valid patterns
         expected: Tolerance for legitimate cycles
@@ -105,5 +105,5 @@ scenarios:
       - Remaining work identified
       - Context strategy selected
       - Handover prepared
-    refs: [crates/arkavo-hrm/src/burst.rs:60-100]
-    changed: "2025-01-31"
+    refs: [crates/arkavo-hrm/src/burst/result.rs:119-164]
+    changed: "2026-06-12"

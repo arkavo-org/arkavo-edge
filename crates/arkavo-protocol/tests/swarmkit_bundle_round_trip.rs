@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use arkavo_budget::provider_costs::PricingEntry;
 use arkavo_protocol::AgentSpecializationBundle;
 use arkavo_protocol::agent_specialization::{
     AgentPersona, ArpDocument, McpToolGrant, RoleContext, unwrap_bundle, wrap_bundle,
@@ -25,10 +26,12 @@ use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::metrics::MetricsCollector;
 use arkavo_protocol::rate_limit::{RateLimitConfig, RateLimiter};
 use arkavo_protocol::types::AgentSpecializeRequest;
+use arkavo_server::server::AgentEvent;
 use arkavo_server::server::config_helpers::{AgentMetadata, RoleSpecializationStore};
 use arkavo_server::server::handlers::specialization::{BundleDecryptor, handle_agent_specialize};
 use arkavo_tdf::TdfManifest;
 use arkavo_tdf::testing::MockTdfService;
+use arkavo_test_macros::spec;
 use async_trait::async_trait;
 use base64::Engine;
 
@@ -77,6 +80,7 @@ fn build_bundle(role: &str, agent_did: &str) -> AgentSpecializationBundle {
         },
         api_tokens: tokens,
         arp_overlay: arp_doc(),
+        manifest_pricing: Vec::new(),
         role_context: RoleContext {
             kit_id: "kit:demo:0.1.0".into(),
             flight_id: "44444444-4444-4444-4444-444444444444".into(),
@@ -111,6 +115,11 @@ impl BundleDecryptor for LocalDecryptor {
     }
 }
 
+fn no_event_tx() -> Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>> {
+    Arc::new(tokio::sync::Mutex::new(None))
+}
+
+#[spec("SK-071")]
 #[tokio::test]
 async fn bundle_round_trips_orchestrator_to_agent() {
     let did = "did:web:agent-7.arkavo.net";
@@ -143,11 +152,15 @@ async fn bundle_round_trips_orchestrator_to_agent() {
         &agent_metadata,
         &role_store,
         &decryptor,
+        &no_event_tx(),
+        None,
+        None,
         AgentSpecializeRequest {
             requester_id: "did:web:orchestrator.arkavo.net".into(),
             encrypted_bundle: encoded,
             task_context: None,
             session_id: None,
+            ticket: None,
         },
     )
     .await
@@ -174,6 +187,7 @@ async fn bundle_round_trips_orchestrator_to_agent() {
     assert_eq!(stored.kit_id, "kit:demo:0.1.0");
 }
 
+#[spec("SK-072")]
 #[tokio::test]
 async fn bundle_for_other_agent_is_rejected_at_unwrap() {
     let bundle = build_bundle("analyst", "did:web:agent-A.arkavo.net");
@@ -204,11 +218,15 @@ async fn bundle_for_other_agent_is_rejected_at_unwrap() {
         &agent_metadata,
         &role_store,
         &decryptor,
+        &no_event_tx(),
+        None,
+        None,
         AgentSpecializeRequest {
             requester_id: "did:web:orchestrator.arkavo.net".into(),
             encrypted_bundle: encoded,
             task_context: None,
             session_id: None,
+            ticket: None,
         },
     )
     .await
@@ -216,4 +234,90 @@ async fn bundle_for_other_agent_is_rejected_at_unwrap() {
 
     assert_eq!(err.code(), -32603);
     assert!(role_store.get().await.is_none());
+}
+
+/// WS-D data-plane round trip: the orchestrator stages a TDF-wrapped
+/// bundle on one Iroh node; a *different* node fetches it by ticket and
+/// `unwrap_bundle`s it. This crosses the same boundary the production
+/// IrohBundleShipper + agent.specialize handler cross, minus the A2A hop.
+#[spec("SK-097")]
+#[tokio::test]
+async fn bundle_round_trips_across_two_iroh_nodes() {
+    use arkavo_tdf_iroh::{IrohNode, IrohTransport};
+
+    let did = "did:web:agent-7.arkavo.net";
+    let svc = MockTdfService::default();
+    let bundle = build_bundle("analyst", did);
+
+    // Orchestrator side: wrap → TDF bytes → stage on node A.
+    let tdf = wrap_bundle(&bundle, &svc, did).await.expect("wrap");
+    let tdf_bytes = serde_json::to_vec(&tdf).expect("serialize tdf");
+
+    let node_a = IrohNode::memory().await.expect("node a");
+    let ticket = IrohTransport::new(node_a.clone())
+        .stage_bytes(&tdf_bytes)
+        .await
+        .expect("stage");
+    let ticket_str = ticket.to_string();
+
+    // Agent side: a separate node fetches by ticket, then unwraps.
+    // Two in-memory Iroh nodes can reach each other via loopback addrs
+    // embedded in the ticket (direct connection without relay needed).
+    let node_b = IrohNode::memory().await.expect("node b");
+    let fetched = IrohTransport::new(node_b.clone())
+        .fetch_bytes(&ticket_str.parse().expect("parse ticket"))
+        .await
+        .expect("fetch across nodes");
+    assert_eq!(fetched, tdf_bytes, "fetched blob must be byte-identical");
+
+    let refetched_tdf: TdfManifest = serde_json::from_slice(&fetched).expect("parse fetched tdf");
+    let recovered = unwrap_bundle(&refetched_tdf, &svc, did)
+        .await
+        .expect("unwrap fetched bundle");
+    assert_eq!(recovered.role_context.role_id, "analyst");
+
+    node_a.stop().await.ok();
+    node_b.stop().await.ok();
+}
+
+#[spec("SK-097")]
+#[tokio::test]
+async fn bundle_manifest_pricing_round_trips_through_tdf() {
+    let did = "did:web:agent-7.arkavo.net";
+    let svc = MockTdfService::default();
+    let mut bundle = build_bundle("analyst", did);
+    bundle.manifest_pricing = vec![
+        PricingEntry {
+            model_id: "gemma-4-9b".into(),
+            provider: "arkavo".into(),
+            input_cents_per_mtok: 50,
+            output_cents_per_mtok: 150,
+            cached_input_cents_per_mtok: None,
+            cache_write_cents_per_mtok: None,
+            context_window: None,
+            max_output_tokens: None,
+        },
+        PricingEntry {
+            model_id: "glm-5.2".into(),
+            provider: "zhipu".into(),
+            input_cents_per_mtok: 140,
+            output_cents_per_mtok: 440,
+            cached_input_cents_per_mtok: Some(26),
+            cache_write_cents_per_mtok: None,
+            context_window: Some(128_000),
+            max_output_tokens: Some(8_192),
+        },
+    ];
+
+    let tdf = wrap_bundle(&bundle, &svc, did).await.expect("wrap");
+    let recovered = unwrap_bundle(&tdf, &svc, did).await.expect("unwrap");
+
+    assert_eq!(recovered.manifest_pricing.len(), 2);
+    assert_eq!(recovered.manifest_pricing[0].model_id, "gemma-4-9b");
+    assert_eq!(recovered.manifest_pricing[0].input_cents_per_mtok, 50);
+    assert_eq!(recovered.manifest_pricing[1].provider, "zhipu");
+    assert_eq!(
+        recovered.manifest_pricing[1].cached_input_cents_per_mtok,
+        Some(26)
+    );
 }

@@ -23,6 +23,12 @@ pub struct EventMetadata {
     pub parent_event_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
+    /// SEQ-015: taint carried by whatever this event describes, source through
+    /// provenance, so a forensic replay can follow data across events without
+    /// reconstructing it from payloads. `None` means the producer tracked no
+    /// taint for this event, which is not a claim that none applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taint_chain: Option<crate::payload::TaintRecord>,
 }
 
 impl Event {
@@ -37,6 +43,7 @@ impl Event {
                 schema_version: SCHEMA_VERSION.to_string(),
                 parent_event_id: None,
                 correlation_id: None,
+                taint_chain: None,
             },
             payload,
         }
@@ -54,6 +61,8 @@ impl Event {
             EventPayload::Error { .. } => "error",
             EventPayload::SessionStarted { .. } => "session_started",
             EventPayload::SessionEnded { .. } => "session_ended",
+            EventPayload::SequenceNode { .. } => "sequence_node",
+            EventPayload::SequenceViolation { .. } => "sequence_violation",
         }
     }
 }
@@ -225,5 +234,21 @@ mod tests {
         };
         let event = Event::new("s".into(), 0, "a".into(), payload);
         assert_eq!(event.event_type(), "session_ended");
+    }
+
+    #[test]
+    fn event_type_sequence_node() {
+        let payload = EventPayload::SequenceNode {
+            node_id: "n-1".to_string(),
+            tool_name: "read_file".to_string(),
+            params_hash: "0f".to_string(),
+            inputs: Vec::new(),
+            taint: crate::payload::TaintRecord {
+                sensitivity: "internal".to_string(),
+                ..Default::default()
+            },
+        };
+        let event = Event::new("s".into(), 0, "a".into(), payload);
+        assert_eq!(event.event_type(), "sequence_node");
     }
 }

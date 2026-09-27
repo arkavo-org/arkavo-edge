@@ -100,6 +100,7 @@ mod tests {
     use arkavo_llm::ProviderResponse;
     use arkavo_llm::tool_parser::ParsedToolCall;
     use arkavo_mcp_tools::ToolInfo;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
     fn create_test_tool(name: &str) -> ToolInfo {
@@ -117,6 +118,7 @@ mod tests {
         }
     }
 
+    #[spec("CRIT-004")]
     #[tokio::test]
     async fn test_schema_check_pass() {
         let check = SchemaCheck::new();
@@ -133,6 +135,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("Find test".to_string(), response, tools);
@@ -141,6 +144,7 @@ mod tests {
         assert!(result.is_pass());
     }
 
+    #[spec("CRIT-004")]
     #[tokio::test]
     async fn test_schema_check_hallucinated_tool() {
         let check = SchemaCheck::new();
@@ -157,6 +161,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("Test".to_string(), response, tools);
@@ -167,6 +172,7 @@ mod tests {
         assert!(evidence.description.contains("nonexistent"));
     }
 
+    #[spec("CRIT-004")]
     #[tokio::test]
     async fn test_schema_check_missing_param() {
         let check = SchemaCheck::new();
@@ -183,6 +189,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("Find test".to_string(), response, tools);
@@ -204,6 +211,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         };
 
         let input = VerificationInput::new("Test".to_string(), response, vec![]);

@@ -18,7 +18,13 @@
     "prior_management": {
       "version_binding": "entity_hash",
       "reset_on_version_change": true,
-      "reset_state": { "alpha": 2.0, "beta": 1.0 }
+      "reset_state": { "alpha": 2.0, "beta": 1.0 },
+      "provenance_tracking": true,
+      "distilled_decay": {
+        "strategy": "live_displacement",
+        "displacement_factor": 0.05,
+        "floor": 0.0
+      }
     }
   },
   "feedback_loops": {

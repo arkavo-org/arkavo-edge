@@ -37,6 +37,7 @@ pub(crate) fn detail_level_for_model(
         ModelChoice::LocalGemma4E4B
         | ModelChoice::LocalGemma4_26B
         | ModelChoice::LocalGemma4_31B
+        | ModelChoice::LocalGemma4_12B
         | ModelChoice::LocalMinistral8B
         | ModelChoice::LocalQwen35_9B
         | ModelChoice::LocalQwen35_27B
@@ -50,9 +51,14 @@ pub(crate) fn detail_level_for_model(
         | ModelChoice::GeminiPro
         | ModelChoice::ClaudeSonnet
         | ModelChoice::ClaudeOpus
+        | ModelChoice::ClaudeFable5
         | ModelChoice::DeepSeekV32
         | ModelChoice::DeepSeekV32Speciale
-        | ModelChoice::KimiK2 => arkavo_mcp_tools::DetailLevel::FullSchema,
+        | ModelChoice::KimiK2
+        | ModelChoice::Glm52
+        | ModelChoice::Grok47
+        | ModelChoice::Grok47Xhigh
+        | ModelChoice::Gpt6Astra => arkavo_mcp_tools::DetailLevel::FullSchema,
     }
 }
 

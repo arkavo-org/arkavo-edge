@@ -192,6 +192,8 @@ async fn test_mock_provider() {
         images: None,
         tool_call_id: None,
         tool_name: None,
+        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let response1 = mock.complete(messages.clone()).await.unwrap();

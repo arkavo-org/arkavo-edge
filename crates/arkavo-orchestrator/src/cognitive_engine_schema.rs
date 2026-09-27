@@ -72,7 +72,9 @@ impl JsonExecutionPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_json_schema_generation() {
         let schema = JsonExecutionPlan::json_schema();
@@ -83,6 +85,7 @@ mod tests {
         assert!(props.get("steps").is_some());
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_deserialize_json_plan() {
         let json = r#"{
@@ -113,6 +116,7 @@ mod tests {
         assert!((plan.steps[0].confidence - 0.9).abs() < 0.01);
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_serialize_json_plan() {
         let plan = JsonExecutionPlan {
@@ -130,6 +134,7 @@ mod tests {
         assert!(json.contains("cargo build"));
     }
 
+    #[spec("ORCH-004")]
     #[test]
     fn test_empty_plan() {
         let json = r#"{"steps": []}"#;

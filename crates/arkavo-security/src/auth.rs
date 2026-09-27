@@ -228,4 +228,95 @@ mod tests {
         );
         assert!(!backend.validate_scopes(&auth, &["admin".to_string()]).await);
     }
+
+    #[spec("SEC-001")]
+    #[tokio::test]
+    async fn test_jwt_rejects_expired_and_tampered_tokens() {
+        let secret = "test_secret";
+        let backend = JwtAuthBackend::new(secret);
+
+        let expired_claims = JwtClaims {
+            sub: "user123".to_string(),
+            exp: Some(chrono::Utc::now().timestamp() - 3600),
+            iat: Some(chrono::Utc::now().timestamp() - 7200),
+            scopes: Some(vec!["read".to_string()]),
+            additional: serde_json::Map::new(),
+        };
+
+        let expired_token = encode(
+            &Header::default(),
+            &expired_claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .unwrap();
+
+        assert!(
+            backend.validate_token(&expired_token).await.is_err(),
+            "expired JWT must be rejected"
+        );
+
+        let valid_claims = JwtClaims {
+            sub: "user123".to_string(),
+            exp: Some(chrono::Utc::now().timestamp() + 3600),
+            iat: Some(chrono::Utc::now().timestamp()),
+            scopes: Some(vec!["read".to_string()]),
+            additional: serde_json::Map::new(),
+        };
+
+        let mut valid_token = encode(
+            &Header::default(),
+            &valid_claims,
+            &EncodingKey::from_secret(secret.as_ref()),
+        )
+        .unwrap();
+        valid_token.push_str("_tampered");
+
+        assert!(
+            backend.validate_token(&valid_token).await.is_err(),
+            "tampered JWT must be rejected"
+        );
+    }
+
+    #[spec("SEC-006")]
+    #[tokio::test]
+    async fn test_multi_auth_backend_falls_back_and_rejects() {
+        struct AlwaysFails;
+
+        #[async_trait]
+        impl AuthBackend for AlwaysFails {
+            async fn validate_token(&self, _token: &str) -> Result<SessionAuth> {
+                Err(SecurityError::Auth("first backend refused".to_string()))
+            }
+        }
+
+        struct AlwaysSucceeds;
+
+        #[async_trait]
+        impl AuthBackend for AlwaysSucceeds {
+            async fn validate_token(&self, _token: &str) -> Result<SessionAuth> {
+                Ok(SessionAuth {
+                    sub: "fallback_user".to_string(),
+                    scopes: vec!["read".to_string()],
+                    exp: None,
+                    metadata: None,
+                })
+            }
+        }
+
+        let backend = MultiAuthBackend::new()
+            .add_backend(Arc::new(AlwaysFails))
+            .add_backend(Arc::new(AlwaysSucceeds));
+
+        let auth = backend.validate_token("any-token").await.unwrap();
+        assert_eq!(auth.sub, "fallback_user");
+
+        let reject_all = MultiAuthBackend::new()
+            .add_backend(Arc::new(AlwaysFails))
+            .add_backend(Arc::new(AlwaysFails));
+
+        assert!(
+            reject_all.validate_token("any-token").await.is_err(),
+            "token must be rejected when every backend fails"
+        );
+    }
 }

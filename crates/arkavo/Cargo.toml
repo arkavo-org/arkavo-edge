@@ -11,18 +11,28 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
+openai = ["arkavo-cli/openai"]
+# The container/deploy feature set: no local inference backend (no
+# `llama-cpp`/`snpe`), remote providers only. This is what the root
+# `Dockerfile` and `docs/deploy/container.md` build. Forwards to
+# `arkavo-cli/cloud` rather than repeating its expansion here, so that
+# manifest is the single place the list is named.
+cloud = ["arkavo-cli/cloud"]
 # Full defaults with all LLM providers
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "web-ui", "claude-agent"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
-# Default features for Windows
-windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "web-ui"]
+# Default features for Windows: every cloud provider the router's own
+# `windows` feature carries, and no llama-cpp (the Windows build is C++-free).
+windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui"]
 memory = ["arkavo-cli/memory"]
 embeddings = ["memory", "arkavo-cli/embeddings"]
 mdns = ["arkavo-cli/mdns"]
 llm-remote = ["arkavo-cli/llm-remote"]
 kimi = ["arkavo-cli/kimi"]
 deepseek = ["arkavo-cli/deepseek"]
+glm = ["arkavo-cli/glm"]
+xai = ["arkavo-cli/xai"]
 gemini = ["arkavo-cli/gemini"]
 llama-cpp = ["arkavo-cli/llama-cpp"]
 snpe = ["arkavo-cli/snpe"]
@@ -32,6 +42,12 @@ kas = ["arkavo-cli/kas"]
 cef-ui = ["arkavo-cli/cef-ui"]
 web-ui = ["arkavo-cli/web-ui"]
 claude-agent = ["arkavo-cli/claude-agent"]
+# Taint-aware egress enforcement (SEQ-003, SEQ-014, SEQ-015). Off until the
+# sequence-integrity work reaches GA; the security suite builds a binary with it.
+taint = ["arkavo-cli/taint"]
+knowledge-pack = ["arkavo-cli/knowledge-pack"]
+fingerprint = ["knowledge-pack"]
+sentinel = ["arkavo-cli/sentinel"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }

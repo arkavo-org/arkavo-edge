@@ -88,6 +88,7 @@ impl Default for TransportConfig {
 
 #[derive(Debug, Clone)]
 pub struct TlsConfig {
+    /// Certificate verification is always on. `false` is ignored.
     pub verify_cert: bool,
     pub require_tls: bool,
     pub client_cert_path: Option<String>,

@@ -69,13 +69,7 @@ pub async fn classify_intent_llm(
     }
 
     let prompt = build_intent_prompt(text);
-    let messages = vec![arkavo_llm::Message {
-        role: arkavo_llm::Role::User,
-        content: prompt,
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
-    }];
+    let messages = vec![arkavo_llm::Message::user(prompt)];
 
     let stream = match router
         .route_fast("teaching intent classification", messages)

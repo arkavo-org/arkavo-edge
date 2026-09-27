@@ -2,7 +2,7 @@ use arkavo_llm::{DeltaStream, DeltaType, LlmClientAdapter, StreamId, StreamLlmMo
 use arkavo_protocol::chat_session::ChatSessionManager;
 use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
 use arkavo_protocol::rate_limit::RateLimiter;
-use arkavo_protocol::types::{ChatRequest, MessageDelta, MessageDeltaContent};
+use arkavo_protocol::types::{ChatRequest, MessageDelta, MessageDeltaContent, StreamEndReason};
 use futures::StreamExt;
 use jsonrpsee::{PendingSubscriptionSink, core::SubscriptionResult};
 use std::sync::Arc;
@@ -108,14 +108,51 @@ pub async fn handle_chat_stream(
         tokio::spawn(async move {
             info!(session.id = %session_id, "Delta forwarder task started");
             let mut delta_count = 0;
+            let mut saw_stream_end = false;
             while let Some(delta) = delta_rx.recv().await {
                 delta_count += 1;
+                if matches!(delta.delta, MessageDeltaContent::StreamEnd { .. }) {
+                    saw_stream_end = true;
+                }
                 info!(session.id = %session_id, delta_count, "Forwarding delta to client");
                 if let Ok(msg) = serde_json::value::to_raw_value(&delta)
                     && sink.send(msg).await.is_err()
                 {
                     warn!(session.id = %session_id, "Client disconnected, stopping delta forwarding");
-                    break;
+                    return;
+                }
+            }
+            if !saw_stream_end {
+                // The delta channel closed without a StreamEnd (e.g. the upstream
+                // forwarder aborted). The client must not mistake the truncated
+                // stream for normal completion.
+                warn!(session.id = %session_id, total_deltas = delta_count, "Delta stream ended without StreamEnd; notifying client");
+                let error_delta = MessageDelta {
+                    session_id: session_id.clone(),
+                    message_id: uuid::Uuid::new_v4().to_string(),
+                    sequence: 0,
+                    delta: MessageDeltaContent::Error {
+                        code: "STREAM_TERMINATED".to_string(),
+                        message: "Stream ended abnormally without a terminal delta".to_string(),
+                    },
+                    timestamp: chrono::Utc::now(),
+                };
+                if let Ok(msg) = serde_json::value::to_raw_value(&error_delta)
+                    && sink.send(msg).await.is_err()
+                {
+                    return;
+                }
+                let end_delta = MessageDelta {
+                    session_id: session_id.clone(),
+                    message_id: uuid::Uuid::new_v4().to_string(),
+                    sequence: 1,
+                    delta: MessageDeltaContent::StreamEnd {
+                        reason: StreamEndReason::Error,
+                    },
+                    timestamp: chrono::Utc::now(),
+                };
+                if let Ok(msg) = serde_json::value::to_raw_value(&end_delta) {
+                    let _ = sink.send(msg).await;
                 }
             }
             info!(session.id = %session_id, total_deltas = delta_count, "Delta forwarder task ended");
