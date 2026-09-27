@@ -374,6 +374,18 @@ mod tests {
         assert_eq!(r.category, "model:glm:code_fence");
     }
 
+    #[spec("CRIT-009")]
+    #[test]
+    fn test_analyze_no_code_fence_issue_for_code_request() {
+        let analyzer = ResponseAnalyzer::new("glm-4.7-flash");
+        // Code fences are expected for an explicit coding request, so no issue is flagged.
+        let result = analyzer.analyze(
+            "write a python function to add two numbers",
+            "```python\ndef add(a, b):\n    return a + b\n```",
+        );
+        assert!(result.is_none());
+    }
+
     #[spec("CRIT-010")]
     #[test]
     fn test_analyze_output_loop() {

@@ -694,6 +694,7 @@ impl MeshTaskStrategy {
             encrypted_bundle,
             task_context,
             session_id: None,
+            ticket: None,
         };
 
         let rpc_request = A2aRequest::new("agent.specialize", serde_json::to_value(&request)?);

@@ -1,3 +1,4 @@
+use crate::cloud_policy::CloudPolicy;
 use crate::cost::TokenCost;
 use chrono::{DateTime, Datelike, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,10 @@ pub struct BudgetConfig {
     pub thresholds: BudgetThresholds,
     pub time_windows: TimeWindows,
     pub agent_budgets: HashMap<String, AgentBudget>,
+    /// Cloud spend posture. Defaults to `AskBeforeCloud` — the safe v1 default
+    /// that never lets availability or quality signals spend silently.
+    #[serde(default)]
+    pub cloud_policy: CloudPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

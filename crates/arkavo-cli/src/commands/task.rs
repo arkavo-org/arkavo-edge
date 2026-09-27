@@ -327,7 +327,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
             // Get the commit message for display
             if let Ok(commit) = repo.find_commit(oid)
-                && let Some(msg) = commit.message()
+                && let Ok(msg) = commit.message()
             {
                 println!("Message: {}", msg.lines().next().unwrap_or(""));
             }

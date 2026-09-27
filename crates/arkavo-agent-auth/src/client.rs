@@ -207,6 +207,13 @@ impl Default for AgentAuthClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_crypto::{AgentKeypair, AgentPublicKey};
+    use arkavo_test_macros::spec;
+    use wiremock::Respond;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+
+    use crate::test_helpers::TEST_LOCK;
 
     #[test]
     fn test_client_creation() {
@@ -222,5 +229,115 @@ mod tests {
 
         let client = AgentAuthClient::with_config(config);
         assert!(client.is_ok());
+    }
+
+    /// Wiremock responder that validates the Ed25519 signature on the token
+    /// request before returning a token response.
+    struct ValidatingTokenResponder {
+        public_key: AgentPublicKey,
+        challenge: Vec<u8>,
+    }
+
+    impl ValidatingTokenResponder {
+        fn new(public_key: AgentPublicKey, challenge: Vec<u8>) -> Self {
+            Self {
+                public_key,
+                challenge,
+            }
+        }
+    }
+
+    impl Respond for ValidatingTokenResponder {
+        fn respond(&self, request: &Request) -> ResponseTemplate {
+            let body: TokenRequest = match serde_json::from_slice(&request.body) {
+                Ok(b) => b,
+                Err(_) => return ResponseTemplate::new(400).set_body_string("invalid json"),
+            };
+
+            if body.challenge != BASE64_STANDARD.encode(&self.challenge) {
+                return ResponseTemplate::new(400).set_body_string("challenge mismatch");
+            }
+
+            let signature = match BASE64_STANDARD.decode(&body.signature) {
+                Ok(s) => s,
+                Err(_) => return ResponseTemplate::new(400).set_body_string("bad signature"),
+            };
+
+            if self.public_key.verify(&self.challenge, &signature).is_err() {
+                return ResponseTemplate::new(401).set_body_string("invalid signature");
+            }
+
+            ResponseTemplate::new(200).set_body_json(TokenResponse {
+                token: "mock-token-123".to_string(),
+                expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                entitlements: vec!["agent.capability.chat".to_string()],
+                delegation_jwt: Some("mock-delegation-jwt".to_string()),
+            })
+        }
+    }
+
+    /// Test AAUTH-001: Request authentication token.
+    /// Test AAUTH-005: Complete challenge-response auth.
+    ///
+    /// The spec names a standalone `respond_to_challenge()` function, which does
+    /// not exist in the current implementation. The equivalent behavior is
+    /// exercised through `AgentAuthClient::authenticate`, which performs the full
+    /// challenge-response flow, submits the signed request to the token endpoint,
+    /// and stores the resulting token.
+    #[spec("AAUTH-001", "AAUTH-005")]
+    #[tokio::test]
+    async fn test_authenticate_challenge_response_flow() {
+        let _guard = TEST_LOCK.lock().await;
+        let _ = storage::delete_token().await;
+
+        let mock_server = MockServer::start().await;
+
+        let keypair = AgentKeypair::generate();
+        let challenge = b"challenge-data-for-test".to_vec();
+        let challenge_b64 = BASE64_STANDARD.encode(&challenge);
+        let did = keypair.public_key().to_did_key();
+
+        Mock::given(method("GET"))
+            .and(path("/agents/challenge"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ChallengeResponse {
+                challenge: challenge_b64,
+                nonce: "nonce-123".to_string(),
+            }))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/agents/token"))
+            .respond_with(ValidatingTokenResponder::new(
+                keypair.public_key(),
+                challenge,
+            ))
+            .mount(&mock_server)
+            .await;
+
+        let config = AgentAuthConfig::new(mock_server.uri());
+        let client = AgentAuthClient::with_config(config).unwrap();
+
+        let stored = client.authenticate(&keypair).await.unwrap();
+
+        assert_eq!(stored.token, "mock-token-123");
+        assert_eq!(stored.did, did);
+        assert_eq!(
+            stored.entitlements,
+            vec!["agent.capability.chat".to_string()]
+        );
+        assert_eq!(
+            stored.delegation_jwt,
+            Some("mock-delegation-jwt".to_string())
+        );
+        assert!(!stored.is_expired());
+
+        // Verify the token was persisted to storage.
+        let loaded = storage::load_token().await.unwrap();
+        assert!(loaded.is_some());
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.token, stored.token);
+
+        let _ = storage::delete_token().await;
     }
 }

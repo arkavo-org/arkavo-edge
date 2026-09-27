@@ -171,6 +171,7 @@ impl VerificationEvidence {
 mod tests {
     use super::*;
     use arkavo_test_macros::spec;
+    use uuid::Uuid;
 
     #[test]
     fn test_severity_ordering() {
@@ -209,5 +210,40 @@ mod tests {
         let evidence = VerificationEvidence::failed("policy", "Violation", CheckSeverity::Error, 2);
         assert!(evidence.status.is_failed());
         assert_eq!(evidence.severity, CheckSeverity::Error);
+    }
+
+    #[spec("CRIT-006")]
+    #[test]
+    fn test_evidence_variants_and_details() {
+        let partial = VerificationEvidence::partial("semantic", 0.75, "Mostly coherent", 5);
+        assert!(matches!(
+            partial.status,
+            VerificationStatus::Partial { score, .. } if (score - 0.75).abs() < f64::EPSILON
+        ));
+        assert_eq!(partial.severity, CheckSeverity::Info);
+
+        let low_partial = VerificationEvidence::partial("semantic", 0.25, "Barely coherent", 6);
+        assert_eq!(low_partial.severity, CheckSeverity::Warning);
+
+        let skipped = VerificationEvidence::skipped("semantic", "Not applicable");
+        assert!(matches!(
+            skipped.status,
+            VerificationStatus::Skipped { reason } if reason == "Not applicable"
+        ));
+
+        let task_id = Uuid::new_v4();
+        let pending = VerificationEvidence::pending("hitl", task_id, "Needs approval");
+        assert!(matches!(
+            pending.status,
+            VerificationStatus::Pending { task_id: id } if id == task_id
+        ));
+        assert_eq!(pending.severity, CheckSeverity::Warning);
+
+        let with_details = VerificationEvidence::passed("schema", "ok", 1)
+            .with_details(serde_json::json!({"key": "value"}));
+        assert_eq!(
+            with_details.details,
+            Some(serde_json::json!({"key": "value"}))
+        );
     }
 }

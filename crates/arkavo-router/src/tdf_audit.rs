@@ -118,6 +118,7 @@ mod tests {
             tool_call_id: None,
             tool_name: None,
             tool_calls: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -129,6 +130,7 @@ mod tests {
             tool_call_id: None,
             tool_name: None,
             tool_calls: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -140,6 +142,7 @@ mod tests {
             tool_call_id: None,
             tool_name: None,
             tool_calls: Vec::new(),
+            ..Default::default()
         }
     }
 

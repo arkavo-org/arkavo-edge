@@ -171,7 +171,7 @@ impl Tool for CalibrationTool {
                             "retry_policy": "Up to 3 attempts if offset detection fails"
                         },
                         "technical_details": {
-                            "tap_method": "idb_companion with --only simulator flag",
+                            "tap_method": "simctl io with AppleScript fallback",
                             "verification_method": "File-based communication via app Documents directory",
                             "expected_files": [
                                 "{app_container}/Documents/calibration_results.json"
@@ -184,16 +184,15 @@ impl Tool for CalibrationTool {
                             "Once complete, use 'get_calibration' to retrieve calibration data"
                         ],
                         "troubleshooting": {
-                            "stuck_in_initializing": "App may not be detecting taps. Auto-recovery will be attempted after 15 seconds",
+                            "stuck_in_initializing": "App may not be detecting taps. Watchdog stops retrying after 15 seconds",
                             "no_verification_data": "App may not be writing results. Check Documents folder permissions",
-                            "calibration_timeout": "Process times out after 60 seconds",
-                            "idb_stuck": "If no taps are detected for 15 seconds, automatic IDB recovery will be triggered"
+                            "calibration_timeout": "Process times out after 60 seconds"
                         },
                         "auto_recovery": {
                             "enabled": true,
                             "watchdog_timeout": "15 seconds",
                             "tap_timeout": "10 seconds per tap",
-                            "description": "Calibration manager will automatically recover from stuck IDB operations"
+                            "description": "Calibration manager uses a 15s watchdog so a stuck tap does not spin forever"
                         }
                     })),
                     CalibrationResponse::Error { message } => Err(TestError::Mcp(message)),
@@ -221,13 +220,7 @@ impl Tool for CalibrationTool {
                             "start_time": status.start_time,
                             "elapsed_seconds": status.elapsed_seconds,
                             "tap_count": status.tap_count,
-                            "last_tap_time": status.last_tap_time,
-                            "idb_status": {
-                                "connected": status.idb_status.connected,
-                                "companion_running": status.idb_status.companion_running,
-                                "last_health_check": status.idb_status.last_health_check,
-                                "last_error": status.idb_status.last_error
-                            }
+                            "last_tap_time": status.last_tap_time
                         });
 
                         // Check if ArkavoReference app is running by checking launchctl
@@ -258,64 +251,6 @@ impl Tool for CalibrationTool {
 
                         response["app_running"] = json!(app_running);
 
-                        // Check for IDB issues
-                        let idb_warning = if !status.idb_status.connected
-                            || !status.idb_status.companion_running
-                        {
-                            // Check if it's a framework issue
-                            if let Some(error) = &status.idb_status.last_error {
-                                if error.contains("Library not loaded")
-                                    && error.contains("FBControlCore")
-                                {
-                                    Some(
-                                        "IDB companion has missing framework dependencies. Use 'idb_management' tool with 'install' action to fix.",
-                                    )
-                                } else if error.contains("Connection refused")
-                                    || error.contains("not connected")
-                                {
-                                    Some(
-                                        "IDB companion is not connected to the device. The MCP server will handle auto-recovery.",
-                                    )
-                                } else if error.contains("timeout") || error.contains("timed out") {
-                                    Some(
-                                        "IDB operation timed out. Auto-recovery will restart IDB companion.",
-                                    )
-                                } else {
-                                    Some(
-                                        "IDB companion encountered an error. Check idb_status.last_error for details.",
-                                    )
-                                }
-                            } else if !status.idb_status.companion_running {
-                                Some(
-                                    "IDB companion process is not running. Use 'idb_management' tool with 'recover' action.",
-                                )
-                            } else {
-                                Some(
-                                    "IDB companion is not connected. Auto-recovery will attempt to fix this.",
-                                )
-                            }
-                        } else {
-                            None
-                        };
-
-                        if let Some(warning) = idb_warning {
-                            response["idb_warning"] = json!(warning);
-
-                            // Add specific action if framework issue
-                            if status
-                                .idb_status
-                                .last_error
-                                .as_ref()
-                                .is_some_and(|e| e.contains("FBControlCore"))
-                            {
-                                response["recommended_action"] = json!({
-                                    "tool": "idb_management",
-                                    "action": "install",
-                                    "description": "Install IDB with proper framework dependencies"
-                                });
-                            }
-                        }
-
                         // Check for stuck calibration (no taps in last 10 seconds during validating phase)
                         if status.status == "validating" && status.tap_count < 5 {
                             if let Some(last_tap) = status.last_tap_time {
@@ -328,7 +263,7 @@ impl Tool for CalibrationTool {
                                     ));
                                     response["auto_recovery_status"] = json!({
                                         "will_trigger_in": (15 - seconds_since_tap).max(0),
-                                        "description": "Automatic IDB recovery will attempt to fix the issue"
+                                        "description": "Watchdog will stop waiting on a stuck tap sequence"
                                     });
                                 }
                             } else if status.elapsed_seconds > 10 {
@@ -336,7 +271,7 @@ impl Tool for CalibrationTool {
                                     json!("No taps detected. Auto-recovery will trigger soon.");
                                 response["auto_recovery_status"] = json!({
                                     "will_trigger_in": (15 - status.elapsed_seconds as i64).max(0),
-                                    "description": "Automatic IDB recovery will attempt to fix the issue"
+                                    "description": "Watchdog will stop waiting on a stuck tap sequence"
                                 });
                             }
                         }
@@ -392,12 +327,10 @@ impl Tool for CalibrationTool {
                                         "current": 2,
                                         "name": "Auto-Recovery",
                                         "status": "recovering",
-                                        "description": "Automatic IDB recovery triggered due to no tap progress",
+                                        "description": "Watchdog triggered due to no tap progress",
                                         "recovery_steps": [
-                                            "Terminating stuck IDB companion processes",
-                                            "Clearing IDB cache",
-                                            "Re-initializing IDB connection",
-                                            "Retrying tap sequence"
+                                            "Stop retrying a stuck tap sequence",
+                                            "Continue remaining calibration taps"
                                         ],
                                         "elapsed": elapsed
                                     });

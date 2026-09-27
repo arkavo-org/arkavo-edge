@@ -861,6 +861,21 @@ mod tests {
         assert!(!dynamic.is_static);
     }
 
+    #[spec("CRIT-015")]
+    #[test]
+    fn test_observe_detects_timeout_empty_response() {
+        let advisor = PromptAdvisor::new();
+        let initial = advisor.stats().len();
+        advisor.observe("gemma", "what is 2+2", "");
+        let stats = advisor.stats();
+        assert_eq!(stats.len(), initial + 1);
+        let dynamic = stats
+            .iter()
+            .find(|s| s.model_family == "gemma" && s.label.contains("timeout"))
+            .unwrap();
+        assert!(!dynamic.is_static);
+    }
+
     #[spec("CRIT-011")]
     #[test]
     fn test_observe_detects_wrong_expert() {

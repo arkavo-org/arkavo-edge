@@ -6,12 +6,14 @@ pub use types::{
 
 use crate::error::{A2aError, Result};
 use base64::{Engine as _, engine::general_purpose};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
+use tracing::warn;
 
 const CHALLENGE_TTL_SECONDS: u64 = 300;
 
@@ -32,9 +34,31 @@ pub struct Registration {
     pub delegated_entitlements: Vec<String>,
 }
 
+/// Verification policy for authnz-rs delegation JWTs (ES256).
+///
+/// Delegation entitlements are granted from a JWT issued by authnz-rs.
+/// Without a trusted public key the token cannot be authenticated, so the
+/// registration service fails closed and grants no delegated entitlements.
+#[derive(Clone, Default)]
+pub struct DelegationConfig {
+    /// Trusted authnz-rs ES256 public keys (PEM-encoded, SubjectPublicKeyInfo).
+    pub trusted_public_keys_pem: Vec<String>,
+    /// INSECURE escape hatch: accept delegation JWT claims without signature
+    /// verification. Development/testing only — any forged token can grant
+    /// entitlements when this is enabled. Never enable in production.
+    pub allow_unverified: bool,
+}
+
+#[derive(Clone, Default)]
+struct DelegationState {
+    decoding_keys: Arc<Vec<DecodingKey>>,
+    allow_unverified: bool,
+}
+
 pub struct RegistrationService {
     challenges: Arc<RwLock<HashMap<String, Challenge>>>,
     registrations: Arc<RwLock<HashMap<String, Registration>>>,
+    delegation: DelegationState,
 }
 
 impl Clone for RegistrationService {
@@ -42,16 +66,38 @@ impl Clone for RegistrationService {
         Self {
             challenges: Arc::clone(&self.challenges),
             registrations: Arc::clone(&self.registrations),
+            delegation: self.delegation.clone(),
         }
     }
 }
 
 impl RegistrationService {
+    /// Create a service with no trusted delegation keys (fail-closed).
     pub fn new() -> Self {
         Self {
             challenges: Arc::new(RwLock::new(HashMap::new())),
             registrations: Arc::new(RwLock::new(HashMap::new())),
+            delegation: DelegationState::default(),
         }
+    }
+
+    /// Configure how delegation JWTs are verified.
+    ///
+    /// Returns an error if any configured public key PEM is not a valid
+    /// ES256 (P-256) public key, so a misconfigured deployment fails at
+    /// startup instead of silently running without delegation trust.
+    pub fn with_delegation_config(mut self, config: &DelegationConfig) -> Result<Self> {
+        let mut decoding_keys = Vec::with_capacity(config.trusted_public_keys_pem.len());
+        for pem in &config.trusted_public_keys_pem {
+            decoding_keys.push(DecodingKey::from_ec_pem(pem.as_bytes()).map_err(|e| {
+                A2aError::Configuration(format!("Invalid authnz-rs ES256 public key PEM: {e}"))
+            })?);
+        }
+        self.delegation = DelegationState {
+            decoding_keys: Arc::new(decoding_keys),
+            allow_unverified: config.allow_unverified,
+        };
+        Ok(self)
     }
 
     /// # Panics
@@ -171,7 +217,7 @@ impl RegistrationService {
 
         // Extract delegated entitlements from delegation JWT (if present)
         let delegated_entitlements = if let Some(ref jwt) = request.delegation_jwt {
-            extract_delegation_entitlements(jwt, &public_key_bytes)?
+            self.extract_delegation_entitlements(jwt, &public_key_bytes)?
         } else {
             vec![]
         };
@@ -211,6 +257,112 @@ impl RegistrationService {
         }
     }
 
+    /// Extract delegated entitlements from a delegation JWT.
+    ///
+    /// The ES256 signature is verified against the trusted authnz-rs public
+    /// keys before any claim is trusted. With no trusted key configured the
+    /// service fails closed: no entitlements are granted (unless the insecure
+    /// `allow_unverified` escape hatch is explicitly enabled).
+    fn extract_delegation_entitlements(
+        &self,
+        jwt: &str,
+        agent_public_key: &[u8],
+    ) -> Result<Vec<String>> {
+        let claims: serde_json::Value = if !self.delegation.decoding_keys.is_empty() {
+            let mut validation = Validation::new(Algorithm::ES256);
+            validation.validate_exp = true;
+            // authnz-rs delegation JWTs carry no aud; subject binding to the
+            // agent's did:key is enforced below instead.
+            validation.validate_aud = false;
+            validation.required_spec_claims.clear();
+            validation.required_spec_claims.insert("exp".to_string());
+            let mut last_error_kind = None;
+            self.delegation
+                .decoding_keys
+                .iter()
+                .find_map(|key| {
+                    match jsonwebtoken::decode::<serde_json::Value>(jwt, key, &validation) {
+                        Ok(token_data) => Some(token_data.claims),
+                        Err(e) => {
+                            last_error_kind = Some(e.into_kind());
+                            None
+                        }
+                    }
+                })
+                .ok_or_else(|| {
+                    let detail = last_error_kind
+                        .map(|kind| format!("{kind:?}"))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    A2aError::AuthenticationFailed(format!(
+                        "Delegation JWT signature verification failed: {detail}"
+                    ))
+                })?
+        } else if self.delegation.allow_unverified {
+            warn!(
+                "INSECURE: accepting delegation JWT without signature verification \
+                 (allow_unverified enabled); never enable in production"
+            );
+            decode_jwt_claims_unverified(jwt)?
+        } else {
+            warn!(
+                "No trusted authnz-rs public key configured; ignoring delegation JWT \
+                 (fail-closed, no entitlements granted). Configure \
+                 DelegationConfig::trusted_public_keys_pem to enable delegation."
+            );
+            return Ok(vec![]);
+        };
+
+        // Validate sub matches agent's did:key
+        if let Some(sub) = claims.get("sub").and_then(|v| v.as_str()) {
+            // Delegation JWTs use Ed25519 did:key identifiers
+            if agent_public_key.len() != 32 {
+                return Err(A2aError::InvalidRequest(
+                    "Delegation JWT only supported for Ed25519 keys".to_string(),
+                ));
+            }
+            let agent_pubkey = arkavo_crypto::AgentPublicKey::from_bytes(agent_public_key)
+                .map_err(|e| A2aError::InvalidRequest(format!("Invalid agent key: {e}")))?;
+            let agent_did = agent_pubkey.to_did_key();
+            if sub != agent_did {
+                return Err(A2aError::AuthenticationFailed(format!(
+                    "JWT sub '{sub}' does not match agent DID '{agent_did}'"
+                )));
+            }
+        } else {
+            return Err(A2aError::InvalidRequest(
+                "JWT missing 'sub' claim".to_string(),
+            ));
+        }
+
+        // Validate expiration (backstop for the unverified path; the verified
+        // path enforces exp via jsonwebtoken Validation)
+        if let Some(exp) = claims.get("exp").and_then(|v| v.as_i64()) {
+            #[allow(clippy::cast_possible_wrap)]
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            if now > exp {
+                return Err(A2aError::AuthenticationFailed(
+                    "Delegation JWT expired".to_string(),
+                ));
+            }
+        }
+
+        // Extract scope as entitlements
+        let entitlements = claims
+            .get("scope")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(entitlements)
+    }
+
     fn cleanup_expired_challenges(
         &self,
         challenges: &mut HashMap<String, Challenge>,
@@ -227,73 +379,21 @@ impl Default for RegistrationService {
     }
 }
 
-/// Extract delegated entitlements from a delegation JWT.
+/// Decode JWT claims without verifying the signature (structure only).
 ///
-/// Validates structural claims (sub matches agent DID, not expired) without
-/// full signature verification. Signature verification requires the authnz-rs
-/// public key, which is deferred until orchestrator key distribution is implemented.
-fn extract_delegation_entitlements(jwt: &str, agent_public_key: &[u8]) -> Result<Vec<String>> {
+/// Only used on the explicit insecure `allow_unverified` escape-hatch path.
+fn decode_jwt_claims_unverified(jwt: &str) -> Result<serde_json::Value> {
     // JWT format: header.payload.signature (base64url-encoded parts)
     let parts: Vec<&str> = jwt.split('.').collect();
     if parts.len() != 3 {
         return Err(A2aError::InvalidRequest("Invalid JWT format".to_string()));
     }
 
-    // Decode payload (second part)
     let payload_bytes = base64_url_decode(parts[1])
         .map_err(|e| A2aError::InvalidRequest(format!("Invalid JWT payload: {e}")))?;
 
-    let claims: serde_json::Value = serde_json::from_slice(&payload_bytes)
-        .map_err(|e| A2aError::InvalidRequest(format!("Invalid JWT claims: {e}")))?;
-
-    // Validate sub matches agent's did:key
-    if let Some(sub) = claims.get("sub").and_then(|v| v.as_str()) {
-        // Delegation JWTs use Ed25519 did:key identifiers
-        if agent_public_key.len() != 32 {
-            return Err(A2aError::InvalidRequest(
-                "Delegation JWT only supported for Ed25519 keys".to_string(),
-            ));
-        }
-        let agent_pubkey = arkavo_crypto::AgentPublicKey::from_bytes(agent_public_key)
-            .map_err(|e| A2aError::InvalidRequest(format!("Invalid agent key: {e}")))?;
-        let agent_did = agent_pubkey.to_did_key();
-        if sub != agent_did {
-            return Err(A2aError::AuthenticationFailed(format!(
-                "JWT sub '{sub}' does not match agent DID '{agent_did}'"
-            )));
-        }
-    } else {
-        return Err(A2aError::InvalidRequest(
-            "JWT missing 'sub' claim".to_string(),
-        ));
-    }
-
-    // Validate expiration
-    if let Some(exp) = claims.get("exp").and_then(|v| v.as_i64()) {
-        #[allow(clippy::cast_possible_wrap)]
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        if now > exp {
-            return Err(A2aError::AuthenticationFailed(
-                "Delegation JWT expired".to_string(),
-            ));
-        }
-    }
-
-    // Extract scope as entitlements
-    let entitlements = claims
-        .get("scope")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(entitlements)
+    serde_json::from_slice(&payload_bytes)
+        .map_err(|e| A2aError::InvalidRequest(format!("Invalid JWT claims: {e}")))
 }
 
 /// Decode base64url without padding (RFC 7515)
@@ -1943,6 +2043,54 @@ mod tests {
         format!("{header}.{payload}.{fake_sig}")
     }
 
+    /// Service with the insecure escape hatch enabled — used to exercise
+    /// structural claim validation independently of signature verification.
+    fn unverified_delegation_service() -> RegistrationService {
+        RegistrationService::new()
+            .with_delegation_config(&DelegationConfig {
+                trusted_public_keys_pem: vec![],
+                allow_unverified: true,
+            })
+            .unwrap()
+    }
+
+    /// Throwaway ES256 keypair standing in for authnz-rs, generated fresh at
+    /// runtime. Private key material is never committed to the repo — each
+    /// test run produces new keys. Returns (private_pem, public_pem).
+    fn test_es256_keypair() -> (String, String) {
+        use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+        let secret = p256::SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let private_pem = secret.to_pkcs8_pem(LineEnding::LF).unwrap().to_string();
+        let public_pem = secret
+            .public_key()
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap();
+        (private_pem, public_pem)
+    }
+
+    fn trusted_delegation_service(public_key_pem: &str) -> RegistrationService {
+        RegistrationService::new()
+            .with_delegation_config(&DelegationConfig {
+                trusted_public_keys_pem: vec![public_key_pem.to_string()],
+                allow_unverified: false,
+            })
+            .unwrap()
+    }
+
+    fn sign_delegation_jwt(claims: &serde_json::Value, private_key_pem: &str) -> String {
+        let key = jsonwebtoken::EncodingKey::from_ec_pem(private_key_pem.as_bytes()).unwrap();
+        jsonwebtoken::encode(&jsonwebtoken::Header::new(Algorithm::ES256), claims, &key).unwrap()
+    }
+
+    fn delegation_claims(agent_did: &str) -> serde_json::Value {
+        serde_json::json!({
+            "iss": "did:key:z6MkHuman",
+            "sub": agent_did,
+            "scope": ["action/read", "action/execute"],
+            "exp": chrono::Utc::now().timestamp() + 3600,
+        })
+    }
+
     #[test]
     fn test_delegation_jwt_valid_entitlements() {
         let keypair = arkavo_crypto::AgentKeypair::generate();
@@ -1954,7 +2102,9 @@ mod tests {
             "exp": chrono::Utc::now().timestamp() + 3600,
         });
         let jwt = make_test_jwt(&claims);
-        let result = extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        let service = unverified_delegation_service();
+        let result =
+            service.extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
         assert_eq!(result.unwrap(), vec!["action/read", "action/execute"]);
     }
 
@@ -1968,7 +2118,9 @@ mod tests {
             "exp": chrono::Utc::now().timestamp() + 3600,
         });
         let jwt = make_test_jwt(&claims);
-        let result = extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        let service = unverified_delegation_service();
+        let result =
+            service.extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
         assert!(result.is_err());
         assert!(format!("{}", result.unwrap_err()).contains("does not match"));
     }
@@ -1984,7 +2136,9 @@ mod tests {
             "exp": chrono::Utc::now().timestamp() - 3600,
         });
         let jwt = make_test_jwt(&claims);
-        let result = extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        let service = unverified_delegation_service();
+        let result =
+            service.extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
         assert!(result.is_err());
         assert!(format!("{}", result.unwrap_err()).contains("expired"));
     }
@@ -1992,8 +2146,9 @@ mod tests {
     #[test]
     fn test_delegation_jwt_invalid_format() {
         let keypair = arkavo_crypto::AgentKeypair::generate();
-        let result =
-            extract_delegation_entitlements("not.a.valid.jwt", &keypair.public_key().to_bytes());
+        let service = unverified_delegation_service();
+        let result = service
+            .extract_delegation_entitlements("not.a.valid.jwt", &keypair.public_key().to_bytes());
         assert!(result.is_err());
     }
 
@@ -2008,8 +2163,245 @@ mod tests {
         let jwt = make_test_jwt(&claims);
         // P-256 uncompressed key is 65 bytes
         let fake_p256_key = vec![0u8; 65];
-        let result = extract_delegation_entitlements(&jwt, &fake_p256_key);
+        let service = unverified_delegation_service();
+        let result = service.extract_delegation_entitlements(&jwt, &fake_p256_key);
         assert!(result.is_err());
         assert!(format!("{}", result.unwrap_err()).contains("Ed25519"));
+    }
+
+    // ============================================================================
+    // SECURITY REGRESSION TESTS: delegation JWT signature verification
+    // ============================================================================
+
+    /// Regression test: valid authnz-rs-signed delegation JWT is accepted
+    ///
+    /// SECURITY FIX: Delegation entitlements were previously granted from
+    /// JWT claims without any signature verification, so any caller could
+    /// forge entitlements. Now the ES256 signature must verify against a
+    /// configured trusted authnz-rs public key.
+    #[test]
+    fn test_delegation_jwt_valid_signature_accepted() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let agent_did = keypair.public_key().to_did_key();
+        let (authnz_private_pem, authnz_public_pem) = test_es256_keypair();
+        let jwt = sign_delegation_jwt(&delegation_claims(&agent_did), &authnz_private_pem);
+
+        let service = trusted_delegation_service(&authnz_public_pem);
+        let result =
+            service.extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        assert_eq!(result.unwrap(), vec!["action/read", "action/execute"]);
+    }
+
+    /// Regression test: forged delegation JWT (wrong signing key) is rejected
+    #[test]
+    fn test_delegation_jwt_forged_signature_rejected() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let agent_did = keypair.public_key().to_did_key();
+        // Signed by an attacker-controlled key, not authnz-rs
+        let (_, authnz_public_pem) = test_es256_keypair();
+        let (forger_private_pem, _) = test_es256_keypair();
+        let jwt = sign_delegation_jwt(&delegation_claims(&agent_did), &forger_private_pem);
+
+        let service = trusted_delegation_service(&authnz_public_pem);
+        let result =
+            service.extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("signature"));
+    }
+
+    /// Regression test: unsigned (fake-signature) JWT is rejected when a
+    /// trusted key is configured
+    #[test]
+    fn test_delegation_jwt_fake_signature_rejected() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let agent_did = keypair.public_key().to_did_key();
+        let jwt = make_test_jwt(&delegation_claims(&agent_did));
+
+        let (_, authnz_public_pem) = test_es256_keypair();
+        let service = trusted_delegation_service(&authnz_public_pem);
+        let result =
+            service.extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("signature"));
+    }
+
+    /// Regression test: no trusted key configured fails closed
+    ///
+    /// Even a correctly-signed delegation JWT grants no entitlements when no
+    /// authnz-rs public key is configured.
+    #[test]
+    fn test_delegation_jwt_no_key_fails_closed() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let agent_did = keypair.public_key().to_did_key();
+        let (authnz_private_pem, _) = test_es256_keypair();
+        let jwt = sign_delegation_jwt(&delegation_claims(&agent_did), &authnz_private_pem);
+
+        let service = RegistrationService::new();
+        let result =
+            service.extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        assert_eq!(
+            result.unwrap(),
+            Vec::<String>::new(),
+            "no trusted key configured must grant no entitlements"
+        );
+    }
+
+    /// Regression test: expired but correctly-signed JWT is rejected
+    #[test]
+    fn test_delegation_jwt_expired_signature_rejected() {
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let agent_did = keypair.public_key().to_did_key();
+        let mut claims = delegation_claims(&agent_did);
+        claims["exp"] = serde_json::json!(chrono::Utc::now().timestamp() - 3600);
+        let (authnz_private_pem, authnz_public_pem) = test_es256_keypair();
+        let jwt = sign_delegation_jwt(&claims, &authnz_private_pem);
+
+        let service = trusted_delegation_service(&authnz_public_pem);
+        let result =
+            service.extract_delegation_entitlements(&jwt, &keypair.public_key().to_bytes());
+        assert!(result.is_err());
+    }
+
+    /// Regression test: full registration path stores verified entitlements
+    #[spec("REG-002")]
+    #[tokio::test]
+    async fn test_verify_challenge_with_signed_delegation_jwt() {
+        let (authnz_private_pem, authnz_public_pem) = test_es256_keypair();
+        let service = trusted_delegation_service(&authnz_public_pem);
+        let device_id = "delegated-device".to_string();
+
+        let challenge_response = service
+            .create_challenge(ChallengeRequest {
+                device_id: device_id.clone(),
+            })
+            .await
+            .unwrap();
+
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let challenge_bytes = general_purpose::STANDARD
+            .decode(&challenge_response.challenge)
+            .unwrap();
+        let signature = keypair.sign(&challenge_bytes);
+
+        let jwt = sign_delegation_jwt(
+            &delegation_claims(&keypair.public_key().to_did_key()),
+            &authnz_private_pem,
+        );
+
+        let verify_request = VerifyRequest {
+            challenge_id: challenge_response.challenge_id,
+            device_id: device_id.clone(),
+            public_key: keypair.public_key().to_base64(),
+            signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: Some(jwt),
+        };
+
+        service.verify_challenge(verify_request).await.unwrap();
+
+        let registrations = service.registrations.read().await;
+        let registration = registrations.get(&device_id).unwrap();
+        assert_eq!(
+            registration.delegated_entitlements,
+            vec!["action/read", "action/execute"]
+        );
+    }
+
+    /// Regression test: forged delegation JWT aborts registration
+    #[spec("REG-002")]
+    #[tokio::test]
+    async fn test_verify_challenge_forged_delegation_jwt_rejected() {
+        let (_, authnz_public_pem) = test_es256_keypair();
+        let (forger_private_pem, _) = test_es256_keypair();
+        let service = trusted_delegation_service(&authnz_public_pem);
+        let device_id = "forged-delegated-device".to_string();
+
+        let challenge_response = service
+            .create_challenge(ChallengeRequest {
+                device_id: device_id.clone(),
+            })
+            .await
+            .unwrap();
+
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let challenge_bytes = general_purpose::STANDARD
+            .decode(&challenge_response.challenge)
+            .unwrap();
+        let signature = keypair.sign(&challenge_bytes);
+
+        let forged_jwt = sign_delegation_jwt(
+            &delegation_claims(&keypair.public_key().to_did_key()),
+            &forger_private_pem,
+        );
+
+        let verify_request = VerifyRequest {
+            challenge_id: challenge_response.challenge_id,
+            device_id: device_id.clone(),
+            public_key: keypair.public_key().to_base64(),
+            signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: Some(forged_jwt),
+        };
+
+        let result = service.verify_challenge(verify_request).await;
+        assert!(result.is_err(), "forged delegation JWT must be rejected");
+
+        let registrations = service.registrations.read().await;
+        assert!(
+            !registrations.contains_key(&device_id),
+            "registration must not be created from a forged token"
+        );
+    }
+
+    /// Regression test: fail-closed applies through the full registration path
+    #[spec("REG-002")]
+    #[tokio::test]
+    async fn test_verify_challenge_delegation_jwt_no_key_fails_closed() {
+        let service = RegistrationService::new();
+        let device_id = "no-key-delegated-device".to_string();
+
+        let challenge_response = service
+            .create_challenge(ChallengeRequest {
+                device_id: device_id.clone(),
+            })
+            .await
+            .unwrap();
+
+        let keypair = arkavo_crypto::AgentKeypair::generate();
+        let challenge_bytes = general_purpose::STANDARD
+            .decode(&challenge_response.challenge)
+            .unwrap();
+        let signature = keypair.sign(&challenge_bytes);
+
+        let (authnz_private_pem, _) = test_es256_keypair();
+        let jwt = sign_delegation_jwt(
+            &delegation_claims(&keypair.public_key().to_did_key()),
+            &authnz_private_pem,
+        );
+
+        let verify_request = VerifyRequest {
+            challenge_id: challenge_response.challenge_id,
+            device_id: device_id.clone(),
+            public_key: keypair.public_key().to_base64(),
+            signature: general_purpose::STANDARD.encode(&signature),
+            delegation_jwt: Some(jwt),
+        };
+
+        service.verify_challenge(verify_request).await.unwrap();
+
+        let registrations = service.registrations.read().await;
+        let registration = registrations.get(&device_id).unwrap();
+        assert!(
+            registration.delegated_entitlements.is_empty(),
+            "no trusted key configured must grant no entitlements"
+        );
+    }
+
+    /// Regression test: invalid trusted key PEM fails at configuration time
+    #[test]
+    fn test_delegation_config_rejects_invalid_pem() {
+        let result = RegistrationService::new().with_delegation_config(&DelegationConfig {
+            trusted_public_keys_pem: vec!["not a pem".to_string()],
+            allow_unverified: false,
+        });
+        assert!(result.is_err());
     }
 }

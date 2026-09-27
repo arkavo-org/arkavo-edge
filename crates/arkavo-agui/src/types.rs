@@ -377,6 +377,15 @@ pub enum AgUiEvent {
         failed: u32,
     },
 
+    /// Router telemetry: process-wide counts of structured `RouterEvent`s
+    /// (e.g. `cloud_escalation_blocked`, `local_feasibility`,
+    /// `spec_decoding_disabled`), read from the global event counters. Lets the
+    /// UI surface how often local-first held and feasibility degraded.
+    RouterTelemetry {
+        counters: std::collections::HashMap<String, u64>,
+        timestamp: String,
+    },
+
     // Security / TDF audit events
     GetSecurityStatus,
     SecurityStatusUpdate {

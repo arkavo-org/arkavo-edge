@@ -14,6 +14,10 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::super::LearningBus;
+use super::super::agent_cycle_reply::{
+    REQUEST_REPLY_BUDGET, apply_outcome, deliver_outcome_to_task,
+};
+use super::super::agent_event::CycleOutcome;
 use super::super::config_helpers::AgentMetadata;
 use super::super::execute_with_conductor_and_learning;
 use super::super::tool_memory::ToolMemory;
@@ -259,6 +263,7 @@ pub async fn handle_message_send(
 
                     let correlation_id = CorrelationId(uuid::Uuid::new_v4());
                     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                    let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
 
                     let sender_did = request_metadata_ref
                         .as_ref()
@@ -274,27 +279,23 @@ pub async fn handle_message_send(
                             task_id: task_id_clone,
                             correlation_id,
                             reply: reply_tx,
+                            outcome: outcome_tx,
                         })
                         .await;
 
+                    // The requester polls this task, so the cycle's answer —
+                    // text, tool summary, or refusal — has to land on it. The
+                    // specialist path below does the same thing inline.
+                    let executor = task_executor.clone();
                     tokio::spawn(async move {
-                        match tokio::time::timeout(std::time::Duration::from_mins(2), reply_rx)
-                            .await
-                        {
-                            Ok(Ok(receipt)) => {
-                                info!(
-                                    correlation_id = %receipt.correlation_id.0,
-                                    cycle = receipt.cycle_id.0,
-                                    "Message incorporated into orchestrator cycle"
-                                );
-                            }
-                            Ok(Err(_canceled)) => {
-                                warn!("Agent loop dropped message — event channel closed");
-                            }
-                            Err(_timeout) => {
-                                warn!("Message not processed within 120s");
-                            }
-                        }
+                        deliver_outcome_to_task(
+                            executor,
+                            task_id_clone,
+                            reply_rx,
+                            outcome_rx,
+                            REQUEST_REPLY_BUDGET,
+                        )
+                        .await;
                     });
                 } else {
                     // Specialist path: execute directly via conductor
@@ -307,7 +308,21 @@ pub async fn handle_message_send(
                     let compute_budget = compute_budget.clone();
                     let mesh_state = mesh_state.cloned();
                     let agent_memory = agent_memory.clone();
-                    let specialist_id = agent_metadata.read().await.name.clone();
+                    // Read both name and granted_tools in a single lock acquisition
+                    // so the specialist path honours the same least-privilege grant
+                    // set that the orchestrator-loop path enforces (design D9).
+                    let (specialist_id, specialist_granted, specialist_specialized): (
+                        String,
+                        Vec<String>,
+                        bool,
+                    ) = {
+                        let meta = agent_metadata.read().await;
+                        (
+                            meta.name.clone(),
+                            meta.granted_tools.clone(),
+                            meta.specialized,
+                        )
+                    };
                     let task_start = std::time::Instant::now();
                     #[cfg(feature = "iroh")]
                     let iroh_node = iroh_node.cloned();
@@ -325,6 +340,14 @@ pub async fn handle_message_send(
 
                         // Build a registry with mesh tools so specialists can
                         // use send_task/list_agents to communicate with the swarm.
+                        // When the agent has a non-empty grant set (i.e. it is a
+                        // SwarmKit-specialized agent), filter the registry down to
+                        // exactly those tools before handing it to the conductor.
+                        // This closes the least-privilege bypass on the A2A
+                        // message.send specialist path (mirrors the orchestrator
+                        // loop enforcement in agent_loop.rs — design D9).
+                        let granted_set: std::collections::HashSet<String> =
+                            specialist_granted.iter().cloned().collect();
                         let specialist_registry = {
                             let mut reg = arkavo_mcp_tools::ToolRegistry::empty();
                             if let Some(ref ms) = mesh_state {
@@ -340,8 +363,17 @@ pub async fn handle_message_send(
                                     reg.register(&name, Box::new(bridge));
                                 }
                             }
+                            if specialist_specialized {
+                                reg.retain_granted(&granted_set);
+                            }
                             Arc::new(reg)
                         };
+                        let granted_opt: Option<&std::collections::HashSet<String>> =
+                            if !specialist_specialized {
+                                None
+                            } else {
+                                Some(&granted_set)
+                            };
 
                         match execute_with_conductor_and_learning(
                             &conductor,
@@ -364,6 +396,7 @@ pub async fn handle_message_send(
                             None,
                             false, // specialists may need complexity assessment
                             Some(specialist_registry),
+                            granted_opt,
                             #[cfg(feature = "iroh")]
                             iroh_node.as_ref(),
                         )
@@ -455,6 +488,18 @@ pub async fn handle_message_send(
                         }
                     });
                 }
+            } else {
+                // No router means no way to execute this task, ever. Submitting
+                // it and walking away leaves the requester polling a task that
+                // will never move.
+                apply_outcome(
+                    task_executor,
+                    &task_id,
+                    &CycleOutcome::Failed {
+                        error: "agent has no router configured to execute this message".to_string(),
+                    },
+                )
+                .await;
             }
 
             let response = MessageSendResponse {

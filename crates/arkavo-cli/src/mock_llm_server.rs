@@ -588,8 +588,10 @@ mod tests {
     fn test_dlp_detection() {
         let config = MockLlmServerConfig::default();
 
-        let (blocked, reason) =
-            check_sensitive_data("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG", &config);
+        let (blocked, reason) = check_sensitive_data(
+            &format!("AWS_SECRET_ACCESS_KEY={}", "w".repeat(20)),
+            &config,
+        );
         assert!(blocked);
         assert!(reason.unwrap().contains("AWS"));
     }

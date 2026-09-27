@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 description = "Per-agent ARP runtime that wires PolicyCache and AdaptationEngine into the agent step loop"
 
+[features]
+# Publishes the DecisionTrace process-wide for the taint egress gate.
+taint = []
+
 [dependencies]
 arkavo-arp = { path = "../arkavo-arp" }
 arkavo-policy-cache = { path = "../arkavo-policy-cache" }

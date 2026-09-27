@@ -36,16 +36,25 @@ impl QwenProvider {
     }
 }
 
+/// Convert an arkavo-llm message to the Qwen chat shape.
+///
+/// Qwen's chat API has no tool role, and a trailing assistant message would be
+/// continued as prefill rather than answered, so a tool result goes back as
+/// attributed user text — the same rendering the other adapters use.
 fn convert_message(msg: Message) -> arkavo_qwen::Message {
-    let role = match msg.role {
-        Role::System => arkavo_qwen::MessageRole::System,
-        Role::User => arkavo_qwen::MessageRole::User,
-        Role::Assistant => arkavo_qwen::MessageRole::Assistant,
+    let (role, content) = match msg.role {
+        Role::System => (arkavo_qwen::MessageRole::System, msg.content),
+        Role::User => (arkavo_qwen::MessageRole::User, msg.content),
+        Role::Assistant => (arkavo_qwen::MessageRole::Assistant, msg.content),
+        Role::Tool => (
+            arkavo_qwen::MessageRole::User,
+            msg.tool_result_as_user_text(),
+        ),
     };
 
     arkavo_qwen::Message {
         role,
-        content: msg.content,
+        content,
         images: msg.images,
     }
 }
@@ -57,6 +66,7 @@ fn convert_stream_response(resp: arkavo_qwen::StreamResponse) -> crate::StreamRe
         // Keep this as None until arkavo-qwen exposes a reasoning channel.
         reasoning_content: None,
         done: resp.done,
+        ..Default::default()
     }
 }
 

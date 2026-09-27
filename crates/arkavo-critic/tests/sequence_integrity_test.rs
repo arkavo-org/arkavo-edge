@@ -16,6 +16,7 @@ fn make_input(text: &str) -> VerificationInput {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         },
         vec![],
     )

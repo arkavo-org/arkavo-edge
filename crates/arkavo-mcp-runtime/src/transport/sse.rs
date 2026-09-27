@@ -20,7 +20,7 @@ pub struct SseTransport {
 
 impl SseTransport {
     /// Create a new SSE transport
-    #[allow(clippy::unused_async)]
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn new(
         url: String,
         headers: HashMap<String, String>,

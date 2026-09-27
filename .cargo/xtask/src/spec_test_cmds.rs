@@ -1,5 +1,5 @@
 use crate::spec_test::{
-    CoverageAnalyzer, CoverageStatus, Criticality, RefsValidator, SpecCoverage, SpecParser,
+    CoverageAnalyzer, CoverageStatus, Criticality, RefsValidator, Spec, SpecCoverage, SpecParser,
     SpecStaleRefs, StaleRef, TestDiscovery, TestGenerator,
 };
 use crate::spec_test_diff;
@@ -26,6 +26,9 @@ pub enum Commands {
         fail_under: Option<f64>,
         #[arg(long)]
         critical_required: bool,
+        /// Exclude scenarios marked wip from the report
+        #[arg(long)]
+        skip_wip: bool,
     },
     /// List uncovered scenarios
     Uncovered {
@@ -33,6 +36,9 @@ pub enum Commands {
         generate: bool,
         #[arg(short, long, default_value = "tests/generated")]
         output: PathBuf,
+        /// Exclude scenarios marked wip from the report
+        #[arg(long)]
+        skip_wip: bool,
     },
     /// Generate test stubs
     Generate {
@@ -99,6 +105,7 @@ pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result
             markdown,
             fail_under,
             critical_required,
+            skip_wip,
         } => cmd_coverage(
             &specs_dir,
             &crates_dir,
@@ -107,10 +114,13 @@ pub fn run(command: Commands, specs_dir: PathBuf, crates_dir: PathBuf) -> Result
             markdown,
             fail_under,
             critical_required,
+            skip_wip,
         ),
-        Commands::Uncovered { generate, output } => {
-            cmd_uncovered(&specs_dir, &crates_dir, generate, output)
-        }
+        Commands::Uncovered {
+            generate,
+            output,
+            skip_wip,
+        } => cmd_uncovered(&specs_dir, &crates_dir, generate, output, skip_wip),
         Commands::Generate {
             spec,
             uncovered_only,
@@ -140,6 +150,19 @@ fn spec_name(path: &Path) -> String {
         .replace(".spec", "")
 }
 
+fn filter_wip(specs: Vec<(PathBuf, Spec)>, skip_wip: bool) -> Vec<(PathBuf, Spec)> {
+    if !skip_wip {
+        return specs;
+    }
+    specs
+        .into_iter()
+        .map(|(path, mut spec)| {
+            spec.scenarios.retain(|s| !s.wip);
+            (path, spec)
+        })
+        .collect()
+}
+
 fn filter_specs(specs: Vec<SpecCoverage>, filter: Option<String>) -> Vec<SpecCoverage> {
     match filter {
         Some(f) => {
@@ -156,6 +179,7 @@ fn filter_specs(specs: Vec<SpecCoverage>, filter: Option<String>) -> Vec<SpecCov
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_coverage(
     specs_dir: &Path,
     crates_dir: &Path,
@@ -164,8 +188,9 @@ fn cmd_coverage(
     markdown: bool,
     fail_under: Option<f64>,
     critical_required: bool,
+    skip_wip: bool,
 ) -> Result<()> {
-    let specs = SpecParser::parse_all_specs(specs_dir)?;
+    let specs = filter_wip(SpecParser::parse_all_specs(specs_dir)?, skip_wip);
     let tests = TestDiscovery::new()?.discover_tests(crates_dir)?;
     let report = CoverageAnalyzer::analyze(specs, tests);
     let pct = report.coverage_percentage();
@@ -264,6 +289,7 @@ fn cmd_uncovered(
     crates_dir: &Path,
     generate: bool,
     output: PathBuf,
+    skip_wip: bool,
 ) -> Result<()> {
     println!(
         "{}\n{}\n",
@@ -271,7 +297,7 @@ fn cmd_uncovered(
         "==================".yellow()
     );
 
-    let specs = SpecParser::parse_all_specs(specs_dir)?;
+    let specs = filter_wip(SpecParser::parse_all_specs(specs_dir)?, skip_wip);
     let tests = TestDiscovery::new()?.discover_tests(crates_dir)?;
     let report = CoverageAnalyzer::analyze(specs, tests);
 

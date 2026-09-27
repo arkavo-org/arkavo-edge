@@ -406,6 +406,8 @@ impl PeerManager {
 mod tests {
     use super::*;
     use arkavo_test_macros::spec;
+    use futures::StreamExt;
+    use tokio::net::TcpListener;
     use uuid::Uuid;
 
     #[spec("PROTO-011")]
@@ -517,6 +519,54 @@ mod tests {
         );
     }
 
+    #[spec("PROTO-013")]
+    #[tokio::test]
+    async fn test_connect_to_peer_with_websocket_transport() {
+        let ws_url = start_ws_server().await;
+        // Provide an http:// URL and a WebSocket transport type to exercise
+        // the normalization path (http:// -> ws://).
+        let raw_url = ws_url.replace("ws://", "http://");
+
+        let config = PeerManagerConfig {
+            default_transport: TransportType::Http,
+            auto_upgrade_streaming: true,
+            transport_config: TransportConfig {
+                tls_config: crate::transport::TlsConfig {
+                    require_tls: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        };
+        let manager = PeerManager::with_config("agent".to_string(), config);
+
+        let result = manager
+            .connect_to_peer_with_transport(&raw_url, TransportType::WebSocket)
+            .await;
+        assert!(
+            result.is_ok(),
+            "Expected WebSocket connection to succeed: {result:?}"
+        );
+
+        assert!(manager.has_peers());
+        assert_eq!(manager.peer_count(), 1);
+
+        let peers = manager.connected_peers_with_transport();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].1, TransportType::WebSocket);
+        assert!(
+            peers[0].0.starts_with("ws://"),
+            "URL should be normalized to WebSocket scheme: {}",
+            peers[0].0
+        );
+
+        // Clean up the WebSocket connection gracefully.
+        let guard = manager.peers.read().unwrap();
+        let peer = guard.values().next().unwrap();
+        let ws = peer.ws_transport.as_ref().unwrap();
+        ws.close().await.ok();
+    }
+
     #[spec("PROTO-017")]
     #[spec("PROTO-018")]
     #[test]
@@ -565,6 +615,23 @@ mod tests {
         }
     }
 
+    /// Start a minimal local WebSocket server and return its URL.
+    ///
+    /// The server accepts one connection and keeps it open until the client
+    /// closes, which is enough for `connect_to_peer_with_transport` to succeed.
+    async fn start_ws_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while ws.next().await.is_some() {}
+        });
+
+        format!("ws://127.0.0.1:{port}")
+    }
+
     #[spec("PROTO-015")]
     #[tokio::test]
     async fn test_broadcast_to_registered_peers() {
@@ -599,6 +666,44 @@ mod tests {
         assert_eq!(b_requests[0].method, "agent_query");
     }
 
+    #[spec("PROTO-015")]
+    #[tokio::test]
+    async fn test_broadcast_collects_errors() {
+        let manager = PeerManager::new("agent".to_string());
+
+        let peer_ok = Arc::new(MockTransport::new(vec![Ok(A2aResponse::Success {
+            jsonrpc: "2.0".to_string(),
+            id: Uuid::new_v4(),
+            result: serde_json::json!({"peer": "ok"}),
+        })]));
+        let peer_err = Arc::new(MockTransport::new(vec![Err(anyhow::anyhow!("boom"))]));
+
+        manager.register_transport("http://peer-ok.example", peer_ok.clone());
+        manager.register_transport("http://peer-err.example", peer_err.clone());
+
+        let results = manager
+            .broadcast("agent_query", serde_json::json!({"key": "value"}))
+            .await;
+
+        assert_eq!(results.len(), 2);
+        let ok_count = results.iter().filter(|r| r.is_ok()).count();
+        let err_count = results.iter().filter(|r| r.is_err()).count();
+        assert_eq!(ok_count, 1);
+        assert_eq!(err_count, 1);
+
+        let err_text = results
+            .iter()
+            .find_map(|r| r.as_ref().err())
+            .expect("one error result");
+        assert!(
+            err_text.contains("boom"),
+            "error should mention failure reason: {err_text}"
+        );
+
+        assert_eq!(peer_ok.take_requests().len(), 1);
+        assert_eq!(peer_err.take_requests().len(), 1);
+    }
+
     #[spec("PROTO-016")]
     #[tokio::test]
     async fn test_send_to_specific_peer() {
@@ -621,6 +726,36 @@ mod tests {
             .await;
 
         assert!(response.is_ok());
+        let requests = peer.take_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "agent_query");
+    }
+
+    #[spec("PROTO-016")]
+    #[tokio::test]
+    async fn test_send_to_specific_peer_error_propagation() {
+        let manager = PeerManager::new("agent".to_string());
+
+        let peer = Arc::new(MockTransport::new(vec![Err(anyhow::anyhow!(
+            "peer failure"
+        ))]));
+        manager.register_transport("http://peer-a.example", peer.clone());
+
+        let result = manager
+            .send_to(
+                "http://peer-a.example",
+                "agent_query",
+                serde_json::json!({"key": "value"}),
+            )
+            .await;
+
+        assert!(result.is_err(), "send_to should propagate transport errors");
+        let err_text = result.unwrap_err().to_string();
+        assert!(
+            err_text.contains("peer failure"),
+            "error should mention the underlying failure: {err_text}"
+        );
+
         let requests = peer.take_requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, "agent_query");

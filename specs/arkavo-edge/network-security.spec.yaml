@@ -165,7 +165,6 @@ scenarios:
       - Admin interface binds to different port
       - Admin interface requires stronger authentication
       - Admin actions require re-authentication for sensitive ops
-    refs: [crates/arkavo-agui/src/admin_isolation.rs]
 
   - id: NET-012
     name: Security configuration audit on startup
@@ -193,7 +192,6 @@ scenarios:
       - Minimal information is revealed in responses
       - Version numbers are not exposed
       - Generic error responses for unauthenticated requests
-    refs: [crates/arkavo-protocol/src/fingerprint_guard.rs]
 
   - id: NET-014
     name: DNS resolution validation before connection
@@ -262,7 +260,6 @@ scenarios:
       - Request initiator (user command, tool, autonomous) is recorded
       - Response size and status logged
       - Audit trail enables forensic analysis
-    refs: [crates/arkavo-observability/src/egress_audit.rs]
     edge_cases:
       - condition: DNS resolution fails
         expected: Log shows "DNS failed" with attempted hostname

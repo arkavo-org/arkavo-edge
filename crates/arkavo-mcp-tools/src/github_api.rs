@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 
-const GITHUB_API_BASE: &str = "https://api.github.com";
+pub(crate) const GITHUB_API_BASE: &str = "https://api.github.com";
 const USER_AGENT: &str = "Arkavo-MCP-Tools/0.1";
 
 /// Merge method for pull requests
@@ -21,14 +21,22 @@ pub enum MergeMethod {
     Rebase,
 }
 
+/// Commit ref returned inside a PR response.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct GhHead {
+    pub(crate) sha: String,
+}
+
 /// Minimal PR response
-#[derive(Debug, Deserialize)]
-struct GhPullRequest {
-    number: u64,
-    title: Option<String>,
-    html_url: Option<String>,
-    state: Option<String>,
-    user: Option<GhUser>,
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct GhPullRequest {
+    pub(crate) number: u64,
+    pub(crate) title: Option<String>,
+    pub(crate) html_url: Option<String>,
+    pub(crate) state: Option<String>,
+    pub(crate) user: Option<GhUser>,
+    pub(crate) head: Option<GhHead>,
+    pub(crate) updated_at: Option<String>,
 }
 
 /// Minimal issue response
@@ -48,13 +56,13 @@ struct GhRelease {
 }
 
 /// Minimal user response
-#[derive(Debug, Deserialize)]
-struct GhUser {
-    login: String,
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct GhUser {
+    pub(crate) login: String,
 }
 
-struct GitHubClient {
-    client: reqwest::Client,
+pub(crate) struct GitHubClient {
+    pub(crate) client: reqwest::Client,
     token: String,
 }
 
@@ -62,7 +70,7 @@ struct GitHubClient {
 static GITHUB_CLIENT: OnceCell<GitHubClient> = OnceCell::const_new();
 
 /// Get or initialize the GitHub client
-async fn get_github_client() -> Result<&'static GitHubClient> {
+pub(crate) async fn get_github_client() -> Result<&'static GitHubClient> {
     GITHUB_CLIENT
         .get_or_try_init(|| async {
             let token = std::env::var("GITHUB_TOKEN")
@@ -79,7 +87,7 @@ async fn get_github_client() -> Result<&'static GitHubClient> {
 }
 
 /// Send a GitHub API request and check for errors
-async fn github_request(
+pub(crate) async fn github_request(
     gh: &GitHubClient,
     request: reqwest::RequestBuilder,
     action: &str,

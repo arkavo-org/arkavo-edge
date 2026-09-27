@@ -4,8 +4,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod complexity;
+mod escalation;
 mod executor;
 mod planner;
+mod planning_provider;
+mod subtask_model;
 
 pub use complexity::{ComplexityScore, ComplexityScorer};
 pub use executor::{ArchitectExecutor, SubtaskResult};
@@ -22,13 +25,21 @@ pub struct ArchitectPlan {
     pub complexity_score: ComplexityScore,
     /// Ordered list of subtasks to execute
     pub subtasks: Vec<Subtask>,
-    /// Estimated cost if Opus handled entire task alone (for savings calculation)
-    pub opus_only_estimate_usd: f64,
+    /// Estimated cost of running the whole task on the planning arm alone —
+    /// the baseline architect mode is measured against. Zero when no planning
+    /// model produced this plan, in which case there is nothing to compare to.
+    #[serde(default, alias = "opus_only_estimate_usd")]
+    pub single_arm_estimate_usd: f64,
     /// Estimated total cost with architect mode routing
     pub architect_estimate_usd: f64,
     /// Reasoning/thinking content from the planning model (e.g., DeepSeek V3.2-Speciale)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub planning_reasoning: Option<String>,
+    /// Model that actually produced this plan. `None` on a plan built outside
+    /// the planner (a hand-assembled or legacy-deserialized plan), where there
+    /// is no planning call to attribute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning_model: Option<ModelChoice>,
 }
 
 impl ArchitectPlan {
@@ -38,17 +49,18 @@ impl ArchitectPlan {
             original_task: task,
             complexity_score: complexity,
             subtasks: Vec::new(),
-            opus_only_estimate_usd: 0.0,
+            single_arm_estimate_usd: 0.0,
             architect_estimate_usd: 0.0,
             planning_reasoning: None,
+            planning_model: None,
         }
     }
 
     /// Calculate estimated savings percentage
     pub fn estimated_savings_percent(&self) -> f32 {
-        if self.opus_only_estimate_usd > 0.0 {
-            let savings = self.opus_only_estimate_usd - self.architect_estimate_usd;
-            ((savings / self.opus_only_estimate_usd) * 100.0) as f32
+        if self.single_arm_estimate_usd > 0.0 {
+            let savings = self.single_arm_estimate_usd - self.architect_estimate_usd;
+            ((savings / self.single_arm_estimate_usd) * 100.0) as f32
         } else {
             0.0
         }
@@ -115,7 +127,7 @@ pub struct ArchitectResult {
     pub final_response: String,
     /// Actual total cost incurred
     pub actual_cost_usd: f64,
-    /// Actual savings compared to Opus-only estimate
+    /// Actual savings against [`ArchitectPlan::single_arm_estimate_usd`]
     pub actual_savings_usd: f64,
     /// Whether architect mode was beneficial
     pub was_cost_effective: bool,
@@ -136,8 +148,8 @@ impl ArchitectResult {
 
     /// Calculate actual savings percentage achieved
     pub fn savings_percent(&self) -> f32 {
-        if self.plan.opus_only_estimate_usd > 0.0 {
-            ((self.actual_savings_usd / self.plan.opus_only_estimate_usd) * 100.0) as f32
+        if self.plan.single_arm_estimate_usd > 0.0 {
+            ((self.actual_savings_usd / self.plan.single_arm_estimate_usd) * 100.0) as f32
         } else {
             0.0
         }
@@ -216,44 +228,6 @@ impl ArchitectResult {
     }
 }
 
-/// Cost tracking metadata for architect mode spending records
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArchitectCostMetadata {
-    /// Whether this spending was in architect mode
-    pub architect_mode: bool,
-    /// Plan ID this spending belongs to
-    pub plan_id: Option<Uuid>,
-    /// Phase of execution
-    pub phase: ArchitectPhase,
-    /// Subtask ID if in execution phase
-    pub subtask_id: Option<Uuid>,
-    /// What we estimated Opus-only would cost
-    pub opus_only_estimate: Option<f64>,
-}
-
-/// Phase of architect mode execution
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ArchitectPhase {
-    /// Opus is generating the plan
-    Planning,
-    /// Executing a subtask
-    Execution,
-    /// Synthesizing final result
-    Synthesis,
-}
-
-impl Default for ArchitectCostMetadata {
-    fn default() -> Self {
-        Self {
-            architect_mode: false,
-            plan_id: None,
-            phase: ArchitectPhase::Planning,
-            subtask_id: None,
-            opus_only_estimate: None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,7 +238,7 @@ mod tests {
     #[test]
     fn test_architect_plan_savings() {
         let mut plan = ArchitectPlan::new("test task".to_string(), ComplexityScore::simple());
-        plan.opus_only_estimate_usd = 0.10;
+        plan.single_arm_estimate_usd = 0.10;
         plan.architect_estimate_usd = 0.03;
 
         assert!((plan.estimated_savings_percent() - 70.0).abs() < 0.1);

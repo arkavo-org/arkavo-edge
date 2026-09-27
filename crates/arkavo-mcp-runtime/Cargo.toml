@@ -33,5 +33,8 @@ uuid.workspace = true
 chrono.workspace = true
 rand.workspace = true
 
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+
 [lints]
 workspace = true

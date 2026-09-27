@@ -10,7 +10,7 @@
 //! For UI interactions, we must use either:
 //! 1. XCTest framework (via XCTestUnixBridge)
 //! 2. AppleScript with Accessibility API
-//! 3. Third-party tools like idb
+//! 3. simctl io fallbacks
 
 use super::device_manager::DeviceManager;
 use super::xctest_compiler::XCTestCompiler;

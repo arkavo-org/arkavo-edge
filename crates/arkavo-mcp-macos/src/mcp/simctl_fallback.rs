@@ -2,7 +2,7 @@ use crate::{Result, TestError};
 use serde_json::json;
 use std::process::Command;
 
-/// Fallback implementation for when IDB fails
+/// Fallback implementation when AXP is unavailable
 /// Note: xcrun simctl doesn't have direct tap capability, so we use AppleScript
 pub struct SimctlFallback;
 
@@ -26,7 +26,7 @@ impl SimctlFallback {
 
         // If AppleScript fails or not on macOS, return error
         Err(TestError::Mcp(
-            "simctl does not support tap operations. IDB or XCTest is required for UI automation."
+            "simctl does not support tap operations. XCTest or AppleScript is required for UI automation."
                 .to_string(),
         ))
     }

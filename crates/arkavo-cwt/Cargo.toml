@@ -1,0 +1,32 @@
+[package]
+name = "arkavo-cwt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "COSE_Sign1/ES256 CWT verification against a published COSE key set"
+
+[lints]
+workspace = true
+
+[dependencies]
+ciborium = { workspace = true }
+coset = { workspace = true }
+ed25519-dalek = { workspace = true }
+p256 = { workspace = true }
+base64 = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# `sync` only: the cached key set serializes its refreshes so a burst of
+# unknown-kid verifications makes one request, not one each.
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+# Tests generate keypairs; the runtime crate needs no RNG.
+ed25519-dalek = { workspace = true, features = ["rand_core"] }
+rand = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"

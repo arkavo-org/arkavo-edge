@@ -80,6 +80,22 @@ impl IrohTransport {
 
         debug!(?blob_ticket, "Fetching blob");
 
+        // Establish a direct connection to the provider using the full address
+        // embedded in the ticket (direct IPs + relay URL). The downloader below
+        // resolves providers by bare EndpointId, which on its own can only be
+        // located via the endpoint's external AddressLookup (n0.computer DNS) —
+        // that path needs outbound network and fails on restricted CI runners.
+        // Pre-connecting here seeds the connection pool with a live connection
+        // that get_or_connect then reuses, so the fetch succeeds via loopback
+        // without any external resolution. Best-effort: if the direct connect
+        // itself fails, fall through and let the downloader try relay/lookup.
+        if let Err(e) = endpoint
+            .connect(blob_ticket.addr().clone(), iroh_blobs::protocol::ALPN)
+            .await
+        {
+            debug!(error = %e, "Direct connect to provider failed; falling back to downloader resolution");
+        }
+
         // Create downloader and download blob
         let downloader = store.downloader(&endpoint);
 

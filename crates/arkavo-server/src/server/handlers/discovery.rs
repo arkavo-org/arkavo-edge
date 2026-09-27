@@ -207,7 +207,7 @@ pub async fn handle_discover_features_query(
     Ok(DiscoverFeaturesDisclose { disclosures })
 }
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 pub async fn handle_rpc_discover(
     metrics: &Arc<MetricsCollector>,
 ) -> Result<serde_json::Value, ErrorObjectOwned> {

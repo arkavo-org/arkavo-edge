@@ -8,7 +8,7 @@ use arkavo_trust::{
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 pub async fn handle_trust_query(
     metrics: &Arc<MetricsCollector>,
     rate_limiter: &RateLimiter,
@@ -43,7 +43,7 @@ pub async fn handle_trust_query(
     }
 }
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 pub async fn handle_trust_verify(
     metrics: &Arc<MetricsCollector>,
     rate_limiter: &RateLimiter,
@@ -78,7 +78,7 @@ pub async fn handle_trust_verify(
     }
 }
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 pub async fn handle_trust_history(
     metrics: &Arc<MetricsCollector>,
     rate_limiter: &RateLimiter,
@@ -102,7 +102,7 @@ pub async fn handle_trust_history(
     Ok(response)
 }
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 pub async fn handle_trust_publish(
     metrics: &Arc<MetricsCollector>,
     rate_limiter: &RateLimiter,
@@ -137,7 +137,7 @@ pub async fn handle_trust_publish(
     }
 }
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 pub async fn handle_trust_providers(
     metrics: &Arc<MetricsCollector>,
     trust_service: &SharedTrustService,

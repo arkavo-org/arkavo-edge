@@ -138,8 +138,17 @@ pub fn spawn_status_broadcaster(connections: Arc<RwLock<HashMap<String, Connecti
                     health: health_data,
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 };
-                for (_, conn_info) in conns.iter() {
+                // Router telemetry from the process-wide event counters (the
+                // real serving router increments these at emit time, so this
+                // needs no router handle and never double-drains).
+                let router_telemetry = AgUiEvent::RouterTelemetry {
+                    counters: arkavo_observability::event_counters::global_event_counters()
+                        .snapshot(),
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                };
+                for conn_info in conns.values() {
                     let _ = conn_info._ws_tx.send(status_event.clone()).await;
+                    let _ = conn_info._ws_tx.send(router_telemetry.clone()).await;
                 }
             }
         }
@@ -186,7 +195,7 @@ pub fn spawn_agent_monitor(
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
                     let conns = connections.read().await;
-                    for (_, ci) in conns.iter() {
+                    for ci in conns.values() {
                         let _ = ci._ws_tx.send(event.clone()).await;
                     }
                 }
@@ -199,7 +208,7 @@ pub fn spawn_agent_monitor(
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 };
                 let conns = connections.read().await;
-                for (_, ci) in conns.iter() {
+                for ci in conns.values() {
                     let _ = ci._ws_tx.send(event.clone()).await;
                 }
             }

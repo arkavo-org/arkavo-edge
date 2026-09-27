@@ -1,3 +1,4 @@
+pub mod cloud_consent;
 pub mod commands;
 pub mod first_run;
 pub mod hardware;
@@ -10,6 +11,13 @@ pub mod mock_llm_server;
 pub mod mock_provider;
 pub mod prompt_loader;
 pub mod secure_http;
+#[cfg(feature = "sentinel")]
+pub mod sentinel_embedder;
+#[cfg(feature = "sentinel")]
+pub mod sentinel_scorer;
+#[cfg(feature = "sentinel")]
+pub mod sentinel_wiring;
+pub mod startup_policy;
 pub mod tool_integration;
 pub mod welcome;
 
@@ -39,6 +47,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         // Initialize security controls
         // SECURITY: Egress filter prevents SSRF attacks
         secure_http::init_egress_filter();
+        #[cfg(feature = "sentinel")]
+        sentinel_wiring::install();
     });
 
     // Check for verbose flag
@@ -49,11 +59,20 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .first()
         .is_some_and(|a| matches!(a.as_str(), "-h" | "--help" | "help" | "-v" | "--version"));
 
-    // First-run experience: check if models are available
-    if !is_help_or_version && first_run::is_first_run() {
-        // Handle first-run flow in a runtime
-        let runtime = tokio::runtime::Runtime::new()?;
-        runtime.block_on(handle_first_run(verbose))?;
+    startup_policy::validate_local_backend(
+        args,
+        cfg!(any(feature = "llama-cpp", feature = "snpe")),
+    )?;
+    if !is_help_or_version && startup_policy::needs_local_setup(args) && first_run::is_first_run() {
+        match startup_policy::first_run_action() {
+            startup_policy::FirstRunAction::Prompt => {
+                let runtime = tokio::runtime::Runtime::new()?;
+                runtime.block_on(handle_first_run(verbose))?;
+            }
+            startup_policy::FirstRunAction::Skip => {
+                return Err("The agent harness requires local models. Provision them with `arkavo model download` before starting; cloud credentials do not replace local inference.".into());
+            }
+        }
     }
 
     if args.is_empty() {
@@ -66,7 +85,30 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "chat" => commands::chat::execute(&args[1..]),
         "task" => commands::task::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),
+        "mcp" => commands::mcp_proxy::execute(&args[1..]),
+        "login" | "logout" => {
+            let is_login = args[0] == "login";
+            let run_async = async {
+                if is_login {
+                    commands::login::execute_login().await
+                } else {
+                    commands::login::execute_logout().await
+                }
+            };
+
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => handle.block_on(run_async),
+                Err(_) => {
+                    let runtime = tokio::runtime::Runtime::new()?;
+                    runtime.block_on(run_async)
+                }
+            }
+        }
         // Hidden commands (still accessible, just not in main help)
+        #[cfg(feature = "knowledge-pack")]
+        "pack" => commands::pack::execute(&args[1..]).map_err(Into::into),
+        #[cfg(not(feature = "knowledge-pack"))]
+        "pack" => Err("pack is not in this build; compile with the knowledge-pack feature".into()),
         "terminal" => commands::terminal::execute(&args[1..]),
         #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         "test" => commands::test::execute(&args[1..]),
@@ -142,34 +184,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        #[cfg(feature = "llama-cpp")]
-        "tool-bench" => {
-            let run_async = async {
-                use clap::Parser;
-
-                #[derive(Parser)]
-                #[command(name = "tool-bench")]
-                #[command(about = "Benchmark tool calling across local models")]
-                struct Cli {
-                    #[command(flatten)]
-                    command: commands::tool_bench::ToolBenchCommand,
-                }
-
-                let cli = Cli::parse_from(
-                    std::iter::once("tool-bench")
-                        .chain(args[1..].iter().map(std::string::String::as_str)),
-                );
-                commands::tool_bench::run(&cli.command).await
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
         "help" => {
             print_usage();
             Ok(())
@@ -200,6 +214,9 @@ fn print_usage() {
     println!("    chat           Conversational chat");
     println!("    task           Plan and apply code changes");
     println!("    ui             Launch web UI");
+    println!("    pack           Build sealed knowledge-pack components");
+    println!("    mcp proxy      Permit-gated stdio MCP relay");
+    println!("{}", commands::login::login_help());
     println!();
     println!("Run 'arkavo <command> --help' for detailed options");
     println!();
@@ -273,8 +290,6 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
         println!("You can download models later with:");
         println!("  arkavo model download");
         println!();
-        println!("Or use a cloud provider with an API key:");
-        println!("  GEMINI_API_KEY=your-key arkavo chat --prompt \"Hello\"");
     }
 
     std::process::exit(0);

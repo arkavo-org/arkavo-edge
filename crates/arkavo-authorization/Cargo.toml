@@ -28,6 +28,7 @@ prost = { workspace = true, optional = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
 wiremock = "0.6"
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [features]
 default = ["connect"]

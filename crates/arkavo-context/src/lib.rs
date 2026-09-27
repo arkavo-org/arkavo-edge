@@ -1,5 +1,5 @@
 #![allow(clippy::significant_drop_tightening)]
-#![allow(clippy::unused_async)]
+#![allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 
 pub mod chunker;
 pub mod compressor;

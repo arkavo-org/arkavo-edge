@@ -535,6 +535,15 @@ provenance:
         );
     }
 
+    #[spec("SK-070")]
+    #[tokio::test]
+    async fn launch_without_bindings_leaves_dids_unset() {
+        let m = parse_yaml(KIT).unwrap();
+        let f = SwarmFlight::launch(&m, LaunchOptions::default()).unwrap();
+        assert!(f.role("alpha").unwrap().bound_agent_did().is_none());
+        assert!(f.role("beta").unwrap().bound_agent_did().is_none());
+    }
+
     #[spec("SK-073")]
     #[tokio::test]
     async fn dispatch_initial_tasks_calls_transport_per_bound_role() {
@@ -561,6 +570,29 @@ provenance:
         assert!(sent[0].task.contains("two roles"));
         assert_eq!(sent[1].role_id, "beta");
         assert_eq!(sent[1].agent_did, "did:web:agent-b.arkavo.net");
+    }
+
+    #[spec("SK-073")]
+    #[tokio::test]
+    async fn dispatch_initial_tasks_includes_flight_id_and_role_type() {
+        let m = parse_yaml(KIT).unwrap();
+        let mut bindings = HashMap::new();
+        bindings.insert("alpha".to_string(), "did:web:agent-a.arkavo.net".into());
+        let f = SwarmFlight::launch(
+            &m,
+            LaunchOptions {
+                role_agent_bindings: bindings,
+                ..LaunchOptions::default()
+            },
+        )
+        .unwrap();
+        let transport = CapturingTransport::default();
+        f.dispatch_initial_tasks(&transport).await.unwrap();
+        let sent = transport.sent.lock().await;
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].role_id, "alpha");
+        assert_eq!(sent[0].role_type, "specialist");
+        assert!(!sent[0].flight_id.to_string().is_empty());
     }
 
     #[tokio::test]

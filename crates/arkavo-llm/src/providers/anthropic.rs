@@ -340,7 +340,11 @@ impl AnthropicProvider {
         }
     }
 
-    /// Convert messages to Anthropic's 3-role format
+    /// Convert messages to Anthropic's 3-role format.
+    ///
+    /// Anthropic accepts only `user` and `assistant`; the tool role is carried
+    /// by content blocks this converter does not model, so tool results are
+    /// attributed in user text instead (see the `Role::Tool` arm).
     fn convert_messages(&self, messages: Vec<Message>) -> (Option<String>, Vec<ApiMessage>) {
         let mut system_content = None;
         let mut api_messages = Vec::new();
@@ -371,7 +375,7 @@ impl AnthropicProvider {
                         });
                     }
                 }
-                Role::Assistant | Role::Tool => {
+                Role::Assistant => {
                     // Skip empty assistant messages (unless it's the last one)
                     if !content.is_empty() {
                         api_messages.push(ApiMessage {
@@ -379,6 +383,20 @@ impl AnthropicProvider {
                             content: content.to_string(),
                         });
                     }
+                }
+                Role::Tool => {
+                    // `ApiMessage` carries plain text, not tool_use/tool_result
+                    // blocks, so the result cannot travel as a tool turn. It
+                    // must not travel as an assistant turn either: Anthropic
+                    // continues a trailing assistant message as prefill, so the
+                    // model would finish its own tool output instead of
+                    // answering. Attribute it in user text, as Gemini does.
+                    // Never skipped when empty — a dropped result would leave
+                    // the request ending on the assistant turn that called it.
+                    api_messages.push(ApiMessage {
+                        role: "user".to_string(),
+                        content: msg.tool_result_as_user_text(),
+                    });
                 }
             }
         }
@@ -729,9 +747,8 @@ impl Provider for AnthropicProvider {
                                     && tx
                                         .send(Ok(StreamResponse {
                                             content,
-                                            reasoning_content: None,
                                             done,
-                                            inference_timing: None,
+                                            ..Default::default()
                                         }))
                                         .await
                                         .is_err()
@@ -846,8 +863,7 @@ impl Provider for AnthropicProvider {
             },
             tool_calls,
             finish_reason: message.stop_reason,
-            inference_timing: None,
-            quality_gate_retries: 0,
+            ..Default::default()
         })
     }
 }
@@ -855,6 +871,7 @@ impl Provider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_message_conversion() {
@@ -875,6 +892,65 @@ mod tests {
         assert_eq!(api_messages[0].role, "user");
         assert_eq!(api_messages[1].role, "assistant");
         assert_eq!(api_messages[2].role, "user");
+    }
+
+    /// Anthropic reads a trailing assistant message as prefill and continues
+    /// it, so a tool result replayed under that role makes the model finish
+    /// its own tool output instead of answering. It must arrive as user text.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn tool_result_is_not_sent_as_an_assistant_turn() {
+        let provider = AnthropicProvider::new(AnthropicConfig::default()).unwrap();
+
+        let messages = vec![
+            Message::user("what is the weather in Dublin"),
+            Message::assistant_with_tool_calls(
+                "Checking the forecast.",
+                vec![crate::ToolCall {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"Dublin"}"#.to_string(),
+                    id: Some("call_1".to_string()),
+                }],
+            ),
+            Message::tool_result("sunny, 21C", "call_1", "get_weather"),
+        ];
+
+        let (_, api_messages) = provider.convert_messages(messages);
+
+        let last = api_messages.last().expect("conversation is not empty");
+        assert_ne!(last.role, "assistant");
+        assert_eq!(last.role, "user");
+        assert!(last.content.contains("sunny, 21C"), "{last:?}");
+        assert!(last.content.contains("get_weather"), "{last:?}");
+    }
+
+    /// The tool-calling assistant turn often carries no text. Dropping it
+    /// leaves two adjacent user turns, which Anthropic rejects unless the
+    /// converter merges them — and the tool output must survive that merge.
+    #[spec("ASTRA-002")]
+    #[test]
+    fn tool_result_after_a_silent_assistant_turn_merges_into_one_user_turn() {
+        let provider = AnthropicProvider::new(AnthropicConfig::default()).unwrap();
+
+        let messages = vec![
+            Message::user("what is the weather in Dublin"),
+            Message::assistant_with_tool_calls(
+                "",
+                vec![crate::ToolCall {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"Dublin"}"#.to_string(),
+                    id: Some("call_1".to_string()),
+                }],
+            ),
+            Message::tool_result("sunny, 21C", "call_1", "get_weather"),
+        ];
+
+        let (_, api_messages) = provider.convert_messages(messages);
+
+        assert_eq!(api_messages.len(), 1, "{api_messages:?}");
+        assert_eq!(api_messages[0].role, "user");
+        assert!(api_messages[0].content.contains("Dublin"));
+        assert!(api_messages[0].content.contains("sunny, 21C"));
     }
 
     #[test]

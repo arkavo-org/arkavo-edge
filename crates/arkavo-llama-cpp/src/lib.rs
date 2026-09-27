@@ -39,9 +39,17 @@ pub mod multimodal;
 #[cfg(not(target_env = "musl"))]
 pub mod memory;
 
+// Pooled sentence embeddings
+#[cfg(not(target_env = "musl"))]
+pub mod embedding;
+
 // Speculative decoding via arkavo_spec_wrapper
 #[cfg(not(target_env = "musl"))]
 pub mod speculative;
+
+// Cookie FILE* reader for llama_model_load_from_file_ptr (no llama.cpp patch)
+#[cfg(all(unix, not(target_env = "musl")))]
+mod callback;
 
 // Real implementation for non-musl targets
 #[cfg(not(target_env = "musl"))]
@@ -51,7 +59,6 @@ pub use arkavo_llama_cpp_sys as ffi;
 use std::ffi::CString;
 #[cfg(not(target_env = "musl"))]
 use std::os::raw::{c_char, c_void};
-#[cfg(not(target_env = "musl"))]
 #[cfg(not(target_env = "musl"))]
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -236,6 +243,16 @@ impl LlamaModel {
         Self::from_file_with_options(path, true, false)
     }
 
+    fn load_mode_from_flags(use_mmap: bool, use_direct_io: bool) -> ffi::llama_load_mode {
+        if use_direct_io {
+            ffi::llama_load_mode_LLAMA_LOAD_MODE_DIRECT_IO
+        } else if use_mmap {
+            ffi::llama_load_mode_LLAMA_LOAD_MODE_MMAP
+        } else {
+            ffi::llama_load_mode_LLAMA_LOAD_MODE_NONE
+        }
+    }
+
     /// Load model with explicit options
     /// - `use_direct_io`: Use direct I/O for faster loading (bypasses OS cache)
     /// - `use_mmap`: Use memory-mapped I/O (default: true, ignored if use_direct_io is true)
@@ -261,7 +278,7 @@ impl LlamaModel {
             let mut params = unsafe { ffi::llama_model_default_params() };
             params.n_gpu_layers = -1; // Offload all layers (negative = all in llama.cpp b7785+)
             params.main_gpu = 0; // Use GPU 0 (primary GPU)
-            params.use_mmap = use_mmap;
+            params.load_mode = Self::load_mode_from_flags(use_mmap, use_direct_io);
 
             if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
                 eprintln!(
@@ -295,7 +312,7 @@ impl LlamaModel {
         // SAFETY: Null return is checked immediately after this call
         let mut cpu_params = unsafe { ffi::llama_model_default_params() };
         cpu_params.n_gpu_layers = 0; // CPU only
-        cpu_params.use_mmap = use_mmap;
+        cpu_params.load_mode = Self::load_mode_from_flags(use_mmap, use_direct_io);
 
         // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
         let cpu_model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), cpu_params) };
@@ -310,9 +327,99 @@ impl LlamaModel {
         }
     }
 
+    /// Load a virtual linear GGUF through `read_at` without a filesystem path.
+    ///
+    /// `read_at(offset, buf)` copies bytes of the virtual GGUF into `buf` and
+    /// returns the count (0 on EOF or error). `virtual_size` is that GGUF's
+    /// length — not a zip/TDF length.
+    ///
+    /// Uses `funopen`/`fopencookie` and `llama_model_load_from_file_ptr` with
+    /// `LLAMA_LOAD_MODE_NONE` so llama.cpp never mmaps and never sees TDF.
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    pub fn from_callback<F>(virtual_size: u64, mut read_at: F) -> Result<Self, String>
+    where
+        F: FnMut(u64, &mut [u8]) -> usize,
+    {
+        if virtual_size == 0 {
+            return Err("virtual GGUF size must be greater than zero".to_string());
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = read_at;
+            return Err("callback model load requires funopen/fopencookie (Unix)".to_string());
+        }
+
+        #[cfg(unix)]
+        {
+            // SAFETY: Null return is checked immediately after this call
+            unsafe {
+                ffi::llama_backend_init();
+            }
+
+            let file = callback::StdioCookieFile::open(virtual_size, &mut read_at)?;
+            let ptr = Self::load_from_cookie(&file)?;
+            Ok(Self {
+                ptr,
+                path: format!("<callback:{virtual_size}>"),
+            })
+        }
+    }
+
+    #[cfg(unix)]
+    fn load_from_cookie(file: &callback::StdioCookieFile) -> Result<*mut ffi::llama_model, String> {
+        let gpu_status = GPU_STATUS.load(Ordering::Relaxed);
+        let try_gpu = gpu_status != 2;
+        let none = ffi::llama_load_mode_LLAMA_LOAD_MODE_NONE;
+
+        if try_gpu {
+            // SAFETY: Null return is checked immediately after this call
+            let mut params = unsafe { ffi::llama_model_default_params() };
+            params.n_gpu_layers = -1;
+            params.main_gpu = 0;
+            params.load_mode = none;
+
+            // SAFETY: `file` is a live cookie FILE*; llama.cpp does not fclose it.
+            let model = unsafe { ffi::llama_model_load_from_file_ptr(file.as_ptr(), params) };
+            if !model.is_null() {
+                GPU_STATUS.store(1, Ordering::Relaxed);
+                return Ok(model);
+            }
+            GPU_STATUS.store(2, Ordering::Relaxed);
+            eprintln!("⚠ GPU model loading failed, falling back to CPU-only mode");
+            file.rewind()?;
+        }
+
+        // SAFETY: Null return is checked immediately after this call
+        let mut cpu_params = unsafe { ffi::llama_model_default_params() };
+        cpu_params.n_gpu_layers = 0;
+        cpu_params.load_mode = none;
+
+        // SAFETY: cookie FILE* was rewound if a GPU attempt consumed bytes.
+        let cpu_model = unsafe { ffi::llama_model_load_from_file_ptr(file.as_ptr(), cpu_params) };
+        if cpu_model.is_null() {
+            // Both attempts failed, so the bytes are not a loadable model
+            // rather than the GPU being unusable. Restoring the previous
+            // status keeps one bad archive from disabling GPU for the process.
+            GPU_STATUS.store(gpu_status, Ordering::Relaxed);
+            Err("Failed to load model (CPU attempt failed)".to_string())
+        } else {
+            eprintln!("✓ CPU-only model loaded successfully");
+            Ok(cpu_model)
+        }
+    }
+
     pub fn get_vocab(&self) -> *const ffi::llama_vocab {
         // SAFETY: Null return is checked immediately after this call
         unsafe { ffi::llama_model_get_vocab(self.ptr) }
+    }
+
+    /// Number of tokens in the model's vocabulary — the length of one row of
+    /// logits from `get_logits_ith`. Used to read per-token logprobs.
+    pub fn n_vocab(&self) -> i32 {
+        // SAFETY: get_vocab returns the model's vocab pointer (non-null for a
+        // loaded model); llama_vocab_n_tokens reads its token count.
+        unsafe { ffi::llama_vocab_n_tokens(self.get_vocab()) }
     }
 
     pub fn get_eos_token(&self) -> i32 {
@@ -1713,7 +1820,7 @@ impl LlamaSampler {
     /// CRITICAL for GLM-4.7-Flash: Without dry_multiplier ~1.1, the model loops.
     ///
     /// - `vocab`: Model vocabulary for sequence detection
-    /// - `n_ctx_train`: Training context size
+    /// - `n_ctx_train`: Unused since llama.cpp b10615; kept for caller compatibility
     /// - `dry_multiplier`: Penalty multiplier (1.1 recommended for GLM-4.7)
     /// - `dry_base`: Base for exponential penalty growth (default 1.75)
     /// - `dry_allowed_length`: Min length before penalty applies (default 2)
@@ -1724,7 +1831,7 @@ impl LlamaSampler {
     pub unsafe fn add_dry(
         &self,
         vocab: *const ffi::llama_vocab,
-        n_ctx_train: i32,
+        _n_ctx_train: i32,
         dry_multiplier: f32,
         dry_base: f32,
         dry_allowed_length: i32,
@@ -1735,10 +1842,11 @@ impl LlamaSampler {
             [c"\n".as_ptr(), c":".as_ptr(), c"\"".as_ptr(), c"*".as_ptr()];
 
         // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
+        // b10615 dropped n_ctx_train from llama_sampler_init_dry; keep the
+        // wrapper argument so existing callers compile.
         let dry_sampler = unsafe {
             ffi::llama_sampler_init_dry(
                 vocab,
-                n_ctx_train,
                 dry_multiplier,
                 dry_base,
                 dry_allowed_length,
@@ -2128,8 +2236,7 @@ pub fn test_minimal_init() -> Result<(), String> {
     // SAFETY: Null return is checked immediately after this call
     let mut _model_params = unsafe { ffi::llama_model_default_params() };
     _model_params.vocab_only = true; // only read vocab & metadata
-    _model_params.use_mmap = false; // avoid vm tricks until stable
-    _model_params.use_mlock = false; // avoid locking (needs perms)
+    _model_params.load_mode = ffi::llama_load_mode_LLAMA_LOAD_MODE_NONE;
 
     // Only show debug output if debug logging is enabled
     if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
@@ -2333,6 +2440,23 @@ mod tests {
         assert!(glm_config.is_enabled());
     }
 
+    #[spec("LLAMA-007")]
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn test_tool_choice_respected_defaults() {
+        // ToolChoice drives whether the grammar forces, permits, or forbids tool calls.
+        assert_eq!(ToolChoice::Auto as i32, 0);
+        assert_eq!(ToolChoice::Required as i32, 1);
+        assert_eq!(ToolChoice::None as i32, 2);
+        assert_eq!(ToolChoice::default(), ToolChoice::Auto);
+
+        let inputs = ChatInputs::default();
+        assert_eq!(inputs.tool_choice, ToolChoice::Auto);
+        // Default false caps tool calls to one per inference, avoiding runaway batches.
+        assert!(!inputs.parallel_tool_calls);
+        assert!(inputs.tools.is_empty());
+    }
+
     #[spec("LLAMA-002")]
     #[cfg(not(target_env = "musl"))]
     #[test]
@@ -2342,6 +2466,19 @@ mod tests {
         assert_eq!(gpu_status(), GpuStatus::Unavailable);
 
         // Reset should restore to Unknown (allowing retry)
+        reset_gpu_status();
+        assert_eq!(gpu_status(), GpuStatus::Unknown);
+    }
+
+    #[spec("LLAMA-002")]
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn test_gpu_status_available_then_reset() {
+        // After a successful GPU load the status is Available.
+        GPU_STATUS.store(1, Ordering::Relaxed);
+        assert_eq!(gpu_status(), GpuStatus::Available);
+
+        // Reset allows the next model load to rediscover acceleration or fallback.
         reset_gpu_status();
         assert_eq!(gpu_status(), GpuStatus::Unknown);
     }
@@ -2374,5 +2511,50 @@ mod tests {
 
         cap_tool_calls(&mut calls);
         assert_eq!(calls.len(), 3);
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn from_callback_rejects_zero_virtual_size() {
+        let err = match LlamaModel::from_callback(0, |_offset, _buf| 0) {
+            Ok(_) => panic!("expected error for zero virtual size"),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_lowercase().contains("virtual"),
+            "error should mention virtual size, got: {err}"
+        );
+    }
+
+    #[cfg(not(target_env = "musl"))]
+    #[test]
+    fn from_callback_rejects_non_gguf_bytes() {
+        let prev_gpu = GPU_STATUS.load(Ordering::Relaxed);
+        let data = *b"NOTGGUF-padding-so-the-reader-has-length";
+        let mut reads_at_zero = 0usize;
+        let err = match LlamaModel::from_callback(data.len() as u64, |offset, buf| {
+            if offset == 0 {
+                reads_at_zero += 1;
+            }
+            let start = offset as usize;
+            if start >= data.len() {
+                return 0;
+            }
+            let n = buf.len().min(data.len() - start);
+            buf[..n].copy_from_slice(&data[start..start + n]);
+            n
+        }) {
+            Ok(_) => panic!("expected error for non-GGUF bytes"),
+            Err(e) => e,
+        };
+        GPU_STATUS.store(prev_gpu, Ordering::Relaxed);
+        assert!(
+            err.to_lowercase().contains("failed to load"),
+            "expected load failure, got: {err}"
+        );
+        assert!(
+            reads_at_zero >= 2,
+            "CPU retry must rewind so magic is read twice, got {reads_at_zero} reads at offset 0"
+        );
     }
 }

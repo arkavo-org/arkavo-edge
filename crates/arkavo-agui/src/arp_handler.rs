@@ -1106,6 +1106,64 @@ mod proposal_tests {
         assert_eq!(agent.proposals[0].reviewed_by.as_deref(), Some("operator"));
     }
 
+    #[spec("AGUI-014")]
+    #[tokio::test]
+    async fn review_proposal_rejects_held_proposal() {
+        let handler = ArpHandler::new();
+        handler.set_agent_arp("rover-alpha", DOC_WITH_POLICY).await;
+        ingest_into(
+            &handler,
+            "rover-alpha",
+            proposal("p3", BlastRadius::SingleAgent),
+        )
+        .await;
+
+        let state = handler
+            .review_proposal("rover-alpha", "p3", false, "operator")
+            .await
+            .unwrap();
+        assert_eq!(state, "rejected");
+
+        let snapshot = handler.snapshot().await;
+        let agent = snapshot
+            .agents
+            .iter()
+            .find(|a| a.agent_id == "rover-alpha")
+            .unwrap();
+        let card = &agent.proposals[0];
+        assert_eq!(card.state, "rejected");
+        assert_eq!(card.reviewed_by.as_deref(), Some("operator"));
+    }
+
+    #[spec("AGUI-013")]
+    #[tokio::test]
+    async fn held_proposal_surfaces_in_proposed_state_for_review() {
+        let handler = ArpHandler::new();
+        handler.set_agent_arp("rover-alpha", DOC_WITH_POLICY).await;
+        // single_agent radius exceeds the single_entity auto-apply ceiling,
+        // so the proposal must stay in the "proposed" state and expose
+        // Approve/Reject actions rather than being auto-applied.
+        ingest_into(
+            &handler,
+            "rover-alpha",
+            proposal("p4", BlastRadius::SingleAgent),
+        )
+        .await;
+
+        let snapshot = handler.snapshot().await;
+        let agent = snapshot
+            .agents
+            .iter()
+            .find(|a| a.agent_id == "rover-alpha")
+            .unwrap();
+        assert_eq!(agent.proposals.len(), 1);
+        let card = &agent.proposals[0];
+        assert_eq!(card.id, "p4");
+        assert_eq!(card.state, "proposed");
+        assert_eq!(card.effect_kind, "deny_tool");
+        assert_eq!(card.blast_radius, "single_agent");
+    }
+
     #[tokio::test]
     async fn review_proposal_errors_for_unknown_agent() {
         let handler = ArpHandler::new();

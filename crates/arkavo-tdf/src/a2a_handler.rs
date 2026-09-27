@@ -221,7 +221,8 @@ impl KasA2aHandler {
     /// 4. Evaluate ABAC policy against entitlements
     /// 5. Verify policy binding (HMAC)
     /// 6. Rewrap the key for the client's public key
-    #[allow(clippy::unused_async)]
+    // 1.98 files the same shape under a second name for functions in impl blocks.
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn handle_rewrap(
         &self,
         request: KasRewrapRequest,
@@ -262,7 +263,8 @@ impl KasA2aHandler {
     }
 
     /// Handle a kas.publicKey request.
-    #[allow(clippy::unused_async)]
+    // 1.98 files the same shape under a second name for functions in impl blocks.
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn handle_public_key(
         &self,
         request: KasPublicKeyRequest,

@@ -704,4 +704,32 @@ mod tests {
                 .contains("budget exhausted")
         );
     }
+
+    #[spec("SRV-012")]
+    #[tokio::test]
+    async fn budget_exhaustion_stops_between_batches_without_trace() {
+        let mut batches = batch();
+        batches.push(("nav".to_string(), vec![episode(&["move"], true); 3]));
+        batches.push(("mine".to_string(), vec![episode(&["dig"], true); 3]));
+
+        // First reply costs 0.06 — over the 0.05 ceiling before batch 2.
+        let teacher = MockTeacher::scripted(vec![(GOOD_REPLY, 0.06)], false);
+        let run = run_teacher(
+            &teacher,
+            &batches,
+            Some(0.05),
+            &identity(),
+            "agent",
+            "swarm",
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(run.budget_exhausted);
+        assert_eq!(run.categories_consolidated, 1);
+        assert_eq!(run.categories_budget_stopped, 2);
+        // Partial output is preserved even with no trace.
+        assert_eq!(run.lessons.len(), 1);
+    }
 }

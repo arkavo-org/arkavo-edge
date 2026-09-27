@@ -1,7 +1,10 @@
 //! Data Classification System
 
+use serde::{Deserialize, Serialize};
+
 /// Data category
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DataCategory {
     Pii,
     Credentials,
@@ -12,7 +15,8 @@ pub enum DataCategory {
 }
 
 /// Sensitivity levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SensitivityLevel {
     Public = 0,
     Internal = 1,
@@ -21,7 +25,8 @@ pub enum SensitivityLevel {
 }
 
 /// Individual datum types
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DatumType {
     Email,
     PhoneNumber,
@@ -58,7 +63,7 @@ impl DatumType {
 }
 
 /// Classification result
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassifiedDatum {
     pub datum_type: DatumType,
     pub position: (usize, usize),
@@ -76,11 +81,25 @@ impl ClassifiedDatum {
 }
 
 /// DLP Action
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Wrap` and `Hold` exist because Allow/Block/Redact cannot express two things
+/// the egress gate has to say. A payload the requester is entitled to but the
+/// transport is not may travel wrapped rather than not at all; and a decision
+/// the gate could not reach — an unresolved destination, an exhausted budget, a
+/// detector that did not answer — must hold the content rather than resolve to
+/// one of the two terminal answers (SENT-013).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DlpAction {
     Allow,
     Block,
     Redact,
+    /// Deliver only under these OpenTDF attributes, as (fqn, value) pairs.
+    Wrap {
+        attributes: Vec<(String, String)>,
+    },
+    /// Neither released nor refused: held pending resolution.
+    Hold,
 }
 
 /// DLP Policy
@@ -99,7 +118,7 @@ impl DlpPolicy {
 
     pub fn evaluate(&self, classification: &ClassifiedDatum) -> DlpAction {
         if classification.sensitivity() >= self.threshold {
-            self.action
+            self.action.clone()
         } else {
             DlpAction::Allow
         }

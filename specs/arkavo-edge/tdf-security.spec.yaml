@@ -78,7 +78,6 @@ scenarios:
       - Smaller payload size than equivalent JSON
       - Same cryptographic protections as TDF-JSON
       - Parsing more efficient than JSON for large manifests
-    refs: [crates/arkavo-tdf/src/formats/cbor.rs]
 
   - id: TDFS-005
     name: Format negotiation between agents
@@ -94,7 +93,6 @@ scenarios:
       - TDF-JSON is default fallback
       - TDF-CBOR used when both support it
       - Format choice logged for audit
-    refs: [crates/arkavo-tdf/src/formats/negotiation.rs]
 
   - id: TDFS-006
     name: Policy binding prevents policy tampering
@@ -126,7 +124,6 @@ scenarios:
       - Escrow access requires multiple approvals
       - All escrow operations auditable
       - Escrow key access triggers alerts
-    refs: [crates/arkavo-tdf/src/escrow.rs]
 
   - id: TDFS-008
     name: Attribute authority verification
@@ -175,7 +172,6 @@ scenarios:
       - Keys only released from approved regions
       - Cross-border key transfer blocked
       - Residency violation logged
-    refs: [crates/arkavo-tdf/src/residency.rs]
 
   - id: TDFS-011
     name: Secure key hierarchy
@@ -207,7 +203,6 @@ scenarios:
       - Policy freshness checked against max age
       - Offline access limited by cached constraints
       - Offline access logged for later audit
-    refs: [crates/arkavo-tdf/src/offline_policy.rs]
 
   - id: TDFS-013
     name: Forward secrecy for key agreement
@@ -239,7 +234,6 @@ scenarios:
       - Old policy remains valid for existing sessions
       - New accesses use updated policy
       - Policy update cryptographically linked to previous
-    refs: [crates/arkavo-tdf/src/policy_update.rs]
 
   - id: TDFS-015
     name: TDF payload obfuscation
@@ -255,7 +249,6 @@ scenarios:
       - Padding indistinguishable from real data
       - Size rounded to configurable block boundaries
       - Padding amount logged for capacity planning
-    refs: [crates/arkavo-tdf/src/obfuscation.rs]
     edge_cases:
       - condition: KAS unavailable during decryption
         expected: Returns TdfError::KasUnavailable with retry guidance

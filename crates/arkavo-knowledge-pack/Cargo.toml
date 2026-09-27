@@ -1,0 +1,35 @@
+[package]
+name = "arkavo-knowledge-pack"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Sealed knowledge packs: separately wrapped components bound by one signed manifest"
+repository.workspace = true
+keywords = ["tdf", "manifest", "signing", "dlp"]
+categories = ["cryptography"]
+
+[dependencies]
+arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf", features = ["knowledge-pack"] }
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-sentinel = { path = "../arkavo-sentinel", default-features = false }
+arkavo-fingerprint = { path = "../arkavo-fingerprint" }
+arkavo-protocol = { path = "../arkavo-protocol", features = ["taint"] }
+opentdf = { version = "0.15.0", default-features = false, features = ["rustls-tls"] }
+base64 = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+zeroize = { version = "1.8", features = ["derive"] }
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -197,7 +197,7 @@ Clone the llama.cpp dependency (not tracked in git):
 ```bash
 git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
 cd vendor/llama.cpp
-git checkout ef570f63087b6a5a2930210a13f87990e8113927
+git checkout f280b26983ad0fdb705a0d9ebf0503e76f2899b0  # b10615
 cd ../..
 ```
 

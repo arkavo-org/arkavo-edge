@@ -13,9 +13,8 @@ This document outlines the core architectural principles and long-term vision fo
 - **AI-Driven Configuration**: Instead of static files, the system uses an AI-driven, interactive process. The agent discovers its environment and asks the user for guidance when necessary.
 - **Memory Storage**: All configurations (e.g., Ollama server URLs) are stored in the `arkavo-memory` crate, not in environment variables or config files, enabling dynamic, persistent configuration.
 
-### 1.3. Dependency Management: The Embedded Binary Approach
-- To ensure single-binary distribution and zero-dependency startup, third-party tools like `idb_companion` are embedded directly into the Arkavo executable at build time.
-- At runtime, the binary is extracted to a temporary directory and executed as needed. This makes the tool portable and easy to use.
+### 1.3. Dependency Management
+- The macOS crate ships as a single binary. iOS automation uses Xcode, simctl, AppleScript, XCTest, and the AXP harness rather than embedding third-party binaries.
 
 ## 2. Agent Communication & Dataflow
 

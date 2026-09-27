@@ -94,7 +94,7 @@ impl WebhookServer {
         Ok(())
     }
 
-    #[allow(clippy::unused_async)]
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     fn process_event(&self, event: GitHubEvent) -> Result<()> {
         info!(
             event_type = event.event_type(),

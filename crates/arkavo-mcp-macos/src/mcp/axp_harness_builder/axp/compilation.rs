@@ -211,7 +211,7 @@ impl HarnessCompiler {
                     "error": {
                         "code": super::constants::error_codes::BETA_COMPILATION_FAILED,
                         "message": "iOS 26 beta compilation failed - XCTest symbols not available",
-                        "recommendation": "Use IDB or standard UI automation instead of AXP",
+                        "recommendation": "Use simctl, AppleScript, or standard UI automation instead of AXP",
                         "details": error_details,
                         "fallback_available": true
                     }

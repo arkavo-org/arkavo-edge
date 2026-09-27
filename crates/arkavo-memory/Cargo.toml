@@ -35,7 +35,6 @@ anyhow = { workspace = true }
 hnsw_rs = { workspace = true, optional = true }
 arkavo-mcp = { path = "../arkavo-mcp" }
 async-trait = { workspace = true }
-bytemuck = { workspace = true }
 
 [dev-dependencies]
 arkavo-events = { path = "../arkavo-events" }

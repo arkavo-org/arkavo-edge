@@ -70,7 +70,10 @@ pub struct DelegationToken {
 
 impl DelegationToken {
     /// Compute the canonical payload bytes for signing.
-    fn payload_bytes(&self) -> Result<Vec<u8>, DelegationError> {
+    ///
+    /// Issuers sign these bytes; the verifier recomputes them when checking
+    /// the signature, so both sides must use this exact serialization.
+    pub fn payload_bytes(&self) -> Result<Vec<u8>, DelegationError> {
         let payload = serde_json::json!({
             "issuer_did": self.issuer_did,
             "subject_did": self.subject_did,
@@ -303,6 +306,50 @@ mod tests {
 
         let verifier = DelegationVerifier::empty();
         let result = verifier.verify(&token, "did:key:z6MkSubject");
+
+        assert!(matches!(result, Err(DelegationError::Expired(_))));
+    }
+
+    #[spec("TDFS-009")]
+    #[test]
+    fn test_expired_parent_token_in_chain() {
+        use arkavo_crypto::AgentKeypair;
+
+        // Root authority issues an expired delegation to an intermediate.
+        let root_key = AgentKeypair::generate();
+        let root_did = root_key.public_key().to_did_key();
+        let intermediate_key = AgentKeypair::generate();
+        let intermediate_did = intermediate_key.public_key().to_did_key();
+        let caller_did = "did:key:z6MkCaller";
+
+        let mut parent = DelegationToken {
+            issuer_did: root_did.clone(),
+            subject_did: intermediate_did.clone(),
+            entitlements: vec!["https://arkavo.net/attr/role/value/user".to_string()],
+            expires_at: Utc::now() - chrono::Duration::seconds(3600),
+            signature: String::new(),
+            parent: None,
+        };
+        let parent_payload = parent.payload_bytes().unwrap();
+        parent.signature = general_purpose::STANDARD.encode(root_key.sign(&parent_payload));
+
+        // Leaf token is valid, but its parent has expired.
+        let mut leaf = DelegationToken {
+            issuer_did: intermediate_did,
+            subject_did: caller_did.to_string(),
+            entitlements: vec!["https://arkavo.net/attr/role/value/user".to_string()],
+            expires_at: Utc::now() + chrono::Duration::seconds(3600),
+            signature: String::new(),
+            parent: Some(Box::new(parent)),
+        };
+        let leaf_payload = leaf.payload_bytes().unwrap();
+        leaf.signature = general_purpose::STANDARD.encode(intermediate_key.sign(&leaf_payload));
+
+        let verifier = DelegationVerifier::new(vec![TrustedRoot {
+            did: root_did,
+            public_key_bytes: root_key.public_key().to_bytes(),
+        }]);
+        let result = verifier.verify(&leaf, caller_did);
 
         assert!(matches!(result, Err(DelegationError::Expired(_))));
     }

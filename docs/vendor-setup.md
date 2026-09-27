@@ -14,26 +14,19 @@ Clone the llama.cpp repository:
 # Clone llama.cpp to the vendor directory
 git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
 
-# Checkout the required version (includes Ministral 3 support)
+# Checkout the required version
 cd vendor/llama.cpp
-git checkout d23355afc  # GDN regression fix, Vulkan GDN, Qwen3.5 NVFP4
+git checkout f280b26983ad0fdb705a0d9ebf0503e76f2899b0  # b10615
 ```
 
 ### Required Version
 
-**Recommended commit:** `d23355afc` (model: wire up Qwen3.5/Qwen3.5MoE tensors for NVFP4 support) - March 14, 2026
+**Recommended commit:** `f280b2698` (tag `b10615`, 2026-08-24)
 
-This commit includes:
-- Ministral 3 architecture support (3B/8B/14B)
-- Multimodal (mtmd) warmup field
-- `GGML_OP_GATED_DELTA_NET` fused recurrence op (CPU + Metal + CUDA + Vulkan)
-- Metal GPU kernel for DeltaNet-based models (Qwen3.5, etc.) on Apple Silicon
-- Chunked fused GDN path for efficient inference
-- GDN state transpose optimization (39% Metal perf regression fix)
-- Vulkan GATED_DELTA_NET op support
-- Qwen3.5/Qwen3.5MoE NVFP4 tensor support
-- Fix pooling assertion crash in chunked GDN detection path
-- OpenCL cumsum op support
+This pin includes:
+- llama.cpp `b9292` → `b10615` (Metal flash-attn vec per-device tuning, NVFP4, GDN, Ministral 3, Gemma 4)
+- Semantic versioning tags (`vX.Y.Z`) exist upstream; this repo stays on `b` tags to match CI's shallow fetch
+- The Gemma 4 constrained-tool-grammar patch still applies (`gemma4-dict-nonempty`)
 
 ### Updating llama.cpp
 

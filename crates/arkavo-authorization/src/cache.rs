@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_cache_basic_operations() {
-        let cache = DecisionCache::new(100, Duration::from_secs(60));
+        let cache = DecisionCache::new(100, Duration::from_mins(1));
 
         let entity = EntityIdentifier {
             id: "user123".to_string(),
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_cache_expiration() {
-        let cache = DecisionCache::new(100, Duration::from_secs(60));
+        let cache = DecisionCache::new(100, Duration::from_mins(1));
 
         let entity = EntityIdentifier {
             id: "user123".to_string(),
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_cache_key_uniqueness() {
-        let cache = DecisionCache::new(100, Duration::from_secs(60));
+        let cache = DecisionCache::new(100, Duration::from_mins(1));
 
         let entity1 = EntityIdentifier {
             id: "user123".to_string(),

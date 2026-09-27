@@ -5,7 +5,9 @@
 //! - Executor (mid model): executes tool calls via MCP
 //! - Judge (small model): distills results, scores quality, synthesizes feedback
 
-use super::conductor_tool_loop::{ToolCallObservation, ToolLoopResult, distill_with_small_model};
+use super::conductor_tool_loop::{
+    ToolCallObservation, ToolLoopResult, distill_with_small_model, tool_call_permitted,
+};
 use super::learning_bus::{LearningBus, LearningEvent};
 use super::tool_memory::ToolMemory;
 use arkavo_llm::ParsedToolCall;
@@ -58,6 +60,8 @@ pub(super) async fn run_tool_loop_parallel(
     learning_bus: Option<&Arc<LearningBus>>,
     tool_memory: Option<&Arc<RwLock<ToolMemory>>>,
     compute_budget: Option<&arkavo_budget::SharedComputeBudget>,
+    granted_tools: Option<&std::collections::HashSet<String>>,
+    #[cfg(feature = "taint")] egress: Option<Arc<super::egress_guard::EgressGuard>>,
 ) -> Result<ToolLoopResult, String> {
     let loop_start = std::time::Instant::now();
 
@@ -72,6 +76,10 @@ pub(super) async fn run_tool_loop_parallel(
     let (feedback_tx, feedback_rx) = mpsc::channel::<JudgeFeedback>(4);
     let (obs_tx, mut obs_rx) = mpsc::channel::<ToolCallObservation>(64);
 
+    // Clone granted_tools into an owned HashSet so the spawned executor can own it.
+    // None = no filtering (unspecialized agent), Some = least-privilege grant set.
+    let exec_granted: Option<std::collections::HashSet<String>> = granted_tools.cloned();
+
     // Spawn executor track (3B model, chat_semaphore)
     let exec_router = router.clone();
     let exec_registry = registry_arc.clone();
@@ -79,6 +87,8 @@ pub(super) async fn run_tool_loop_parallel(
     let exec_bus = learning_bus.cloned();
     let exec_mem = tool_memory.cloned();
     let exec_declared = declared_scope.clone();
+    #[cfg(feature = "taint")]
+    let exec_egress = egress.clone();
     let executor = tokio::spawn(async move {
         executor_track(
             &exec_router,
@@ -90,6 +100,9 @@ pub(super) async fn run_tool_loop_parallel(
             exec_mem.as_ref(),
             &exec_declared,
             obs_tx,
+            exec_granted.as_ref(),
+            #[cfg(feature = "taint")]
+            exec_egress,
         )
         .await;
     });
@@ -127,8 +140,18 @@ pub(super) async fn run_tool_loop_parallel(
 
     let total_latency = loop_start.elapsed().as_millis() as u64;
 
+    // A refusal is returned as an error rather than as empty text: the caller
+    // may be a requester waiting on an answer, and a log line is not an answer.
+    // Tool-only rounds keep returning empty text, because this loop's tool
+    // record lives in ToolMemory and the agent loop answers from there.
+    let final_text = super::conductor_tool_loop::loop_result_text(
+        plan_result.final_text,
+        None,
+        plan_result.failure,
+    )?;
+
     Ok(ToolLoopResult {
-        final_text: plan_result.final_text,
+        final_text,
         decision_model_name: plan_result.decision_model_name,
         total_latency_ms: total_latency,
         context_tokens: plan_result.context_tokens,
@@ -146,6 +169,11 @@ struct PlanResult {
     context_utilization_pct: f64,
     inference_timing: Option<arkavo_llm::provider::InferenceTiming>,
     tool_call_count: usize,
+    /// Why the planner stopped early, when it stopped on a refusal rather than
+    /// on a finished plan. A routing, budget or timeout refusal is a real,
+    /// actionable condition for whoever asked for the work, so it is carried
+    /// out of the loop instead of ending in a log line.
+    failure: Option<String>,
 }
 
 /// Planner track: runs on the hinted (large) model.
@@ -169,6 +197,7 @@ async fn planner_track(
         context_utilization_pct: 0.0,
         inference_timing: None,
         tool_call_count: 0,
+        failure: None,
     };
 
     let model_ctx = super::rlm_bridge::model_context_size(model_hint.map(|h| h.name()), false);
@@ -196,6 +225,9 @@ async fn planner_track(
             let snap = budget.read().await.snapshot();
             if !snap.has_remaining {
                 info!("Planner: compute budget exhausted at round {plan_round}");
+                result.failure = Some(format!(
+                    "compute budget exhausted before planning round {plan_round}"
+                ));
                 break;
             }
         }
@@ -211,12 +243,11 @@ async fn planner_track(
         let char_budget = model_ctx * 4;
         let mut context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         if context_chars > char_budget && messages.len() > 3 {
-            let keep_recent = 2;
-            let compactable = messages.len() - 1 - keep_recent;
+            let compactable = super::conductor_history::compactable_prefix(&messages, 2);
             if compactable > 0 {
                 let old_messages: Vec<String> = messages[1..=compactable]
                     .iter()
-                    .map(|m| format!("[{:?}] {}", m.role, &m.content[..m.content.len().min(500)]))
+                    .map(super::conductor_history::summary_line)
                     .collect();
                 let old_chars: usize = messages[1..=compactable]
                     .iter()
@@ -323,6 +354,7 @@ async fn planner_track(
             Ok(Ok(resp)) => resp,
             Ok(Err(e)) => {
                 warn!("Planner round {plan_round} failed: {e}");
+                result.failure = Some(e.to_string());
                 break;
             }
             Err(_) => {
@@ -330,6 +362,7 @@ async fn planner_track(
                 // Retrying would block on the same semaphore. Break and let the
                 // next cycle start fresh when the GPU is available.
                 warn!("Planner round {plan_round} timed out at {timeout_secs}s");
+                result.failure = Some(format!("planner inference timed out after {timeout_secs}s"));
                 break;
             }
         };
@@ -347,7 +380,7 @@ async fn planner_track(
                 // Round 0 produced text but no tool calls. Retry on round 1
                 // with an explicit instruction to use tools.
                 warn!("Planner round 0: no tool calls, will retry with tool nudge");
-                messages.push(arkavo_llm::Message::assistant(response.content.clone()));
+                messages.push(response.as_assistant_message());
                 messages.push(arkavo_llm::Message::user(
                     "You MUST use a tool now. Pick the most appropriate tool and call it."
                         .to_string(),
@@ -369,7 +402,8 @@ async fn planner_track(
         result.tool_call_count += call_count;
         info!("Planner round {plan_round}: produced {call_count} tool calls");
 
-        messages.push(arkavo_llm::Message::assistant(response.content.clone()));
+        let native_tool_role = response.tool_results_use_tool_role();
+        messages.push(response.as_assistant_message());
 
         if plan_tx
             .send(PlannedActions {
@@ -397,10 +431,11 @@ async fn planner_track(
                 // Push tool results with proper role so Jinja templates
                 // (especially Gemma 4) render <|tool_response> tokens.
                 for tr in &feedback.tool_results {
-                    messages.push(arkavo_llm::Message::tool_result(
+                    messages.push(arkavo_llm::tool_feedback_message(
                         &tr.content,
                         &tr.call_id,
                         &tr.tool_name,
+                        native_tool_role,
                     ));
                 }
                 if feedback.should_replan {
@@ -465,11 +500,29 @@ async fn executor_track(
     tool_memory: Option<&Arc<RwLock<ToolMemory>>>,
     declared_scope: &[String],
     obs_tx: mpsc::Sender<ToolCallObservation>,
+    granted_tools: Option<&std::collections::HashSet<String>>,
+    #[cfg(feature = "taint")] egress: Option<Arc<super::egress_guard::EgressGuard>>,
 ) {
     let mut step_idx: usize = 0;
 
     while let Some(planned) = plan_rx.recv().await {
-        let tool_calls = dedup_tool_calls(planned.tool_calls);
+        // Filter calls to only those permitted by the grant set before
+        // executing — deny at the boundary, never fabricate.
+        let raw_calls = dedup_tool_calls(planned.tool_calls);
+        let tool_calls: Vec<_> = raw_calls
+            .into_iter()
+            .filter(|tc| {
+                if tool_call_permitted(&tc.tool_name, granted_tools) {
+                    true
+                } else {
+                    warn!(
+                        tool = %tc.tool_name,
+                        "Parallel executor: tool call denied (least-privilege)"
+                    );
+                    false
+                }
+            })
+            .collect();
         info!(
             tool_count = tool_calls.len(),
             "Executor: received action batch"
@@ -489,6 +542,8 @@ async fn executor_track(
                     .clone()
                     .unwrap_or_else(|| format!("call_{idx}"));
                 let mem = tool_memory.cloned();
+                #[cfg(feature = "taint")]
+                let guard = egress.clone();
                 async move {
                     // Skip setup tools that already succeeded (e.g., registerAgent)
                     if let Some(ref m) = mem
@@ -501,6 +556,25 @@ async fn executor_track(
                             args,
                             Ok::<String, String>("Already completed \u{2014} skipped".to_string()),
                             true,
+                            None,
+                            0u64,
+                        );
+                    }
+                    // SEQ-003: refuse before dispatch. Calls in one batch run
+                    // concurrently, so a call is judged against what the session
+                    // held when the batch was planned — a same-batch peer's
+                    // result cannot have reached these params yet.
+                    #[cfg(feature = "taint")]
+                    if let Some(ref g) = guard
+                        && let Err(message) = g.check_call(&name, &args)
+                    {
+                        return (
+                            idx,
+                            name,
+                            call_id,
+                            args,
+                            Err::<String, String>(message),
+                            false,
                             None,
                             0u64,
                         );
@@ -543,6 +617,17 @@ async fn executor_track(
                     declared: declared_scope.iter().any(|t| t == &tool_name),
                 })
                 .await;
+            // SEQ-004: fold results into the session's taint sequentially, so
+            // the accumulator sees a deterministic order and no batch contends
+            // on its lock. Errors count too: one that echoes its argument
+            // carries whatever was in it.
+            #[cfg(feature = "taint")]
+            if let Some(ref g) = egress {
+                match &result {
+                    Ok(body) => g.observe_result(&tool_name, &args, body),
+                    Err(message) => g.observe_error(&tool_name, message),
+                }
+            }
             match result {
                 Ok(result_str) => {
                     if let Some(r) = reward
@@ -696,11 +781,7 @@ async fn judge_track(
             )
         };
 
-        let content = if distilled.len() > 800 {
-            format!("{}...", &distilled[..800])
-        } else {
-            distilled
-        };
+        let content = super::conductor_history::preview(&distilled, 800);
 
         batch_results.push(CondensedToolResult {
             tool_name: exec_result.tool_name,

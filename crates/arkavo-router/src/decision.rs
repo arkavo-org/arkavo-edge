@@ -78,6 +78,29 @@ pub enum ModelChoice {
     DeepSeekV32Speciale,
     /// Kimi K2.5 - 256K context, thinking mode support
     KimiK2,
+    /// GLM-5.2 (Zhipu AI / Z.ai) - OpenAI-compatible cloud reasoning model.
+    /// Routed through the generic OpenAI-compatible adapter (base URL +
+    /// model string + `GLM_API_KEY`). Introduced as a single Thompson
+    /// Sampling arm to respect the cold-start exploration cap; a thinking-tier
+    /// (High/Max) split can follow once this base arm graduates probation.
+    Glm52,
+    /// Grok 4.7 (xAI) — flagship cloud model via the xAI Responses API.
+    /// Routed through `ResponsesProvider` (`XAI_API_KEY`, base
+    /// `https://api.x.ai/v1`, `POST /v1/responses`) with low reasoning effort
+    /// by default for agent latency. `Grok47Xhigh` is the max-effort companion.
+    /// `Grok45` / `Grok46` remain serde aliases so persisted traces keep
+    /// loading across model generations.
+    #[serde(alias = "Grok45", alias = "Grok46")]
+    Grok47,
+    /// Grok 4.7 with `xhigh` reasoning effort — maximum depth for the hardest
+    /// problems. Distinct Thompson arm so cost and latency are visible to
+    /// routing. The API model id is still `grok-4.7`; effort is sent as
+    /// `reasoning.effort = "xhigh"`.
+    #[serde(alias = "Grok46Xhigh")]
+    Grok47Xhigh,
+    /// OpenAI flagship via Responses: 1,050,000 context, 128,000 max output,
+    /// medium reasoning by default. Premium arm, never a category preference.
+    Gpt6Astra,
 }
 
 impl ModelChoice {
@@ -118,6 +141,13 @@ impl ModelChoice {
             Self::LocalDeepSeekCoder => "deepseek-coder-v2-lite-instruct",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek-chat",
             Self::KimiK2 => "kimi-k2.5",
+            Self::Glm52 => "glm-5.2",
+            Self::Gpt6Astra => "gpt-6-astra",
+            Self::Grok47 => "grok-4.7",
+            // Thompson Sampling sees each effort tier as a distinct arm, so
+            // the canonical name carries the suffix. `grok_api_model()`
+            // strips it back to the API model id for REST calls.
+            Self::Grok47Xhigh => "grok-4.7-xhigh",
         }
     }
 
@@ -129,7 +159,7 @@ impl ModelChoice {
             | Self::LocalQwen35_27B
             | Self::LocalQwen36A3B => "qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "mistral",
-            Self::LocalGlm47Flash => "glm",
+            Self::LocalGlm47Flash | Self::Glm52 => "glm",
             Self::LocalGemma4E2B
             | Self::LocalGemma4E4B
             | Self::LocalGemma4_26B
@@ -147,6 +177,8 @@ impl ModelChoice {
             | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus | Self::ClaudeFable5 => "anthropic",
             Self::KimiK2 => "kimi",
+            Self::Gpt6Astra => "openai",
+            Self::Grok47 | Self::Grok47Xhigh => "grok",
         }
     }
 
@@ -162,6 +194,7 @@ impl ModelChoice {
             "qwen3.5-27b" => Some(Self::LocalQwen35_27B),
             "qwen3.6-35b-a3b" | "qwen3.6" | "qwen36" => Some(Self::LocalQwen36A3B),
             "glm-4.7-flash" => Some(Self::LocalGlm47Flash),
+            "glm-5.2" | "glm5.2" | "glm-5" | "glm52" => Some(Self::Glm52),
             "gemma-4-e2b" => Some(Self::LocalGemma4E2B),
             "gemma-4-e4b" => Some(Self::LocalGemma4E4B),
             "gemma-4-26b-a4b" => Some(Self::LocalGemma4_26B),
@@ -173,6 +206,25 @@ impl ModelChoice {
             "deepseek-coder-v2-lite-instruct" => Some(Self::LocalDeepSeekCoder),
             "deepseek-chat" => Some(Self::DeepSeekV32),
             "kimi-k2.5" => Some(Self::KimiK2),
+            "gpt-6-astra" => Some(Self::Gpt6Astra),
+            "grok-4.7-xhigh"
+            | "grok-4.7-x-high"
+            | "grok47-xhigh"
+            | "grok-xhigh"
+            | "grok-4.6-xhigh"
+            | "grok-4.6-x-high"
+            | "grok46-xhigh" => Some(Self::Grok47Xhigh),
+            "grok-4.7"
+            | "grok-4.7-latest"
+            | "grok-build-latest"
+            | "grok47"
+            | "grok"
+            | "grok-4.6"
+            | "grok-4.6-latest"
+            | "grok46"
+            | "grok-4.5"
+            | "grok-4.5-latest"
+            | "grok45" => Some(Self::Grok47),
             "gemini-flash-latest" => Some(Self::GeminiFlash),
             "gemini-3.5-flash"
             | "gemini-3.5-flash-latest"
@@ -244,6 +296,28 @@ impl ModelChoice {
         Self::LocalQwen35_27B,
     ];
 
+    /// All paid cloud model variants. Used by the spend plane to exclude cloud
+    /// arms from a feasibility/quality re-route when the cloud policy does not
+    /// authorize silent spend. Every entry satisfies `is_cloud()`.
+    pub const ALL_CLOUD: &[Self] = &[
+        Self::GeminiFlash,
+        Self::Gemini35Flash,
+        Self::Gemini35FlashMinimal,
+        Self::Gemini35FlashMedium,
+        Self::Gemini35FlashHigh,
+        Self::GeminiPro,
+        Self::ClaudeSonnet,
+        Self::ClaudeOpus,
+        Self::ClaudeFable5,
+        Self::DeepSeekV32,
+        Self::DeepSeekV32Speciale,
+        Self::KimiK2,
+        Self::Glm52,
+        Self::Grok47,
+        Self::Grok47Xhigh,
+        Self::Gpt6Astra,
+    ];
+
     pub fn is_anthropic(&self) -> bool {
         matches!(
             self,
@@ -304,6 +378,26 @@ impl ModelChoice {
         matches!(self, Self::KimiK2)
     }
 
+    /// Cloud GLM (Zhipu AI / Z.ai) arm, reached via the OpenAI-compatible
+    /// adapter. Distinct from the local `LocalGlm47Flash` GGUF model.
+    pub fn is_glm(&self) -> bool {
+        matches!(self, Self::Glm52)
+    }
+
+    /// Cloud Grok (xAI) arm, reached via the xAI Responses API client.
+    pub fn is_grok(&self) -> bool {
+        matches!(self, Self::Grok47 | Self::Grok47Xhigh)
+    }
+
+    /// Underlying xAI API model id (strips the per-arm effort suffix).
+    /// Returns `None` for non-Grok variants.
+    pub fn grok_api_model(&self) -> Option<&'static str> {
+        match self {
+            Self::Grok47 | Self::Grok47Xhigh => Some("grok-4.7"),
+            _ => None,
+        }
+    }
+
     pub fn provider(&self) -> &str {
         match self {
             Self::GeminiFlash
@@ -330,6 +424,9 @@ impl ModelChoice {
             Self::LocalDeepSeekCoder => "local-deepseek",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
             Self::KimiK2 => "kimi",
+            Self::Glm52 => "zhipu",
+            Self::Gpt6Astra => "openai",
+            Self::Grok47 | Self::Grok47Xhigh => "xai",
         }
     }
 
@@ -365,7 +462,11 @@ impl ModelChoice {
             | Self::ClaudeFable5
             | Self::DeepSeekV32
             | Self::DeepSeekV32Speciale
-            | Self::KimiK2 => PlannerTier::Large,
+            | Self::KimiK2
+            | Self::Glm52
+            | Self::Grok47
+            | Self::Grok47Xhigh
+            | Self::Gpt6Astra => PlannerTier::Large,
         }
     }
 
@@ -565,6 +666,10 @@ impl ModelChoice {
             Self::DeepSeekV32 => "DeepSeek V3.2",
             Self::DeepSeekV32Speciale => "DeepSeek V3.2 Speciale",
             Self::KimiK2 => "Kimi K2.5",
+            Self::Glm52 => "GLM-5.2",
+            Self::Gpt6Astra => "GPT-6 Astra",
+            Self::Grok47 => "Grok 4.7",
+            Self::Grok47Xhigh => "Grok 4.7 (xhigh)",
         }
     }
 }
@@ -727,14 +832,48 @@ impl RoutingDecision {
                     ModelChoice::GeminiPro,
                 ]
             }
+            // GLM-5.2 steps down to the other low-cost cloud arms, then a
+            // capable local model, so a missing GLM key never strands a task.
+            (ModelChoice::Glm52, _) => {
+                vec![
+                    ModelChoice::DeepSeekV32,
+                    ModelChoice::GeminiFlash,
+                    ModelChoice::LocalMinistral8B,
+                ]
+            }
+            // Grok 4.7 steps to mid-tier cloud then a local safety net.
+            (ModelChoice::Gpt6Astra, _) => vec![
+                ModelChoice::ClaudeSonnet,
+                ModelChoice::Gemini35Flash,
+                ModelChoice::LocalMinistral8B,
+            ],
+            (ModelChoice::Grok47, _) => {
+                vec![
+                    ModelChoice::ClaudeSonnet,
+                    ModelChoice::GeminiFlash,
+                    ModelChoice::LocalMinistral8B,
+                ]
+            }
+            (ModelChoice::Grok47Xhigh, _) => {
+                vec![
+                    ModelChoice::Grok47,
+                    ModelChoice::ClaudeSonnet,
+                    ModelChoice::LocalMinistral8B,
+                ]
+            }
             _ => vec![ModelChoice::GeminiFlash],
         }
     }
 
-    fn estimate_cost(model: &ModelChoice, category: TaskCategory) -> f64 {
+    pub fn estimate_cost(model: &ModelChoice, category: TaskCategory) -> f64 {
         let token_estimate = category.estimated_tokens();
 
         match model {
+            ModelChoice::Gpt6Astra => {
+                f64::from(token_estimate.output)
+                    .mul_add(50.0, f64::from(token_estimate.input) * 10.0)
+                    / 1_000_000.0
+            }
             ModelChoice::GeminiFlash => {
                 let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.30;
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.50;
@@ -808,6 +947,38 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.20;
                 input_cost + output_cost
             }
+            ModelChoice::Glm52 => {
+                // GLM-5.2 (Zhipu AI / Z.ai) published list rates:
+                // $1.40/1M input, $4.40/1M output (docs.z.ai/guides/overview/pricing,
+                // cross-checked on OpenRouter). The earlier $0.60/$2.20 placeholder
+                // was GLM-4.6's rate and undercounted spend ~2x — enough that a
+                // single category-sized call rounded to $0.00 in the integer-cent
+                // `TokenCost`, so the budget gate treated GLM calls as free. At the
+                // real rate a call carries non-zero cost and enforcement engages.
+                // Cheap relative to the Anthropic/Gemini tiers, so it stays routable
+                // where DeepSeek/Kimi sit. Real spend should come from the response
+                // `usage` block once surfaced.
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 1.40;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 4.40;
+                input_cost + output_cost
+            }
+            ModelChoice::Grok47 | ModelChoice::Grok47Xhigh => {
+                // Grok 4.7 (xAI) list rates: $2.00/1M input, $6.00/1M output
+                // below 200k prompt tokens (docs.x.ai). Cached input is $0.50/1M
+                // when the API reports it; static estimates use the full input
+                // rate. `xhigh` burns extra reasoning tokens billed as output,
+                // so that arm gets a thinking-multiplier prior — Thompson
+                // Sampling can see the cost difference. Real spend should come
+                // from the response `usage` block once surfaced.
+                let thinking_multiplier = match model {
+                    ModelChoice::Grok47Xhigh => 6.0,
+                    _ => 0.0,
+                };
+                let effective_output = (token_estimate.output as f64) * (1.0 + thinking_multiplier);
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 2.00;
+                let output_cost = (effective_output / 1_000_000.0) * 6.00;
+                input_cost + output_cost
+            }
             // All local models are free
             ModelChoice::LocalQwen3
             | ModelChoice::LocalMinistral3B
@@ -830,6 +1001,7 @@ impl RoutingDecision {
 
     fn estimate_time(model: &ModelChoice, _category: TaskCategory) -> Duration {
         match model {
+            ModelChoice::Gpt6Astra => Duration::from_secs(20),
             ModelChoice::GeminiFlash => Duration::from_secs(3),
             // Gemini 3.5 Flash sustains ~280 tok/s — faster than legacy Flash.
             // Latency scales roughly with the thinking budget; tiers are
@@ -862,6 +1034,13 @@ impl RoutingDecision {
             ModelChoice::LocalDeepSeekCoder => Duration::from_secs(4),
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => Duration::from_secs(5),
             ModelChoice::KimiK2 => Duration::from_secs(5),
+            // GLM-5.2 reasons before answering; budget extra wall-clock on
+            // hard tasks, in line with the other thinking cloud arms.
+            ModelChoice::Glm52 => Duration::from_secs(8),
+            // Grok 4.7 is reasoning-capable; low-effort budget similar wall-clock.
+            ModelChoice::Grok47 => Duration::from_secs(7),
+            // xhigh is "maximum reasoning depth, correspondingly higher latency".
+            ModelChoice::Grok47Xhigh => Duration::from_secs(25),
         }
     }
 }
@@ -876,7 +1055,31 @@ pub struct TokenEstimate {
 #[allow(clippy::disallowed_methods)]
 #[allow(clippy::float_cmp)]
 mod tests {
+    #[test]
+    fn astra_catalog_round_trip_and_cost() {
+        let model = super::ModelChoice::Gpt6Astra;
+        assert_eq!(
+            super::ModelChoice::from_name(model.name()),
+            Some(model.clone())
+        );
+        assert_eq!(model.provider(), "openai");
+        assert!(model.is_cloud());
+        assert!(super::ModelChoice::ALL_CLOUD.contains(&model));
+        assert_eq!(model.capability(), super::PlannerTier::Large);
+        assert!(
+            super::RoutingDecision::estimate_cost(
+                &model,
+                crate::classifier::TaskCategory::CodeGeneration
+            ) > 0.0
+        );
+    }
+
     use super::*;
+    use arkavo_budget::TokenCost;
+    use arkavo_budget::config::{BudgetConfig, BudgetLimits};
+    use arkavo_budget::cost::TokenUsage;
+    use arkavo_budget::tracker::BudgetTracker;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_model_choice_name() {
@@ -1036,6 +1239,23 @@ mod tests {
         assert!(!ModelChoice::GeminiFlash.is_local());
     }
 
+    // Regression: the spend plane excludes ALL_CLOUD on a feasibility/quality
+    // re-route, so every listed arm must actually be a cloud arm — a local arm
+    // slipping in would wrongly block a free local model.
+    #[test]
+    fn all_cloud_entries_are_cloud_and_disjoint_from_local() {
+        for m in ModelChoice::ALL_CLOUD {
+            assert!(m.is_cloud(), "{m:?} is in ALL_CLOUD but is not cloud");
+        }
+        for m in ModelChoice::ALL_LOCAL {
+            assert!(m.is_local(), "{m:?} is in ALL_LOCAL but is not local");
+            assert!(
+                !ModelChoice::ALL_CLOUD.contains(m),
+                "{m:?} appears in both ALL_LOCAL and ALL_CLOUD"
+            );
+        }
+    }
+
     #[test]
     fn test_routing_decision_cost() {
         let decision = RoutingDecision::new(
@@ -1046,6 +1266,417 @@ mod tests {
         );
 
         assert_eq!(decision.estimated_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn test_glm52_properties() {
+        let model = ModelChoice::Glm52;
+        assert_eq!(model.name(), "glm-5.2");
+        assert_eq!(model.provider(), "zhipu");
+        assert_eq!(model.family(), "glm");
+        assert_eq!(model.display_name(), "GLM-5.2");
+        assert!(model.is_glm());
+        assert!(model.is_cloud());
+        assert!(!model.is_local());
+        assert_eq!(model.capability(), PlannerTier::Large);
+        // Contract (docs.z.ai): GLM-5.2 is text-only — the vision sibling is a
+        // separate model (glm-5v-turbo). Pinning this catches an accidental add
+        // to the supports_vision allow-list, which would send image parts the
+        // model can't accept.
+        assert!(!model.supports_vision(), "GLM-5.2 is text-only");
+    }
+
+    #[test]
+    fn test_grok47_properties() {
+        let model = ModelChoice::Grok47;
+        assert_eq!(model.name(), "grok-4.7");
+        assert_eq!(model.grok_api_model(), Some("grok-4.7"));
+        assert_eq!(model.provider(), "xai");
+        assert_eq!(model.family(), "grok");
+        assert_eq!(model.display_name(), "Grok 4.7");
+        assert!(model.is_grok());
+        assert!(model.is_cloud());
+        assert!(!model.is_local());
+        assert!(!model.is_glm());
+        assert_eq!(model.capability(), PlannerTier::Large);
+        assert!(ModelChoice::ALL_CLOUD.contains(&ModelChoice::Grok47));
+        assert!(ModelChoice::ALL_CLOUD.contains(&ModelChoice::Grok47Xhigh));
+    }
+
+    #[test]
+    fn test_grok47_xhigh_properties() {
+        let model = ModelChoice::Grok47Xhigh;
+        assert_eq!(model.name(), "grok-4.7-xhigh");
+        assert_eq!(model.grok_api_model(), Some("grok-4.7"));
+        assert_eq!(model.display_name(), "Grok 4.7 (xhigh)");
+        assert!(model.is_grok());
+        assert_eq!(model.provider(), "xai");
+        assert_eq!(model.capability(), PlannerTier::Large);
+    }
+
+    #[test]
+    fn test_grok47_name_resolution() {
+        for alias in [
+            "grok-4.7",
+            "grok-4.7-latest",
+            "grok-build-latest",
+            "grok47",
+            "grok",
+            "GROK-4.7",
+            // Superseded generations migrate to the current flagship arm.
+            "grok-4.6",
+            "grok-4.6-latest",
+            "grok46",
+            "GROK-4.6",
+            "grok-4.5",
+            "grok-4.5-latest",
+            "grok45",
+        ] {
+            assert_eq!(
+                ModelChoice::from_name(alias),
+                Some(ModelChoice::Grok47),
+                "alias {alias} should resolve to Grok47"
+            );
+        }
+        assert_eq!(
+            ModelChoice::from_name(ModelChoice::Grok47.name()),
+            Some(ModelChoice::Grok47),
+            "round-trip via primary name"
+        );
+        for alias in [
+            "grok-4.7-xhigh",
+            "grok-4.7-x-high",
+            "grok47-xhigh",
+            "grok-xhigh",
+            // Superseded xhigh aliases migrate to the current xhigh arm.
+            "grok-4.6-xhigh",
+            "grok-4.6-x-high",
+            "grok46-xhigh",
+        ] {
+            assert_eq!(
+                ModelChoice::from_name(alias),
+                Some(ModelChoice::Grok47Xhigh),
+                "alias {alias} should resolve to Grok47Xhigh"
+            );
+        }
+        assert_eq!(
+            ModelChoice::from_name(ModelChoice::Grok47Xhigh.name()),
+            Some(ModelChoice::Grok47Xhigh),
+            "round-trip via xhigh name"
+        );
+    }
+
+    #[test]
+    fn test_grok_serde_aliases_load_superseded_variants() {
+        for (persisted, expected) in [
+            ("\"Grok45\"", ModelChoice::Grok47),
+            ("\"Grok46\"", ModelChoice::Grok47),
+            ("\"Grok46Xhigh\"", ModelChoice::Grok47Xhigh),
+            ("\"Grok47\"", ModelChoice::Grok47),
+            ("\"Grok47Xhigh\"", ModelChoice::Grok47Xhigh),
+        ] {
+            let decoded: ModelChoice = serde_json::from_str(persisted)
+                .unwrap_or_else(|e| panic!("{persisted} should deserialize: {e}"));
+            assert_eq!(
+                decoded, expected,
+                "persisted trace {persisted} should load as {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_grok45_serde_alias_reads_as_grok47() {
+        let model: ModelChoice = serde_json::from_str("\"Grok45\"").expect("Grok45 alias");
+        assert_eq!(model, ModelChoice::Grok47);
+    }
+
+    #[test]
+    fn test_grok47_cost_math_matches_published_rate() {
+        let cost =
+            RoutingDecision::estimate_cost(&ModelChoice::Grok47, TaskCategory::CodeGeneration);
+        let input_cost = 800.0 / 1_000_000.0 * 2.00;
+        let output_cost = 3000.0 / 1_000_000.0 * 6.00;
+        let expected = input_cost + output_cost;
+        assert!(
+            (cost - expected).abs() < 1e-9,
+            "Grok 4.7 cost {cost} must equal {expected} at the published $2.00/$6.00 rate"
+        );
+    }
+
+    #[test]
+    fn test_grok47_xhigh_cost_includes_thinking_multiplier() {
+        let base =
+            RoutingDecision::estimate_cost(&ModelChoice::Grok47, TaskCategory::CodeGeneration);
+        let xhigh =
+            RoutingDecision::estimate_cost(&ModelChoice::Grok47Xhigh, TaskCategory::CodeGeneration);
+        assert!(
+            xhigh > base,
+            "xhigh prior must exceed the low-effort arm ({xhigh} vs {base})"
+        );
+    }
+
+    #[test]
+    fn test_grok47_fallback_chain_has_local_safety_net() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Grok47,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Test".to_string(),
+        );
+        let chain = &decision.fallback_chain;
+        assert!(!chain.is_empty(), "Grok 4.7 must have a fallback chain");
+        assert!(
+            chain.last().is_some_and(ModelChoice::is_local),
+            "Grok 4.7 fallback chain must end on a local model: {chain:?}"
+        );
+        assert_eq!(
+            chain,
+            &vec![
+                ModelChoice::ClaudeSonnet,
+                ModelChoice::GeminiFlash,
+                ModelChoice::LocalMinistral8B,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_grok47_xhigh_fallback_steps_down_to_base_arm() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Grok47Xhigh,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Test".to_string(),
+        );
+        assert_eq!(
+            decision.fallback_chain,
+            vec![
+                ModelChoice::Grok47,
+                ModelChoice::ClaudeSonnet,
+                ModelChoice::LocalMinistral8B,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_glm52_name_resolution() {
+        for alias in ["glm-5.2", "glm5.2", "glm-5", "glm52", "GLM-5.2"] {
+            assert_eq!(
+                ModelChoice::from_name(alias),
+                Some(ModelChoice::Glm52),
+                "alias {alias} should resolve to Glm52"
+            );
+        }
+        assert_eq!(
+            ModelChoice::from_name(ModelChoice::Glm52.name()),
+            Some(ModelChoice::Glm52),
+            "round-trip via primary name"
+        );
+        // GLM-5.2 (cloud) must not collide with the local GLM-4.7-Flash GGUF.
+        assert_eq!(
+            ModelChoice::from_name("glm-4.7-flash"),
+            Some(ModelChoice::LocalGlm47Flash)
+        );
+    }
+
+    // BUDGET-001 (track token cost): the cost-calculation half — a GLM call is
+    // priced from real provider rates, the precondition for any budget tracking.
+    #[spec("BUDGET-001")]
+    #[test]
+    fn test_glm52_cost_is_priced_below_anthropic() {
+        // Budget enforcement only engages if GLM has a real, non-zero cost
+        // model. GLM-5.2 must be priced (cloud) yet sit well under Opus.
+        let glm = RoutingDecision::estimate_cost(&ModelChoice::Glm52, TaskCategory::CodeGeneration);
+        let opus =
+            RoutingDecision::estimate_cost(&ModelChoice::ClaudeOpus, TaskCategory::CodeGeneration);
+        assert!(
+            glm > 0.0,
+            "GLM-5.2 must carry a real cost for budget gating"
+        );
+        assert!(glm < opus, "GLM-5.2 should be cheaper than Opus");
+    }
+
+    // BUDGET-001 (track token cost): pin the EXACT cost math, not just an
+    // inequality. The "cheaper than Opus" check above was too weak to catch the
+    // $0.60/$2.20 (GLM-4.6) vs $1.40/$4.40 (GLM-5.2) error — a ~2x under-count
+    // that still passed "< Opus". This asserts the published GLM-5.2 rate so a
+    // future stale-price edit fails CI: CodeGeneration estimates 800 in / 3000
+    // out, so cost = 800/1e6*$1.40 + 3000/1e6*$4.40 = $0.00112 + $0.0132.
+    #[spec("BUDGET-001")]
+    #[test]
+    fn test_glm52_cost_math_matches_published_rate() {
+        let cost =
+            RoutingDecision::estimate_cost(&ModelChoice::Glm52, TaskCategory::CodeGeneration);
+        // Mirror estimate_cost's term structure (separate input/output costs) so
+        // this matches bit-for-bit and avoids a fused mul-add (suboptimal_flops).
+        let input_cost = 800.0 / 1_000_000.0 * 1.40;
+        let output_cost = 3000.0 / 1_000_000.0 * 4.40;
+        let expected = input_cost + output_cost;
+        assert!(
+            (cost - expected).abs() < 1e-9,
+            "GLM-5.2 cost {cost} must equal {expected} at the published $1.40/$4.40 rate"
+        );
+        // Guard the absolute figure too, so a refactor of `estimated_tokens()`
+        // that also drifts the rate can't keep this green by coincidence.
+        assert!(
+            (cost - 0.01432).abs() < 1e-9,
+            "expected $0.01432 for a CodeGeneration-sized GLM-5.2 call, got {cost}"
+        );
+    }
+
+    #[test]
+    fn test_glm52_fallback_chain_has_local_safety_net() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Glm52,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Test".to_string(),
+        );
+        let chain = &decision.fallback_chain;
+        assert!(!chain.is_empty(), "GLM-5.2 must have a fallback chain");
+        // "A missing GLM key never strands a task" requires more than *a* local
+        // model somewhere in the chain — the chain must TERMINATE on a local
+        // model, so that even with every cloud key absent the walk reaches a
+        // runnable model instead of dead-ending on an unavailable cloud arm.
+        assert!(
+            chain.last().is_some_and(ModelChoice::is_local),
+            "GLM-5.2 fallback chain must end on a local model: {chain:?}"
+        );
+        // The chain steps down through the cheaper cloud arms first (cost
+        // discipline), then to the local net — order is part of the contract.
+        assert_eq!(
+            chain,
+            &vec![
+                ModelChoice::DeepSeekV32,
+                ModelChoice::GeminiFlash,
+                ModelChoice::LocalMinistral8B,
+            ]
+        );
+    }
+
+    // A realistic GLM-5.2 call (200K input + 100K output) priced at the
+    // `ModelChoice::Glm52` arm's published rates ($1.40 / $4.40 per 1M). Kept in
+    // one place so these budget tests track the cost arm above.
+    fn glm52_call_cost() -> TokenCost {
+        let input_cost = 200_000.0 / 1_000_000.0 * 1.40;
+        let output_cost = 100_000.0 / 1_000_000.0 * 4.40;
+        TokenCost::from_dollars(input_cost + output_cost)
+    }
+
+    // BUDGET-001 (track token cost): a real routed GLM call accrues non-zero,
+    // tracked spend. This exercises the exact orchestrator conversion
+    // (`TokenCost::from_dollars(decision.estimated_cost_usd)`), so it also guards
+    // the integer-cent flooring regression — under the old $0.60/$2.20 placeholder
+    // a category-sized call rounded to $0.00 and escaped tracking entirely.
+    #[spec("BUDGET-001")]
+    #[tokio::test]
+    async fn test_glm52_call_accrues_tracked_cost() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Glm52,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Generate code via GLM".to_string(),
+        );
+        let cost = TokenCost::from_dollars(decision.estimated_cost_usd);
+        assert!(
+            cost > TokenCost::ZERO,
+            "a routed GLM call must price above zero cents or budget tracking is a no-op"
+        );
+
+        let tracker = BudgetTracker::new(BudgetConfig::default()).await.unwrap();
+        tracker
+            .record_spending(
+                "agent-glm".to_string(),
+                ModelChoice::Glm52.provider().to_string(),
+                ModelChoice::Glm52.name().to_string(),
+                TokenUsage::new(800, 3000),
+                cost,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            tracker.get_status().await.session_spent,
+            cost,
+            "running total must reflect the GLM call's cost"
+        );
+    }
+
+    // BUDGET-002 (enforce budget limit before call): with spend near the cap, a
+    // GLM call is rejected and nothing is recorded — proving the paid arm is
+    // bounded.
+    #[spec("BUDGET-002")]
+    #[tokio::test]
+    async fn test_glm52_call_blocked_when_over_budget() {
+        let config = BudgetConfig {
+            limits: BudgetLimits {
+                session_limit: Some(TokenCost::from_dollars(1.00)),
+                hourly_limit: None,
+                daily_limit: None,
+                monthly_limit: None,
+                total_limit: None,
+            },
+            ..Default::default()
+        };
+        let tracker = BudgetTracker::new(config).await.unwrap();
+        // Current spend near the $1.00 session cap.
+        tracker
+            .record_spending(
+                "agent-glm".to_string(),
+                ModelChoice::Glm52.provider().to_string(),
+                ModelChoice::Glm52.name().to_string(),
+                TokenUsage::new(0, 0),
+                TokenCost::from_dollars(0.99),
+            )
+            .await
+            .unwrap();
+
+        let call = glm52_call_cost();
+        assert!(
+            !tracker.can_afford("agent-glm", call).await.unwrap(),
+            "GLM call that overruns the cap must not be affordable"
+        );
+        assert!(
+            tracker
+                .try_spend(
+                    "agent-glm".to_string(),
+                    ModelChoice::Glm52.provider().to_string(),
+                    ModelChoice::Glm52.name().to_string(),
+                    TokenUsage::new(200_000, 100_000),
+                    call,
+                )
+                .await
+                .is_err(),
+            "try_spend must error rather than dispatch an over-budget GLM call"
+        );
+        assert_eq!(
+            tracker.get_status().await.session_spent,
+            TokenCost::from_dollars(0.99),
+            "a blocked GLM call must not accrue spend"
+        );
+    }
+
+    // BUDGET-002 (enforce budget limit before call): the gate is bidirectional —
+    // the same GLM call clears and records when it fits under the budget.
+    #[spec("BUDGET-002")]
+    #[tokio::test]
+    async fn test_glm52_call_allowed_within_budget() {
+        let tracker = BudgetTracker::new(BudgetConfig::default()).await.unwrap();
+        let call = glm52_call_cost();
+        assert!(
+            tracker.can_afford("agent-glm", call).await.unwrap(),
+            "GLM call within the default budget must be affordable"
+        );
+        tracker
+            .try_spend(
+                "agent-glm".to_string(),
+                ModelChoice::Glm52.provider().to_string(),
+                ModelChoice::Glm52.name().to_string(),
+                TokenUsage::new(200_000, 100_000),
+                call,
+            )
+            .await
+            .expect("an affordable GLM call must record spend");
+        assert_eq!(tracker.get_status().await.session_spent, call);
     }
 
     #[test]

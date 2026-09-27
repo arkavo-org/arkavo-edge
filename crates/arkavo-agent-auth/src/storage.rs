@@ -82,11 +82,9 @@ pub async fn delete_token() -> Result<(), AgentAuthError> {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use crate::test_helpers::TEST_LOCK;
+    use arkavo_test_macros::spec;
     use chrono::{Duration, Utc};
-    use tokio::sync::Mutex;
-
-    // Use a mutex to serialize storage tests since they share the same file
-    static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
     #[tokio::test]
     async fn test_token_storage_roundtrip() {
@@ -144,5 +142,59 @@ mod tests {
         // Verify file was actually deleted
         let path = get_token_path().unwrap();
         assert!(!path.exists());
+    }
+
+    /// Test AAUTH-002: Store token securely.
+    ///
+    /// The current implementation persists the token as JSON on disk and sets
+    /// restrictive Unix permissions (0o600). Full encryption of the token file is
+    /// not yet implemented, so this test verifies the implemented safeguards:
+    /// platform-specific path, metadata preservation, and restricted access bits.
+    #[spec("AAUTH-002")]
+    #[tokio::test]
+    async fn test_store_token_securely() {
+        let _guard = TEST_LOCK.lock().await;
+        let _ = delete_token().await;
+
+        let expires = Utc::now() + Duration::hours(1);
+        let token = StoredToken::new(
+            "secure-token-value".to_string(),
+            "did:key:z6MkSecure".to_string(),
+            expires,
+            vec![
+                "agent.capability.chat".to_string(),
+                "agent.capability.read".to_string(),
+            ],
+        )
+        .with_delegation_jwt(Some("delegation.jwt.value".to_string()));
+
+        store_token(&token).await.unwrap();
+
+        let path = get_token_path().unwrap();
+        assert!(
+            path.exists(),
+            "token file should be written to platform storage"
+        );
+
+        // Verify restrictive permissions on Unix.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = std::fs::metadata(&path).unwrap();
+            let mode = metadata.permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "token file should be readable only by owner");
+        }
+
+        // Verify metadata is preserved.
+        let json = tokio::fs::read_to_string(&path).await.unwrap();
+        let parsed: StoredToken = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.token, token.token);
+        assert_eq!(parsed.did, token.did);
+        assert_eq!(parsed.expires_at.timestamp(), token.expires_at.timestamp());
+        assert_eq!(parsed.entitlements, token.entitlements);
+        assert_eq!(parsed.delegation_jwt, token.delegation_jwt);
+        assert!(parsed.stored_at <= Utc::now());
+
+        delete_token().await.unwrap();
     }
 }
