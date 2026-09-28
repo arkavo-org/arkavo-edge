@@ -134,12 +134,16 @@ pub(super) fn pending_model_change(
     current_model: &str,
 ) -> Option<String> {
     let declared_id = size.map_or_else(|| family.to_string(), |s| format!("{family}-{s}"));
+    // When the router knows both names its answer is final: the token match
+    // below would call `grok 4.7` and `grok-4.7-xhigh` the same model.
     if let (Some(declared), Some(running)) = (
         arkavo_router::ModelChoice::from_name(&declared_id),
         arkavo_router::ModelChoice::from_name(current_model),
-    ) && declared == running
-    {
-        return None;
+    ) {
+        return (declared != running).then(|| match size {
+            Some(size) => format!("{family} {size}"),
+            None => family.to_string(),
+        });
     }
     let current = current_model.to_lowercase();
     let family_lc = family.to_lowercase();
@@ -546,6 +550,16 @@ provenance:
         assert_eq!(
             pending_model_change("gpt-6-astra", None, "ministral-3b"),
             Some("gpt-6-astra".to_string())
+        );
+    }
+
+    #[test]
+    fn pending_model_change_flags_a_different_variant_the_router_distinguishes() {
+        // Regression: both names resolved to different models, then the token
+        // fallback saw `grok` and `4.7` inside `grok-4.7-xhigh` and matched.
+        assert_eq!(
+            pending_model_change("grok", Some("4.7"), "grok-4.7-xhigh"),
+            Some("grok 4.7".to_string())
         );
     }
 
