@@ -19,7 +19,7 @@ impl super::Router {
             .await
     }
 
-    /// Route with a model hint from AGENTS.md configuration.
+    /// Route with a model hint from SwarmKit configuration.
     ///
     /// If the hinted model is available, it biases the initial Thompson Sampling
     /// selection. Escalation and quality gates still apply if inference fails.
@@ -136,7 +136,7 @@ impl super::Router {
                 tracing::info!(
                     hint = hint.name(),
                     original = current_decision.recommended_model.name(),
-                    "Applying model hint from AGENTS.md"
+                    "Applying model hint from SwarmKit"
                 );
                 current_decision.recommended_model = hint.clone();
                 applied_hint = Some(hint.clone());

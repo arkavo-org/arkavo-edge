@@ -1,9 +1,9 @@
-//! Integration tests for KAS-gated delegation via AGENTS.md trusted roots
+//! Integration tests for KAS-gated delegation via SwarmKit trusted roots
 //!
 //! Regression coverage for KAS trusted roots previously being dropped:
 //! the server used to build `KasA2aHandler::new(vec![], ...)`, so every
 //! `kas.rewrap` failed with `NoTrustedRoot`. These tests drive the full
-//! path: AGENTS.md YAML -> `KasYamlConfig.trusted_roots` ->
+//! path: kit `runtime.kas.trusted_roots` -> `KasYamlConfig.trusted_roots` ->
 //! `trusted_roots_from_config` -> `KasA2aHandler::handle_rewrap`.
 
 #![cfg(feature = "kas")]
@@ -62,24 +62,78 @@ fn make_chain() -> ChainFixture {
     }
 }
 
-/// Load an AGENTS.md containing a `kas:` block with the given trusted root
-/// DIDs and return the parsed KAS config.
+/// Load a SwarmKit kit whose `runtime.kas` block trusts the given root DIDs
+/// and return the KAS config the server builds from it.
 fn load_kas_config(trusted_root_dids: &[&str]) -> arkavo_router::KasYamlConfig {
-    let mut roots_yaml = String::new();
+    // An empty list must stay an explicit `[]`: a bare `trusted_roots:` is YAML null.
+    let mut roots_yaml = if trusted_root_dids.is_empty() {
+        String::from("      []\n")
+    } else {
+        String::new()
+    };
     for did in trusted_root_dids {
         roots_yaml.push_str(&format!(
-            "    - did: \"{did}\"\n      name: \"Test Root\"\n"
+            "      - did: \"{did}\"\n        name: \"Test Root\"\n"
         ));
     }
     let content = format!(
-        "---\nname: kas-agent\nkas:\n  enabled: true\n  key_id: test-key\n  algorithm: ec:secp256r1\n  trusted_roots:\n{roots_yaml}---\n"
+        r#"spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "kas-agent"
+  version: "0.1.0"
+  authors:
+    - did: "did:web:example.com"
+  created: "2026-04-29T00:00:00Z"
+  expires: "2026-05-29T00:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+objective:
+  goal: "rewrap keys for delegated callers"
+roles:
+  - id: agent
+    role_type: operator
+    agent_provisioning: {{}}
+    skills: []
+    mcp_tools: []
+    handoffs: []
+coordination:
+  topology: hub-spoke
+  protocol: a2a-jsonrpc-2.0
+  routing:
+    strategy: static
+constraints:
+  global_budget:
+    max_wallclock_seconds: 60
+    max_total_tokens: 8000
+    max_cost_usd: 0.01
+  data_classifications: ["public"]
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+completion:
+  rules: ["done"]
+  on_failure: abort
+  max_retries: 0
+provenance:
+  signatures:
+    - signer_did: "did:web:example.com"
+      algorithm: ed25519
+      signature: "AAA"
+runtime:
+  kas:
+    enabled: true
+    key_id: test-key
+    algorithm: ec:secp256r1
+    trusted_roots:
+{roots_yaml}"#
     );
 
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("AGENTS.md");
+    let path = dir.path().join("kas-agent.swarmkit.yaml");
     std::fs::write(&path, content).unwrap();
 
-    let agent_config = arkavo_router::preflight::load_agent_config_from_agents_md(&path).unwrap();
+    let kit = arkavo_swarmkit::load_kit_file(&path).unwrap();
+    let agent_config = arkavo_router::agent_config_from_runtime(&kit.config);
     agent_config.kas.expect("kas config should parse")
 }
 
@@ -153,7 +207,7 @@ async fn rewrap_denied_when_chain_terminates_at_unknown_root() {
 #[tokio::test]
 async fn rewrap_denied_when_no_roots_configured() {
     // Regression guard for the original deny-all behavior: without
-    // trusted_roots in AGENTS.md the handler must keep denying.
+    // trusted_roots in the kit the handler must keep denying.
     let chain = make_chain();
     let kas_config = load_kas_config(&[]);
     let trusted_roots = trusted_roots_from_config(&kas_config);

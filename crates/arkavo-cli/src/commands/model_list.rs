@@ -1,6 +1,5 @@
 #![allow(clippy::collapsible_if)]
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub(crate) fn get_model_compatibility(model_name: &str) -> (&'static str, &'static str) {
@@ -16,68 +15,6 @@ pub(crate) fn get_model_compatibility(model_name: &str) -> (&'static str, &'stat
     } else {
         ("incompatible", "unknown format")
     }
-}
-
-pub(crate) fn parse_agents_config() -> HashMap<String, Vec<String>> {
-    let mut models = HashMap::new();
-
-    let mut current_dir = std::env::current_dir().ok();
-    let mut agents_file = None;
-
-    while let Some(dir) = current_dir {
-        let candidate = dir.join(".arkavo").join("AGENTS.md");
-        if candidate.exists() {
-            agents_file = Some(candidate);
-            break;
-        }
-        current_dir = dir.parent().map(|p| p.to_path_buf());
-    }
-
-    if let Some(path) = agents_file {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            let mut current_provider = String::new();
-
-            for line in content.lines() {
-                let trimmed = line.trim();
-
-                if trimmed.starts_with("##") {
-                    current_provider = trimmed.trim_start_matches("##").trim().to_string();
-                    models
-                        .entry(current_provider.clone())
-                        .or_insert_with(Vec::new);
-                } else if trimmed.contains("API_KEY=") {
-                    if let Some((key, value)) = trimmed.split_once('=') {
-                        let key = key.trim();
-                        let value = value.trim();
-                        if std::env::var(key).is_err() {
-                            // SAFETY: set during config parse, before worker threads.
-                            unsafe {
-                                std::env::set_var(key, value);
-                            }
-                        }
-                    }
-                } else if trimmed.starts_with('-') && !current_provider.is_empty() {
-                    let model = trimmed
-                        .trim_start_matches('-')
-                        .trim()
-                        .split(':')
-                        .next()
-                        .unwrap_or("")
-                        .trim()
-                        .to_string();
-
-                    if !model.is_empty() {
-                        models
-                            .entry(current_provider.clone())
-                            .or_insert_with(Vec::new)
-                            .push(model);
-                    }
-                }
-            }
-        }
-    }
-
-    models
 }
 
 pub(crate) fn list_local_gguf_models() -> Vec<(String, String, PathBuf, u64)> {

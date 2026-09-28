@@ -63,7 +63,7 @@ pub async fn execute_with_conductor(
 /// Execute a task via HRM Conductor with optional learning and system prompt.
 ///
 /// When `system_prompt` is provided, it is sent as a System message so the LLM
-/// treats AGENTS.md instructions (tool examples, planning workflow) as authoritative.
+/// treats SwarmKit instructions (tool examples, planning workflow) as authoritative.
 #[allow(deprecated)] // route_with_tools bypasses architect mode, which is needed for agent tasks
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::implicit_hasher)] // HashSet<String> is the right type here; callers use std hasher

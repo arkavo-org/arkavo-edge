@@ -35,6 +35,7 @@ sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"], optional = tr
 # Internal dependencies
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-budget = { path = "../arkavo-budget" }
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 arkavo-gemini = { path = "../arkavo-gemini", optional = true }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }

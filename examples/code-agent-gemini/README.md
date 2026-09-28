@@ -77,14 +77,14 @@ npm install -g jest
 ### 1. Start the Gemini Code Agent
 
 ```bash
-./launch_agent.sh
+./launch.sh
 ```
 
 This starts an agent on port 8346 with Gemini 2.5 Pro.
 
 For faster iteration with Flash:
 ```bash
-./launch_agent.sh --flash
+./launch.sh --flash
 ```
 
 ### 2. Test Basic Functionality
@@ -228,26 +228,39 @@ Compare Gemini against Claude on identical tasks:
 
 ## Agent Configuration
 
-The agent is configured via `AGENTS.md`:
+The agent is configured via `code-agent-gemini.swarmkit.yaml`:
 
 ```yaml
-name: gemini-code-agent
-port: 8346
-model: gemini-3-pro-preview  # or gemini-flash-latest
-
-capabilities:
-  - code_generation
-  - code_analysis
-  - security_scanning
-
-mcp_tools:
-  - codegrep_search
-  - struct_find_replace
-  - syntax_tree
-  - test_run
-  - sec_semgrep
-  - gh_pr_review
+roles:
+  - id: "gemini-code-agent"
+    role_type: "coding"
+    mcp_tools:
+      - server: "arkavo-code-search"
+        tools: ["codegrep_search", "struct_find_replace", "syntax_tree"]
+      - server: "arkavo-security"
+        tools: ["sec_semgrep", "deps_osv"]
+      - server: "arkavo-github"
+        tools: ["test_run", "gh_checks", "gh_pr_review"]
+runtime:
+  listen: "0.0.0.0:8346"
 ```
+
+The Gemini model itself (`gemini-3-pro-preview`, `gemini-flash-latest`, ...)
+is a cloud model with no entry in this repo's local-edge-model vocabulary,
+so it is not set via `agent_provisioning.model` in the kit — select it with
+`GEMINI_MODEL` / `launch.sh`'s `--pro`/`--flash`/`--lite` flags instead (see
+Model Selection below).
+
+### Configuration not yet modeled in SwarmKit
+
+The rest of the old AGENTS.md had fields with no RoleSpec equivalent,
+supplied via env/flags/CLI defaults instead:
+- `a2a.static_peers` — peer discovery is now mDNS-only (`runtime.mdns: true`)
+- `websocket` — used only for `arkavo ui` connections, not agent-to-agent
+- `logging`, `health_check` — CLI/runtime defaults
+- `performance` (streaming, buffer_size, tool_timeout, parallel_tools, rate_limit)
+- `workspace` (root, max_size_mb, auto_cleanup, cleanup_after_hours) — defaults to `./workspace`
+- `code_generation.allow_globs`/`deny_globs` — no file-access-pattern equivalent yet
 
 ## Model Selection
 
@@ -255,21 +268,21 @@ mcp_tools:
 Use for production-quality code generation:
 ```bash
 export GEMINI_MODEL="gemini-3-pro-preview"
-./launch_agent.sh
+./launch.sh
 ```
 
 ### Gemini 2.5 Flash
 Use for fast iteration and development:
 ```bash
 export GEMINI_MODEL="gemini-flash-latest"
-./launch_agent.sh --flash
+./launch.sh --flash
 ```
 
 ### Gemini 2.5 Flash-Lite
 Use for budget-conscious development:
 ```bash
 export GEMINI_MODEL="gemini-flash-lite-latest"
-./launch_agent.sh --lite
+./launch.sh --lite
 ```
 
 ## Cost Optimization
@@ -282,12 +295,12 @@ The agent automatically tracks token usage and costs:
 # View current budget status
 curl http://localhost:8346/v1/agent/budget
 
-# Set budget limits in AGENTS.md
-budget:
-  limits:
-    hourly: 0.50
-    daily: 5.00
-    monthly: 50.00
+# Per-agent hourly/daily/monthly budget limits are not yet parsed from the
+# kit (this was already true of the old AGENTS.md's commented-out `budget:`
+# block); budget tracking is orchestrator-level. The kit's own
+# `constraints.global_budget.max_cost_usd` and
+# `agent_provisioning.budget.max_total_tokens` are enforced per session —
+# see code-agent-gemini.swarmkit.yaml.
 ```
 
 ### Model Selection Strategy
@@ -338,7 +351,7 @@ grep "latency" logs/gemini-code-agent.log
 
 ```bash
 # Check if required tools are installed
-./launch_agent.sh --check-deps
+./launch.sh --check-deps
 
 # Install missing tools
 brew install ripgrep comby semgrep
@@ -356,7 +369,7 @@ Gemini 3.0 is expected in Q1 2026 with:
 ```bash
 # When available, test with beta models
 export GEMINI_MODEL="gemini-3.0-flash-beta"
-./launch_agent.sh
+./launch.sh
 
 # Benchmark against 2.5 baseline
 ./run_benchmarks.sh --compare gemini-3-pro-preview
@@ -369,11 +382,11 @@ The Gemini Code agent can work with other Arkavo agents:
 ```bash
 # Start Claude Code agent for comparison
 cd ../claude-code-agent
-./launch_agent.sh
+./launch.sh
 
 # Start project orchestrator
 cd ../software-development-lifecycle/orchestrator
-./launch_agent.sh
+./launch.sh
 
 # Agents can delegate tasks to each other via A2A protocol
 ```

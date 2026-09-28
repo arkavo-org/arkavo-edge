@@ -7,15 +7,18 @@
 # - Orchestrator: Coordinates both for feature implementation
 #
 # Usage:
-#   ./launch.sh                    # Use default model
-#   ./launch.sh --model glm        # Use GLM-4.7-Flash
-#   ./launch.sh --model ministral  # Use Ministral-3B
+#   ./launch.sh                    # Use the kit's configured model
 #   ./launch.sh stop               # Stop all agents
+#
+# Model selection now lives in fullstack-feature.swarmkit.yaml
+# (agent_provisioning.model per role) rather than a CLI flag — `arkavo
+# agent` has no model-override flag. Edit the kit file to change models.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINARY="${BINARY:-$SCRIPT_DIR/../../target/debug/arkavo}"
+KIT="$SCRIPT_DIR/fullstack-feature.swarmkit.yaml"
 PID_FILE="$SCRIPT_DIR/.agent_pids"
 LOG_DIR="$SCRIPT_DIR/logs"
 
@@ -27,16 +30,9 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Default model (empty = use agent's AGENTS.md model)
-MODEL=""
-
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --model|-m)
-            MODEL="$2"
-            shift 2
-            ;;
         stop)
             echo -e "${CYAN}Stopping agents...${NC}"
             if [ -f "$PID_FILE" ]; then
@@ -90,22 +86,15 @@ check_prerequisites() {
 
 start_agent() {
     local name="$1"
-    local config="$2"
+    local role="$2"
+    local port="$3"
     local log_file="$LOG_DIR/$name.log"
 
     mkdir -p "$LOG_DIR"
 
-    echo -e "${BLUE}Starting $name...${NC}"
+    echo -e "${BLUE}Starting $name on port $port...${NC}"
 
-    # If model override specified, create temp config with model replaced
-    local actual_config="$config"
-    if [ -n "$MODEL" ]; then
-        local temp_config="$LOG_DIR/$name-config.md"
-        sed "s/^model:.*$/model:   $MODEL/" "$config" > "$temp_config"
-        actual_config="$temp_config"
-    fi
-
-    nohup "$BINARY" agent --config "$actual_config" > "$log_file" 2>&1 &
+    nohup "$BINARY" agent -c "$KIT" -n "$role" -p "$port" > "$log_file" 2>&1 &
     local pid=$!
 
     echo "$pid $name" >> "$PID_FILE"
@@ -169,21 +158,17 @@ cleanup() {
 # Main
 print_banner
 
-if [ -n "$MODEL" ]; then
-    echo -e "${CYAN}Model:${NC} $MODEL"
-    echo ""
-fi
-
 check_prerequisites
 
 # Clean up any existing agents
 rm -f "$PID_FILE"
 
-# Start the mesh agents
+# Start the mesh agents (roles of fullstack-feature.swarmkit.yaml, each on
+# its historical listen port)
 echo -e "${CYAN}Starting mesh agents...${NC}"
-start_agent "frontend-agent" "$SCRIPT_DIR/frontend/AGENTS.md"
-start_agent "backend-agent" "$SCRIPT_DIR/backend/AGENTS.md"
-start_agent "orchestrator" "$SCRIPT_DIR/orchestrator/AGENTS.md"
+start_agent "frontend-agent" "frontend-agent" 8370
+start_agent "backend-agent" "backend-agent" 8380
+start_agent "orchestrator" "orchestrator-agent" 8390
 echo ""
 
 # Give agents time to register on mesh

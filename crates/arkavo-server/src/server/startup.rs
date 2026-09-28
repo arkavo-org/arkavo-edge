@@ -28,7 +28,7 @@ pub enum GoalStatus {
 /// Run startup planning phase for autonomous agents
 ///
 /// This phase executes when:
-/// 1. Purpose is known (system prompt from AGENTS.md)
+/// 1. Purpose is known (system prompt from SwarmKit)
 /// 2. MCP tools are registered
 /// 3. MCP tools are working (first successful response)
 pub async fn run_startup_planning_phase(

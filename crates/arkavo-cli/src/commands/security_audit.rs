@@ -52,7 +52,7 @@ impl AuditReport {
             check_rate_limiting(),
             check_preflight_moderation(),
             check_memory_encryption(),
-            check_agents_md_exists(),
+            check_swarmkit_manifest(),
             check_api_keys_in_env(),
             check_task_policy_manager(),
         ];
@@ -228,7 +228,9 @@ fn check_preflight_moderation() -> AuditResult {
         _ => AuditResult {
             name: "Preflight moderation".to_string(),
             status: AuditStatus::Warn,
-            message: "No preflight policies configured in AGENTS.md".to_string(),
+            message:
+                "No preflight policies configured; add runtime.preflight to the SwarmKit manifest"
+                    .to_string(),
             category: "Input Safety".to_string(),
         },
     }
@@ -253,29 +255,40 @@ fn check_memory_encryption() -> AuditResult {
     }
 }
 
-fn check_agents_md_exists() -> AuditResult {
-    // Search upward for AGENTS.md
-    let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    loop {
-        let agents_file = dir.join("AGENTS.md");
-        if agents_file.exists() {
-            return AuditResult {
-                name: "Agent config".to_string(),
-                status: AuditStatus::Pass,
-                message: format!("AGENTS.md found at {}", agents_file.display()),
-                category: "Configuration".to_string(),
-            };
-        }
-        if !dir.pop() {
-            break;
-        }
-    }
+fn check_swarmkit_manifest() -> AuditResult {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    check_swarmkit_manifest_at(&cwd)
+}
 
-    AuditResult {
-        name: "Agent config".to_string(),
-        status: AuditStatus::Warn,
-        message: "No AGENTS.md found; using defaults".to_string(),
-        category: "Configuration".to_string(),
+/// `cwd`-parameterized so tests can exercise every discovery outcome
+/// without depending on (or mutating) the process's real working directory.
+fn check_swarmkit_manifest_at(cwd: &std::path::Path) -> AuditResult {
+    match arkavo_swarmkit::discover_kit_path(cwd) {
+        Ok(path) => AuditResult {
+            name: "Agent config".to_string(),
+            status: AuditStatus::Pass,
+            message: format!("SwarmKit manifest found: {}", path.display()),
+            category: "Configuration".to_string(),
+        },
+        Err(arkavo_swarmkit::DiscoverError::NotFound) => AuditResult {
+            name: "Agent config".to_string(),
+            status: AuditStatus::Warn,
+            message: "No SwarmKit manifest; agent runs with defaults — arkavo kit init <name>"
+                .to_string(),
+            category: "Configuration".to_string(),
+        },
+        Err(err @ arkavo_swarmkit::DiscoverError::AgentsMdUnsupported { .. }) => AuditResult {
+            name: "Agent config".to_string(),
+            status: AuditStatus::Warn,
+            message: err.to_string(),
+            category: "Configuration".to_string(),
+        },
+        Err(err) => AuditResult {
+            name: "Agent config".to_string(),
+            status: AuditStatus::Warn,
+            message: format!("SwarmKit manifest discovery error: {err}"),
+            category: "Configuration".to_string(),
+        },
     }
 }
 
@@ -368,6 +381,84 @@ mod tests {
         let result = check_tls_settings();
         assert_eq!(result.status, AuditStatus::Pass);
         assert!(result.message.contains("rustls"));
+    }
+
+    fn minimal_kit_yaml() -> &'static str {
+        r#"
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "hello"
+  version: "0.1.0"
+  authors:
+    - did: "did:web:example.com"
+  created: "2026-04-29T00:00:00Z"
+  expires: "2026-05-29T00:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+objective:
+  goal: "say hello"
+roles:
+  - id: agent
+    role_type: operator
+    agent_provisioning: {}
+    skills: []
+    mcp_tools: []
+    handoffs: []
+coordination:
+  topology: hub-spoke
+  protocol: a2a-jsonrpc-2.0
+  routing:
+    strategy: static
+constraints:
+  global_budget:
+    max_wallclock_seconds: 60
+    max_total_tokens: 8000
+    max_cost_usd: 0.01
+  data_classifications: ["public"]
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+completion:
+  rules: ["done"]
+  on_failure: abort
+  max_retries: 0
+provenance:
+  signatures:
+    - signer_did: "did:web:example.com"
+      algorithm: ed25519
+      signature: "AAA"
+"#
+    }
+
+    #[test]
+    fn swarmkit_check_passes_when_manifest_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let arkavo_dir = dir.path().join(".arkavo");
+        std::fs::create_dir_all(&arkavo_dir).unwrap();
+        std::fs::write(arkavo_dir.join("agent.swarmkit.yaml"), minimal_kit_yaml()).unwrap();
+
+        let result = check_swarmkit_manifest_at(dir.path());
+        assert_eq!(result.status, AuditStatus::Pass);
+        assert!(result.message.contains("SwarmKit manifest found"));
+    }
+
+    #[test]
+    fn swarmkit_check_warns_when_no_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = check_swarmkit_manifest_at(dir.path());
+        assert_eq!(result.status, AuditStatus::Warn);
+        assert!(result.message.contains("arkavo kit init"));
+    }
+
+    #[test]
+    fn swarmkit_check_warns_with_migrate_hint_when_only_agents_md_present() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "# AGENTS.md\n").unwrap();
+
+        let result = check_swarmkit_manifest_at(dir.path());
+        assert_eq!(result.status, AuditStatus::Warn);
+        assert!(result.message.contains("migrate-from-agents-md"));
     }
 
     #[test]

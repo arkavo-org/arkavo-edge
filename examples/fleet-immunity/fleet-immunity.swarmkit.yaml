@@ -1,0 +1,254 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# rover-alpha/, rover-beta/, and rover-gamma/.
+#
+# `a2a.enabled`/`discovery.service_type` aren't representable kit fields;
+# mesh discovery now runs on `runtime.mdns: true` (kit-level) — see
+# README.md. The `logging:` blocks (level/file per old agent) are
+# unrepresentable — see README.md. `rover-alpha.arp.json`/`.adl.json` are
+# unrelated Agent Runtime Policy documents and are left untouched.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "fleet-immunity"
+  version: "0.1.0"
+  description: "Three autonomous delivery rovers that learn from crashes and share safety lessons across the fleet in real time, using a shared MCP fleet-environment server for sector state."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "HuY2-FS044migbt6jC8tKg"
+
+objective:
+  goal: |
+    Autonomous delivery rover for warehouse logistics.
+    Route: 1 → 2 → 4 → 3 (Alpha enters Sector 4 early - first to encounter hazards)
+
+    Behavior:
+    - Query each sector before entering using get_sector tool
+    - If hazard detected while driving FAST: report crash, synthesize safety lesson
+    - Broadcast lessons to fleet peers via A2A protocol
+    - Evaluate lessons received from peers and apply if valid
+
+    Tool Call Format (use fenced code blocks):
+    ```get_sector
+    id: 4
+    ```
+  success_criteria:
+    - "the first rover to hit a hazard while fast crashes and synthesizes a lesson"
+    - "peers that receive and verify the lesson slow down before Sector 4 and avoid crashing"
+
+roles:
+  - id: "rover-alpha"
+    role_type: "operator"
+    description: "Autonomous delivery rover, route 1→2→4→3 (first to encounter Sector 4 hazards)."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Autonomous delivery rover for warehouse logistics.
+            Route: 1 → 2 → 4 → 3 (Alpha enters Sector 4 early - first to encounter hazards)
+
+            Behavior:
+            - Query each sector before entering using get_sector tool
+            - If hazard detected while driving FAST: report crash, synthesize safety lesson
+            - Broadcast lessons to fleet peers via A2A protocol
+            - Evaluate lessons received from peers and apply if valid
+
+            Tool Call Format (use fenced code blocks):
+            ```get_sector
+            id: 4
+            ```
+
+            Rover Configuration:
+            - route: [1, 2, 4, 3]
+            - default_speed: fast
+            - invariant: "NOT(traction_loss AND drive_fast)"
+          resources: []
+    mcp_tools:
+      - server: "fleet-env"
+        auth: "delegated"
+        tools: []
+    handoffs:
+      - to: "rover-beta"
+        on: "lesson_synthesized"
+      - to: "rover-gamma"
+        on: "lesson_synthesized"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "rover-beta"
+    role_type: "operator"
+    description: "Autonomous delivery rover, route 2→3→4→1 (encounters Sector 4 mid-route)."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Autonomous delivery rover for warehouse logistics.
+            Route: 2 → 3 → 4 → 1 (Beta encounters Sector 4 mid-route)
+
+            Behavior:
+            - Query each sector before entering using get_sector tool
+            - If hazard detected while driving FAST: report crash, synthesize safety lesson
+            - Broadcast lessons to fleet peers via A2A protocol
+            - Evaluate lessons received from peers and apply if valid
+
+            Tool Call Format (use fenced code blocks):
+            ```get_sector
+            id: 4
+            ```
+
+            Rover Configuration:
+            - route: [2, 3, 4, 1]
+            - default_speed: fast
+            - invariant: "NOT(traction_loss AND drive_fast)"
+          resources: []
+    mcp_tools:
+      - server: "fleet-env"
+        auth: "delegated"
+        tools: []
+    handoffs:
+      - to: "rover-alpha"
+        on: "lesson_synthesized"
+      - to: "rover-gamma"
+        on: "lesson_synthesized"
+    context_scope:
+      can_read: ["rover-alpha", "self"]
+      can_write: ["self"]
+
+  - id: "rover-gamma"
+    role_type: "operator"
+    description: "Autonomous delivery rover, route 3→1→2→4 (encounters Sector 4 last)."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Autonomous delivery rover for warehouse logistics.
+            Route: 3 → 1 → 2 → 4 (Gamma encounters Sector 4 last)
+
+            Behavior:
+            - Query each sector before entering using get_sector tool
+            - If hazard detected while driving FAST: report crash, synthesize safety lesson
+            - Broadcast lessons to fleet peers via A2A protocol
+            - Evaluate lessons received from peers and apply if valid
+
+            Tool Call Format (use fenced code blocks):
+            ```get_sector
+            id: 4
+            ```
+
+            Note: Gamma arrives at Sector 4 last - should have learned from Alpha's crash.
+
+            Rover Configuration:
+            - route: [3, 1, 2, 4]
+            - default_speed: fast
+            - invariant: "NOT(traction_loss AND drive_fast)"
+          resources: []
+    mcp_tools:
+      - server: "fleet-env"
+        auth: "delegated"
+        tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["rover-alpha", "rover-beta", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "mesh"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 900
+    max_total_tokens: 150000
+    max_cost_usd: 0.75
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "every rover that enters Sector 4 after the first crash slows down instead of crashing"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true
+  mcp_servers:
+    - name: "fleet-env"
+      command: "../mcp-fleet-env/target/debug/arkavo-mcp-fleet-env"
+      args: ["--connect", "http://localhost:8360"]

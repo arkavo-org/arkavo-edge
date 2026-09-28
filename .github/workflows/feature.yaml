@@ -312,7 +312,7 @@ jobs:
             # arkavo-server artifacts with the line above so this group does
             # not build the crate a second time.
             cargo test --locked -p arkavo-server --features taint,kas --lib llm_intent_analyzer
-            # KAS delegation regression (trusted roots from AGENTS.md). Same
+            # KAS delegation regression (trusted roots from kit runtime.kas). Same
             # taint,kas feature set as the two lines above so it shares their
             # arkavo-server build instead of a new feature unification.
             cargo test --locked -p arkavo-server --features taint,kas --test kas_delegation_test

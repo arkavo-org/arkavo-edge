@@ -86,16 +86,16 @@ pub async fn process_with_tools(
 ) -> Result<ToolIntegrationResult, Box<dyn std::error::Error>> {
     let config = config.unwrap_or_default();
 
-    // Load preflight policies from AGENTS.md in current or parent directories
+    // Load preflight policies from discovered SwarmKit runtime.preflight
     let moderator = arkavo_router::preflight::load_policies_from_config().unwrap_or_else(|e| {
         tracing::warn!("Failed to load policies: {e}, using empty moderator");
         arkavo_router::preflight::PreflightModerator::new()
     });
 
-    // Spend plane: adopt the AGENTS.md cloud policy (resolved by the shared
+    // Spend plane: adopt the SwarmKit runtime cloud policy (resolved by the shared
     // server-crate helper) and share one budget tracker between the router
     // (live-cap enforcement) and UCP below.
-    let cloud_policy = arkavo_server::cloud_policy_from_agents_md();
+    let cloud_policy = arkavo_server::cloud_policy_from_kit();
     let ucp_budget_tracker = std::sync::Arc::new(
         arkavo_budget::BudgetTracker::new(arkavo_budget::BudgetConfig::default())
             .await

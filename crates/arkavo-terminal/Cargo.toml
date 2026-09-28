@@ -26,6 +26,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 semver = { workspace = true }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, optional = true }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }

@@ -12,17 +12,23 @@ Hands-on verification of `feature/gpt-6-astra` (PR #688, which includes the trus
 
 **Local weights.** `arkavo model list` must show at least one ✓ GGUF (Qwen3.5-0.8B or Gemma 4). To simulate a machine with no weights, prefix a command with `HF_HOME=$(mktemp -d)`.
 
-**Cloud policy.** Set in the YAML frontmatter of `AGENTS.md` (or `.arkavo/AGENTS.md`) in the working directory. Omitted means `ask_before_cloud`.
+**Cloud policy.** Set in the `runtime` block of the SwarmKit kit discovered from the working directory (`ARKAVO_SWARMKIT_PATH`, `.arkavo/*.swarmkit.yaml`, or a `*.swarmkit.yaml` in the directory; `arkavo kit init` writes one). AGENTS.md is not read. Omitted means `ask_before_cloud`.
 
 ```yaml
----
-budget:
+runtime:
   cloud_policy: local_only      # local_only | ask_before_cloud | cloud_within_cap
   max_cost_per_session: 0.50
----
 ```
 
-**Consent.** An explicit `--model gpt-6-astra` and an `AGENTS.md` `model:` hint both count as consent. Auto-selection never picks a cloud arm while a local arm is feasible.
+**Consent.** An explicit `--model gpt-6-astra` and a kit role model hint both count as consent. Auto-selection never picks a cloud arm while a local arm is feasible. A role names a cloud model by its router id as the family, with no size:
+
+```yaml
+roles:
+  - id: agent
+    agent_provisioning:
+      model:
+        family: gpt-6-astra
+```
 
 **Debug.** `ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1` prints the model chosen, tool calls with their ids, and the `[Perf]` token line.
 
@@ -166,7 +172,7 @@ Policy is enforced before any provider is built. Consent comes from an explicit 
 
 ### P-01 local_only refuses an explicit cloud model before any request (local)
 
-Setup: scratch dir with an `AGENTS.md` whose frontmatter sets `cloud_policy: local_only`; export `OPENAI_API_KEY=sk-invalid`.
+Setup: scratch dir with a kit whose `runtime` sets `cloud_policy: local_only`; export `OPENAI_API_KEY=sk-invalid`.
 
 ```bash
 ARKAVO_DEBUG=1 arkavo chat --model gpt-6-astra --repo-context off --prompt "hi" </dev/null
@@ -176,13 +182,15 @@ Expect: a policy error naming LocalOnly. No 401 appears, proving the refusal hap
 
 ### P-02 Manifest model hint counts as consent (cloud)
 
-Setup: `AGENTS.md` with an agent section whose `model: gpt-6-astra`; no `cloud_policy` (default ask_before_cloud).
+Setup: a kit whose role sets `agent_provisioning.model.family: gpt-6-astra`; no `cloud_policy` (default ask_before_cloud).
 
 ```bash
-ARKAVO_DEBUG=1 arkavo chat --repo-context off --prompt "Reply with ready." </dev/null
+ARKAVO_DEBUG=1 arkavo agent -v -c <kit>.swarmkit.yaml
 ```
 
-Expect: Astra answers with no consent prompt (documented behaviour: a manifest hint is explicit consent). Remove the hint: the same command stays local.
+Then send the agent a task over A2A (for example `arkavo chat --agent-id <agent id> --prompt "Reply with ready."`).
+
+Expect: Astra answers with no consent prompt (documented behaviour: a manifest hint is explicit consent). Remove the role's `model` block: the same request stays local.
 
 ### P-03 Non-interactive client never hangs on a consent prompt (cloud, after fix: Task 2)
 
@@ -193,13 +201,13 @@ Setup: terminal 1 runs `arkavo agent -v -p 8343` in a dir with default policy an
 arkavo chat --agent-id <agent id from terminal 1> --prompt "Use gpt-6-astra to reply with ready." </dev/null
 ```
 
-Then, from terminal 2, request something that requires cloud through the agent's chat session (a model hint in the request, or an `AGENTS.md` for the client that names gpt-6-astra).
+Then, from terminal 2, request something that requires cloud through the agent's chat session (a model hint in the request, or a kit role for the client whose model is gpt-6-astra).
 
 Expect: the remote client receives a clear "cloud confirmation required" policy error immediately. Current bug: the server process shows the yes/no prompt on its own terminal and the client waits until someone answers it there.
 
 ### P-04 Interactive consent is asked once per session and scoped to it (cloud, after fix: Task 2)
 
-Setup: interactive `arkavo chat` on a TTY, default policy, key loaded, and a path that needs cloud (an `AGENTS.md` without a model hint but with `cloud_policy: ask_before_cloud`, and a request that only a cloud arm satisfies).
+Setup: interactive `arkavo chat` on a TTY, default policy, key loaded, and a path that needs cloud (a kit with `cloud_policy: ask_before_cloud` and no model hint, and a request that only a cloud arm satisfies).
 
 1. Session A: trigger cloud, answer `y`. Trigger again.
 2. Session B (second terminal, same agent or a fresh `arkavo chat`): trigger cloud.
@@ -209,7 +217,7 @@ Expect: A asks once and not again. B is asked independently. C refuses and does 
 
 ### P-05 cloud_within_cap refuses when the cap cannot cover the request (local)
 
-Setup: `AGENTS.md` with `cloud_policy: cloud_within_cap` and `max_cost_per_session: 0.0001`; `OPENAI_API_KEY=sk-invalid`.
+Setup: a kit whose `runtime` sets `cloud_policy: cloud_within_cap` and `max_cost_per_session: 0.0001`; `OPENAI_API_KEY=sk-invalid`.
 
 ```bash
 ARKAVO_DEBUG=1 arkavo chat --model gpt-6-astra --repo-context off --prompt "Write 300 words." </dev/null
@@ -229,7 +237,7 @@ Every Astra call records cached input, visible output and reasoning once each; f
 
 ### B-01 Small calls accumulate instead of rounding to zero (cloud)
 
-Setup: `AGENTS.md` with `cloud_policy: cloud_within_cap` and `max_cost_per_session: 0.02`.
+Setup: a kit whose `runtime` sets `cloud_policy: cloud_within_cap` and `max_cost_per_session: 0.02`.
 
 In one interactive Astra session send "ok" twenty times, then ask for 800 words.
 
@@ -378,7 +386,7 @@ Expect: requests contain role, content and tool fields only; no `provider_state`
 
 ### R-03 Architect mode plans on Astra and executes locally (cloud, after fix: Tasks 3 and 4)
 
-Setup: a scratch repo; `AGENTS.md` with `model: gpt-6-astra`.
+Setup: a scratch repo; a kit whose role sets `agent_provisioning.model.family: gpt-6-astra`.
 
 ```bash
 ARKAVO_DEBUG=1 arkavo task 'add a README with an install section and a usage section, and a CONTRIBUTING file' --local-only

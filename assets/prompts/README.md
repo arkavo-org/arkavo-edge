@@ -10,8 +10,8 @@ Naming Conventions
   - type: what this file is (prompt).
   - format: the prompt’s authoring format (md, json, etc.).
 - Example (recommended, concise):
-  - agents_md.prompt.md
-  - Why it’s good: Within assets/prompts/, it’s clear this prompt generates the AGENTS.MD file. It’s short and follows [output_file].[type].[format].
+  - chat_system.prompt.md
+  - Why it’s good: Within assets/prompts/, it’s clear this prompt generates the chat system prompt. It’s short and follows [output_file].[type].[format].
 - Guidance:
   - Choose descriptive, consistent names aligned with nearby prompts (e.g., system_prompt).
   - Prefer lowercase with underscores for multiword names.
@@ -119,12 +119,12 @@ Output (excerpt):
 - v1.0: Initial version.
 
 Example Names
-- agents_md.prompt.md → Generates AGENTS.MD documentation.
+- chat_system.prompt.md → Generates the chat system prompt.
 - changelog_md.prompt.md → Generates CHANGELOG.md entries.
 - release_notes_md.prompt.md → Generates release notes in Markdown.
 
 Quick Rationale Recap
 - The name you choose for each prompt is important for clarity and maintainability.
 - Within assets/prompts/ alongside other configuration prompts (like system_prompt), use descriptive, consistent names.
-- Simpler, also good option: agents_md.prompt.md
-  - Why it’s good: Short, clear, and follows [output_file].[type].[format]; within assets/prompts/, it’s understood that the prompt is for generating AGENTS.MD.
+- Simpler, also good option: chat_system.prompt.md
+  - Why it’s good: Short, clear, and follows [output_file].[type].[format]; within assets/prompts/, it’s understood that the prompt is for generating the chat system prompt.

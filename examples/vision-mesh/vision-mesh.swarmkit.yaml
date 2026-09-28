@@ -1,0 +1,164 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# orchestrator/, vision-analyst/.
+#
+# `discovery.mdns` (set on both roles) maps to the single kit-level
+# `runtime.mdns` below. Both roles used the same `qwen3.5-27b` vision model
+# (Qwen3.5-27B GGUF + mmproj vision projector) — see README.md for the
+# download prerequisites; the router auto-discovers the mmproj file.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "vision-mesh"
+  version: "0.1.0"
+  description: "Image analysis mesh using Qwen3.5-27B vision: an orchestrator routes image analysis requests to a vision-analyst agent and aggregates results for multi-image workflows."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "visionMeshNonce00001"
+
+objective:
+  goal: |
+    Orchestrate vision analysis tasks across a mesh of specialist agents.
+    Routes image analysis requests to the vision-analyst agent and
+    aggregates results for multi-image workflows.
+
+    Supported task types:
+    - UI screenshot analysis (layout, accessibility, component identification)
+    - Architecture diagram interpretation
+    - Chart and graph data extraction
+    - General image description and comparison
+  success_criteria:
+    - "image analysis requests are routed to vision-analyst-agent"
+    - "results from multi-image workflows are aggregated coherently"
+
+roles:
+  - id: "vision-orchestrator"
+    role_type: "planner"
+    description: "Orchestrate vision analysis tasks across a mesh of specialist agents."
+    agent_provisioning:
+      model:
+        family: "qwen"
+        size: "27B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Orchestrate vision analysis tasks across a mesh of specialist agents.
+            Routes image analysis requests to the vision-analyst agent and
+            aggregates results for multi-image workflows.
+
+            Supported task types:
+            - UI screenshot analysis (layout, accessibility, component identification)
+            - Architecture diagram interpretation
+            - Chart and graph data extraction
+            - General image description and comparison
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "vision-analyst-agent"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "vision-analyst-agent"
+    role_type: "specialist"
+    description: "Analyze images using Qwen3.5-27B vision capabilities."
+    agent_provisioning:
+      model:
+        family: "qwen"
+        size: "27B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Analyze images using Qwen3.5-27B vision capabilities.
+
+            Specializations:
+            - UI screenshot review (layout issues, accessibility, component hierarchy)
+            - Architecture diagram interpretation (components, data flow, dependencies)
+            - Chart and graph data extraction (values, trends, anomalies)
+            - Code screenshot OCR and analysis
+            - Visual diff comparison between image pairs
+
+            When analyzing images, always provide:
+            - Structured observations with confidence levels
+            - Specific coordinates or regions of interest when relevant
+            - Actionable recommendations based on visual content
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["vision-orchestrator", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 600
+    max_total_tokens: 150000
+    max_cost_usd: 1.00
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "vision-analyst-agent's findings are returned to the orchestrator"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

@@ -1,11 +1,10 @@
 pub mod agent;
-pub mod agent_config;
-pub mod agent_config_markdown;
-pub mod agent_config_yaml;
+pub mod agent_kit;
 pub mod chat;
 #[cfg(feature = "sentinel")]
 pub mod chat_pack;
 pub mod dataflow;
+pub mod kit;
 pub mod login;
 pub mod mcp_proxy;
 pub mod mesh;

@@ -59,25 +59,27 @@ echo ""
 echo "[FLEET ] Starting rovers..."
 echo ""
 
-# Start rovers as arkavo agents (each from its own directory for separate databases)
-# RUST_LOG enables tracing output for gossip learning visibility
+# Start rovers as arkavo agents, each as one role of the shared fleet-immunity
+# kit. RUST_LOG enables tracing output for gossip learning visibility.
 export RUST_LOG="${RUST_LOG:-info}"
 
-(cd "$SCRIPT_DIR/rover-alpha" && "$ARKAVO_BIN" agent --config AGENTS.md > "$SCRIPT_DIR/logs/alpha.log" 2>&1) &
+KIT="$SCRIPT_DIR/fleet-immunity.swarmkit.yaml"
+
+(cd "$SCRIPT_DIR/rover-alpha" && "$ARKAVO_BIN" agent -c "$KIT" -n rover-alpha > "$SCRIPT_DIR/logs/alpha.log" 2>&1) &
 ALPHA_PID=$!
 echo $ALPHA_PID > .alpha.pid
 echo "[ALPHA ] Started Rover Alpha (PID: $ALPHA_PID)"
 
 sleep 1
 
-(cd "$SCRIPT_DIR/rover-beta" && "$ARKAVO_BIN" agent --config AGENTS.md > "$SCRIPT_DIR/logs/beta.log" 2>&1) &
+(cd "$SCRIPT_DIR/rover-beta" && "$ARKAVO_BIN" agent -c "$KIT" -n rover-beta > "$SCRIPT_DIR/logs/beta.log" 2>&1) &
 BETA_PID=$!
 echo $BETA_PID > .beta.pid
 echo "[BETA  ] Started Rover Beta (PID: $BETA_PID)"
 
 sleep 1
 
-(cd "$SCRIPT_DIR/rover-gamma" && "$ARKAVO_BIN" agent --config AGENTS.md > "$SCRIPT_DIR/logs/gamma.log" 2>&1) &
+(cd "$SCRIPT_DIR/rover-gamma" && "$ARKAVO_BIN" agent -c "$KIT" -n rover-gamma > "$SCRIPT_DIR/logs/gamma.log" 2>&1) &
 GAMMA_PID=$!
 echo $GAMMA_PID > .gamma.pid
 echo "[GAMMA ] Started Rover Gamma (PID: $GAMMA_PID)"
@@ -92,5 +94,5 @@ echo ""
 echo "  Next steps:"
 echo "    1. ./monitor_fleet.sh  - Watch fleet status"
 echo "    2. ./inject_hazard.sh  - Inject black ice into Sector 4"
-echo "    3. ./stop_fleet.sh     - Stop all rovers"
+echo "    3. ./stop.sh           - Stop all rovers"
 echo ""

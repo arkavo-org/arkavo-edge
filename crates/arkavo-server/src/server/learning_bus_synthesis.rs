@@ -231,14 +231,14 @@ impl LearningBus {
         self.policy_cache.read().await.len()
     }
 
-    /// Load AGENTS.md content as configuration lessons into the policy cache.
+    /// Load kit teaching text as configuration lessons into the policy cache.
     ///
     /// Called once at startup. Parses constraints (MUST/NEVER/ALWAYS) and
     /// suggestions (bullet points) into canonical lessons.
-    pub async fn load_agents_md_lessons(&self, content: &str) {
-        let signals = arkavo_router::learning::human_teaching::parse_agents_md(
+    pub async fn load_kit_lessons(&self, content: &str) {
+        let signals = arkavo_router::learning::human_teaching::parse_teaching_text(
             content,
-            std::path::PathBuf::from("AGENTS.md"),
+            std::path::PathBuf::from("kit.md"),
         );
         if signals.is_empty() {
             return;
@@ -254,7 +254,7 @@ impl LearningBus {
             cache.add_lesson(lesson);
         }
         tracing::info!(
-            "{count} lessons loaded from AGENTS.md ({} constraints, {} suggestions)",
+            "{count} lessons loaded from SwarmKit ({} constraints, {} suggestions)",
             signals.iter().filter(|s| !s.overridable).count(),
             signals.iter().filter(|s| s.overridable).count(),
         );

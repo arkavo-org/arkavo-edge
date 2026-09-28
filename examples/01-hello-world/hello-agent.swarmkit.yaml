@@ -1,0 +1,87 @@
+# Single-role SwarmKit — replaces the deprecated per-product config for hello-world.
+# Validate: cargo run -p arkavo-swarmkit --example validate_kit -- examples/01-hello-world/hello-agent.swarmkit.yaml
+spec_version: "1.0.0"
+kit:
+  id: "blake3:CuiN0Cj6nEab8glfIKyhM3hiDw4o9iTfkt8hmUz-JMQ"
+  name: "hello-agent"
+  version: "0.1.0"
+  description: "A friendly agent that introduces itself and answers basic questions"
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "helloAgentNonce00001"
+
+objective:
+  goal: "Introduce yourself and answer basic questions helpfully"
+  success_criteria:
+    - "responds in a friendly tone"
+    - "answers basic questions"
+
+roles:
+  - id: "agent"
+    role_type: "operator"
+    description: "Primary single-agent role"
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            You are a friendly agent that introduces itself and answers basic questions.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 300
+    max_total_tokens: 100000
+    max_cost_usd: 0.50
+  data_classifications:
+    - "public"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "user question answered"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

@@ -24,24 +24,25 @@ Five AI agents coordinate to control a Minecraft bot named "Edge" in a survival 
                     ┌─────────────────────┐
                     │     Commander       │ ← Has MCP tools
                     │ Port 8401           │   Executes bot actions
-                    │ Model: ministral-8b │
                     └──────────┬──────────┘
                                │ A2A
                     ┌──────────▼──────────┐
                     │       Router        │ ← Thompson Sampling
                     │ Port 8402           │   Selects specialist
-                    │ Model: qwen3-0.6b   │
                     └──────────┬──────────┘
            ┌───────────────────┼───────────────────┐
            │                   │                   │
     ┌──────▼──────┐     ┌──────▼──────┐     ┌──────▼──────┐
     │    Scout    │     │   Builder   │     │   Runner    │
     │ Port 8410   │     │ Port 8411   │     │ Port 8412   │
-    │ qwen3-0.6b  │     │ ministral-3b│     │ qwen3-0.6b  │
     └─────────────┘     └─────────────┘     └─────────────┘
     Navigation          Resources           Objectives
     Threat detection    Construction        Escape routes
 ```
+
+All five roles leave `agent_provisioning.model` unset in
+`minecraft-swarm.swarmkit.yaml`, so the router auto-selects the largest
+already-loaded local model — no per-agent model pin.
 
 **Single Bot "Edge"** ← Commander executes all bot actions based on specialist advice
 
@@ -61,19 +62,20 @@ cargo build -p arkavo
 ### Run the Demo
 
 ```bash
-# 1. Start swarm (Minecraft server + 5 agents)
-./launch_minecraft.sh
+# 1. Start swarm (Minecraft server + 5 agents, reads roles/ports from
+#    minecraft-swarm.swarmkit.yaml)
+./launch.sh
 
 # 2. Check swarm status
-./launch_minecraft.sh status
+./launch.sh status
 
 # 3. In Minecraft client, connect to localhost:25565
 #    Watch Edge respond to coordinated agent commands
 
 # 4. Stop everything
-./launch_minecraft.sh stop
+./launch.sh stop
 # or
-./stop_minecraft.sh
+./stop.sh
 ```
 
 See [RUNBOOK.md](RUNBOOK.md) for detailed test procedures.
@@ -82,23 +84,12 @@ See [RUNBOOK.md](RUNBOOK.md) for detailed test procedures.
 
 ```
 minecraft/
-├── README.md                  # This file
-├── RUNBOOK.md                 # Detailed test procedures
-├── compose.yaml               # Docker Compose for Minecraft server
-├── launch_minecraft.sh        # Start server and 5-agent swarm
-├── stop_minecraft.sh          # Stop everything
-├── agents/
-│   ├── commander/
-│   │   └── AGENTS.md          # MCP tools + coordination
-│   ├── router/
-│   │   └── AGENTS.md          # Specialist selection
-│   └── specialists/
-│       ├── scout/
-│       │   └── AGENTS.md      # Navigation advice
-│       ├── builder/
-│       │   └── AGENTS.md      # Construction advice
-│       └── runner/
-│           └── AGENTS.md      # Objective advice
+├── README.md                       # This file
+├── RUNBOOK.md                      # Detailed test procedures
+├── compose.yaml                    # Docker Compose for Minecraft server
+├── minecraft-swarm.swarmkit.yaml   # 5-role SwarmKit mesh definition
+├── launch.sh                       # Start server and 5-agent swarm
+├── stop.sh                         # Stop everything
 └── logs/
     ├── commander.log
     ├── router.log
@@ -109,13 +100,13 @@ minecraft/
 
 ## Agent Roles
 
-| Agent | Model | Port | Purpose |
-|-------|-------|------|---------|
-| Commander | ministral-8b | 8401 | Has MCP tools, executes bot actions, coordinates swarm |
-| Router | qwen3-0.6b | 8402 | Thompson Sampling specialist selection |
-| Scout | qwen3-0.6b | 8410 | Navigation, exploration, threat detection |
-| Builder | ministral-3b | 8411 | Resource gathering, construction, crafting |
-| Runner | qwen3-0.6b | 8412 | Objective retrieval, escape planning |
+| Agent | Role id (in `minecraft-swarm.swarmkit.yaml`) | Port | Purpose |
+|-------|------|------|---------|
+| Commander | minecraft-commander | 8401 | Has MCP tools, executes bot actions, coordinates swarm |
+| Router | minecraft-router | 8402 | Thompson Sampling specialist selection |
+| Scout | minecraft-scout | 8410 | Navigation, exploration, threat detection |
+| Builder | minecraft-builder | 8411 | Resource gathering, construction, crafting |
+| Runner | minecraft-runner | 8412 | Objective retrieval, escape planning |
 
 ## MCP Tools (Commander Only)
 

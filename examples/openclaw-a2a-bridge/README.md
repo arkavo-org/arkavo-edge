@@ -1,6 +1,6 @@
 # OpenClaw A2A Protocol Bridge
 
-Demonstrates A2A protocol interoperability between Arkavo and OpenClaw, highlighting Arkavo's security-first advantages: TDF-encrypted context, budget caps, preflight policies, and local model support.
+Demonstrates A2A protocol interoperability between Arkavo and OpenClaw, highlighting Arkavo's security-first advantages: TDF-encrypted context, budget caps, preflight policies, and local model support. Peers are discovered via mDNS (`runtime.mdns: true` in the kit).
 
 ## What You'll Learn
 
@@ -61,7 +61,7 @@ Transport is plaintext HTTP on loopback (127.0.0.1). This is acceptable because:
 
 | File | Purpose |
 |------|---------|
-| `AGENTS.md` | Arkavo bridge agent config (KAS + preflight + budget) |
+| `bridge-agent.swarmkit.yaml` | Arkavo bridge agent config (KAS + preflight + budget) |
 | `SKILL.md` | OpenClaw skill definition for invoking the bridge |
 | `bridge.sh` | Protocol bridge: curl-based A2A caller with security metadata |
 | `demo.sh` | Five-act competitive narrative with report generation |

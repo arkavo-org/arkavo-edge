@@ -28,10 +28,32 @@ A swarm of agents that autonomously improve themselves through patchlet generati
 ## Quick Start
 
 ```bash
+# Launch all 6 agents (reads roles/ports from self-improvement-swarm.swarmkit.yaml)
 ./launch.sh
+
+# Stop all agents
+./launch.sh stop
 ```
 
-See [RUNBOOK.md](RUNBOOK.md) for detailed procedures.
+| Agent | Role id (in `self-improvement-swarm.swarmkit.yaml`) | Port |
+|-------|------|------|
+| orchestrator | self-improvement-orchestrator | 8400 |
+| code-analyzer | code-analyzer-agent | 8401 |
+| refactorer | refactorer-agent | 8402 |
+| test-generator | test-generator-agent | 8403 |
+| performance-optimizer | performance-optimizer-agent | 8404 |
+| clippy-fixer | clippy-fixer-agent | 8405 |
+
+`glm-4.7-flash` isn't in the kit's local-edge-model vocabulary
+(`crates/arkavo-cli/src/commands/kit/model_map.rs` only maps
+ministral/gemma-4/qwen3 families to `agent_provisioning.model`), so
+`self-improvement-swarm.swarmkit.yaml` omits `model:` for all six roles.
+`agent_kit.rs::role_to_agent_config` resolves the model hint via
+`kit_model_to_hint(family, size)`, and any family/size pair outside that
+table returns `None`, so the router falls back to its default local model
+instead of GLM. Running this swarm against GLM currently requires
+extending `model_map.rs`'s `LOCAL_EDGE_MODELS` table (a Rust change, out
+of scope for this example conversion).
 
 ## How It Works
 

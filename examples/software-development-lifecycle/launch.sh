@@ -19,6 +19,7 @@ if [ ! -f "$BINARY" ]; then
 fi
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_FILE="$SCRIPT_DIR/.agent_pids"
+KIT="$SCRIPT_DIR/software-development-lifecycle.swarmkit.yaml"
 
 mkdir -p "$LOG_DIR"
 
@@ -81,44 +82,36 @@ stop_agents() {
 
 start_agent() {
     local name=$1
-    local dir=$2
+    local role=$2
     local port=$3
 
-    if [ ! -d "$dir" ]; then
-        print_status "WARNING" "Directory $dir not found, skipping $name"
-        return 0
-    fi
-
-    if [ ! -f "$dir/AGENTS.md" ]; then
-        print_status "WARNING" "No AGENTS.md in $dir, skipping $name"
+    if [ ! -f "$KIT" ]; then
+        print_status "WARNING" "Kit $KIT not found, skipping $name"
         return 0
     fi
 
     print_status "INFO" "Starting $name (port $port)..."
 
-    cd "$dir"
-    nohup "$BINARY" agent run > "$LOG_DIR/${name}.log" 2>&1 &
+    nohup "$BINARY" agent -c "$KIT" -n "$role" -p "$port" > "$LOG_DIR/${name}.log" 2>&1 &
     echo "$!" >> "$PID_FILE"
-
-    cd "$SCRIPT_DIR"
 }
 
 start_all_agents() {
     > "$PID_FILE"
 
-    # Core agents
-    start_agent "orchestrator" "$SCRIPT_DIR/orchestrator" 8342
-    start_agent "security" "$SCRIPT_DIR/security" 8343
-    start_agent "code-review" "$SCRIPT_DIR/code-review" 8344
-    start_agent "database" "$SCRIPT_DIR/database" 8345
-    start_agent "testing" "$SCRIPT_DIR/testing" 8346
-    start_agent "documentation" "$SCRIPT_DIR/documentation" 8347
-    start_agent "performance" "$SCRIPT_DIR/performance" 8348
-    start_agent "devops" "$SCRIPT_DIR/devops" 8349
-    start_agent "frontend" "$SCRIPT_DIR/frontend" 8350
-    start_agent "architecture" "$SCRIPT_DIR/architecture" 8351
-    start_agent "data-science" "$SCRIPT_DIR/data-science" 8352
-    start_agent "debug" "$SCRIPT_DIR/debug" 8353
+    # Core agents (name : role id in software-development-lifecycle.swarmkit.yaml : port)
+    start_agent "orchestrator" "orchestrator-agent" 8342
+    start_agent "security" "security-agent" 8343
+    start_agent "code-review" "code-review-agent" 8344
+    start_agent "database" "database-agent" 8345
+    start_agent "testing" "testing-agent" 8346
+    start_agent "documentation" "documentation-agent" 8347
+    start_agent "performance" "performance-agent" 8348
+    start_agent "devops" "devops-agent" 8349
+    start_agent "frontend" "frontend-agent" 8350
+    start_agent "architecture" "architecture-agent" 8351
+    start_agent "data-science" "data-science-agent" 8352
+    start_agent "debug" "debug-agent" 8353
 
     print_status "INFO" "Waiting for agents to initialize..."
     sleep 5

@@ -9,7 +9,7 @@ Your first Arkavo agent in 5 minutes.
 
 ## What You'll Learn
 
-- How to configure an agent with AGENTS.md
+- How to configure an agent with a SwarmKit kit
 - How to start and interact with an agent
 - The basic agent lifecycle
 
@@ -31,7 +31,7 @@ That's it! The agent will start and respond to your prompt.
 
 ## What's Happening
 
-1. `run.sh` starts the agent using the config in `AGENTS.md`
+1. `run.sh` starts the agent using `hello-agent.swarmkit.yaml`
 2. The agent loads the `ministral-3b` model (downloads on first run)
 3. The agent processes the task from `tasks.json`
 4. You see the response
@@ -40,7 +40,7 @@ That's it! The agent will start and respond to your prompt.
 
 | File | Purpose |
 |------|---------|
-| `AGENTS.md` | Agent configuration (name, purpose, model) |
+| `hello-agent.swarmkit.yaml` | Agent configuration (name, purpose, model) |
 | `tasks.json` | Demo tasks to run |
 | `run.sh` | Launch script |
 

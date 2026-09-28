@@ -1,0 +1,118 @@
+# Single-role SwarmKit replacing the deprecated AGENTS.md for gemini-code-agent.
+#
+# `model: gemini-3.5-flash` is a cloud model with no entry in the
+# local-edge-model vocabulary (crates/arkavo-cli/src/commands/kit/model_map.rs
+# only maps locally-hosted ministral/gemma-4/qwen3 families), so
+# `agent_provisioning.model` is omitted — see README.md for how to select
+# the Gemini model via GEMINI_MODEL/launch.sh flags instead.
+# `mcp_tools:` named real registered tools (crates/arkavo-mcp-tools,
+# crates/arkavo-mcp-code-search), so they became role `mcp_tools` grants
+# below, grouped the way other converted kits group flat tool lists under a
+# logical server name (see examples/github-ops-kit's `arkavo-github` grants).
+# `a2a.static_peers`, `websocket`, `logging`, `health_check`, `performance`,
+# `workspace`, and `code_generation.allow_globs/deny_globs` have no RoleSpec
+# equivalent — see README.md's "Configuration not yet modeled in SwarmKit"
+# section for where that operational intent now lives. The budget block was
+# already fully commented out in the old AGENTS.md ("not yet parsed"), so
+# this role's budget below uses the same defaults as other converted
+# single-role kits rather than migrating a disabled block.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "code-agent-gemini"
+  version: "0.1.0"
+  description: "Native Arkavo integration with Google Gemini for coding tasks: code generation, code analysis, security scanning, and GitHub PR review via MCP tools."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "codeAgentGeminiNonce1"
+
+objective:
+  goal: "Native Arkavo integration with Google Gemini for coding tasks: code generation, code analysis, security scanning, and GitHub PR review via MCP tools."
+  success_criteria:
+    - "coding tasks are completed using the granted MCP tools"
+    - "security findings are surfaced via sec_semgrep/deps_osv before code lands"
+
+roles:
+  - id: "gemini-code-agent"
+    role_type: "coding"
+    description: "Native Arkavo integration with Google Gemini for coding tasks."
+    agent_provisioning:
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: true
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Native Arkavo integration with Google Gemini for coding tasks:
+            code generation, code analysis, code improvement, test
+            generation, documentation, code search, and security scanning.
+          resources: []
+    mcp_tools:
+      - server: "arkavo-code-search"
+        auth: "delegated"
+        tools:
+          - "codegrep_search"
+          - "struct_find_replace"
+          - "syntax_tree"
+      - server: "arkavo-security"
+        auth: "delegated"
+        tools:
+          - "sec_semgrep"
+          - "deps_osv"
+      - server: "arkavo-github"
+        auth: "delegated"
+        tools:
+          - "test_run"
+          - "gh_checks"
+          - "gh_pr_review"
+    handoffs: []
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 300
+    max_total_tokens: 50000
+    max_cost_usd: 0.50
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: true
+    egress_allowlist:
+      - "generativelanguage.googleapis.com"
+
+completion:
+  rules:
+    - "coding task completed within budget"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  listen: "0.0.0.0:8346"
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

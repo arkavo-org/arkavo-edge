@@ -1,0 +1,89 @@
+# Single-role SwarmKit for mesh/agent-0 — the only mesh member with a
+# purpose-built identity; mesh.sh -c's this in for index 0 and starts the
+# rest (agent-1..N) zero-config so the mesh also demonstrates default routing.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "mesh-orchestrator"
+  version: "0.1.0"
+  description: "Coordinate agent mesh and execute scenario tasks"
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "BqOJWbxn14ZbZBmxKY7BiQ"
+
+objective:
+  goal: "Coordinate agent mesh and execute scenario tasks"
+  success_criteria:
+    - "discovers mesh peers via mDNS"
+    - "routes and executes scenario tasks across the mesh"
+
+roles:
+  - id: "orchestrator"
+    role_type: "operator"
+    description: "Coordinates the agent mesh and executes scenario tasks."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Coordinate agent mesh and execute scenario tasks.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 300
+    max_total_tokens: 100000
+    max_cost_usd: 0.50
+  data_classifications:
+    - "public"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "scenario task executed"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

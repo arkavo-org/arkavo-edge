@@ -1,0 +1,236 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# analyzer/ and fixer-{alpha,beta,gamma}/.
+#
+# `a2a.enabled`/`discovery.service_type` aren't representable kit fields;
+# mesh discovery now runs on `runtime.mdns: true` (kit-level) — see
+# README.md for where the dropped detail now lives. The `logging:` blocks
+# (level/file per old agent) are unrepresentable — see README.md.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "autonomous-refactor"
+  version: "0.1.0"
+  description: "Multi-agent mesh that repairs a breaking API change across a 3-service monorepo: one analyzer categorizes build errors by service, three fixers apply the known repair pattern to their assigned service."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "x5MNg3SY5887um9yDmEhFA"
+
+objective:
+  goal: "Analyzes build errors in the demo_workspace monorepo. Runs cargo check and categorizes errors by service. Coordinates with fixer agents via A2A protocol."
+  success_criteria:
+    - "agents do not crash or timeout"
+    - "logs show [ARCHIVED: ...] pointers instead of raw error dumps"
+    - "build errors are fixed (cargo check passes after the mesh completes)"
+
+roles:
+  - id: "refactor-analyzer"
+    role_type: "planner"
+    description: "Runs cargo check, categorizes build errors by service, and coordinates fixer agents."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Analyzes build errors in the demo_workspace monorepo. Runs
+            cargo check and categorizes errors by service. Coordinates with
+            fixer agents via A2A protocol. Capabilities: cargo-check,
+            error-analysis, task-coordination.
+          resources: []
+    mcp_tools:
+      - server: "filesystem"
+        auth: "delegated"
+        tools: []
+    handoffs:
+      - to: "fixer-alpha"
+        on: "always"
+      - to: "fixer-beta"
+        on: "always"
+      - to: "fixer-gamma"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "fixer-alpha"
+    role_type: "operator"
+    description: "Fixes build errors in service_a of the demo_workspace."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Fixes build errors in service_a of the demo_workspace. Fix
+            pattern: replace process_id(100) with
+            process_id(100.to_string()). Capabilities: code-edit,
+            service-a.
+          resources: []
+    mcp_tools:
+      - server: "filesystem"
+        auth: "delegated"
+        tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["refactor-analyzer", "self"]
+      can_write: ["self"]
+
+  - id: "fixer-beta"
+    role_type: "operator"
+    description: "Fixes build errors in service_b of the demo_workspace."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Fixes build errors in service_b of the demo_workspace. Fix
+            pattern: replace process_id(100) with
+            process_id(100.to_string()). Capabilities: code-edit,
+            service-b.
+          resources: []
+    mcp_tools:
+      - server: "filesystem"
+        auth: "delegated"
+        tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["refactor-analyzer", "self"]
+      can_write: ["self"]
+
+  - id: "fixer-gamma"
+    role_type: "operator"
+    description: "Fixes build errors in service_c of the demo_workspace."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Fixes build errors in service_c of the demo_workspace. Fix
+            pattern: replace process_id(100) with
+            process_id(100.to_string()). Capabilities: code-edit,
+            service-c.
+          resources: []
+    mcp_tools:
+      - server: "filesystem"
+        auth: "delegated"
+        tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["refactor-analyzer", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 900
+    max_total_tokens: 200000
+    max_cost_usd: 1.00
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "cargo check passes across all three services"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true
+  mcp_servers:
+    - name: "filesystem"
+      command: "npx"
+      args: ["-y", "@anthropic-ai/mcp-server-filesystem", "../demo_workspace"]

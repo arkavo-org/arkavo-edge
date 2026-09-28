@@ -121,7 +121,7 @@ impl super::Router {
     }
 
     /// Route with a model override — bypass classification, Thompson Sampling,
-    /// and quality gate retries. Use when AGENTS.md specifies `model:` and the
+    /// and quality gate retries. Use when SwarmKit specifies `model:` and the
     /// caller wants the exact model with minimal overhead.
     pub async fn route_with_tools_override(
         &self,

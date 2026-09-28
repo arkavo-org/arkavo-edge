@@ -22,6 +22,20 @@ pub use event::{AppEvent, EventHandler};
 pub use multi_terminal::{MultiTerminalManager, TaskType, TerminalSpawnConfig};
 pub use renderer::{DiffRenderer, RenderMetrics, Renderable};
 
+/// Source content for the terminal chat system prompt.
+///
+/// The discovered SwarmKit kit's purpose text (objective + primary role's
+/// skill instructions — the same source `a2a_server.rs`'s
+/// `read_kit_lesson_content` uses) takes precedence. `CLAUDE.md` is a
+/// contributor-context file, not agent config, but stays as a fallback for
+/// workspaces without a kit. Product AGENTS.md is never read here.
+pub fn system_prompt_source(cwd: &std::path::Path) -> Option<String> {
+    if let Ok(discovered) = arkavo_swarmkit::load_discovered_kit(cwd) {
+        return Some(discovered.config.purpose_text());
+    }
+    std::fs::read_to_string(cwd.join("CLAUDE.md")).ok()
+}
+
 #[derive(Debug, Clone)]
 pub enum ChatMessage {
     UserInput(String),
@@ -201,23 +215,13 @@ pub async fn run() -> Result<()> {
                 "\n\nMCP Integration: Disabled".to_string()
             };
 
-            // Try to read .arkavo/AGENTS.md first, then AGENTS.md, then CLAUDE.md
-            let agents_md_content = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
-                std::fs::read_to_string(".arkavo/AGENTS.md").ok()
-            } else {
-                match std::fs::read_to_string("AGENTS.md") {
-                    Ok(content) => Some(content),
-                    Err(_) => {
-                        // Try CLAUDE.md as fallback
-                        std::fs::read_to_string("CLAUDE.md").ok()
-                    }
-                }
-            };
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let kit_or_claude_content = system_prompt_source(&cwd);
 
             // System prompt with MCP tools information
-            let system_prompt = if let Some(agents_content) = agents_md_content {
+            let system_prompt = if let Some(source_content) = kit_or_claude_content {
                 format!(
-                    "{agents_content}\n\nMCP Integration: You have access to MCP tools for various operations including Git, device management, and UI interaction. \
+                    "{source_content}\n\nMCP Integration: You have access to MCP tools for various operations including Git, device management, and UI interaction. \
                 When the user asks you to perform actions, you can use these tools by including @toolname commands in your response.\n\
                 \nTo invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
                 \nFor example: @git_status {{}} or @device_management {{\"action\": \"list\"}}\

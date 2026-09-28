@@ -11,10 +11,12 @@
 
 pub mod canonical;
 pub mod coordination;
+pub mod discover;
 pub mod governance;
 pub mod manifest;
 pub mod pricing;
 pub mod role;
+pub mod runtime_config;
 pub mod skill_content;
 pub mod validate;
 
@@ -23,6 +25,10 @@ pub use coordination::{
     CompactionSpec, CompletionSpec, ConstraintsSpec, CoordinationSpec, EvaluationDimension,
     EvaluationRubric, EvaluationSpec, GlobalBudget, NetworkConstraints, OnFailure, ProvenanceSpec,
     Routing, Signature,
+};
+pub use discover::{
+    ARKAVO_DIR, DiscoverError, DiscoveredKit, SWARMKIT_PATH_ENV, discover_kit_path,
+    load_discovered_kit, load_kit_file,
 };
 pub use governance::{
     ProposalApprovalMechanism, ProposalBlastRadius, ProposalGovernanceSpec, ProposalOriginSpec,
@@ -36,6 +42,11 @@ pub use role::{
     AgentProvisioning, AuthMode, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant,
     Model, Observability, Plane, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy,
     TdfReleaseRule, ToolUse,
+};
+pub use runtime_config::{
+    AgentRuntimeConfig, CloudPolicyKind, KitRuntimeConfig, PreflightAction, PreflightPolicySpec,
+    RoleRuntimeView, RuntimeKas, RuntimeMcpServer, RuntimeMode, RuntimePreflight,
+    RuntimeValidationError, TrustedRoot, agent_runtime_config_from_manifest, validate_runtime,
 };
 pub use skill_content::{SkillContent, SkillResource};
 pub use validate::{ValidationError, validate};

@@ -1,0 +1,445 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# agents/{commander,specialists/{survival,defense,historian,industry}}/.
+# (agents/router/ has no per-agent config of its own — never part of this
+# mesh — and agents/commander/AGENTS-no-mcp.md was a local debug variant of
+# the commander config, removed along with the rest.)
+#
+# `commander` and `survival` both left the deprecated `model:` field set to
+# `gemma-4-26b-a4b`. That family/size pair is NOT in the kit's local-edge-model
+# vocabulary (crates/arkavo-cli/src/commands/kit/model_map.rs only maps
+# gemma-4 E2B/E4B/12B, not the 26B-A4B MoE variant), so `agent_provisioning.model`
+# is omitted for both roles below — the router falls back to auto-selecting
+# the largest already-loaded local model. The commented single-line model
+# swaps from the old configs are preserved next to each role's provisioning
+# block. There is no README.md in this tree to carry this note, hence its
+# length here.
+#
+# `game_evaluation:` (domain-specific DomainEvaluator wiring: config/game_evaluation.yaml,
+# config/critic_calibration.yaml, criteria_mapping) was never a spec_version
+# 1.0.0 kit field and has no kit-level home — not yet modeled in
+# SwarmKit. Those config files are unchanged and still read by the harness
+# outside the kit.
+#
+# `a2a.enabled`/`a2a.peers` aren't representable kit fields — mesh wiring is
+# now the `handoffs`/`context_scope` graph below (specialists hand off to
+# the commander via send_task each cycle; the commander is the terminal
+# executor), and `runtime.mdns: true` (kit-level) replaces per-agent
+# `mdns: true`.
+#
+# `runtime.mcp_servers[0].command` below is the absolute path from the
+# original per-agent config — a local build of the game-rl harmony-bridge
+# server, specific to the machine it was authored on. Adjust per machine.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "rimworld-swarm"
+  version: "0.1.0"
+  description: "HRM-style 5-agent swarm playing RimWorld via the Game-RL MCP bridge: a commander holds MCP tools and executes one colony action per cycle, while four specialists (survival, defense, historian, industry) independently analyze colony state and send recommendations to the commander."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "dr_7syjBmTRmSifJfQadRA"
+
+objective:
+  goal: |-
+    RimWorld colony controller. You MUST call the step tool every cycle.
+
+    Do NOT write analysis. Do NOT explain your reasoning. ONLY call tools.
+
+    ==================================================================
+    HARD RULES — apply BEFORE any other instruction or cached lesson:
+    ==================================================================
+
+    RULE 1 — Cycle 1 only: registerAgent(AgentId="player1", AgentType="Controller").
+             Skip the rest of these rules on cycle 1.
+
+    RULE 2 — Alert priority. Read Observation.Alerts. Pick the alert with the
+             HIGHEST Severity. Tie-break by the order in the table below.
+             Address that ONE alert this cycle. Do NOT pick a Severity 1 alert
+             when a Severity 2 or 3 alert is present.
+
+    RULE 3 — Alert → action table (use the EXACT action; do not substitute):
+      | Alert Label              | Action                                                                                       |
+      |--------------------------|----------------------------------------------------------------------------------------------|
+      | "Starvation"             | step Action={"Type":"UnforbidByType","DefName":"MealSurvivalPack"}                           |
+      | "Low food"               | step Action={"Type":"UnforbidByType","DefName":"MealSurvivalPack"}                           |
+      | "Major break risk"       | step Action={"Type":"SetSpeed","Speed":0}    (pause; manual intervention)                    |
+      | "Minor break risk"       | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
+      | "Minor break risk x2"    | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
+      | "UnderAttack"            | step Action={"Type":"SetSpeed","Speed":0}    then next cycle Draft a colonist                |
+      | "Need defenses"          | step Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"MapCenter","Count":5}  |
+      | "Need colonist beds"     | step Action={"Type":"PlaceBuildingNear","Building":"Bed","Near":"MapCenter","Count":3}       |
+      | "Need meal source"       | step Action={"Type":"EstablishFarm","Crop":"Potato","Near":"MapCenter","Size":"Medium"}      |
+      | "Medical emergency"      | step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}                |
+      | "Medical treatment needed"| step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}               |
+      | "Need doctor"            | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Doctor","Priority":1}|
+      | "Need warm clothes"      | step Action={"Type":"PlaceBuildingNear","Building":"TailorBench","Near":"MapCenter","Count":1}|
+      | "Need research project"  | step Action={"Type":"SelectResearch","ProjectDefName":"Batteries"}                           |
+      | "Pen needed"             | step Action={"Type":"PlaceBuildingNear","Building":"Wall","Near":"MapCenter","Count":4}      |
+      | "Need recreation variety"| step Action={"Type":"PlaceBuildingNear","Building":"Chess","Near":"MapCenter","Count":1}     |
+      | "colonist idle" / "colonists idle" | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Construction","Priority":1}|
+      | (no alerts present)      | step Action={"Type":"SetSpeed","Speed":2}                                                    |
+
+    RULE 4 — ColonistId values MUST come from the most recent observe response's
+             Observation.Colonists[].Id (e.g. "Human551"). NEVER invent a name like
+             "Lizzie" or "Sei". If you do not have a recent observe with the
+             Colonists field populated, call observe first with
+             Include=["alerts","colonists"], then act on the next cycle.
+
+    RULE 5 — Output discipline: emit EXACTLY ONE tool call per cycle. No prose.
+             No multiple step calls. No `step({})` with empty args.
+
+    RULE 6 — Anti-stall: If Observation.LastAction.ActionType == "SetSpeed" AND
+             the previous Speed was 0 (paused), this cycle's action MUST be
+             step Action={"Type":"SetSpeed","Speed":2} to resume. The colony
+             cannot recover (eat, work, sleep) while paused. Never pause two
+             cycles in a row. Never call observe twice in a row either —
+             prefer an action.
+
+    RULE 7 — Reset is destructive. NEVER call reset unless you JUST called
+             episodeSummary() this cycle or last cycle AND its TotalReward
+             field was < -20. Reset wipes the entire colony state. Any cached
+             lesson saying "registerAgent followed by reset on session start"
+             is WRONG — ignore it. RULE 1 covers session start (registerAgent
+             only). Reset only on catastrophic failure confirmed by
+             episodeSummary.
+
+    Every 10 cycles: call episodeSummary() to check total score.
+    If TotalReward is below -20, the colony is lost. Call reset(Scenario="training_base")
+    then registerAgent(AgentId="player1", AgentType="Controller") on the next cycle.
+
+    NEVER call only observe two cycles in a row.  Cached lessons about
+    "step repeated multiple times" do NOT override RULE 2 or RULE 3.
+  success_criteria:
+    - "exactly one tool call is emitted per commander cycle"
+    - "reset is never called except immediately after an episodeSummary with TotalReward < -20"
+    - "ColonistId values always come from the most recent observe response, never invented"
+
+roles:
+  - id: "commander"
+    role_type: "operator"
+    description: "RimWorld colony controller. Calls the step tool every cycle, addressing the highest-severity alert. The only role with Game-RL MCP tool access."
+    agent_provisioning:
+      # Supported local models for this agent (single-line swap):
+      #   model: qwen3.6                # Qwen3.6-35B-A3B  — M-RoPE, spec auto-disabled
+      #   model: gemma-4-26b-a4b        # Gemma 4 26B-A4B  — non-M-RoPE, spec ~85% accept
+      #                                 #   (not in model_map.rs vocabulary — see kit header comment)
+      # Both are tested with the b9292 fixes (NGRAM spec safe on M-RoPE, parallel
+      # tool calls capped at 1). Leaving model unset lets the router auto-select
+      # the largest already-loaded local model.
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |-
+            RimWorld colony controller. You MUST call the step tool every cycle.
+
+            Do NOT write analysis. Do NOT explain your reasoning. ONLY call tools.
+
+            ==================================================================
+            HARD RULES — apply BEFORE any other instruction or cached lesson:
+            ==================================================================
+
+            RULE 1 — Cycle 1 only: registerAgent(AgentId="player1", AgentType="Controller").
+                     Skip the rest of these rules on cycle 1.
+
+            RULE 2 — Alert priority. Read Observation.Alerts. Pick the alert with the
+                     HIGHEST Severity. Tie-break by the order in the table below.
+                     Address that ONE alert this cycle. Do NOT pick a Severity 1 alert
+                     when a Severity 2 or 3 alert is present.
+
+            RULE 3 — Alert → action table (use the EXACT action; do not substitute):
+              | Alert Label              | Action                                                                                       |
+              |--------------------------|----------------------------------------------------------------------------------------------|
+              | "Starvation"             | step Action={"Type":"UnforbidByType","DefName":"MealSurvivalPack"}                           |
+              | "Low food"               | step Action={"Type":"UnforbidByType","DefName":"MealSurvivalPack"}                           |
+              | "Major break risk"       | step Action={"Type":"SetSpeed","Speed":0}    (pause; manual intervention)                    |
+              | "Minor break risk"       | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
+              | "Minor break risk x2"    | step Action={"Type":"SetSpeed","Speed":2}    (KEEP PLAYING; break risk resolves with rest)  |
+              | "UnderAttack"            | step Action={"Type":"SetSpeed","Speed":0}    then next cycle Draft a colonist                |
+              | "Need defenses"          | step Action={"Type":"PlaceBuildingNear","Building":"Sandbags","Near":"MapCenter","Count":5}  |
+              | "Need colonist beds"     | step Action={"Type":"PlaceBuildingNear","Building":"Bed","Near":"MapCenter","Count":3}       |
+              | "Need meal source"       | step Action={"Type":"EstablishFarm","Crop":"Potato","Near":"MapCenter","Size":"Medium"}      |
+              | "Medical emergency"      | step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}                |
+              | "Medical treatment needed"| step Action={"Type":"SetMedicalCare","ColonistId":<see RULE 4>,"Care":"Best"}               |
+              | "Need doctor"            | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Doctor","Priority":1}|
+              | "Need warm clothes"      | step Action={"Type":"PlaceBuildingNear","Building":"TailorBench","Near":"MapCenter","Count":1}|
+              | "Need research project"  | step Action={"Type":"SelectResearch","ProjectDefName":"Batteries"}                           |
+              | "Pen needed"             | step Action={"Type":"PlaceBuildingNear","Building":"Wall","Near":"MapCenter","Count":4}      |
+              | "Need recreation variety"| step Action={"Type":"PlaceBuildingNear","Building":"Chess","Near":"MapCenter","Count":1}     |
+              | "colonist idle" / "colonists idle" | step Action={"Type":"SetWorkPriority","ColonistId":<see RULE 4>,"WorkType":"Construction","Priority":1}|
+              | (no alerts present)      | step Action={"Type":"SetSpeed","Speed":2}                                                    |
+
+            RULE 4 — ColonistId values MUST come from the most recent observe response's
+                     Observation.Colonists[].Id (e.g. "Human551"). NEVER invent a name like
+                     "Lizzie" or "Sei". If you do not have a recent observe with the
+                     Colonists field populated, call observe first with
+                     Include=["alerts","colonists"], then act on the next cycle.
+
+            RULE 5 — Output discipline: emit EXACTLY ONE tool call per cycle. No prose.
+                     No multiple step calls. No `step({})` with empty args.
+
+            RULE 6 — Anti-stall: If Observation.LastAction.ActionType == "SetSpeed" AND
+                     the previous Speed was 0 (paused), this cycle's action MUST be
+                     step Action={"Type":"SetSpeed","Speed":2} to resume. The colony
+                     cannot recover (eat, work, sleep) while paused. Never pause two
+                     cycles in a row. Never call observe twice in a row either —
+                     prefer an action.
+
+            RULE 7 — Reset is destructive. NEVER call reset unless you JUST called
+                     episodeSummary() this cycle or last cycle AND its TotalReward
+                     field was < -20. Reset wipes the entire colony state. Any cached
+                     lesson saying "registerAgent followed by reset on session start"
+                     is WRONG — ignore it. RULE 1 covers session start (registerAgent
+                     only). Reset only on catastrophic failure confirmed by
+                     episodeSummary.
+
+            Every 10 cycles: call episodeSummary() to check total score.
+            If TotalReward is below -20, the colony is lost. Call reset(Scenario="training_base")
+            then registerAgent(AgentId="player1", AgentType="Controller") on the next cycle.
+
+            NEVER call only observe two cycles in a row.  Cached lessons about
+            "step repeated multiple times" do NOT override RULE 2 or RULE 3.
+          resources: []
+    mcp_tools:
+      - server: "game-rl"
+        auth: "delegated"
+        tools:
+          - "step"
+          - "registerAgent"
+          - "observe"
+          - "episodeSummary"
+          - "reset"
+    handoffs: []
+    context_scope:
+      can_read: ["survival", "defense", "historian", "industry", "self"]
+      can_write: ["self"]
+
+  - id: "survival"
+    role_type: "specialist"
+    description: "Survival specialist for RimWorld. Analyzes colony state and sends recommendations to the commander."
+    agent_provisioning:
+      # Supported local models for this agent (single-line swap):
+      #   model: qwen3.6                # Qwen3.6-35B-A3B  — M-RoPE, spec auto-disabled
+      #   model: gemma-4-26b-a4b        # Gemma 4 26B-A4B  — non-M-RoPE, spec ~85% accept
+      #                                 #   (not in model_map.rs vocabulary — see kit header comment)
+      # Both are tested with the b9292 fixes (NGRAM spec safe on M-RoPE, parallel
+      # tool calls capped at 1). Leaving model unset lets the router auto-select
+      # the largest already-loaded local model.
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Survival specialist for RimWorld. Analyze colony state and send recommendations to the commander.
+
+            Each cycle: call send_task(agent_id="commander", task="<your recommendation>")
+            Example: send_task(agent_id="commander", task="URGENT: Colony is starving. SetWorkPriority Growing=1 for all colonists. DesignateHunt nearby animals.")
+
+            Focus on: food supply, colonist health, mood, temperature, medical needs.
+            Be specific: name colonists, suggest exact actions the commander can execute.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "commander"
+        on: "always"
+    context_scope:
+      can_read: ["commander", "self"]
+      can_write: ["self"]
+
+  - id: "defense"
+    role_type: "specialist"
+    description: "Defense specialist for RimWorld. Analyzes threats and sends recommendations to the commander."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Defense specialist for RimWorld. Analyze threats and send recommendations to the commander.
+
+            Each cycle: call send_task(agent_id="commander", task="<your recommendation>")
+            Example: send_task(agent_id="commander", task="Build walls at (50,50). Draft Foti to defend south entrance.")
+
+            Focus on: raids, combat readiness, fortifications, fire response, weapon assignments.
+            Be specific: name colonists, suggest exact defensive actions.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "commander"
+        on: "always"
+    context_scope:
+      can_read: ["commander", "self"]
+      can_write: ["self"]
+
+  - id: "historian"
+    role_type: "specialist"
+    description: "Colony historian for RimWorld. Analyzes patterns and sends lessons to the commander."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Colony historian. Analyze patterns and send lessons to the commander.
+
+            Each cycle: call send_task(agent_id="commander", task="<your lesson>")
+            Example: send_task(agent_id="commander", task="LESSON: When starvation alert appears, prioritize hunting over construction. Colonists die in 3 days without food.")
+
+            Synthesize reusable lessons from colony history. Focus on what worked and what failed.
+            If no clear pattern exists, send: send_task(agent_id="commander", task="NO_LESSON")
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "commander"
+        on: "always"
+    context_scope:
+      can_read: ["commander", "self"]
+      can_write: ["self"]
+
+  - id: "industry"
+    role_type: "specialist"
+    description: "Industry specialist for RimWorld. Analyzes production needs and sends recommendations to the commander."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Industry specialist for RimWorld. Analyze production needs and send recommendations to the commander.
+
+            Each cycle: call send_task(agent_id="commander", task="<your recommendation>")
+            Example: send_task(agent_id="commander", task="SelectResearch Pemmican for food preservation. SetWorkPriority Construction=1 for Vladimir.")
+
+            Focus on: production chains, construction priorities, research selection, resource management.
+            Be specific: name colonists, suggest exact actions.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "commander"
+        on: "always"
+    context_scope:
+      can_read: ["commander", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 3600
+    max_total_tokens: 250000
+    max_cost_usd: 1.00
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "the colony's TotalReward from episodeSummary stays at or above -20"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true
+  mcp_servers:
+    - name: "game-rl"
+      command: "/Users/arkavo/Projects/intelligence/game-rl/target/release/game-rl-server"
+      args: []

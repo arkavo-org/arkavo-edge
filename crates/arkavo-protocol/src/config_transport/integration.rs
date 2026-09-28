@@ -43,8 +43,8 @@ use crate::types::{AgentConfigGetRequest, AgentConfigGetResponse};
 ///         }
 ///     }
 ///
-///     // Fall back to standard AGENTS.md config
-///     // ... existing AGENTS.md reading logic ...
+///     // Fall back to standard SwarmKit config
+///     // ... existing SwarmKit reading logic ...
 /// }
 /// ```
 pub struct ConfigTransportIntegration;

@@ -62,9 +62,11 @@ stop_agents() {
     pkill -f "arkavo agent" 2>/dev/null || true
 }
 
+KIT="$SCRIPT_DIR/family-travel-mesh.swarmkit.yaml"
+
 start_agent() {
     local name=$1
-    local dir=$2
+    local role=$2
     local port=$3
     local log_file="$LOG_DIR/${name}.log"
 
@@ -75,11 +77,9 @@ start_agent() {
         return 1
     fi
 
-    cd "$dir"
-    nohup "$BINARY" agent --config AGENTS.md > "$log_file" 2>&1 &
+    nohup "$BINARY" agent -c "$KIT" -n "$role" -p "$port" > "$log_file" 2>&1 &
     local pid=$!
     echo "$pid:$name" >> "$PIDS_FILE"
-    cd "$SCRIPT_DIR"
 
     local max_attempts=15
     local attempt=0
@@ -156,21 +156,22 @@ main() {
     echo ""
 
     # Start in dependency order: Memory -> Critic -> Specialists -> Router -> Conductor
-    start_agent "memory" "$SCRIPT_DIR/agents/memory" 8404 || exit 1
+    # (name : role id in family-travel-mesh.swarmkit.yaml : port)
+    start_agent "memory" "memory-service" 8404 || exit 1
     sleep 1
 
-    start_agent "critic" "$SCRIPT_DIR/agents/critic" 8403 || exit 1
+    start_agent "critic" "family-safety-critic" 8403 || exit 1
     sleep 1
 
-    start_agent "vegas-guide" "$SCRIPT_DIR/agents/specialists/vegas-guide" 8410 || exit 1
-    start_agent "family-activities" "$SCRIPT_DIR/agents/specialists/family-activities" 8411 || exit 1
-    start_agent "budget-optimizer" "$SCRIPT_DIR/agents/specialists/budget-optimizer" 8412 || exit 1
+    start_agent "vegas-guide" "vegas-guide" 8410 || exit 1
+    start_agent "family-activities" "family-activities" 8411 || exit 1
+    start_agent "budget-optimizer" "budget-optimizer" 8412 || exit 1
     sleep 1
 
-    start_agent "router" "$SCRIPT_DIR/agents/router" 8402 || exit 1
+    start_agent "router" "agent-router" 8402 || exit 1
     sleep 1
 
-    start_agent "conductor" "$SCRIPT_DIR/agents/conductor" 8401 || exit 1
+    start_agent "conductor" "family-travel-conductor" 8401 || exit 1
 
     echo ""
     print_status "INFO" "Waiting for mDNS discovery (5s)..."
@@ -191,7 +192,7 @@ main() {
         echo "  Budget Optimizer:  http://localhost:8412"
         echo ""
         print_status "INFO" "Run './run_task.sh' to execute the demo"
-        print_status "INFO" "Run './stop_mesh.sh' to stop all agents"
+        print_status "INFO" "Run './stop.sh' to stop all agents"
         echo ""
     else
         print_status "ERROR" "Failed to start all agents"

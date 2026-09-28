@@ -35,13 +35,19 @@ start_mesh() {
             mkdir -p "$agent_dir"
         fi
 
-        # Clean persisted .arkavo config to use fresh AGENTS.md if present
+        # Clean persisted .arkavo config so a fresh kit (or the zero-config
+        # default) is used on this start.
         rm -rf "$agent_dir/.arkavo" 2>/dev/null
 
         echo -n "  agent-$i... "
 
         cd "$agent_dir"
-        nohup "$BINARY" agent run > "$SCRIPT_DIR/logs/agent-$i.log" 2>&1 &
+        if [ "$i" -eq 0 ]; then
+            # agent-0 is the only mesh member with a purpose-built identity.
+            nohup "$BINARY" agent -c "$SCRIPT_DIR/mesh/orchestrator.swarmkit.yaml" > "$SCRIPT_DIR/logs/agent-$i.log" 2>&1 &
+        else
+            nohup "$BINARY" agent run > "$SCRIPT_DIR/logs/agent-$i.log" 2>&1 &
+        fi
         local pid=$!
         echo $pid >> "$PID_FILE"
 

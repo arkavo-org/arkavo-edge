@@ -82,13 +82,13 @@ The system uses a hybrid orchestrator-mesh architecture:
 
 ### Start All Agents
 ```bash
-./launch_multi_agent_system.sh
+./launch.sh
 ```
 
 ### Start Individual Agent
 ```bash
-cd examples/software-development-lifecycle/security
-arkavo agent run
+cd examples/software-development-lifecycle
+arkavo agent -c software-development-lifecycle.swarmkit.yaml -n security-agent -p 8343
 ```
 
 ### Test Multi-Agent Collaboration
@@ -136,7 +136,7 @@ Broadcast capabilities to other agents:
 
 1. **Context Efficiency**: Agents ask specific questions rather than sharing entire knowledge bases
 2. **No Database Replication**: Knowledge remains with specialists; agents query each other
-3. **Configuration Simplicity**: Each agent is just an AGENTS.md file
+3. **Configuration Simplicity**: All 12 agents are roles in one `software-development-lifecycle.swarmkit.yaml` kit
 4. **Zero Configuration**: mDNS enables automatic discovery
 5. **Modular Design**: Easy to add new specialized agents
 
@@ -177,11 +177,10 @@ npm install -g @cyanheads/git-mcp-server
 
 To add a new specialized agent:
 
-1. Create directory: `mkdir examples/software-development-lifecycle/new-specialist`
-2. Create `AGENTS.md` with appropriate configuration
-3. Set unique port number
-4. Define purpose that includes keywords for capability detection
-5. Start the agent: `cd examples/software-development-lifecycle/new-specialist && arkavo agent run`
+1. Add a new entry under `roles:` in `software-development-lifecycle.swarmkit.yaml`
+2. Give it a unique role `id`, an inline `skill:identity` with its purpose, and a `description` that includes keywords for capability detection
+3. Set a unique port and add it to `launch.sh`'s `start_all_agents`
+4. Start the agent: `arkavo agent -c software-development-lifecycle.swarmkit.yaml -n <role-id> -p <port>`
 
 The agent will automatically:
 - Broadcast its capabilities via mDNS

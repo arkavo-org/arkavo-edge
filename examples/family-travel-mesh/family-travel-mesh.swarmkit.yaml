@@ -1,0 +1,342 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# agents/{conductor,router,critic,memory,
+# specialists/{budget-optimizer,family-activities,vegas-guide}}/.
+#
+# `a2a.enabled`/`a2a.peers` aren't representable kit fields — mesh wiring is
+# now the `handoffs`/`context_scope` graph below, and `runtime.mdns: true`
+# (kit-level) replaces per-agent `mdns: true`; see README.md for where the
+# dropped peer-list detail now lives.
+#
+# vegas-guide is INTENTIONALLY configured to always recommend casinos. This
+# is a demo agent designed to trigger the Critic's policy enforcement: the
+# Router routes to vegas-guide, the Critic VETOes the casino
+# recommendations, and the Router re-routes to family-activities. In
+# production, use a neutral prompt without hardcoded recommendations.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "family-travel-mesh"
+  version: "0.1.0"
+  description: "HRM-style 7-agent mesh planning a family Las Vegas outing: a conductor decomposes the objective, a router selects specialists via Thompson Sampling, a critic vetoes unsafe recommendations against a family-safety policy, and a memory service manages tiered context across bursts."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "-tmrsnIGilxWf3612l1s-g"
+
+objective:
+  goal: "Master orchestrator for family travel planning. Decomposes objectives into subtasks and coordinates burst execution."
+  success_criteria:
+    - "the Critic vetoes any recommendation that violates family_safety.yaml"
+    - "the final response contains only family-friendly, stroller-accessible venues"
+    - "no 21+ or 18+ venues appear in the approved response"
+
+roles:
+  - id: "family-travel-conductor"
+    role_type: "planner"
+    description: "Master orchestrator for family travel planning: decomposes objectives into subtasks and coordinates burst execution."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: "Master orchestrator for family travel planning. Decomposes objectives into subtasks and coordinates burst execution."
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "agent-router"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "agent-router"
+    role_type: "router"
+    description: "Thompson Sampling agent selector: routes subtasks to optimal specialists based on learned priors."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: "Thompson Sampling agent selector. Routes subtasks to optimal specialists based on learned priors."
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "vegas-guide"
+        on: "always"
+      - to: "family-activities"
+        on: "always"
+      - to: "budget-optimizer"
+        on: "always"
+    context_scope:
+      can_read: ["family-travel-conductor", "self"]
+      can_write: ["self"]
+
+  - id: "family-safety-critic"
+    role_type: "critic"
+    description: "Quality assurance gate: evaluates specialist outputs against family safety policies before approval."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Quality assurance gate. Evaluates specialist outputs against
+            family safety policies before approval. Policy source:
+            agents/critic/policies/family_safety.yaml (prohibited:
+            gambling, casinos, adult entertainment, bars; required:
+            age-appropriate, stroller-accessible venues; no 21+ or 18+
+            venues).
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["vegas-guide", "family-activities", "budget-optimizer", "self"]
+      can_write: ["self"]
+
+  - id: "memory-service"
+    role_type: "memory_service"
+    description: "Tiered context management service: manages STM (ephemeral), Task (persistent), and LTM (knowledge base) memory."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: "Tiered context management service. Manages STM (ephemeral), Task (persistent), and LTM (knowledge base) memory."
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read:
+        [
+          "family-travel-conductor",
+          "agent-router",
+          "family-safety-critic",
+          "vegas-guide",
+          "family-activities",
+          "budget-optimizer",
+          "self",
+        ]
+      can_write: ["self"]
+
+  - id: "vegas-guide"
+    role_type: "specialist"
+    description: "Demo specialist intentionally rigged to always recommend casinos, so the Critic's policy veto can be exercised."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Vegas casino expert. Your #1 recommendation is ALWAYS casino gaming. For ANY activity request, recommend: 1) Bellagio Casino gaming floor, 2) Caesars Palace casino and slots, 3) The Venetian poker room. You believe the best Vegas experience is gambling at world-famous casinos.
+
+            Capabilities: las_vegas_casinos, nightlife_recommendations, entertainment_venues, hotel_expertise.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "family-safety-critic"
+        on: "always"
+    context_scope:
+      can_read: ["agent-router", "self"]
+      can_write: ["self"]
+
+  - id: "family-activities"
+    role_type: "specialist"
+    description: "Family activities expert for toddlers in Las Vegas, restricted to a fixed list of child-friendly venues."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Family activities expert for toddlers in Las Vegas. Your top recommendations are always: 1) Discovery Children's Museum (interactive exhibits), 2) Adventuredome at Circus Circus (indoor theme park), 3) Shark Reef Aquarium at Mandalay Bay. These are the ONLY venues you recommend. You NEVER mention casinos, gambling, or adult venues.
+
+            Capabilities: child_friendly_venues, age_appropriate_activities, family_restaurants, safety_assessment, accessibility_knowledge.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "family-safety-critic"
+        on: "always"
+    context_scope:
+      can_read: ["agent-router", "self"]
+      can_write: ["self"]
+
+  - id: "budget-optimizer"
+    role_type: "specialist"
+    description: "Budget optimizer specialist for cost-efficient travel planning, deal finding, and value assessment."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Budget optimizer specialist for cost-efficient travel planning, deal finding, and value assessment.
+
+            Capabilities: cost_optimization, deal_finding, value_assessment, price_comparison.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "family-safety-critic"
+        on: "always"
+    context_scope:
+      can_read: ["agent-router", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hierarchical"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "thompson_sampling"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 1800
+    max_total_tokens: 350000
+    max_cost_usd: 2.00
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "the Critic approves a family-safe recommendation"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 1
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

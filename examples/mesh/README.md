@@ -22,7 +22,8 @@ Agents discover each other via mDNS and communicate using the A2A (Agent-to-Agen
 
 | File | Purpose |
 |------|---------|
-| `agent-0/` | First mesh agent |
+| `orchestrator.swarmkit.yaml` | SwarmKit config for agent-0 (the orchestrator role) |
+| `agent-0/` | First mesh agent's runtime state (`.arkavo/`) |
 | `mesh.sh` | Launch script |
 
 ## Learn More

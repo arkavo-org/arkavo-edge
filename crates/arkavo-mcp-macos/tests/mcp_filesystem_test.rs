@@ -7,12 +7,12 @@ use serde_json::json;
 use tempfile::TempDir;
 
 #[tokio::test]
-async fn test_filesystem_kit_read_agents_md() {
+async fn test_filesystem_kit_read_sample_doc() {
     let temp_dir = TempDir::new().unwrap();
 
-    // Create AGENTS.md with absolute path
-    let agents_path = temp_dir.path().join("AGENTS.md");
-    let agents_content = r#"# AGENTS.md
+    // Create sample-doc.md with absolute path
+    let sample_path = temp_dir.path().join("sample-doc.md");
+    let sample_content = r#"# sample-doc.md
 
 This is the system prompt for the AI agent.
 
@@ -20,13 +20,13 @@ This is the system prompt for the AI agent.
 - Follow these guidelines
 - Be helpful and accurate"#;
 
-    std::fs::write(&agents_path, agents_content).unwrap();
+    std::fs::write(&sample_path, sample_content).unwrap();
 
-    // Test reading AGENTS.md using FileSystemKit
+    // Test reading sample-doc.md using FileSystemKit
     let kit = FileSystemKit::new();
     let params = json!({
         "action": "read_file",
-        "file_path": agents_path.to_str().unwrap()
+        "file_path": sample_path.to_str().unwrap()
     });
 
     let result = kit.execute(params).await.unwrap();
@@ -38,11 +38,11 @@ This is the system prompt for the AI agent.
 }
 
 #[tokio::test]
-async fn test_filesystem_kit_list_directory_with_agents() {
+async fn test_filesystem_kit_list_directory_with_sample_doc() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create files with absolute paths
-    std::fs::write(temp_dir.path().join("AGENTS.md"), "Agent content").unwrap();
+    std::fs::write(temp_dir.path().join("sample-doc.md"), "Agent content").unwrap();
     std::fs::write(temp_dir.path().join("CLAUDE.md"), "Claude content").unwrap();
     std::fs::write(temp_dir.path().join("README.md"), "Readme content").unwrap();
 
@@ -65,25 +65,25 @@ async fn test_filesystem_kit_list_directory_with_agents() {
         .map(|e| e["name"].as_str().unwrap().to_string())
         .collect();
 
-    assert!(file_names.contains(&"AGENTS.md".to_string()));
+    assert!(file_names.contains(&"sample-doc.md".to_string()));
     assert!(file_names.contains(&"CLAUDE.md".to_string()));
     assert!(file_names.contains(&"README.md".to_string()));
 }
 
 #[tokio::test]
-async fn test_filesystem_kit_file_info_agents() {
+async fn test_filesystem_kit_file_info_sample_doc() {
     let temp_dir = TempDir::new().unwrap();
 
-    // Create AGENTS.md with specific content
-    let agents_path = temp_dir.path().join("AGENTS.md");
-    let content = "This is AGENTS.md content for testing";
-    std::fs::write(&agents_path, content).unwrap();
+    // Create sample-doc.md with specific content
+    let sample_path = temp_dir.path().join("sample-doc.md");
+    let content = "This is sample-doc.md content for testing";
+    std::fs::write(&sample_path, content).unwrap();
 
     // Get file info
     let kit = FileSystemKit::new();
     let params = json!({
         "action": "file_info",
-        "file_path": agents_path.to_str().unwrap()
+        "file_path": sample_path.to_str().unwrap()
     });
 
     let result = kit.execute(params).await.unwrap();

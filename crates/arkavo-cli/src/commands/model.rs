@@ -1,10 +1,11 @@
 #![allow(clippy::collapsible_if)]
 
+use crate::commands::kit::kit_model_to_hint;
 use anyhow::Result;
 use clap::{Args, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use super::model_list::{get_model_compatibility, list_local_gguf_models, parse_agents_config};
+use super::model_list::{get_model_compatibility, list_local_gguf_models};
 
 #[derive(Args)]
 pub struct ModelCommand {
@@ -72,35 +73,60 @@ enum ModelSubcommand {
     },
 }
 
+/// Preferred models declared by the discovered SwarmKit kit: one `(role id,
+/// model hint)` pair per role whose `agent_provisioning.model` names a
+/// model the router knows, local or cloud, via [`kit_model_to_hint`].
+/// Returns `None` when no kit is discovered, or when a kit exists but
+/// declares no recognized models — the caller falls back to the same
+/// env-key status display either way, matching how the old AGENTS.md-based
+/// lookup handled "nothing configured".
+fn kit_preferred_models(cwd: &Path) -> Option<Vec<(String, String)>> {
+    let discovered = arkavo_swarmkit::load_discovered_kit(cwd).ok()?;
+    let models: Vec<(String, String)> = discovered
+        .config
+        .roles
+        .iter()
+        .filter_map(|role| {
+            let hint =
+                kit_model_to_hint(role.model_family.as_deref()?, role.model_size.as_deref())?;
+            Some((role.role_id.clone(), hint))
+        })
+        .collect();
+    if models.is_empty() {
+        None
+    } else {
+        Some(models)
+    }
+}
+
 pub async fn run(cmd: &ModelCommand) -> Result<()> {
     match &cmd.command {
         ModelSubcommand::List => {
             println!("Available Models\n");
 
-            // Read .arkavo/AGENTS.md configuration
-            let agents_config = parse_agents_config();
-
-            // Show preferred models from .arkavo/AGENTS.md
-            if !agents_config.is_empty() {
-                println!("Preferred Models (from .arkavo/AGENTS.md):");
-                for (provider, models) in &agents_config {
-                    println!("\n  {provider}:");
-                    for model in models {
+            // Read preferred models from the discovered SwarmKit manifest
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            match kit_preferred_models(&cwd) {
+                Some(models) => {
+                    println!("Preferred Models (from SwarmKit manifest):");
+                    for (role, model) in &models {
+                        println!("\n  {role}:");
                         println!("    • {model}");
                     }
+                    println!();
                 }
-                println!();
-            } else {
-                // Fallback: check for Gemini
-                println!("Preferred Models:");
-                if std::env::var("GEMINI_API_KEY").is_ok() {
-                    println!("  ✓ Gemini API configured");
-                } else {
-                    println!("  ✗ No API keys configured");
-                    println!("  Set GEMINI_API_KEY to use Gemini models");
+                None => {
+                    // Fallback: check for Gemini
+                    println!("Preferred Models:");
+                    if std::env::var("GEMINI_API_KEY").is_ok() {
+                        println!("  ✓ Gemini API configured");
+                    } else {
+                        println!("  ✗ No API keys configured");
+                        println!("  Set GEMINI_API_KEY to use Gemini models");
+                    }
+                    println!("\n  Configure preferred models with: arkavo kit init");
+                    println!();
                 }
-                println!("\n  Configure preferred models in .arkavo/AGENTS.md");
-                println!();
             }
 
             // Show local GGUF models
@@ -275,6 +301,96 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
 mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
+
+    fn minimal_kit_yaml(role_id: &str, family: &str, size: &str) -> String {
+        format!(
+            r#"
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "hello"
+  version: "0.1.0"
+  authors:
+    - did: "did:web:example.com"
+  created: "2026-04-29T00:00:00Z"
+  expires: "2026-05-29T00:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+objective:
+  goal: "say hello"
+roles:
+  - id: {role_id}
+    role_type: operator
+    agent_provisioning:
+      model:
+        family: {family}
+        size: {size}
+    skills: []
+    mcp_tools: []
+    handoffs: []
+coordination:
+  topology: hub-spoke
+  protocol: a2a-jsonrpc-2.0
+  routing:
+    strategy: static
+constraints:
+  global_budget:
+    max_wallclock_seconds: 60
+    max_total_tokens: 8000
+    max_cost_usd: 0.01
+  data_classifications: ["public"]
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+completion:
+  rules: ["done"]
+  on_failure: abort
+  max_retries: 0
+provenance:
+  signatures:
+    - signer_did: "did:web:example.com"
+      algorithm: ed25519
+      signature: "AAA"
+"#
+        )
+    }
+
+    #[test]
+    fn kit_preferred_models_maps_known_local_edge_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let arkavo_dir = dir.path().join(".arkavo");
+        std::fs::create_dir_all(&arkavo_dir).unwrap();
+        std::fs::write(
+            arkavo_dir.join("agent.swarmkit.yaml"),
+            minimal_kit_yaml("worker", "ministral", "3B"),
+        )
+        .unwrap();
+
+        let models = kit_preferred_models(dir.path()).expect("kit with known model");
+        assert_eq!(
+            models,
+            vec![("worker".to_string(), "ministral-3b".to_string())]
+        );
+    }
+
+    #[test]
+    fn kit_preferred_models_none_when_no_kit() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(kit_preferred_models(dir.path()).is_none());
+    }
+
+    #[test]
+    fn kit_preferred_models_none_when_model_unrecognized() {
+        let dir = tempfile::tempdir().unwrap();
+        let arkavo_dir = dir.path().join(".arkavo");
+        std::fs::create_dir_all(&arkavo_dir).unwrap();
+        std::fs::write(
+            arkavo_dir.join("agent.swarmkit.yaml"),
+            minimal_kit_yaml("worker", "unknown-family", "1B"),
+        )
+        .unwrap();
+
+        assert!(kit_preferred_models(dir.path()).is_none());
+    }
 
     /// `ModelCommand` derives `Args`, not `Parser`, so it has no `Command` of
     /// its own to render help from; this wrapper mirrors the one `lib.rs`

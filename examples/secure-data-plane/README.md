@@ -2,6 +2,7 @@
 
 Demonstrates encrypted interagent data sharing using TDF (Trusted Data Format)
 with KAS (Key Access Service) for key management and Iroh for P2P blob transport.
+Peers are discovered via mDNS (`runtime.mdns: true` in the kit).
 
 ## What You'll Learn
 
@@ -126,8 +127,7 @@ curl -s -X POST http://localhost:8082 \
 
 | File | Purpose |
 |------|---------|
-| `sender/AGENTS.md` | Sender agent config with KAS |
-| `receiver/AGENTS.md` | Receiver agent config with KAS + trusted roots |
+| `secure-data-plane.swarmkit.yaml` | Two-role kit (`data-sender`, `data-receiver`) |
 | `launch.sh` | Start both agents |
 | `stop.sh` | Stop both agents |
 | `test-data-plane.sh` | End-to-end test script |
@@ -140,3 +140,15 @@ curl -s -X POST http://localhost:8082 \
 - **Authorization**: NTDF delegation token chains
 - **Transport**: Iroh QUIC with relay for NAT traversal
 - **TLS**: rustls (no OpenSSL)
+
+### Kit-level KAS
+
+`runtime.kas` is kit-level (SwarmKit has no per-role KAS block), so the two
+agents' previously-separate KAS configs had to be merged into one. The
+receiver's config wins at kit level — `key_id: receiver-key-1`,
+`algorithm: ec:secp256r1`, and its `trusted_roots` entry (`Demo Root
+Authority`) — because the receiver is the side that verifies delegation and
+rewraps keys; that's the config that has to be correct for the demo to
+work. The sender's original config used a distinct `key_id: sender-key-1`
+with no `trusted_roots`; that detail isn't representable in the merged kit
+and is recorded here rather than silently dropped.

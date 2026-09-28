@@ -56,7 +56,7 @@ sample.rs ──► parse (syn) ──► apply OpBundle ──► render (prett
 
 | File | Purpose |
 |------|---------|
-| `AGENTS.md` | Agent configuration |
+| `evofabric-agent.swarmkit.yaml` | Agent configuration |
 | `run_test.sh` | AST pipeline verification (51 tests) |
 | `run.sh` | Full agent pipeline with local model |
 | `sample.rs` | Target source file for testing |

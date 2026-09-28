@@ -56,14 +56,21 @@ start_agents() {
     stop_agents
     > "$PID_FILE"
 
-    for agent_dir in orchestrator code-reviewer test-writer; do
-        local dir="$SCRIPT_DIR/$agent_dir"
-        [ -f "$dir/AGENTS.md" ] || continue
-        cd "$dir"
-        RUST_LOG=info nohup "$BINARY" agent run >> "$LOG_DIR/${agent_dir}.log" 2>&1 &
+    local kit="$SCRIPT_DIR/dogfood-mesh.swarmkit.yaml"
+    # role id : listen port (preserves the old per-agent listen: values)
+    local roles=(
+        "dogfood-orchestrator:8420"
+        "dogfood-code-reviewer:8422"
+        "dogfood-test-writer:8424"
+    )
+
+    for entry in "${roles[@]}"; do
+        local role="${entry%%:*}"
+        local port="${entry##*:}"
+        RUST_LOG=info nohup "$BINARY" agent -c "$kit" -n "$role" -p "$port" \
+            >> "$LOG_DIR/${role}.log" 2>&1 &
         echo "$!" >> "$PID_FILE"
-        cd "$SCRIPT_DIR"
-        log "Started $agent_dir (pid $!)"
+        log "Started $role on port $port (pid $!)"
     done
 
     sleep 5
@@ -73,7 +80,7 @@ start_agents() {
 wait_for_agents() {
     local retries=10
     while [ "$retries" -gt 0 ]; do
-        if curl -s http://localhost:8421/.well-known/agent.json >/dev/null 2>&1; then
+        if curl -s http://localhost:8420/.well-known/agent.json >/dev/null 2>&1; then
             return 0
         fi
         sleep 2

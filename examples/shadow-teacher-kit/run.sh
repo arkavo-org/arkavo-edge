@@ -71,7 +71,7 @@ stop_agents() {
     # ports and an open handle to a learning store we are about to reset,
     # which then fails writes with SQLITE_READONLY_DBMOVED. Kill any
     # stragglers and wait for the ports to actually free.
-    pkill -f "$BINARY agent run" 2>/dev/null || true
+    pkill -f "$BINARY agent" 2>/dev/null || true
     for entry in "${AGENTS[@]}"; do
         local port="${entry#*:}"
         for _ in $(seq 1 20); do
@@ -91,7 +91,7 @@ start_agents() {
         mkdir -p "$dir/workspace"
         cp "$SCRIPT_DIR"/sample/*.rs "$dir/workspace/"
         info "Starting $name (port $port)..."
-        (cd "$dir" && RUST_LOG=info nohup "$BINARY" agent run \
+        (cd "$dir" && RUST_LOG=info nohup "$BINARY" agent -c "$MANIFEST" -n "$name" -p "$port" \
             > "$LOG_DIR/$name.log" 2>&1 & echo $! >> "$PID_FILE")
     done
 

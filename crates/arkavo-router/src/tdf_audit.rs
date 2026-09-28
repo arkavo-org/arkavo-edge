@@ -24,7 +24,7 @@ pub struct TdfAuditConfig {
     pub kas_url: String,
     /// Agent identifier bound into the TDF policy.
     pub agent_id: String,
-    /// Key identifier from AGENTS.md `kas.key_id`.
+    /// Key identifier from SwarmKit `kas.key_id`.
     pub key_id: String,
 }
 

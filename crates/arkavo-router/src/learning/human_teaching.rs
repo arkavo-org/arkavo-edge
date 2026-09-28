@@ -6,7 +6,7 @@
 //! - Correction → create AntiPattern linked to last DecisionTrace
 //! - Reinforcement → boost episode quality, fast-track to Canonical
 //!
-//! Also parses AGENTS.md at startup for constraints/suggestions (Configuration source).
+//! Also parses kit teaching text at startup for constraints/suggestions (Configuration source).
 
 use super::persistence::{Lesson, LessonPattern, LessonScope, LessonSource, MemoryTier};
 use serde::{Deserialize, Serialize};
@@ -249,9 +249,9 @@ fn detect_scope(text: &str) -> LessonScope {
     }
 }
 
-// --- AGENTS.md parsing (startup configuration) ---
+// --- Kit teaching text parsing (startup configuration) ---
 
-/// A teaching signal from a human source (AGENTS.md or runtime)
+/// A teaching signal from a human source (kit config or runtime)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeachingSignal {
     pub source: TeachingSource,
@@ -277,8 +277,8 @@ pub struct TeachingExample {
     pub tool_sequence: Vec<String>,
 }
 
-/// Parse AGENTS.md content into teaching signals
-pub fn parse_agents_md(content: &str, path: PathBuf) -> Vec<TeachingSignal> {
+/// Parse kit teaching text content into teaching signals
+pub fn parse_teaching_text(content: &str, path: PathBuf) -> Vec<TeachingSignal> {
     let mut signals = Vec::new();
     let mut current_section = String::new();
 
@@ -381,7 +381,7 @@ fn section_to_category(source: &TeachingSource) -> String {
 mod tests {
     use super::*;
 
-    const SAMPLE_AGENTS_MD: &str = r#"# Tool Usage
+    const SAMPLE_TEACHING_TEXT: &str = r#"# Tool Usage
 - Use XML format for tool calls
 - MUST validate all tool arguments before execution
 - NEVER call delete operations without confirmation
@@ -393,8 +393,8 @@ ALWAYS run clippy before pushing
 "#;
 
     #[test]
-    fn test_parse_agents_md() {
-        let signals = parse_agents_md(SAMPLE_AGENTS_MD, PathBuf::from("AGENTS.md"));
+    fn test_parse_teaching_text() {
+        let signals = parse_teaching_text(SAMPLE_TEACHING_TEXT, PathBuf::from("kit.md"));
         assert!(!signals.is_empty());
 
         let constraints: Vec<_> = signals.iter().filter(|s| !s.overridable).collect();
@@ -430,7 +430,7 @@ ALWAYS run clippy before pushing
 
     #[test]
     fn test_signals_to_lessons() {
-        let signals = parse_agents_md(SAMPLE_AGENTS_MD, PathBuf::from("AGENTS.md"));
+        let signals = parse_teaching_text(SAMPLE_TEACHING_TEXT, PathBuf::from("kit.md"));
         let lessons = signals_to_lessons(&signals, "agent-1", "swarm-1");
 
         assert_eq!(lessons.len(), signals.len());
@@ -463,7 +463,7 @@ ALWAYS run clippy before pushing
 
     #[test]
     fn test_section_categories() {
-        let signals = parse_agents_md(SAMPLE_AGENTS_MD, PathBuf::from("AGENTS.md"));
+        let signals = parse_teaching_text(SAMPLE_TEACHING_TEXT, PathBuf::from("kit.md"));
 
         let tool_signals: Vec<_> = signals
             .iter()
@@ -483,7 +483,7 @@ ALWAYS run clippy before pushing
 
     #[test]
     fn test_empty_content() {
-        let signals = parse_agents_md("", PathBuf::from("AGENTS.md"));
+        let signals = parse_teaching_text("", PathBuf::from("kit.md"));
         assert!(signals.is_empty());
     }
 

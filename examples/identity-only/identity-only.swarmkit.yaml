@@ -1,0 +1,147 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# agent-0/, agent-1/, agent-2/.
+#
+# These three roles are intentionally minimal: every AGENTS.md they replace
+# had an EMPTY `purpose:` and EMPTY `model:` (agent_provisioning.model is
+# omitted below per convention — model selection is left to the CLI/router
+# default), because the whole point of this fixture is that real identity
+# (purpose, model, MCP tool grants) arrives LATER from the orchestrator's
+# `apply-kit` flow as a TDF-wrapped `AgentSpecializationBundle`, not from
+# this file. The `capabilities:` comma lists from the old configs become one
+# inline skill per role below, naming the same capability strings verbatim,
+# so the orchestrator's capability-matcher still has something to match
+# against before a bundle is applied. `mdns: true` (set on every role) maps
+# to the single kit-level `runtime.mdns` below.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "identity-only"
+  version: "0.1.0"
+  description: "Identity-only mesh demonstrating capability-scoped agents"
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "identityOnlyNonce001"
+
+objective:
+  goal: "Identity-only mesh demonstrating capability-scoped agents"
+  success_criteria:
+    - "each agent is discoverable via mDNS with only its capability hints, no purpose or model"
+    - "an orchestrator's apply-kit flow can capability-match each role and ship it a specialization bundle over A2A"
+
+roles:
+  - id: "agent-0"
+    role_type: "operator"
+    description: "Identity-only agent exposing capability hints: summarize, asset-store."
+    agent_provisioning:
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:capabilities"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "capabilities"
+          description: "Capability hints only — no purpose or model until specialized"
+          instructions: "Capabilities: summarize, asset-store."
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "agent-1"
+    role_type: "operator"
+    description: "Identity-only agent exposing capability hints: write, social-publisher."
+    agent_provisioning:
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:capabilities"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "capabilities"
+          description: "Capability hints only — no purpose or model until specialized"
+          instructions: "Capabilities: write, social-publisher."
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "agent-2"
+    role_type: "operator"
+    description: "Identity-only agent exposing capability hints: critique, scoring."
+    agent_provisioning:
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:capabilities"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "capabilities"
+          description: "Capability hints only — no purpose or model until specialized"
+          instructions: "Capabilities: critique, scoring."
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "mesh"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 300
+    max_total_tokens: 150000
+    max_cost_usd: 0.75
+  data_classifications:
+    - "public"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "each agent reports its assigned persona via agent_discover after apply-kit"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

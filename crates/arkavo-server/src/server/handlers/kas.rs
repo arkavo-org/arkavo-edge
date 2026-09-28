@@ -10,7 +10,7 @@ use base64::{Engine as _, engine::general_purpose};
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 
-/// Convert trusted roots from the AGENTS.md KAS YAML config into
+/// Convert trusted roots from the kit's `runtime.kas` config into
 /// delegation verifier roots.
 ///
 /// Roots with an undecodable `public_key` are still trusted by DID (the

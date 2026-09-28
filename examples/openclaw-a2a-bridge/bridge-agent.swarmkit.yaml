@@ -1,0 +1,120 @@
+# Single-role SwarmKit — replaces the deprecated per-product config for
+# openclaw-a2a-bridge. `a2a.enabled`/discovery aren't representable kit
+# fields; see README.md for where that information now lives. The $1.00
+# session budget cap maps to runtime.max_cost_per_session.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "arkavo-bridge-agent"
+  version: "0.1.0"
+  description: "A2A protocol bridge demonstrating TDF encryption, budget enforcement, and preflight policies"
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "iK8VxnXoUyph1niKoypo8Q"
+
+objective:
+  goal: "A2A protocol bridge demonstrating TDF encryption, budget enforcement, and preflight policies"
+  success_criteria:
+    - "PII and shell-command inputs are blocked by preflight before inference"
+    - "session spend never exceeds the $1.00 budget cap"
+    - "coding tasks are processed locally with no cloud dependency"
+
+roles:
+  - id: "arkavo-bridge-agent"
+    role_type: "operator"
+    description: "Arkavo's side of the A2A protocol bridge to OpenClaw: KAS encryption, preflight policy enforcement, and budget tracking in one agent."
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+        backend: "llama.cpp"
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            You are Arkavo's side of the A2A protocol bridge to OpenClaw.
+            You combine KAS encryption, preflight policy enforcement, and
+            budget tracking in a single agent configuration: preflight
+            scans every input for PII and shell injection before any
+            inference, context is TDF-encrypted so it never leaves the
+            machine in plaintext, spend is tracked against the session
+            budget cap, and inference runs on the local model with no
+            cloud dependency.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 300
+    max_total_tokens: 100000
+    max_cost_usd: 1.0
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "coding task processed within budget or rejected before inference"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  max_cost_per_session: 1.0
+  local_dev: true
+  kas:
+    enabled: true
+    key_id: "bridge-demo-key-1"
+    algorithm: "ec:secp256r1"
+    trusted_roots:
+      - did: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+        name: "Demo Root Authority"
+  preflight:
+    policies:
+      - id: "block_pii"
+        features:
+          - "InputContainsPII"
+        action: block
+        description: "Blocks SSN, credit card numbers, and email addresses"
+        enabled: true
+      - id: "block_shell_commands"
+        features:
+          - "InputContainsShellCommands"
+        action: block
+        description: "Blocks shell commands like sudo, rm, chmod"
+        enabled: true

@@ -1,0 +1,363 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# orchestrator/, code-analyzer/, refactorer/, test-generator/,
+# performance-optimizer/, and clippy-fixer/.
+#
+# `model: glm-4.7-flash` isn't in the local-edge-model vocabulary
+# (crates/arkavo-cli/src/commands/kit/model_map.rs only maps
+# ministral/gemma-4/qwen3 families), so `agent_provisioning.model` is
+# omitted here per convention — see README.md for how to run against GLM.
+# `discovery.mdns` maps to `runtime.mdns` below.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "self-improvement-swarm"
+  version: "0.1.0"
+  description: "Self-improvement swarm for the Arkavo Edge codebase: an orchestrator coordinates specialized agents to analyze, refactor, test, and optimize code, dispatching findings from a code-analyzer to a refactorer, test-generator, performance-optimizer, and clippy-fixer."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "OqfUh7XULmRW-cWl2Rrqxw"
+
+objective:
+  goal: "Orchestrate codebase self-improvement by coordinating specialized agents to analyze, refactor, test, and optimize code"
+  success_criteria:
+    - "code-analyzer findings are routed to the appropriate specialist (refactorer, test-generator, performance-optimizer, or clippy-fixer)"
+    - "refactored code preserves behavior (semantic equivalence) and passes existing tests"
+    - "generated tests achieve the 85%+ coverage target and compile"
+    - "clippy-fixer output passes cargo clippy -- -D warnings"
+
+roles:
+  - id: "self-improvement-orchestrator"
+    role_type: "planner"
+    description: "Orchestrates codebase self-improvement by coordinating specialized agents to analyze, refactor, test, and optimize code."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Orchestrate codebase self-improvement by coordinating specialized agents to analyze, refactor, test, and optimize code.
+
+            Coordinates the following specialized agents:
+            - code-analyzer: Identifies issues, patterns, and improvement opportunities
+            - refactorer: Applies code transformations and refactoring
+            - test-generator: Creates and improves test coverage
+            - performance-optimizer: Profiles and optimizes performance
+            - clippy-fixer: Fixes Rust clippy warnings and lint issues
+
+            Workflow:
+            1. Receive improvement request from user
+            2. Task code-analyzer to identify issues
+            3. Route findings to appropriate specialists
+            4. Aggregate results and report improvements
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "code-analyzer-agent"
+        on: "always"
+      - to: "refactorer-agent"
+        on: "always"
+      - to: "test-generator-agent"
+        on: "always"
+      - to: "performance-optimizer-agent"
+        on: "always"
+      - to: "clippy-fixer-agent"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "code-analyzer-agent"
+    role_type: "specialist"
+    description: "Analyzes the Rust codebase for code quality issues, anti-patterns, complexity, and improvement opportunities."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Analyze Rust codebase for code quality issues, anti-patterns, complexity, and improvement opportunities.
+
+            Specializations:
+            - Static analysis beyond clippy
+            - Code complexity metrics (cyclomatic, cognitive)
+            - Dead code detection
+            - API design review
+            - Dependency analysis
+            - Code duplication detection
+            - Architecture pattern violations
+
+            Analysis categories:
+            - CRITICAL: Security issues, data races, UB
+            - HIGH: Performance bottlenecks, memory leaks
+            - MEDIUM: Code smells, complexity
+            - LOW: Style, naming conventions
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "self-improvement-orchestrator"
+        on: "always"
+    context_scope:
+      can_read: ["self-improvement-orchestrator", "self"]
+      can_write: ["self"]
+
+  - id: "refactorer-agent"
+    role_type: "operator"
+    description: "Applies safe code refactoring transformations including extract function, inline, rename, and structural changes."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Apply safe code refactoring transformations including extract function, inline, rename, and structural changes.
+
+            Safe transformations:
+            - Extract function/method
+            - Inline function/variable
+            - Rename symbols
+            - Extract trait/impl
+            - Simplify conditionals
+            - Remove dead code
+            - Consolidate duplicate code
+
+            Constraints:
+            - Must preserve behavior (semantic equivalence)
+            - Must pass existing tests after refactoring
+            - Follows Rust idioms and conventions
+            - Respects 400-line file limit from CLAUDE.md
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "self-improvement-orchestrator"
+        on: "always"
+    context_scope:
+      can_read: ["self-improvement-orchestrator", "code-analyzer-agent", "self"]
+      can_write: ["self"]
+
+  - id: "test-generator-agent"
+    role_type: "operator"
+    description: "Generates comprehensive unit and integration tests to achieve an 85%+ code coverage target."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Generate comprehensive unit and integration tests to achieve 85%+ code coverage target.
+
+            Test types:
+            - Unit tests (inline #[cfg(test)] modules)
+            - Integration tests (tests/ directory)
+            - Property-based tests
+            - Regression tests for bug fixes
+
+            Coverage targets:
+            - 85% line coverage minimum
+            - All public APIs tested
+            - Error paths covered
+            - Edge cases identified
+
+            Test patterns:
+            - Arrange-Act-Assert
+            - Given-When-Then for BDD
+            - Table-driven tests for multiple inputs
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "self-improvement-orchestrator"
+        on: "always"
+    context_scope:
+      can_read: ["self-improvement-orchestrator", "code-analyzer-agent", "self"]
+      can_write: ["self"]
+
+  - id: "performance-optimizer-agent"
+    role_type: "specialist"
+    description: "Analyzes and optimizes performance bottlenecks including memory allocation, CPU usage, and async efficiency."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Analyze and optimize performance bottlenecks including memory allocation, CPU usage, and async efficiency.
+
+            Analysis areas:
+            - Memory allocation patterns (avoid excessive heap)
+            - CPU-bound operations (unnecessary copying)
+            - I/O efficiency (batching, buffering)
+            - Async overhead (unnecessary spawns)
+            - Lock contention (mutex patterns)
+
+            Optimization targets:
+            - Router response <= 50ms
+            - Binary size <= 60MB
+            - Memory efficient for edge devices
+
+            Tools:
+            - Profile with cargo flamegraph
+            - Benchmark with criterion
+            - Memory analysis with heaptrack
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "self-improvement-orchestrator"
+        on: "always"
+    context_scope:
+      can_read: ["self-improvement-orchestrator", "code-analyzer-agent", "self"]
+      can_write: ["self"]
+
+  - id: "clippy-fixer-agent"
+    role_type: "operator"
+    description: "Fixes all clippy warnings and applies Rust best practices from linting rules."
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: |
+            Fix all clippy warnings and apply Rust best practices from linting rules.
+
+            Fix categories:
+            - clippy::all warnings
+            - clippy::pedantic suggestions
+            - clippy::nursery experimental
+            - rustfmt violations
+
+            Priority:
+            1. Warnings that block CI (-D warnings)
+            2. Performance-related lints
+            3. Correctness lints
+            4. Style lints
+
+            Constraints:
+            - No #[allow(dead_code)] per CLAUDE.md
+            - Maintain backwards compatibility
+            - Run cargo clippy -- -D warnings to verify
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "self-improvement-orchestrator"
+        on: "always"
+    context_scope:
+      can_read: ["self-improvement-orchestrator", "code-analyzer-agent", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 1800
+    max_total_tokens: 300000
+    max_cost_usd: 1.50
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "refactored/generated code compiles and passes cargo test"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

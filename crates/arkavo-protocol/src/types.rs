@@ -1094,7 +1094,9 @@ pub struct AgentConfigGetRequest {
 /// Response with agent configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AgentConfigGetResponse {
-    /// Current AGENTS.md content
+    /// Current SwarmKit kit YAML content. The `agent_config_*` RPC method
+    /// names predate the S6 AGENTS.md→SwarmKit cutover and were kept for
+    /// wire compatibility; the payload itself has been kit YAML since then.
     pub content: String,
     /// Configuration version/hash
     pub version: String,
@@ -1123,7 +1125,7 @@ pub struct ConfigBackup {
 pub struct AgentConfigUpdateRequest {
     /// Agent ID requesting the update
     pub agent_id: String,
-    /// New AGENTS.md content
+    /// New SwarmKit kit YAML content (see [`AgentConfigGetResponse::content`])
     pub content: String,
     /// Expected version for optimistic locking
     #[serde(skip_serializing_if = "Option::is_none")]

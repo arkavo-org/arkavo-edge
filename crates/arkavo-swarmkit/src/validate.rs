@@ -10,6 +10,7 @@ use chrono::{DateTime, FixedOffset};
 
 use crate::canonical::kit_id_for;
 use crate::manifest::Manifest;
+use crate::runtime_config::{RuntimeValidationError, validate_runtime};
 
 /// Maximum accepted kit lifetime per spec §10.1 — `expires - created` MUST be ≤ 1 year.
 pub const MAX_EXPIRY_HORIZON_SECONDS: i64 = 365 * 24 * 60 * 60;
@@ -95,6 +96,9 @@ pub enum ValidationError {
 
     #[error("manifest could not be canonicalized for kit.id verification: {0}")]
     CanonicalSerializationFailed(String),
+
+    #[error("runtime block invalid: {0}")]
+    Runtime(#[from] RuntimeValidationError),
 }
 
 /// Validate the cross-block invariants of a SwarmKit manifest.
@@ -167,6 +171,10 @@ pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
     }
 
     validate_proposal_governance(m, &role_ids)?;
+
+    if let Some(runtime) = &m.runtime {
+        validate_runtime(runtime)?;
+    }
 
     validate_expiry(m)?;
 
@@ -384,6 +392,7 @@ mod tests {
             pricing: vec![],
             evaluation: None,
             proposal_governance: None,
+            runtime: None,
             completion: CompletionSpec {
                 rules: vec!["all deliverables present".into()],
                 on_failure: OnFailure::Abort,
@@ -398,6 +407,42 @@ mod tests {
                 }],
             },
         }
+    }
+
+    #[spec("SK-100")]
+    #[test]
+    fn runtime_block_validates_with_manifest() {
+        use crate::runtime_config::*;
+        let mut m = minimal_manifest();
+        m.runtime = Some(KitRuntimeConfig {
+            mode: Some(RuntimeMode::Orchestrator),
+            cloud_policy: Some(CloudPolicyKind::AskBeforeCloud),
+            local_dev: Some(true),
+            preflight: Some(RuntimePreflight {
+                policies: vec![PreflightPolicySpec {
+                    id: "block-pii".into(),
+                    features: vec!["InputContainsPII".into()],
+                    action: PreflightAction::Block,
+                    description: None,
+                    enabled: true,
+                }],
+            }),
+            ..Default::default()
+        });
+        validate(&m).unwrap();
+    }
+
+    #[spec("SK-101")]
+    #[test]
+    fn agent_runtime_config_from_minimal() {
+        use crate::runtime_config::agent_runtime_config_from_manifest;
+        let m = minimal_manifest();
+        let cfg = agent_runtime_config_from_manifest(&m);
+        assert_eq!(cfg.kit_name, "test");
+        assert_eq!(cfg.objective_goal, "test");
+        assert_eq!(cfg.roles.len(), 1);
+        assert_eq!(cfg.roles[0].role_id, "r1");
+        assert!(cfg.runtime.mdns_or_default());
     }
 
     #[test]

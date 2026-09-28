@@ -75,7 +75,9 @@ The orchestrator uses these tools to coordinate the mesh:
 
 ## Configuration
 
-See `AGENTS.md` for the orchestrator configuration including:
-- System prompt for routing behavior
-- Capability declarations
-- MCP server configuration
+See `orchestrator-agent.swarmkit.yaml` for the orchestrator configuration:
+the routing system prompt lives in the `orchestrator` role's `skill:identity`
+instructions, and `runtime.listen: 0.0.0.0:8340` pins the fixed port used
+above. The tool grants in the table above are not yet formalized as
+`mcp_tools` in the kit (the original config never declared them either) —
+they describe what the orchestrator is expected to call at runtime.

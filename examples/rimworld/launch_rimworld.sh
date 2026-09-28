@@ -75,9 +75,11 @@ stop_agents() {
     pkill -f "arkavo agent" 2>/dev/null || true
 }
 
+KIT="$SCRIPT_DIR/rimworld-swarm.swarmkit.yaml"
+
 start_agent() {
     local name=$1
-    local dir=$2
+    local role=$2
     local port=$3
     local log_file="$LOG_DIR/${name}.log"
 
@@ -88,13 +90,11 @@ start_agent() {
         return 1
     fi
 
-    cd "$dir"
     # Enable debug logging for chat/swarm interactions
     local log_level="${RUST_LOG:-arkavo_protocol=debug,arkavo_agui=debug,arkavo_router=info,arkavo_server=info,arkavo_llm=info}"
-    nohup env ARKAVO_DEBUG=1 ARKAVO_DEBUG_PEG=1 RUST_LOG="$log_level" ${GEMINI_API_KEY:+GEMINI_API_KEY="$GEMINI_API_KEY"} ${ANTHROPIC_API_KEY:+ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"} "$BINARY" agent --config AGENTS.md > "$log_file" 2>&1 &
+    nohup env ARKAVO_DEBUG=1 ARKAVO_DEBUG_PEG=1 RUST_LOG="$log_level" ${GEMINI_API_KEY:+GEMINI_API_KEY="$GEMINI_API_KEY"} ${ANTHROPIC_API_KEY:+ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"} "$BINARY" agent -c "$KIT" -n "$role" -p "$port" > "$log_file" 2>&1 &
     local pid=$!
     echo "$pid:$name" >> "$PIDS_FILE"
-    cd "$SCRIPT_DIR"
 
     local max_attempts=30
     local attempt=0
@@ -195,13 +195,13 @@ main() {
     echo ""
 
     # Start in dependency order: Specialists -> Commander (orchestrator)
-    start_agent "survival" "$SCRIPT_DIR/agents/specialists/survival" 8410 || exit 1
-    #start_agent "industry" "$SCRIPT_DIR/agents/specialists/industry" 8411 || exit 1
-    #start_agent "defense" "$SCRIPT_DIR/agents/specialists/defense" 8412 || exit 1
-    #start_agent "historian" "$SCRIPT_DIR/agents/specialists/historian" 8413 || exit 1
+    start_agent "survival" "survival" 8410 || exit 1
+    #start_agent "industry" "industry" 8411 || exit 1
+    #start_agent "defense" "defense" 8412 || exit 1
+    #start_agent "historian" "historian" 8413 || exit 1
     sleep 1
 
-    start_agent "commander" "$SCRIPT_DIR/agents/commander" 8401 || exit 1
+    start_agent "commander" "commander" 8401 || exit 1
 
     echo ""
     print_status "INFO" "Waiting for mDNS discovery (5s)..."

@@ -5,11 +5,13 @@
 > **Browse**: `cargo xtask capabilities network-security`
 <!-- /ARKAVO-CAPABILITY -->
 
-Demonstrates preflight policy configuration for input moderation.
+Demonstrates preflight policy configuration for input moderation. Peers are
+discovered via mDNS (`runtime.mdns: true` in the kit); A2A enablement itself
+is implicit in running `arkavo agent` and isn't a separate kit field.
 
 ## What You'll Learn
 
-- How to configure preflight policies in AGENTS.md
+- How to configure preflight policies in a SwarmKit kit
 - Available policy features (PII detection, SQL injection, etc.)
 - How blocked inputs are handled
 - Custom regex patterns for policy rules
@@ -82,7 +84,7 @@ arkavo chat --prompt "What is the weather today?"
 
 | File | Purpose |
 |------|---------|
-| `AGENTS.md` | Agent config with preflight policies |
+| `secure-agent.swarmkit.yaml` | Agent config with preflight policies |
 | `tasks.json` | Test tasks showing blocked/allowed inputs |
 | `launch.sh` | Start the agent |
 | `stop.sh` | Stop the agent |

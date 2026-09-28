@@ -610,7 +610,7 @@ components:
     module: arkavo_swarmkit
     description: SwarmKit manifest, runtime, and AG-UI gateway integration
     criticality: high
-    scenario_count: 53
+    scenario_count: 58
     invariants:
       - kit.id equals BLAKE3 of canonical manifest
       - SwarmFlight builds one ArpRuntime per role at launch

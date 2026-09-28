@@ -23,7 +23,7 @@ impl LocalEngine {
             .await
             .map_err(|e| format!("Failed to initialize router: {e}"))?;
 
-        // Apply preflight policies from AGENTS.md if available
+        // Apply preflight policies from SwarmKit if available
         let agent_config = arkavo_router::load_agent_config().unwrap_or_default();
         let router = if let Some(ref pf) = agent_config.preflight {
             let moderator = arkavo_router::build_moderator_from_config(pf);

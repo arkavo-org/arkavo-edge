@@ -41,7 +41,10 @@ check_prerequisites() {
     fi
     print_status "SUCCESS" "Arkavo binary found"
 
-    # Check for GLM-4.7-Flash model
+    # Check for GLM-4.7-Flash model. Not in model_map.rs's local-edge-model
+    # vocabulary, so the kit omits agent_provisioning.model and the router
+    # falls back to its default local model unless GLM is already loaded —
+    # see README.md.
     local hf_cache="${HF_HOME:-$HOME/.cache/huggingface}/hub"
     if [ -d "$hf_cache/models--unsloth--GLM-4.7-Flash-GGUF" ]; then
         print_status "SUCCESS" "GLM-4.7-Flash model available (unsloth)"
@@ -64,34 +67,29 @@ stop_agents() {
     print_status "SUCCESS" "All agents stopped"
 }
 
+KIT="$SCRIPT_DIR/self-improvement-swarm.swarmkit.yaml"
+
 start_agent() {
     local name=$1
-    local dir=$2
+    local role=$2
     local port=$3
-
-    if [ ! -f "$dir/AGENTS.md" ]; then
-        print_status "WARNING" "No AGENTS.md in $dir, skipping $name"
-        return 0
-    fi
 
     print_status "AGENT" "Starting $name (port $port) with GLM-4.7-Flash..."
 
-    cd "$dir"
-    nohup "$BINARY" agent run > "$LOG_DIR/${name}.log" 2>&1 &
+    nohup "$BINARY" agent -c "$KIT" -n "$role" -p "$port" > "$LOG_DIR/${name}.log" 2>&1 &
     echo "$!" >> "$PID_FILE"
-    cd "$SCRIPT_DIR"
 }
 
 start_swarm() {
     > "$PID_FILE"
 
     # Start specialized agents
-    start_agent "orchestrator" "$SCRIPT_DIR/orchestrator" 8400
-    start_agent "code-analyzer" "$SCRIPT_DIR/code-analyzer" 8401
-    start_agent "refactorer" "$SCRIPT_DIR/refactorer" 8402
-    start_agent "test-generator" "$SCRIPT_DIR/test-generator" 8403
-    start_agent "performance-optimizer" "$SCRIPT_DIR/performance-optimizer" 8404
-    start_agent "clippy-fixer" "$SCRIPT_DIR/clippy-fixer" 8405
+    start_agent "orchestrator" "self-improvement-orchestrator" 8400
+    start_agent "code-analyzer" "code-analyzer-agent" 8401
+    start_agent "refactorer" "refactorer-agent" 8402
+    start_agent "test-generator" "test-generator-agent" 8403
+    start_agent "performance-optimizer" "performance-optimizer-agent" 8404
+    start_agent "clippy-fixer" "clippy-fixer-agent" 8405
 
     print_status "INFO" "Waiting for agents to initialize..."
     sleep 3

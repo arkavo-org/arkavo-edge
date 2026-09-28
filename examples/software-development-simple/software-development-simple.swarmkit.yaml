@@ -1,0 +1,164 @@
+# Multi-role SwarmKit replacing the deprecated per-agent configs for
+# project-manager/, coding-agent/, testing-agent/.
+#
+# `model: gemma-3-270m` (project-manager, testing-agent) isn't in the
+# local-edge-model vocabulary (crates/arkavo-cli/src/commands/kit/model_map.rs
+# only maps gemma's E2B/E4B/12B sizes, not 270m), so `agent_provisioning.model`
+# is omitted for those two roles per convention — see README.md for how to
+# run against gemma-3-270m directly. coding-agent's AGENTS.md left `model:`
+# empty already, so it stays omitted with no further note needed.
+# `mdns: true` (set on every role) maps to the single kit-level `runtime.mdns`
+# below.
+spec_version: "1.0.0"
+kit:
+  id: ""
+  # Authored empty; populated at publish
+  name: "software-development-simple"
+  version: "0.1.0"
+  description: "3-agent A2A collaboration demo: a project manager orchestrates tasks between a coding agent and a testing agent."
+  authors:
+    - did: "did:web:arkavo.com"
+      name: "Arkavo"
+  created: "2026-07-11T00:00:00Z"
+  expires: "2027-07-11T00:00:00Z"
+  nonce: "sdSimpleMeshNonce001"
+
+objective:
+  goal: "Orchestrate software development tasks by coordinating between coding and testing agents"
+  success_criteria:
+    - "tasks assigned to coding-agent are implemented"
+    - "testing-agent validates code quality and generates tests for coding-agent's output"
+
+roles:
+  - id: "project-manager"
+    role_type: "planner"
+    description: "Orchestrate software development tasks by coordinating between coding and testing agents"
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Orchestrate software development tasks by coordinating between
+            coding and testing agents.
+          resources: []
+    mcp_tools: []
+    handoffs:
+      - to: "coding-agent"
+        on: "always"
+      - to: "testing-agent"
+        on: "always"
+    context_scope:
+      can_read: ["self"]
+      can_write: ["self"]
+
+  - id: "coding-agent"
+    role_type: "operator"
+    description: "Implement high-quality code solutions based on requirements"
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Implement high-quality code solutions based on requirements.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["project-manager", "self"]
+      can_write: ["self"]
+
+  - id: "testing-agent"
+    role_type: "specialist"
+    description: "Ensure code quality through comprehensive testing and validation"
+    agent_provisioning:
+      inference:
+        max_tokens: 1024
+        temperature: 0.7
+      budget:
+        max_inference_calls: 32
+        max_wallclock_ms: 120000
+        max_total_tokens: 50000
+      isolation:
+        sandbox: "process"
+        network_egress: false
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: "inline"
+        payload:
+          name: "identity"
+          description: "System identity"
+          instructions: >-
+            Ensure code quality through comprehensive testing and validation.
+          resources: []
+    mcp_tools: []
+    handoffs: []
+    context_scope:
+      can_read: ["project-manager", "coding-agent", "self"]
+      can_write: ["self"]
+
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing:
+    strategy: "static"
+  context_sharing:
+    store: "per-role"
+
+constraints:
+  global_budget:
+    max_wallclock_seconds: 600
+    max_total_tokens: 150000
+    max_cost_usd: 0.75
+  data_classifications:
+    - "internal"
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+
+completion:
+  rules:
+    - "testing-agent validates coding-agent's output"
+    - "no role in error state"
+  on_failure: abort
+  max_retries: 0
+
+provenance:
+  signatures:
+    - signer_did: "did:web:arkavo.com"
+      algorithm: "ed25519"
+      signature: "local-dev-unsigned"
+
+runtime:
+  mode: orchestrator
+  mdns: true
+  cloud_policy: ask_before_cloud
+  local_dev: true

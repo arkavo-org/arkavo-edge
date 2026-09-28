@@ -1,14 +1,15 @@
 //! Spend-plane wiring shared across the server and CLI entry points.
 //!
-//! Resolving the cloud-spend policy from an agent's AGENTS.md was duplicated in
-//! every place that builds a Router (the A2A server, `LocalEngine`, and the CLI
-//! tool integration). It lives here so all entry points share one source of
-//! truth and the safe default is applied consistently.
+//! Resolving the cloud-spend policy from the discovered SwarmKit `runtime`
+//! block was duplicated in every place that builds a Router (the A2A server,
+//! `LocalEngine`, and the CLI tool integration). It lives here so all entry
+//! points share one source of truth and the safe default is applied
+//! consistently.
 
 use arkavo_budget::CloudPolicy;
 use arkavo_router::AgentConfig;
 
-/// Resolve the cloud-spend policy from an agent's AGENTS.md budget block,
+/// Resolve the cloud-spend policy from agent budget config,
 /// falling back to the safe `AskBeforeCloud` default when it is absent or
 /// unparseable.
 pub fn cloud_policy_from_config(config: &AgentConfig) -> CloudPolicy {
@@ -20,9 +21,9 @@ pub fn cloud_policy_from_config(config: &AgentConfig) -> CloudPolicy {
         .unwrap_or_default()
 }
 
-/// Resolve the cloud-spend policy from the AGENTS.md discovered in the current
-/// directory tree (or the default when none is found / it does not parse).
-pub fn cloud_policy_from_agents_md() -> CloudPolicy {
+/// Resolve the cloud-spend policy from the SwarmKit kit discovered in the
+/// current directory tree (or the default when none is found).
+pub fn cloud_policy_from_kit() -> CloudPolicy {
     cloud_policy_from_config(&arkavo_router::load_agent_config().unwrap_or_default())
 }
 

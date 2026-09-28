@@ -18,42 +18,44 @@ fi
 echo "Launching HYPERforum AI Council..."
 echo "Using arkavo: $ARKAVO_BIN"
 
+KIT="$SCRIPT_DIR/hyperforum-council.swarmkit.yaml"
+
 # Launch infrastructure agents
 echo "Starting Conductor on port 8501..."
-"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/agents/conductor/AGENTS.md" > "$LOG_DIR/conductor.log" 2>&1 &
+"$ARKAVO_BIN" agent -c "$KIT" -n "council-conductor" -p 8501 > "$LOG_DIR/conductor.log" 2>&1 &
 echo $! > "$LOG_DIR/conductor.pid"
 
 echo "Starting Router on port 8502..."
-"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/agents/router/AGENTS.md" > "$LOG_DIR/router.log" 2>&1 &
+"$ARKAVO_BIN" agent -c "$KIT" -n "council-router" -p 8502 > "$LOG_DIR/router.log" 2>&1 &
 echo $! > "$LOG_DIR/router.pid"
 
 echo "Starting Critic on port 8503..."
-"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/agents/critic/AGENTS.md" > "$LOG_DIR/critic.log" 2>&1 &
+"$ARKAVO_BIN" agent -c "$KIT" -n "council-critic" -p 8503 > "$LOG_DIR/critic.log" 2>&1 &
 echo $! > "$LOG_DIR/critic.pid"
 
 echo "Starting Synthesis on port 8504..."
-"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/agents/synthesis/AGENTS.md" > "$LOG_DIR/synthesis.log" 2>&1 &
+"$ARKAVO_BIN" agent -c "$KIT" -n "council-synthesis" -p 8504 > "$LOG_DIR/synthesis.log" 2>&1 &
 echo $! > "$LOG_DIR/synthesis.pid"
 
 # Launch specialist agents
 echo "Starting Critical Analyst on port 8510..."
-"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/agents/specialists/critical-analyst/AGENTS.md" > "$LOG_DIR/critical-analyst.log" 2>&1 &
+"$ARKAVO_BIN" agent -c "$KIT" -n "critical-analyst" -p 8510 > "$LOG_DIR/critical-analyst.log" 2>&1 &
 echo $! > "$LOG_DIR/critical-analyst.pid"
 
 echo "Starting Researcher on port 8511..."
-"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/agents/specialists/researcher/AGENTS.md" > "$LOG_DIR/researcher.log" 2>&1 &
+"$ARKAVO_BIN" agent -c "$KIT" -n "researcher" -p 8511 > "$LOG_DIR/researcher.log" 2>&1 &
 echo $! > "$LOG_DIR/researcher.pid"
 
 echo "Starting Synthesizer on port 8512..."
-"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/agents/specialists/synthesizer/AGENTS.md" > "$LOG_DIR/synthesizer.log" 2>&1 &
+"$ARKAVO_BIN" agent -c "$KIT" -n "synthesizer" -p 8512 > "$LOG_DIR/synthesizer.log" 2>&1 &
 echo $! > "$LOG_DIR/synthesizer.pid"
 
 echo "Starting Devil's Advocate on port 8513..."
-"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/agents/specialists/devils-advocate/AGENTS.md" > "$LOG_DIR/devils-advocate.log" 2>&1 &
+"$ARKAVO_BIN" agent -c "$KIT" -n "devils-advocate" -p 8513 > "$LOG_DIR/devils-advocate.log" 2>&1 &
 echo $! > "$LOG_DIR/devils-advocate.pid"
 
 echo "Starting Facilitator on port 8514..."
-"$ARKAVO_BIN" agent --config "$SCRIPT_DIR/agents/specialists/facilitator/AGENTS.md" > "$LOG_DIR/facilitator.log" 2>&1 &
+"$ARKAVO_BIN" agent -c "$KIT" -n "facilitator" -p 8514 > "$LOG_DIR/facilitator.log" 2>&1 &
 echo $! > "$LOG_DIR/facilitator.pid"
 
 echo ""

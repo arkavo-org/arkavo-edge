@@ -23,7 +23,7 @@ pub struct AgentKasInfo {
 pub struct SecurityHandler {
     /// Per-agent KAS status (populated by polling agents)
     agent_kas: Arc<RwLock<HashMap<String, AgentKasInfo>>>,
-    /// Preflight from local AGENTS.md
+    /// Preflight from local SwarmKit config
     preflight_enabled: bool,
     preflight_policy_count: u32,
     audit_count: Arc<AtomicU64>,
@@ -61,8 +61,8 @@ impl SecurityHandler {
         }
     }
 
-    /// Configure preflight from AGENTS.md parsed config.
-    pub fn configure_from_agents_md(&mut self) {
+    /// Configure preflight from SwarmKit parsed config.
+    pub fn configure_from_kit(&mut self) {
         let config = arkavo_router::load_agent_config().unwrap_or_default();
 
         if let Some(ref pf) = config.preflight {

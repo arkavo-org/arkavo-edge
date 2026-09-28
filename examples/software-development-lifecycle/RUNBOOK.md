@@ -34,7 +34,7 @@ npm install -g @cyanheads/git-mcp-server
 
 ```bash
 cd examples/software-development-lifecycle
-./launch_multi_agent_system.sh
+./launch.sh
 ```
 
 **What to watch for:**
@@ -116,7 +116,7 @@ tail -50 logs/security.log
 ### Step 5: Check Status
 
 ```bash
-./launch_multi_agent_system.sh status
+./launch.sh status
 ```
 
 **What to watch for:**
@@ -126,7 +126,7 @@ tail -50 logs/security.log
 ### Step 6: Stop the Mesh
 
 ```bash
-./launch_multi_agent_system.sh stop
+./launch.sh stop
 ```
 
 **What to watch for:**
@@ -146,13 +146,13 @@ lsof -i :8342 -i :8343 -i :8344
 #!/bin/bash
 # test_example.sh - Run this for automated validation
 
-./launch_multi_agent_system.sh start
+./launch.sh start
 sleep 15
 
 # Verify orchestrator is healthy
 if ! curl -sSf http://localhost:8342/.well-known/agent.json > /dev/null 2>&1; then
     echo "FAIL: Orchestrator not responding"
-    ./launch_multi_agent_system.sh stop
+    ./launch.sh stop
     exit 1
 fi
 
@@ -160,12 +160,12 @@ fi
 AGENT_COUNT=$(ps aux | grep "arkavo agent" | grep -v grep | wc -l)
 if [ "$AGENT_COUNT" -lt 5 ]; then
     echo "FAIL: Only $AGENT_COUNT agents running (expected 12)"
-    ./launch_multi_agent_system.sh stop
+    ./launch.sh stop
     exit 1
 fi
 
 echo "PASS: Agent mesh is healthy ($AGENT_COUNT agents running)"
-./launch_multi_agent_system.sh stop
+./launch.sh stop
 ```
 
 ## Agent Roles
@@ -215,7 +215,7 @@ npm install -g @modelcontextprotocol/server-filesystem
 **Fix:** Run fewer agents or increase memory allocation
 ```bash
 # Start only core agents
-./launch_multi_agent_system.sh  # Then stop non-essential agents
+./launch.sh  # Then stop non-essential agents
 ```
 
 ## Example Workflow
@@ -233,7 +233,7 @@ When you ask: "Review my Python web app for security issues"
 ## Architecture Notes
 
 - Agents use mDNS (`_a2a._tcp.local.`) for discovery
-- Each agent is configured via `AGENTS.md` in its directory
-- Ports in AGENTS.md are configuration hints; mDNS handles actual discovery
+- Each agent is a role in `software-development-lifecycle.swarmkit.yaml`, selected at launch via `-n <role-id>`
+- Ports are passed at launch via `-p <port>`; mDNS handles actual discovery
 - No central database - knowledge stays with specialists
 - Agents query each other on-demand for cross-domain expertise

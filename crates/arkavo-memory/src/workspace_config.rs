@@ -1,7 +1,12 @@
 //! Workspace configuration discovery and caching.
 //!
-//! Discovers workspace paths from .arkavo/AGENTS.md and caches them
-//! for consistent cross-process database access.
+//! Discovers the workspace root by walking up from a starting path looking
+//! for a `.arkavo/` directory, and caches it for consistent cross-process
+//! database access. The memory database path is always the default under
+//! `.arkavo/memory_server/memories.db` relative to that root — the old
+//! AGENTS.md `## Paths` / `memory_db:` override has been removed, and no
+//! replacement override exists in the SwarmKit manifest schema
+//! (`KitRuntimeConfig` has no `memory_db` field).
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -31,32 +36,15 @@ impl WorkspaceConfig {
     }
 
     /// Find workspace configuration starting from a given path.
-    /// Walks up the directory tree looking for .arkavo/AGENTS.md.
+    /// Walks up the directory tree looking for a `.arkavo/` directory.
     pub fn find_from_path(start: &Path) -> Option<WorkspaceConfig> {
         let mut current = start.to_path_buf();
 
         loop {
-            let agents_md_path = current.join(".arkavo").join("AGENTS.md");
-
-            if agents_md_path.exists() {
-                // Found AGENTS.md, parse it
-                if let Ok(content) = std::fs::read_to_string(&agents_md_path) {
-                    let memory_db_path = parse_memory_db_path(&content, &current);
-                    return Some(WorkspaceConfig {
-                        memory_db_path,
-                        workspace_root: Some(current),
-                    });
-                }
-            }
-
-            // Check if .arkavo directory exists without AGENTS.md
             let arkavo_dir = current.join(".arkavo");
             if arkavo_dir.is_dir() {
                 // Bootstrap with default paths using this workspace root
-                let default_db = current
-                    .join(".arkavo")
-                    .join("memory_server")
-                    .join("memories.db");
+                let default_db = arkavo_dir.join("memory_server").join("memories.db");
                 return Some(WorkspaceConfig {
                     memory_db_path: Some(default_db),
                     workspace_root: Some(current),
@@ -82,136 +70,13 @@ impl WorkspaceConfig {
     }
 }
 
-/// Parse memory_db path from AGENTS.md content.
-/// Resolves relative paths against the workspace root.
-fn parse_memory_db_path(content: &str, workspace_root: &Path) -> Option<PathBuf> {
-    let mut in_paths_section = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        // Check for Paths section header
-        if trimmed == "## Paths" {
-            in_paths_section = true;
-            continue;
-        }
-
-        // End paths section on next ## header
-        if in_paths_section && trimmed.starts_with("## ") {
-            break;
-        }
-
-        // Parse paths: section marker
-        if trimmed == "paths:" {
-            in_paths_section = true;
-            continue;
-        }
-
-        // Parse memory_db path
-        if in_paths_section && trimmed.starts_with("memory_db:") {
-            let path_str = trimmed
-                .strip_prefix("memory_db:")
-                .unwrap_or("")
-                .trim()
-                .trim_matches('"');
-
-            if !path_str.is_empty() {
-                let path = PathBuf::from(path_str);
-                // Resolve relative paths against workspace root
-                let resolved = if path.is_absolute() {
-                    path
-                } else {
-                    workspace_root.join(path)
-                };
-                return Some(resolved);
-            }
-        }
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
 
     #[test]
-    fn test_parse_memory_db_path_relative() {
-        let content = r#"
-## Paths
-
-paths:
-  memory_db: .arkavo/memory_server/memories.db
-"#;
-        let workspace_root = PathBuf::from("/home/user/project");
-        let path = parse_memory_db_path(content, &workspace_root);
-
-        assert_eq!(
-            path,
-            Some(PathBuf::from(
-                "/home/user/project/.arkavo/memory_server/memories.db"
-            ))
-        );
-    }
-
-    #[test]
-    fn test_parse_memory_db_path_absolute() {
-        let content = r#"
-## Paths
-
-paths:
-  memory_db: /absolute/path/to/memories.db
-"#;
-        let workspace_root = PathBuf::from("/home/user/project");
-        let path = parse_memory_db_path(content, &workspace_root);
-
-        assert_eq!(path, Some(PathBuf::from("/absolute/path/to/memories.db")));
-    }
-
-    #[test]
-    fn test_parse_memory_db_path_no_paths_section() {
-        let content = r#"
-## Agent
-
-name: test-agent
-model: gpt-4
-"#;
-        let workspace_root = PathBuf::from("/home/user/project");
-        let path = parse_memory_db_path(content, &workspace_root);
-
-        assert_eq!(path, None);
-    }
-
-    #[test]
-    fn test_find_from_path_with_agents_md() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let arkavo_dir = temp_dir.path().join(".arkavo");
-        fs::create_dir_all(&arkavo_dir).unwrap();
-
-        let agents_md = arkavo_dir.join("AGENTS.md");
-        fs::write(
-            &agents_md,
-            r#"
-## Paths
-
-paths:
-  memory_db: .arkavo/memory_server/memories.db
-"#,
-        )
-        .unwrap();
-
-        let config = WorkspaceConfig::find_from_path(temp_dir.path()).unwrap();
-
-        assert_eq!(config.workspace_root, Some(temp_dir.path().to_path_buf()));
-        assert_eq!(
-            config.memory_db_path,
-            Some(temp_dir.path().join(".arkavo/memory_server/memories.db"))
-        );
-    }
-
-    #[test]
-    fn test_find_from_path_with_arkavo_dir_only() {
+    fn test_find_from_path_with_arkavo_dir() {
         let temp_dir = tempfile::tempdir().unwrap();
         let arkavo_dir = temp_dir.path().join(".arkavo");
         fs::create_dir_all(&arkavo_dir).unwrap();

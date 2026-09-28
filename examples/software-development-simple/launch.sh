@@ -21,6 +21,7 @@ if [ ! -f "$BINARY" ]; then
 fi
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_FILE="$SCRIPT_DIR/.agent_pids"
+KIT="$SCRIPT_DIR/software-development-simple.swarmkit.yaml"
 
 # Create log directory
 mkdir -p "$LOG_DIR"
@@ -88,23 +89,20 @@ stop_agents() {
 # Function to start an agent
 start_agent() {
     local name=$1
-    local dir=$2
+    local role=$2
     local port=$3
     local log_file="$LOG_DIR/${name}.log"
-    
+
     print_status "INFO" "Starting $name on port $port..."
-    
+
     # Check if port is available
     if ! check_port $port; then
         print_status "ERROR" "Cannot start $name - port $port is in use"
         return 1
     fi
-    
-    # Change to agent directory and start agent
-    cd "$dir"
-    
+
     # Start agent in background and capture PID
-    nohup "$BINARY" agent run > "$log_file" 2>&1 &
+    nohup "$BINARY" agent -c "$KIT" -n "$role" -p "$port" > "$log_file" 2>&1 &
     local pid=$!
     
     # Save PID
@@ -229,13 +227,13 @@ main() {
     echo ""
     
     # Start agents in order
-    start_agent "project-manager" "$SCRIPT_DIR/project-manager" 8342
+    start_agent "project-manager" "project-manager" 8342
     sleep 2
-    
-    start_agent "coding-agent" "$SCRIPT_DIR/coding-agent" 8343
+
+    start_agent "coding-agent" "coding-agent" 8343
     sleep 2
-    
-    start_agent "testing-agent" "$SCRIPT_DIR/testing-agent" 8344
+
+    start_agent "testing-agent" "testing-agent" 8344
     sleep 2
     
     echo ""

@@ -1,6 +1,6 @@
 # Learning Mesh
 
-A 4-agent mesh that learns from its own mistakes. When an agent produces a
+A 5-agent mesh that learns from its own mistakes. When an agent produces a
 low-quality response, the system extracts a lesson, injects corrective guidance
 into future prompts, and re-routes tasks away from underperforming agents.
 
@@ -29,7 +29,7 @@ This demonstrates three capabilities working together:
               │              │              │
      ┌────────▼─────┐ ┌─────▼──────┐ ┌────▼──────────┐
      │ Code Analyzer │ │ Test Gen   │ │ Security Audit │
-     │ (port 8411)   │ │ (port 8412)│ │ (port 8413)   │
+     │ (port 8412)   │ │ (port 8414)│ │ (port 8416)   │
      └───────────────┘ └────────────┘ └───────────────┘
               ▲              ▲              ▲
               └──────────────┼──────────────┘
@@ -107,12 +107,13 @@ Three log signals confirm the learning loop is working:
 
 ## Agents
 
-| Agent | Port | Specialization |
-|-------|------|----------------|
-| orchestrator | 8410 | Task routing, lesson storage, behavior guidance |
-| code-analyzer | 8412 | Code quality, complexity, anti-patterns |
-| test-generator | 8414 | Unit tests, edge cases, coverage |
-| security-auditor | 8416 | Vulnerabilities, OWASP, crypto misuse |
+| Agent | Role id (in `learning-mesh.swarmkit.yaml`) | Port | Specialization |
+|-------|------|------|----------------|
+| orchestrator | learning-orchestrator | 8410 | Task routing, lesson storage, behavior guidance |
+| code-analyzer | code-analyzer-agent | 8412 | Code quality, complexity, anti-patterns |
+| test-generator | test-generator-agent | 8414 | Unit tests, edge cases, coverage |
+| security-auditor | security-auditor-agent | 8416 | Vulnerabilities, OWASP, crypto misuse |
+| task-generator | task-generator-agent | 8418 | Demo task dispatcher, exercises the mesh via send_task |
 
 ## Tasks
 
