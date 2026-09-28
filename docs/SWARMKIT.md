@@ -18,6 +18,8 @@ Three subsystems:
 
 There is no separate single-agent config format — running one agent means authoring a kit with exactly one entry in `roles`. `arkavo agent -c <kit> [-p <port>]` runs it directly; multi-role kits add `-n <role-id>` to pick which role a given process runs. `arkavo kit init <name>` scaffolds this minimal shape; see `examples/01-hello-world/hello-agent.swarmkit.yaml` for a complete single-role kit.
 
+A role's `agent_provisioning.model` picks the model `arkavo agent` runs it on, local or cloud. A local edge model is a family/size pair (`family: ministral`, `size: 3B`); any other model the router knows, cloud models included, is its router id as the family with no size (`family: gpt-6-astra`, `family: kimi-k2.5`). Naming a cloud model counts as consent to use it under the kit's `runtime.cloud_policy`. `arkavo agent` refuses to start a kit whose role names a model the router does not know.
+
 Four shipped kits in `examples/`, each with its own README:
 
 | Kit | Domain | Roles |

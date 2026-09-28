@@ -74,12 +74,12 @@ enum ModelSubcommand {
 }
 
 /// Preferred models declared by the discovered SwarmKit kit: one `(role id,
-/// model hint)` pair per role whose `agent_provisioning.model` maps to a
-/// known local-edge model via [`kit_model_to_hint`]. Returns `None` when no
-/// kit is discovered, or when a kit exists but declares no recognized local
-/// models — the caller falls back to the same env-key status display either
-/// way, matching how the old AGENTS.md-based lookup handled "nothing
-/// configured".
+/// model hint)` pair per role whose `agent_provisioning.model` names a
+/// model the router knows, local or cloud, via [`kit_model_to_hint`].
+/// Returns `None` when no kit is discovered, or when a kit exists but
+/// declares no recognized models — the caller falls back to the same
+/// env-key status display either way, matching how the old AGENTS.md-based
+/// lookup handled "nothing configured".
 fn kit_preferred_models(cwd: &Path) -> Option<Vec<(String, String)>> {
     let discovered = arkavo_swarmkit::load_discovered_kit(cwd).ok()?;
     let models: Vec<(String, String)> = discovered
@@ -89,7 +89,7 @@ fn kit_preferred_models(cwd: &Path) -> Option<Vec<(String, String)>> {
         .filter_map(|role| {
             let hint =
                 kit_model_to_hint(role.model_family.as_deref()?, role.model_size.as_deref())?;
-            Some((role.role_id.clone(), hint.to_string()))
+            Some((role.role_id.clone(), hint))
         })
         .collect();
     if models.is_empty() {

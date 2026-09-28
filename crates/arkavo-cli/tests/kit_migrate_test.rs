@@ -579,6 +579,39 @@ mdns: true
     assert_eq!(manifest.roles[0].id, "hello-agent");
 }
 
+/// A cloud `model:` hint used to be reported unmapped and replaced by the local
+/// default, silently turning a cloud agent into a local one. It must now carry
+/// into the kit and resolve back to the same router hint at `arkavo agent`.
+#[arkavo_test_macros::spec("SK-104")]
+#[test]
+fn cloud_model_hint_migrates_and_resolves_to_the_same_hint() {
+    let dir = tempdir();
+    let in_path = dir.path().join("AGENTS.md");
+    fs::write(
+        &in_path,
+        "## astra-agent\npurpose: \"Plans on Astra\"\nmodel: gpt-6-astra\n",
+    )
+    .unwrap();
+    let out_path = dir.path().join("astra.swarmkit.yaml");
+
+    let report = migrate_from_agents_md(&in_path, &out_path).expect("migration should succeed");
+    assert!(
+        report.unmapped.is_empty(),
+        "a known cloud model must map cleanly: {:?}",
+        report.unmapped
+    );
+
+    let configs = arkavo_cli::commands::agent_kit::resolve_agent_configs(
+        Some(&report.path),
+        None,
+        None,
+        dir.path(),
+    )
+    .expect("migrated kit should resolve");
+    assert_eq!(configs[0].name, "astra-agent");
+    assert_eq!(configs[0].model, "gpt-6-astra");
+}
+
 /// Regression for finding 2: frontmatter `preflight:` policies (ground
 /// truth: `examples/secure-agent/AGENTS.md` as of commit b48c5915^, before
 /// its SwarmKit conversion) were silently dropped by the line-based parser,

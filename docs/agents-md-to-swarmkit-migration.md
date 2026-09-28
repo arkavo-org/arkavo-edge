@@ -52,7 +52,7 @@ AGENTS.md is not one feature — it is a **config bus** with ~46 Rust files and 
 |---------|-------------------|----------------|-----|
 | Multi-agent sections | `## name` blocks | `roles[]` | Map 1:1 |
 | Purpose / system identity | `purpose:` | `objective.goal` + role `description` + skill `instructions` | Need single-role “identity skill” convention |
-| Model hint | `model:` | `agent_provisioning.model` | Map family/size |
+| Model hint | `model:` | `agent_provisioning.model` | Local edge model → family/size (`ministral`/`3B`); any other router model id (cloud such as `gpt-6-astra`, `grok-4.7`, `kimi-k2.5`) → `family: <id>` with no size. Unknown ids stay unmapped and `arkavo agent` rejects a kit that names one |
 | Mode orchestrator/specialist | `mode:` | `plane` + handoffs + launch options | Explicit `runtime.mode` or derive |
 | MCP servers | nested markdown list | `mcp_tools` grants (names) | Commands/URLs may need kit-level `mcp_servers` extension |
 | Listen / mDNS | `listen:`, `mdns:` | Not in manifest | Kit-level `runtime.network` extension or keep CLI flags only |

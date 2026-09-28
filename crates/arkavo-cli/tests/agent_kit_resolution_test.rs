@@ -8,7 +8,7 @@
 use arkavo_cli::commands::agent_kit::{export_resolved_kit_path, resolve_agent_configs};
 use arkavo_cli::commands::kit::init_kit;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 fn tempdir() -> tempfile::TempDir {
@@ -17,8 +17,7 @@ fn tempdir() -> tempfile::TempDir {
 
 /// A two-role kit written directly as YAML (`init_kit` only produces
 /// single-role kits), with a kit-level `runtime` block and per-role models.
-fn write_multi_role_kit(dir: &Path, file_name: &str) {
-    let yaml = r#"
+const MULTI_ROLE_KIT: &str = r#"
 spec_version: "1.0.0"
 kit:
   id: ""
@@ -98,7 +97,24 @@ provenance:
       algorithm: ed25519
       signature: "AAA"
 "#;
-    fs::write(dir.join(file_name), yaml).unwrap();
+
+/// The planner role's model block in [`MULTI_ROLE_KIT`].
+const PLANNER_MODEL: &str = "        family: ministral\n        size: \"3B\"\n";
+
+fn write_multi_role_kit(dir: &Path, file_name: &str) {
+    fs::write(dir.join(file_name), MULTI_ROLE_KIT).unwrap();
+}
+
+/// [`MULTI_ROLE_KIT`] with the planner's model replaced by `model_lines`.
+fn write_kit_with_planner_model(dir: &Path, file_name: &str, model_lines: &str) -> PathBuf {
+    assert!(MULTI_ROLE_KIT.contains(PLANNER_MODEL));
+    let path = dir.join(file_name);
+    fs::write(
+        &path,
+        MULTI_ROLE_KIT.replacen(PLANNER_MODEL, model_lines, 1),
+    )
+    .unwrap();
+    path
 }
 
 #[test]
@@ -279,6 +295,49 @@ fn name_flag_with_no_kit_anywhere_errors_with_no_kit_wording() {
     assert!(
         !msg.contains("available role ids"),
         "must not imply a kit with roles exists: {msg}"
+    );
+}
+
+#[arkavo_test_macros::spec("SK-104")]
+#[test]
+fn kit_role_naming_a_cloud_model_resolves_to_its_router_hint() {
+    let dir = tempdir();
+    let path = write_kit_with_planner_model(
+        dir.path(),
+        "mixed.swarmkit.yaml",
+        "        family: gpt-6-astra\n",
+    );
+
+    let configs = resolve_agent_configs(Some(&path), None, None, dir.path())
+        .expect("a kit mixing cloud and local roles should resolve");
+
+    assert_eq!(configs[0].name, "planner");
+    assert_eq!(configs[0].model, "gpt-6-astra");
+    assert_eq!(configs[1].name, "worker");
+    assert_eq!(configs[1].model, "gemma-4-e2b");
+}
+
+#[arkavo_test_macros::spec("SK-104")]
+#[test]
+fn kit_role_naming_an_unknown_model_is_rejected() {
+    let dir = tempdir();
+    let path = write_kit_with_planner_model(
+        dir.path(),
+        "typo.swarmkit.yaml",
+        "        family: gpt-6-asrta\n",
+    );
+
+    let err = resolve_agent_configs(Some(&path), None, None, dir.path())
+        .expect_err("an unknown model id must not start an agent")
+        .to_string();
+    assert!(err.contains("planner"), "error must name the role: {err}");
+    assert!(
+        err.contains("gpt-6-asrta"),
+        "error must name the model: {err}"
+    );
+    assert!(
+        err.contains("not a model the router knows"),
+        "unexpected error: {err}"
     );
 }
 

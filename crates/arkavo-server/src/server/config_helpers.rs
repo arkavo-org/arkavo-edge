@@ -120,16 +120,27 @@ pub(super) fn is_safe_backup_filename(name: &str) -> bool {
 /// Returns the kit's declared model as a display string when it does not
 /// match the currently running model hint, `None` when they agree.
 ///
-/// The kit expresses models as family/size (e.g. `ministral`/`3B`) while
-/// the router hint is a flat string (e.g. `"ministral-3b"`); the mapping
-/// table between the two lives in the CLI's kit model_map, so hot-reload
-/// cannot recompute the hint — it can only detect divergence (by
-/// comparing the hint's name tokens) and warn that a restart is needed.
+/// The kit expresses local edge models as family/size (e.g. `ministral`/`3B`)
+/// while the router hint is a flat string (e.g. `"ministral-3b"`); the
+/// mapping table between the two lives in the CLI's kit model_map, so
+/// hot-reload cannot recompute the hint — it can only detect divergence (by
+/// comparing the hint's name tokens) and warn that a restart is needed. A
+/// role that names a router model id directly (`gpt-6-astra`) is compared by
+/// the arm both names resolve to, since aliases and tier suffixes make its
+/// tokens unreliable.
 pub(super) fn pending_model_change(
     family: &str,
     size: Option<&str>,
     current_model: &str,
 ) -> Option<String> {
+    let declared_id = size.map_or_else(|| family.to_string(), |s| format!("{family}-{s}"));
+    if let (Some(declared), Some(running)) = (
+        arkavo_router::ModelChoice::from_name(&declared_id),
+        arkavo_router::ModelChoice::from_name(current_model),
+    ) && declared == running
+    {
+        return None;
+    }
     let current = current_model.to_lowercase();
     let family_lc = family.to_lowercase();
     // Tokens, not substrings: `3b` must not match inside `13b`, nor `llama`
@@ -522,6 +533,19 @@ provenance:
         assert_eq!(
             pending_model_change("ministral", Some("13B"), "ministral-13b"),
             None
+        );
+    }
+
+    #[test]
+    fn pending_model_change_none_when_kit_names_the_running_cloud_model() {
+        assert_eq!(
+            pending_model_change("gpt-6-astra", None, "gpt-6-astra"),
+            None
+        );
+        assert_eq!(pending_model_change("grok", Some("4.7"), "grok-4.7"), None);
+        assert_eq!(
+            pending_model_change("gpt-6-astra", None, "ministral-3b"),
+            Some("gpt-6-astra".to_string())
         );
     }
 

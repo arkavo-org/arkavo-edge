@@ -46,12 +46,12 @@ pub fn resolve_agent_configs(
         // fallback to defaults when the caller named a specific file.
         Some(explicit) => {
             let discovered = arkavo_swarmkit::load_kit_file(explicit)?;
-            (agent_configs_from_kit(&discovered.config), true)
+            (agent_configs_from_kit(&discovered.config)?, true)
         }
         None => match arkavo_swarmkit::discover_kit_path(cwd) {
             Ok(path) => {
                 let discovered = arkavo_swarmkit::load_kit_file(&path)?;
-                (agent_configs_from_kit(&discovered.config), true)
+                (agent_configs_from_kit(&discovered.config)?, true)
             }
             // Only-AGENTS.md-present is non-fatal: log the migrate hint once
             // and fall through to the zero-config default. The AGENTS.md
@@ -125,7 +125,12 @@ fn listen_with_port(listen: &str, port: u16) -> String {
 /// Map every role in a loaded kit to an [`AgentConfig`]. Kit-level `runtime`
 /// fields (`listen`, `mdns`, `mode`, `mcp_servers`) apply uniformly to every
 /// role — a kit has exactly one `runtime` block, not one per role.
-fn agent_configs_from_kit(runtime_config: &AgentRuntimeConfig) -> Vec<AgentConfig> {
+///
+/// Fails when any role names a model the router does not know: the model
+/// becomes the router hint (and, for a cloud arm, the operator's consent to
+/// use it), so a typo must stop startup instead of quietly running something
+/// else.
+fn agent_configs_from_kit(runtime_config: &AgentRuntimeConfig) -> Result<Vec<AgentConfig>, String> {
     let listen = runtime_config
         .runtime
         .listen
@@ -147,21 +152,36 @@ fn agent_configs_from_kit(runtime_config: &AgentRuntimeConfig) -> Vec<AgentConfi
         .collect()
 }
 
+/// The router hint a role's declared model stands for; empty when the role
+/// declares none, which leaves the choice to the router.
+fn role_model_hint(role: &RoleRuntimeView) -> Result<String, String> {
+    let Some(family) = role.model_family.as_deref() else {
+        return Ok(String::new());
+    };
+    kit_model_to_hint(family, role.model_size.as_deref()).ok_or_else(|| {
+        let declared = match role.model_size.as_deref() {
+            Some(size) => format!("family {family:?}, size {size:?}"),
+            None => format!("family {family:?}"),
+        };
+        format!(
+            "role {:?}: model ({declared}) is not a model the router knows; name a local \
+             edge model as family/size (e.g. ministral/3B) or a router model id as the \
+             family with no size (e.g. gpt-6-astra)",
+            role.role_id
+        )
+    })
+}
+
 fn role_to_agent_config(
     role: &RoleRuntimeView,
     listen: &str,
     mdns_enabled: bool,
     mode: AgentMode,
     mcp_servers: &[McpServerConfig],
-) -> AgentConfig {
-    let model = role
-        .model_family
-        .as_deref()
-        .and_then(|family| kit_model_to_hint(family, role.model_size.as_deref()))
-        .unwrap_or("")
-        .to_string();
+) -> Result<AgentConfig, String> {
+    let model = role_model_hint(role)?;
 
-    AgentConfig {
+    Ok(AgentConfig {
         name: role.role_id.clone(),
         purpose: role.skill_instructions.clone(),
         model,
@@ -175,7 +195,7 @@ fn role_to_agent_config(
         a2a_enabled: true,
         a2a_service_type: None,
         swarm: None,
-    }
+    })
 }
 
 fn to_agent_mode(mode: RuntimeMode) -> AgentMode {

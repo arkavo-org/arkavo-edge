@@ -20,7 +20,15 @@ runtime:
   max_cost_per_session: 0.50
 ```
 
-**Consent.** An explicit `--model gpt-6-astra` counts as consent. A kit role's `agent_provisioning.model` maps only to local edge models, so a kit cannot name a cloud arm. Auto-selection never picks a cloud arm while a local arm is feasible.
+**Consent.** An explicit `--model gpt-6-astra` and a kit role model hint both count as consent. Auto-selection never picks a cloud arm while a local arm is feasible. A role names a cloud model by its router id as the family, with no size:
+
+```yaml
+roles:
+  - id: agent
+    agent_provisioning:
+      model:
+        family: gpt-6-astra
+```
 
 **Debug.** `ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1` prints the model chosen, tool calls with their ids, and the `[Perf]` token line.
 
@@ -174,7 +182,15 @@ Expect: a policy error naming LocalOnly. No 401 appears, proving the refusal hap
 
 ### P-02 Manifest model hint counts as consent (cloud)
 
-Not reachable from configuration: this case used an AGENTS.md `model: gpt-6-astra` line, and a SwarmKit role's `agent_provisioning.model` maps only to local edge models, so no kit can carry a cloud hint. The router still treats an explicit hint as consent; `--model gpt-6-astra` exercises that path in the Astra cases above.
+Setup: a kit whose role sets `agent_provisioning.model.family: gpt-6-astra`; no `cloud_policy` (default ask_before_cloud).
+
+```bash
+ARKAVO_DEBUG=1 arkavo agent -v -c <kit>.swarmkit.yaml
+```
+
+Then send the agent a task over A2A (for example `arkavo chat --agent-id <agent id> --prompt "Reply with ready."`).
+
+Expect: Astra answers with no consent prompt (documented behaviour: a manifest hint is explicit consent). Remove the role's `model` block: the same request stays local.
 
 ### P-03 Non-interactive client never hangs on a consent prompt (cloud, after fix: Task 2)
 
@@ -185,7 +201,7 @@ Setup: terminal 1 runs `arkavo agent -v -p 8343` in a dir with default policy an
 arkavo chat --agent-id <agent id from terminal 1> --prompt "Use gpt-6-astra to reply with ready." </dev/null
 ```
 
-Then, from terminal 2, request something that requires cloud through the agent's chat session (a model hint in the request).
+Then, from terminal 2, request something that requires cloud through the agent's chat session (a model hint in the request, or a kit role for the client whose model is gpt-6-astra).
 
 Expect: the remote client receives a clear "cloud confirmation required" policy error immediately. Current bug: the server process shows the yes/no prompt on its own terminal and the client waits until someone answers it there.
 
@@ -370,7 +386,7 @@ Expect: requests contain role, content and tool fields only; no `provider_state`
 
 ### R-03 Architect mode plans on Astra and executes locally (cloud, after fix: Tasks 3 and 4)
 
-Setup: a scratch repo. Blocked: the Astra planning hint came from an AGENTS.md `model: gpt-6-astra` line, and a kit role maps only to local edge models.
+Setup: a scratch repo; a kit whose role sets `agent_provisioning.model.family: gpt-6-astra`.
 
 ```bash
 ARKAVO_DEBUG=1 arkavo task 'add a README with an install section and a usage section, and a CONTRIBUTING file' --local-only

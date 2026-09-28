@@ -423,15 +423,15 @@ mod tests {
     }
 
     #[test]
-    fn map_model_hint_recognizes_known_local_models_only() {
+    fn map_model_hint_recognizes_local_and_cloud_models() {
         let model = map_model_hint("ministral-3b").expect("known hint should map");
         assert_eq!(model.family, "ministral");
         assert_eq!(model.size.as_deref(), Some("3B"));
 
-        assert!(
-            map_model_hint("claude-sonnet-4-5-20250929").is_none(),
-            "cloud model hints must stay unmapped"
-        );
+        let cloud = map_model_hint("gpt-6-astra").expect("cloud hint should map");
+        assert_eq!(cloud.family, "gpt-6-astra");
+        assert_eq!(cloud.size, None);
+
         assert!(
             map_model_hint("totally-unknown-model").is_none(),
             "unrecognized hints must stay unmapped"

@@ -936,3 +936,20 @@ scenarios:
       - crates/arkavo-swarmkit/src/runtime_config.rs
       - crates/arkavo-router/src/preflight/config.rs
     changed: "2026-09-28"
+
+  - id: SK-104
+    name: Kit roles name local or cloud models the router knows
+    criticality: critical
+    given:
+      - A kit role with agent_provisioning.model
+      - Local edge models are family/size (ministral/3B); any other router model is its id as family with no size (gpt-6-astra)
+    when: arkavo agent resolves the kit into agent configs
+    then:
+      - A local edge family/size resolves to its router hint (ministral-3b)
+      - A cloud model id resolves to the same router hint an explicit --model would use, which counts as consent for that arm
+      - A model the router does not know stops startup with an error naming the role and the model
+      - kit migrate-from-agents-md writes a known cloud model hint as family <id> with no size
+    refs:
+      - crates/arkavo-cli/src/commands/kit/model_map.rs
+      - crates/arkavo-cli/src/commands/agent_kit.rs
+    changed: "2026-09-28"
