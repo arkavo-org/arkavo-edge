@@ -690,8 +690,11 @@ dependencies = [
 name = "arkavo-attestation"
 version = "0.97.1"
 dependencies = [
+ "arkavo-crypto",
  "arkavo-device-identity",
  "arkavo-test-macros",
+ "security-framework",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1957,6 +1960,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-routines"
+version = "0.97.1"
+dependencies = [
+ "arkavo-mcp",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "arkavo-sat"
 version = "0.97.1"
 dependencies = [
@@ -2063,6 +2080,7 @@ dependencies = [
  "arkavo-orchestrator",
  "arkavo-protocol",
  "arkavo-router",
+ "arkavo-routines",
  "arkavo-security",
  "arkavo-tasks",
  "arkavo-tdf",
@@ -2353,6 +2371,7 @@ name = "arkavo-trust"
 version = "0.97.1"
 dependencies = [
  "arkavo-crypto",
+ "arkavo-test-macros",
  "base64 0.22.1",
  "chrono",
  "serde",

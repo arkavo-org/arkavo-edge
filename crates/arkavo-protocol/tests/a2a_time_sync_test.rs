@@ -3,7 +3,7 @@
 use arkavo_protocol::{A2aMcpBridge, a2a::A2aClient};
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
 async fn run_concurrent_a2a_requests<F, Fut>(
@@ -253,38 +253,61 @@ async fn test_a2a_invalid_tool_request() {
     assert!(response.error.unwrap().contains("not found"));
 }
 
+fn median(mut samples: Vec<Duration>) -> Duration {
+    samples.sort_unstable();
+    samples[samples.len() / 2]
+}
+
 #[tokio::test]
 async fn test_a2a_tool_latency_overhead() {
-    let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
+    // Both calls take microseconds, so a single sample of each is dominated by
+    // scheduler noise on a shared runner. Compare medians of interleaved
+    // samples against an absolute budget rather than a ratio of two samples.
+    const WARMUP: usize = 8;
+    const SAMPLES: usize = 64;
+    const OVERHEAD_BUDGET: Duration = Duration::from_millis(5);
 
-    let direct_start = Instant::now();
-    let _direct_result = bridge
-        .call_tool(arkavo_protocol::McpToolRequest {
-            tool_name: "get_agent_time".to_string(),
-            params: json!({"format": "unix"}),
-        })
-        .await;
-    let direct_latency = direct_start.elapsed().as_secs_f64() * 1000.0;
+    let direct = A2aMcpBridge::new().await.expect("Failed to create bridge");
+    let client =
+        A2aClient::with_mcp_bridge(A2aMcpBridge::new().await.expect("Failed to create bridge"));
+    let request = || arkavo_protocol::McpToolRequest {
+        tool_name: "get_agent_time".to_string(),
+        params: json!({"format": "unix"}),
+    };
 
-    let client = A2aClient::with_mcp_bridge(bridge);
-    let a2a_start = Instant::now();
-    let _a2a_result = client
-        .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
-        .await
-        .unwrap();
-    let a2a_latency = a2a_start.elapsed().as_secs_f64() * 1000.0;
+    for _ in 0..WARMUP {
+        direct.call_tool(request()).await;
+        client
+            .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
+            .await
+            .unwrap();
+    }
 
+    let mut direct_samples = Vec::with_capacity(SAMPLES);
+    let mut a2a_samples = Vec::with_capacity(SAMPLES);
+    for _ in 0..SAMPLES {
+        let start = Instant::now();
+        direct.call_tool(request()).await;
+        direct_samples.push(start.elapsed());
+
+        let start = Instant::now();
+        client
+            .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
+            .await
+            .unwrap();
+        a2a_samples.push(start.elapsed());
+    }
+
+    let direct_median = median(direct_samples);
+    let a2a_median = median(a2a_samples);
+    let overhead = a2a_median.saturating_sub(direct_median);
     println!(
-        "Direct: {:.3}ms, A2A: {:.3}ms, Overhead: {:.3}ms",
-        direct_latency,
-        a2a_latency,
-        a2a_latency - direct_latency
+        "Direct median: {direct_median:?}, A2A median: {a2a_median:?}, Overhead: {overhead:?}"
     );
 
     assert!(
-        a2a_latency < direct_latency * 10.0,
-        "A2A overhead too large: {:.2}x",
-        a2a_latency / direct_latency
+        overhead < OVERHEAD_BUDGET,
+        "A2A median overhead {overhead:?} exceeds {OVERHEAD_BUDGET:?}"
     );
 }
 

@@ -307,6 +307,16 @@ pub async fn execute_with_conductor_and_learning(
         Arc::new(tool_registry)
     };
 
+    #[cfg(feature = "routines")]
+    if let Some(bus) = learning_bus {
+        registry_arc = super::routine_tools::with_routines(
+            registry_arc,
+            bus,
+            granted_tools,
+            egress_guard.clone(),
+        );
+    }
+
     // 4.5 Check if RLM mode should activate (large context handling)
     let input_tokens = estimate_tokens(&task_content);
     let context_size = model_context_size(
