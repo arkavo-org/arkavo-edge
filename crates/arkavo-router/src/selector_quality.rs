@@ -106,7 +106,9 @@ impl ModelSelector {
             ModelChoice::DeepSeekV32Speciale => "Planning-optimized (5s), reasoning-only, no tools",
             ModelChoice::KimiK2 => "Fast (5s), 256K context, thinking mode support",
             ModelChoice::Glm52 => "GLM-5.2 (8s), low-cost cloud reasoning, OpenAI-compatible",
-            ModelChoice::Grok45 => "Grok 4.5 (7s), xAI Responses API, tools + low-effort reasoning",
+            ModelChoice::Gpt6Astra => "GPT-6 Astra, OpenAI Responses, tools and reasoning",
+            ModelChoice::Grok47 => "Grok 4.7 (7s), xAI Responses API, tools + low-effort reasoning",
+            ModelChoice::Grok47Xhigh => "Grok 4.7 xhigh (25s), maximum reasoning depth, tools",
         };
 
         format!(
@@ -250,9 +252,13 @@ impl ModelSelector {
             feasible.retain(|m| !excluded.iter().any(|e| e == m.name()));
         }
 
-        // Ensure at least one model
+        // Every gate above can empty the set, and this function must still
+        // name an arm. Name the device's own default — a cached arm where
+        // there is one, the first-run model otherwise — rather than a fixed
+        // `LocalQwen3` whose weights nobody checked. When nothing is cached
+        // the name is what the dispatch guard reports as unprovisioned.
         if feasible.is_empty() {
-            feasible.push(ModelChoice::LocalQwen3);
+            feasible.push(self.fastest_local_model());
         }
 
         let excluded_names: Vec<String> = excluded.to_vec();
@@ -261,7 +267,7 @@ impl ModelSelector {
             let model = feasible
                 .into_iter()
                 .next()
-                .unwrap_or(ModelChoice::LocalQwen3);
+                .unwrap_or_else(|| self.fastest_local_model());
             let reasoning = format!("Single feasible model: {}", model.name());
             let trace = DecisionTrace::single_feasible(
                 classification.category,
@@ -548,6 +554,7 @@ mod tests {
             kimi: false,
             glm: false,
             xai: false,
+            openai: false,
         }
     }
 
@@ -594,7 +601,7 @@ mod tests {
     #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_budget_constraint() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
         let decision = selector
@@ -608,7 +615,7 @@ mod tests {
     #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_select_adaptive_uses_thompson_sampling() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let learning = LearningModule::new();
 
         // Feed positive evidence for both Flash variants and negative for Pro,
@@ -670,14 +677,18 @@ mod tests {
     async fn test_select_adaptive_reasoning_contains_thompson() {
         // Need both Gemini and Anthropic so feasible set has >1 model
         // (single-model path skips Thompson Sampling)
-        let selector = ModelSelector::with_availability(ProviderAvailability {
-            gemini: true,
-            anthropic: true,
-            deepseek: false,
-            kimi: false,
-            glm: false,
-            xai: false,
-        });
+        let selector = ModelSelector::with_availability(
+            ProviderAvailability {
+                gemini: true,
+                anthropic: true,
+                deepseek: false,
+                kimi: false,
+                glm: false,
+                xai: false,
+                openai: false,
+            },
+            false,
+        );
         let learning = LearningModule::new();
         let classification =
             Classification::new(TaskCategory::General, 0.70, "General task".to_string());
@@ -692,7 +703,7 @@ mod tests {
     #[spec("ROUTER-003")]
     #[tokio::test]
     async fn test_select_adaptive_budget_excludes_cloud() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let learning = LearningModule::new();
         let classification =
             Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
@@ -710,7 +721,7 @@ mod tests {
     #[spec("ROUTER-001")]
     #[tokio::test]
     async fn test_select_adaptive_exclusions() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let learning = LearningModule::new();
         let classification =
             Classification::new(TaskCategory::General, 0.70, "General task".to_string());
@@ -736,7 +747,7 @@ mod tests {
         // tiers AND any locally-cached model — is seeded with failures so it
         // cannot contaminate the Minimal-vs-High comparison. At equal quality
         // the cheaper tier must be selected more often than the expensive one.
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let learning = LearningModule::new();
 
         for _ in 0..50 {
@@ -1003,7 +1014,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_seed_model_learning() {
-        let selector = ModelSelector::with_availability(gemini_only());
+        let selector = ModelSelector::with_availability(gemini_only(), false);
         let learning = LearningModule::new();
         seed_model_learning(&selector, &learning).await;
         let stats = learning.get_category_stats("gemini-flash-latest").await;

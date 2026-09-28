@@ -8,6 +8,23 @@ pub enum Error {
     #[error("Model selection error: {0}")]
     Selection(String),
 
+    #[error(
+        "Cloud inference with {model} requires confirmation (estimated ${estimated_cost_usd:.4}). Select --model {model} to explicitly authorize this model."
+    )]
+    CloudConfirmationRequired {
+        model: String,
+        estimated_cost_usd: f64,
+    },
+
+    /// A routing decision resolved to a local arm whose weights are not on
+    /// disk. Routing refuses rather than downloading: a multi-gigabyte fetch
+    /// inside an inference timeout reads as a hang, and provisioning is the
+    /// user's decision, not a side effect of asking a question.
+    #[error(
+        "Local model {model} is not provisioned. This step requires local models — run `arkavo model download` to provision them; cloud credentials do not replace local inference."
+    )]
+    ModelNotAvailable { model: String },
+
     #[error("Cost estimation error: {0}")]
     CostEstimation(String),
 

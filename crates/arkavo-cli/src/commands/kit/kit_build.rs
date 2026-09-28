@@ -1,10 +1,9 @@
 //! `arkavo kit migrate-from-agents-md` — best-effort conversion of a legacy
 //! AGENTS.md agent config into a SwarmKit manifest.
 //!
-//! Reuses `parse_legacy_agents_md` (`crate::commands::kit::legacy_agents_md`),
-//! the CLI-local legacy markdown/YAML parser scheduled for deletion once this
-//! migrate command is retired. This command is its last sanctioned caller —
-//! do not add new callers.
+//! Parses with `kit::agents_md`, which merges frontmatter with `##` agent
+//! sections and rejects nameless agents. This command is that parser's only
+//! caller: the runtime never reads AGENTS.md.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -16,8 +15,9 @@ use arkavo_swarmkit::{
 };
 
 use crate::commands::agent::{AgentConfig, McpServerConfig};
+use crate::commands::kit::agents_md::parse_agents_md;
 use crate::commands::kit::frontmatter::extract_runtime_extras;
-use crate::commands::kit::legacy_agents_md::parse_legacy_agents_md;
+use crate::commands::kit::manifest_template;
 use crate::commands::kit::model_map::hint_to_kit_model;
 
 /// Result of a `migrate-from-agents-md` run.
@@ -58,7 +58,7 @@ pub fn migrate_from_agents_md(
         return Err(format!("parent directory {} does not exist", parent.display()).into());
     }
 
-    let agents = parse_legacy_agents_md(&content)
+    let agents = parse_agents_md(&content)
         .map_err(|e| format!("failed to parse {}: {e}", in_path.display()))?;
     let Some(first) = agents.first() else {
         return Err(format!("no agent sections found in {}", in_path.display()).into());
@@ -72,7 +72,7 @@ pub fn migrate_from_agents_md(
 
     let kit_name = first.name.clone();
     let goal = if first.purpose.trim().is_empty() {
-        super::DEFAULT_GOAL.to_string()
+        manifest_template::DEFAULT_GOAL.to_string()
     } else {
         first.purpose.clone()
     };
@@ -85,7 +85,7 @@ pub fn migrate_from_agents_md(
     let roles: Vec<RoleSpec> = agents
         .iter()
         .map(|a| {
-            let (role, unmapped_hint) = build_role(a, &mut used_ids);
+            let (role, unmapped_hint) = build_role(a, &mut used_ids)?;
             if let Some(hint) = unmapped_hint {
                 unmapped_models.push((role.id.clone(), hint));
             }
@@ -100,11 +100,11 @@ pub fn migrate_from_agents_md(
                     None => mcp_servers.push(candidate),
                 }
             }
-            role
+            Ok(role)
         })
-        .collect();
+        .collect::<Result<_, String>>()?;
 
-    let mut manifest = super::manifest_skeleton(
+    let mut manifest = manifest_template::manifest_skeleton(
         &kit_name,
         format!(
             "Migrated from {} by arkavo kit migrate-from-agents-md",
@@ -153,21 +153,27 @@ pub fn migrate_from_agents_md(
 
 /// Build one role from one AGENTS.md agent section. Returns the unmapped
 /// model hint (if any) alongside the role so the caller can attribute it.
-fn build_role(agent: &AgentConfig, used_ids: &mut HashSet<String>) -> (RoleSpec, Option<String>) {
-    let id = unique_slug(&agent.name, used_ids);
+fn build_role(
+    agent: &AgentConfig,
+    used_ids: &mut HashSet<String>,
+) -> Result<(RoleSpec, Option<String>), String> {
+    let id = unique_slug(&agent.name, used_ids)?;
 
     let instructions = if agent.purpose.trim().is_empty() {
-        super::DEFAULT_IDENTITY_INSTRUCTIONS.to_string()
+        manifest_template::DEFAULT_IDENTITY_INSTRUCTIONS.to_string()
     } else {
         agent.purpose.clone()
     };
 
     let (model, unmapped_hint) = if agent.model.trim().is_empty() {
-        (super::default_model(), None)
+        (manifest_template::default_model(), None)
     } else {
         match map_model_hint(&agent.model) {
             Some(model) => (model, None),
-            None => (super::default_model(), Some(agent.model.clone())),
+            None => (
+                manifest_template::default_model(),
+                Some(agent.model.clone()),
+            ),
         }
     };
 
@@ -193,27 +199,32 @@ fn build_role(agent: &AgentConfig, used_ids: &mut HashSet<String>) -> (RoleSpec,
         agent_provisioning: AgentProvisioning {
             model: Some(model),
             inference: None,
-            budget: Some(super::default_budget()),
+            budget: Some(manifest_template::default_budget()),
             tool_use: None,
             context: None,
             observability: None,
-            isolation: Some(super::default_isolation()),
+            isolation: Some(manifest_template::default_isolation()),
             failure: None,
         },
-        skills: vec![super::identity_skill(&instructions)],
+        skills: vec![manifest_template::identity_skill(&instructions)],
         mcp_tools,
         tdf_attribute_release_policy: None,
         handoffs: vec![],
         context_scope: None,
     };
 
-    (role, unmapped_hint)
+    Ok((role, unmapped_hint))
 }
 
 /// Slugify `name` into a role id, then disambiguate against ids already
 /// used by earlier roles in the same kit (`-2`, `-3`, ...).
-fn unique_slug(name: &str, used: &mut HashSet<String>) -> String {
-    let base = slugify(name);
+///
+/// A name with nothing to slugify is an error rather than a placeholder id:
+/// the parser already rejects a blank name, and inventing `agent` here would
+/// let a name made only of punctuation through as an identity nobody chose.
+fn unique_slug(name: &str, used: &mut HashSet<String>) -> Result<String, String> {
+    let base = slugify(name)
+        .ok_or_else(|| format!("agent name {name:?} has no letters or digits to form a role id"))?;
     let mut candidate = base.clone();
     let mut n = 2;
     while used.contains(&candidate) {
@@ -221,10 +232,10 @@ fn unique_slug(name: &str, used: &mut HashSet<String>) -> String {
         n += 1;
     }
     used.insert(candidate.clone());
-    candidate
+    Ok(candidate)
 }
 
-fn slugify(input: &str) -> String {
+fn slugify(input: &str) -> Option<String> {
     let mut out = String::new();
     for c in input.chars() {
         if c.is_ascii_alphanumeric() {
@@ -234,11 +245,7 @@ fn slugify(input: &str) -> String {
         }
     }
     let trimmed = out.trim_end_matches('-');
-    if trimmed.is_empty() {
-        "agent".to_string()
-    } else {
-        trimmed.to_string()
-    }
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 /// Best-effort `model:` hint → kit `Model` mapping (brief item 4). Thin
@@ -363,7 +370,7 @@ fn unmapped_lines(
         );
     }
     // `quiet` is a CLI runtime flag, never actually parsed from AGENTS.md
-    // content by parse_legacy_agents_md (every branch of that parser defaults
+    // content by parse_agents_md (every branch of that parser defaults
     // it to `true` regardless of file content), so a parsed AgentConfig can
     // never distinguish "explicitly set" from "default" for this field. A
     // raw content scan is the only way to detect an explicit `quiet:` key,
@@ -388,18 +395,31 @@ mod tests {
 
     #[test]
     fn slugify_lowercases_and_collapses_separators() {
-        assert_eq!(slugify("Alert Manager!"), "alert-manager");
-        assert_eq!(slugify("already-slug"), "already-slug");
-        assert_eq!(slugify("---"), "agent");
-        assert_eq!(slugify(""), "agent");
+        assert_eq!(slugify("Alert Manager!").as_deref(), Some("alert-manager"));
+        assert_eq!(slugify("already-slug").as_deref(), Some("already-slug"));
+    }
+
+    // Regression: a name with no letters or digits used to become the invented role id
+    // `agent`, while the parser rejects a blank name outright; both now refuse it.
+    #[test]
+    fn unsluggable_agent_name_is_rejected() {
+        assert_eq!(slugify("---"), None);
+        assert_eq!(slugify(""), None);
+        let mut used = HashSet::new();
+        let err = unique_slug("  ", &mut used).unwrap_err();
+        assert!(
+            err.contains("no letters or digits"),
+            "unexpected error: {err}"
+        );
+        assert!(used.is_empty());
     }
 
     #[test]
     fn unique_slug_disambiguates_collisions() {
         let mut used = HashSet::new();
-        assert_eq!(unique_slug("worker", &mut used), "worker");
-        assert_eq!(unique_slug("worker", &mut used), "worker-2");
-        assert_eq!(unique_slug("worker", &mut used), "worker-3");
+        assert_eq!(unique_slug("worker", &mut used).unwrap(), "worker");
+        assert_eq!(unique_slug("worker", &mut used).unwrap(), "worker-2");
+        assert_eq!(unique_slug("worker", &mut used).unwrap(), "worker-3");
     }
 
     #[test]

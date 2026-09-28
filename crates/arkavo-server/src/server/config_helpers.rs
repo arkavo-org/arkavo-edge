@@ -1,4 +1,5 @@
 use arkavo_protocol::agent_specialization::RoleContext;
+use arkavo_protocol::auth::{AuthBackend, MultiAuthBackend};
 use arkavo_protocol::error::{A2aError, Result};
 use arkavo_protocol::mcp_registry::McpRegistry;
 use std::path::{Path, PathBuf};
@@ -241,6 +242,62 @@ pub(super) async fn reload_configuration_for_watcher(
     apply_kit_reload(content, &agent_metadata, &mcp_registry).await
 }
 
+/// Build delegation-JWT verification config from the environment.
+///
+/// - `ARKAVO_DELEGATION_PUBLIC_KEY_PEM`: trusted authnz-rs ES256 public key,
+///   either inline PEM (literal `\n` sequences are expanded) or a path to a
+///   PEM file.
+/// - `ARKAVO_ALLOW_UNVERIFIED_DELEGATION=1|true`: INSECURE escape hatch that
+///   accepts delegation JWT claims without signature verification. Dev/test
+///   only — any forged token can grant entitlements. Never set in production.
+///
+/// With neither set the registration service fails closed: delegation
+/// entitlements are never granted.
+///
+/// Returns an error when the env var names a key file that cannot be read —
+/// a configured-but-unreadable key must fail startup, not silently run with
+/// no trusted key (which hides the operator's misconfiguration).
+pub(super) fn delegation_config_from_env()
+-> arkavo_protocol::Result<arkavo_protocol::DelegationConfig> {
+    let mut config = arkavo_protocol::DelegationConfig::default();
+
+    if let Ok(raw) = std::env::var("ARKAVO_DELEGATION_PUBLIC_KEY_PEM") {
+        let pem = if raw.contains("-----BEGIN") {
+            raw.replace("\\n", "\n")
+        } else {
+            std::fs::read_to_string(&raw).map_err(|e| {
+                arkavo_protocol::A2aError::Configuration(format!(
+                    "Failed to read delegation public key from '{raw}': {e}"
+                ))
+            })?
+        };
+        config.trusted_public_keys_pem.push(pem);
+    }
+
+    let allow_unverified = std::env::var("ARKAVO_ALLOW_UNVERIFIED_DELEGATION")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if allow_unverified {
+        warn!(
+            "INSECURE: ARKAVO_ALLOW_UNVERIFIED_DELEGATION is set; delegation JWTs are \
+             accepted without signature verification"
+        );
+        config.allow_unverified = true;
+    }
+
+    Ok(config)
+}
+
+/// Backend that verifies the bearer token a client presents to `chat_open`.
+///
+/// No identity issuer key is configured for session tokens, so the backend
+/// trusts no issuer and rejects every token. Verifying against a shared secret
+/// compiled into the binary would let anyone who reads the source mint a
+/// session under any identity.
+pub(super) fn session_auth_backend() -> Arc<dyn AuthBackend> {
+    Arc::new(MultiAuthBackend::new())
+}
+
 /// Clean up old configuration backups for the given kit filename.
 pub(super) async fn cleanup_old_backups(
     backup_dir: &std::path::Path,
@@ -273,8 +330,11 @@ pub(super) async fn cleanup_old_backups(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_protocol::auth::JwtClaims;
+    use jsonwebtoken::{EncodingKey, Header, encode};
 
     const MINIMAL_KIT_YAML: &str = r#"
 spec_version: "1.0.0"
@@ -545,5 +605,42 @@ provenance:
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Failed to parse kit"));
+    }
+
+    fn hs256_token(secret: &str) -> String {
+        let now = chrono::Utc::now().timestamp();
+        let claims = JwtClaims {
+            sub: "attacker-chosen-identity".to_string(),
+            exp: Some(now + 3600),
+            iat: Some(now),
+            scopes: Some(vec!["admin".to_string()]),
+            additional: serde_json::Map::new(),
+        };
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .expect("HS256 encoding of plain claims cannot fail")
+    }
+
+    /// Regression for #708: the server verified session tokens with the
+    /// literal secret `change-me-in-production`, so anyone could forge one.
+    #[tokio::test]
+    async fn session_backend_rejects_token_signed_with_former_hardcoded_secret() {
+        let forged = hs256_token("change-me-in-production");
+        let result = session_auth_backend().validate_token(&forged).await;
+        assert!(
+            result.is_err(),
+            "a token signed with a secret published in source must never authenticate"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_backend_rejects_tokens_when_no_issuer_is_configured() {
+        let backend = session_auth_backend();
+        for token in [hs256_token(""), hs256_token("any-secret"), String::new()] {
+            assert!(backend.validate_token(&token).await.is_err());
+        }
     }
 }

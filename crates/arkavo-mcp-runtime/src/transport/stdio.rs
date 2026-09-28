@@ -22,7 +22,7 @@ pub struct StdioTransport {
 
 impl StdioTransport {
     /// Create a new stdio transport by spawning a subprocess
-    #[allow(clippy::unused_async)]
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn new(
         command: String,
         args: Vec<String>,

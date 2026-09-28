@@ -33,7 +33,13 @@ impl super::Router {
                 "kimi-k2.5",
             ),
         ] {
-            if std::env::var(api_key).is_ok() {
+            let enabled = match api_key {
+                "ANTHROPIC_API_KEY" => self.is_anthropic_available(),
+                "GEMINI_API_KEY" => self.is_gemini_available(),
+                "MOONSHOT_API_KEY" => self.is_kimi_available(),
+                _ => false,
+            };
+            if enabled {
                 let model = std::env::var(model_key).unwrap_or_else(|_| default.to_string());
                 llms.push(LlmInfo {
                     name: name.to_string(),
@@ -43,11 +49,21 @@ impl super::Router {
                 });
             }
         }
+        if self.is_openai_available() {
+            llms.push(LlmInfo {
+                name: "GPT-6 Astra".into(),
+                provider: "OpenAI".into(),
+                model: "gpt-6-astra".into(),
+                available: true,
+            });
+        }
         llms.push(LlmInfo {
             name: "Local".to_string(),
             provider: "Local".to_string(),
             model: "qwen3.5-0.8b / ministral-3b".to_string(),
-            available: true,
+            available: crate::ModelChoice::ALL_LOCAL
+                .iter()
+                .any(|m| self.is_model_available(m)),
         });
         llms
     }

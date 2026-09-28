@@ -5,21 +5,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use std::path::{Path, PathBuf};
 
-/// Check if a model has proper chat template support
-fn get_model_compatibility(model_name: &str) -> (&'static str, &'static str) {
-    let name_lower = model_name.to_lowercase();
-    if name_lower.contains("qwen") {
-        ("compatible", "Qwen3")
-    } else if name_lower.contains("mistral") || name_lower.contains("ministral") {
-        ("compatible", "MistralV3")
-    } else if name_lower.contains("gemma") {
-        ("compatible", "Gemma3")
-    } else if name_lower.contains("glm-4") || name_lower.contains("glm4") {
-        ("compatible", "GLM4")
-    } else {
-        ("incompatible", "unknown format")
-    }
-}
+use super::model_list::{get_model_compatibility, list_local_gguf_models};
 
 #[derive(Args)]
 pub struct ModelCommand {
@@ -42,6 +28,38 @@ enum ModelSubcommand {
     Download {
         /// Name of the model to download (defaults to gemma3-1b-it-qat)
         name: Option<String>,
+    },
+
+    /// Wrap a GGUF into a KAS-gated .gguf.tdf archive
+    Protect {
+        /// Path to the source .gguf file
+        path: PathBuf,
+
+        /// Output archive path (default: <source>.tdf)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// KAS base URL to wrap the payload key to
+        #[arg(long)]
+        kas_url: Option<String>,
+
+        /// Maximum plaintext bytes per weight segment (default 4 MiB)
+        #[arg(long)]
+        max_segment: Option<u64>,
+
+        /// Policy data attribute FQN; repeatable
+        #[arg(long = "attribute")]
+        attributes: Vec<String>,
+
+        /// Delete the plaintext source after a successful wrap.
+        ///
+        /// The written archive is reopened, unlocked with the freshly
+        /// generated payload key, and its header authenticated first; the
+        /// KAS rewrap itself is not exercised, so a wrong KAS public key is
+        /// only caught at first load. Keep a backup until a load through
+        /// `arkavo login` has succeeded.
+        #[arg(long)]
+        delete_source: bool,
     },
 
     /// Add a local model file
@@ -81,70 +99,6 @@ fn kit_preferred_models(cwd: &Path) -> Option<Vec<(String, String)>> {
     }
 }
 
-/// List all available GGUF models using the model_discovery module
-fn list_local_gguf_models() -> Vec<(String, String, PathBuf, u64)> {
-    let mut found_models = Vec::new();
-
-    // Get HF cache directory
-    let hf_cache_dir = if let Ok(hf_home) = std::env::var("HF_HOME") {
-        Some(PathBuf::from(hf_home).join("hub"))
-    } else {
-        dirs::home_dir().map(|d| d.join(".cache").join("huggingface").join("hub"))
-    };
-
-    if let Some(cache_dir) = hf_cache_dir {
-        if cache_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                        if dir_name.starts_with("models--") {
-                            let snapshots_dir = path.join("snapshots");
-                            if snapshots_dir.exists() {
-                                if let Ok(snapshot_entries) = std::fs::read_dir(&snapshots_dir) {
-                                    for snapshot in snapshot_entries.flatten() {
-                                        let snapshot_path = snapshot.path();
-                                        if snapshot_path.is_dir() {
-                                            if let Ok(files) = std::fs::read_dir(&snapshot_path) {
-                                                for file in files.flatten() {
-                                                    if let Some(name) = file.file_name().to_str() {
-                                                        if name.ends_with(".gguf") {
-                                                            let model_name = dir_name
-                                                                .strip_prefix("models--")
-                                                                .unwrap_or(dir_name)
-                                                                .replace("--", "/");
-                                                            let file_path = file.path();
-                                                            let size =
-                                                                std::fs::metadata(&file_path)
-                                                                    .map(|m| m.len())
-                                                                    .unwrap_or(0);
-                                                            found_models.push((
-                                                                model_name,
-                                                                name.to_string(),
-                                                                file_path,
-                                                                size,
-                                                            ));
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    found_models
-}
-
-#[allow(clippy::unused_async)]
 pub async fn run(cmd: &ModelCommand) -> Result<()> {
     match &cmd.command {
         ModelSubcommand::List => {
@@ -312,6 +266,25 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             println!("\nModel ready! Run 'arkavo' to start.");
         }
 
+        ModelSubcommand::Protect {
+            path,
+            output,
+            kas_url,
+            max_segment,
+            attributes,
+            delete_source,
+        } => {
+            super::model_protect::run(super::model_protect::ProtectArgs {
+                path,
+                output: output.as_deref(),
+                kas_url: kas_url.as_deref(),
+                max_segment: *max_segment,
+                attributes,
+                delete_source: *delete_source,
+            })
+            .await?;
+        }
+
         ModelSubcommand::Add { path, name } => {
             // For future extensibility
             println!(
@@ -327,6 +300,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::{CommandFactory, Parser};
 
     fn minimal_kit_yaml(role_id: &str, family: &str, size: &str) -> String {
         format!(
@@ -416,5 +390,27 @@ provenance:
         .unwrap();
 
         assert!(kit_preferred_models(dir.path()).is_none());
+    }
+
+    /// `ModelCommand` derives `Args`, not `Parser`, so it has no `Command` of
+    /// its own to render help from; this wrapper mirrors the one `lib.rs`
+    /// builds at dispatch time.
+    #[derive(Parser)]
+    struct Cli {
+        #[command(flatten)]
+        command: ModelCommand,
+    }
+
+    #[test]
+    fn delete_source_help_states_the_kas_rewrap_is_not_exercised() {
+        let mut top = Cli::command();
+        let protect = top
+            .find_subcommand_mut("protect")
+            .expect("protect subcommand exists");
+        let help = protect.render_long_help().to_string();
+        assert!(
+            help.contains("KAS rewrap itself is not exercised"),
+            "help must state the trust boundary, got:\n{help}"
+        );
     }
 }

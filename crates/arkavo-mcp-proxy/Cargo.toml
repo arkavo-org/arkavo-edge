@@ -1,0 +1,32 @@
+[package]
+name = "arkavo-mcp-proxy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "MCP interception proxy: stdio pass-through with policy enforcement"
+repository.workspace = true
+keywords = ["mcp", "proxy", "policy", "agent"]
+categories = ["development-tools"]
+
+[dependencies]
+arkavo-dispatch-gate = { path = "../arkavo-dispatch-gate" }
+arkavo-observability = { path = "../arkavo-observability" }
+async-trait.workspace = true
+base64.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-permit = { path = "../arkavo-permit" }
+# `test-util` pauses the clock in the tests whose subject is the order of a
+# lock, a write timeout and a retirement: on virtual time that order is fixed
+# by the deadlines rather than by how quickly a loaded runner schedules them.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

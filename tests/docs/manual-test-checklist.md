@@ -274,7 +274,7 @@ This checklist covers the 79 remaining tests that require manual verification or
   - [ ] Monitor agent logs
   - [ ] No "simctl tap" used
   - [ ] No "simctl swipe" used
-  - [ ] Uses IDB/XCTest instead
+  - [ ] Uses XCTest/AXP/AppleScript instead
   - Result: ________
 
 - [ ] **IOS-04**: Advanced Harness

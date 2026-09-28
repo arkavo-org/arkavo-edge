@@ -1,7 +1,21 @@
 use crate::decision::ModelChoice;
 use crate::error::{Error, Result};
+// Weight discovery is only reachable from the local-inference paths; the
+// selector answers "is this weight on disk" for everyone else.
+#[cfg(feature = "llama-cpp")]
 use crate::model_discovery;
 use arkavo_llm::Provider;
+use std::path::Path;
+
+/// Substitutes live provider construction.
+///
+/// Install one with [`crate::Router::with_provider_factory`] to drive routing,
+/// cloud policy and spend accounting deterministically: the router resolves
+/// every dispatch through the factory instead of reading credentials, the model
+/// cache or the network. Returning an error models an unavailable arm.
+pub trait ProviderFactory: Send + Sync {
+    fn build(&self, model: &ModelChoice) -> Result<Box<dyn Provider>>;
+}
 
 #[cfg(feature = "llama-cpp")]
 fn sampling_config_for(
@@ -34,9 +48,52 @@ fn sampling_config_for(
 }
 
 impl super::Router {
-    /// Get a provider for the given model choice (local or cloud)
-    pub async fn get_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
-        self.instantiate_provider(model).await
+    // `instantiate_provider_inner` calls this unconditionally (including on
+    // the substituted-provider path), so it must compile in every feature
+    // combination that function does, not just the ones with a live remote
+    // provider arm.
+    fn protect_provider(&self, provider: Box<dyn Provider>) -> Box<dyn Provider> {
+        #[cfg(feature = "sentinel")]
+        {
+            crate::response_policy::protect(provider)
+        }
+        #[cfg(not(feature = "sentinel"))]
+        {
+            provider
+        }
+    }
+
+    /// Substituted provider for `model`, when a factory is installed.
+    fn substituted_provider(&self, model: &ModelChoice) -> Option<Result<Box<dyn Provider>>> {
+        self.provider_factory
+            .as_ref()
+            .map(|factory| factory.build(model))
+    }
+
+    /// Construct the requested arm without hidden fallback so billing keeps its
+    /// identity.
+    ///
+    /// This is the only way to obtain a provider from outside the crate, and it
+    /// does not gate: call `authorize_call` (and `require_provisioned` for an
+    /// arm the caller did not name) first.
+    pub async fn get_provider_attributed(
+        &self,
+        model: &ModelChoice,
+    ) -> Result<(Box<dyn Provider>, ModelChoice)> {
+        Ok((
+            self.instantiate_provider_exact_with_spec(model, true)
+                .await?,
+            model.clone(),
+        ))
+    }
+
+    pub(crate) async fn instantiate_provider_exact_with_spec(
+        &self,
+        model: &ModelChoice,
+        use_spec_decoding: bool,
+    ) -> Result<Box<dyn Provider>> {
+        self.instantiate_provider_inner(model, use_spec_decoding)
+            .await
     }
 
     /// Get a reference to the local provider for simple classification tasks
@@ -44,27 +101,16 @@ impl super::Router {
         self.classifier.clone()
     }
 
-    /// Get a Gemini provider for complex planning/thinking tasks
-    #[cfg(feature = "gemini")]
-    pub fn get_planning_provider(&self) -> Option<arkavo_llm::GeminiProvider> {
-        arkavo_llm::GeminiProvider::new().ok()
-    }
-
-    #[cfg(not(feature = "gemini"))]
-    pub fn get_planning_provider(&self) -> Option<()> {
-        None
-    }
-
     pub fn is_gemini_available(&self) -> bool {
         cfg!(feature = "gemini") && std::env::var("GEMINI_API_KEY").is_ok()
     }
 
     pub fn is_anthropic_available(&self) -> bool {
-        std::env::var("ANTHROPIC_API_KEY").is_ok()
+        cfg!(feature = "llm-remote") && std::env::var("ANTHROPIC_API_KEY").is_ok()
     }
 
     pub fn is_kimi_available(&self) -> bool {
-        std::env::var("MOONSHOT_API_KEY").is_ok()
+        cfg!(feature = "kimi") && std::env::var("MOONSHOT_API_KEY").is_ok()
     }
 
     pub fn is_glm_available(&self) -> bool {
@@ -79,10 +125,21 @@ impl super::Router {
         cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok()
     }
 
-    pub fn get_anthropic_provider(
-        &self,
-    ) -> Option<arkavo_llm::providers::anthropic::AnthropicProvider> {
-        arkavo_llm::providers::anthropic::AnthropicProvider::from_env().ok()
+    #[cfg(feature = "llm-remote")]
+    pub fn get_anthropic_provider(&self) -> Option<Box<dyn Provider>> {
+        arkavo_llm::providers::anthropic::AnthropicProvider::from_env()
+            .ok()
+            .map(|provider| self.protect_provider(Box::new(provider)))
+    }
+
+    #[cfg(not(feature = "llm-remote"))]
+    pub fn get_anthropic_provider(&self) -> Option<Box<dyn Provider>> {
+        None
+    }
+
+    pub fn is_openai_available(&self) -> bool {
+        cfg!(feature = "openai")
+            && std::env::var("OPENAI_API_KEY").is_ok_and(|key| !key.trim().is_empty())
     }
 
     pub(crate) fn get_local_fallback(
@@ -99,6 +156,25 @@ impl super::Router {
         }
     }
 
+    /// Refuse a local arm whose weights are not on disk.
+    ///
+    /// A routing decision must never turn into a multi-gigabyte download: the
+    /// fetch runs inside whatever timeout the caller set (60s for intent
+    /// analysis) and reads as a hang, and provisioning is the user's decision,
+    /// made with `arkavo model download`, not a side effect of asking a
+    /// question.
+    ///
+    /// Public because every crate that resolves a provider for itself — the UI
+    /// planner, the CLI — has to make the same check before dispatch.
+    pub fn require_provisioned(&self, model: &ModelChoice) -> Result<()> {
+        if model.is_local() && !self.selector.is_local_model_cached(model) {
+            return Err(Error::ModelNotAvailable {
+                model: model.name().to_string(),
+            });
+        }
+        Ok(())
+    }
+
     pub(crate) fn is_model_available(&self, model: &ModelChoice) -> bool {
         match model {
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
@@ -111,15 +187,19 @@ impl super::Router {
             | ModelChoice::Gemini35FlashHigh
             | ModelChoice::GeminiPro => self.is_gemini_available(),
             ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
-                std::env::var("DEEPSEEK_API_KEY").is_ok()
+                cfg!(feature = "deepseek") && std::env::var("DEEPSEEK_API_KEY").is_ok()
             }
-            ModelChoice::KimiK2 => std::env::var("MOONSHOT_API_KEY").is_ok(),
+            ModelChoice::KimiK2 => self.is_kimi_available(),
+            ModelChoice::Gpt6Astra => self.is_openai_available(),
             ModelChoice::Glm52 => cfg!(feature = "glm") && std::env::var("GLM_API_KEY").is_ok(),
-            ModelChoice::Grok45 => cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok(),
-            m if m.is_local() => match (m.repo_id(), m.gguf_filename()) {
-                (Some(repo), Some(file)) => model_discovery::is_model_cached(repo, file),
-                _ => false,
-            },
+            ModelChoice::Grok47 | ModelChoice::Grok47Xhigh => {
+                cfg!(feature = "xai") && std::env::var("XAI_API_KEY").is_ok()
+            }
+            // The selector is the single authority on whether local weights are
+            // on disk, so availability, escalation and subtask assignment all
+            // read the same answer instead of each re-deriving it from the
+            // HuggingFace cache.
+            m if m.is_local() => self.selector.is_local_model_cached(m),
             _ => false,
         }
     }
@@ -151,11 +231,7 @@ impl super::Router {
                 "Loading model into registry (first use)"
             );
 
-            self.model_registry
-                .load(registry_name, &model_path.to_string_lossy())
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to load {registry_name}: {e}"))
-                })?;
+            self.ensure_loaded(registry_name, &model_path).await?;
 
             // Pre-warm the context pool so the first inference avoids allocation latency
             #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -205,98 +281,109 @@ impl super::Router {
             provider
         };
 
-        Ok(Box::new(provider))
+        Ok(self.protect_provider(Box::new(provider)))
     }
 
-    /// Create a provider with execution-mode overrides: temp 0.1, thinking off.
-    /// Used for tool-loop iterations that emit mechanical tool calls.
+    /// Load an on-disk GGUF (or `.gguf.tdf`) by path. Not a named catalog model.
     #[cfg(feature = "llama-cpp")]
-    pub(crate) async fn instantiate_provider_execution(
+    pub(crate) async fn instantiate_gguf_path(
         &self,
-        model: &ModelChoice,
+        path: &Path,
+        use_spec_decoding: bool,
     ) -> Result<Box<dyn Provider>> {
-        if !model.is_local() {
-            return self.instantiate_provider(model).await;
+        if let Some(substituted) = self.substituted_provider(&ModelChoice::LocalQwen3) {
+            // A substituted arm is still a model whose output reaches a caller;
+            // returning it unwrapped would bypass the release gate entirely.
+            return substituted.map(|provider| self.protect_provider(provider));
         }
-        let repo = model
-            .repo_id()
-            .ok_or_else(|| Error::ModelExecution(format!("No repo_id for {model:?}")))?;
-        let file = model
-            .gguf_filename()
-            .ok_or_else(|| Error::ModelExecution(format!("No gguf_filename for {model:?}")))?;
-        let registry_name = model.name();
-        let model_path = model_discovery::find_gguf_model(repo, file)
-            .await
-            .map_err(Error::ModelExecution)?;
-        if !self.model_registry.is_loaded(registry_name) {
-            self.model_registry
-                .load(registry_name, &model_path.to_string_lossy())
-                .map_err(|e| {
-                    Error::ModelExecution(format!("Failed to load {registry_name}: {e}"))
-                })?;
+        let resolved = model_discovery::resolve_gguf_path(path);
+        if !resolved.exists() {
+            return Err(Error::ModelExecution(format!(
+                "GGUF not found: {}",
+                path.display()
+            )));
         }
-        let execution_config = arkavo_llm::SamplingConfig {
-            temperature: 0.1,
-            top_p: 0.9,
+        let canonical = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
+        let registry_name = format!("gguf:{}", canonical.display());
+
+        if !self.model_registry.is_loaded(&registry_name) {
+            tracing::info!(
+                model = %registry_name,
+                path = %canonical.display(),
+                "Loading GGUF path into registry"
+            );
+            self.ensure_loaded(&registry_name, &canonical).await?;
+
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            if let Ok(ctx) = self.model_registry.acquire_fresh_context(&registry_name) {
+                let _ = self
+                    .model_registry
+                    .release_context(&registry_name, ctx, true);
+                tracing::info!(model = %registry_name, "Context pool pre-warmed");
+            }
+            tracing::info!(model = %registry_name, "GGUF loaded and cached in registry");
+        } else {
+            tracing::debug!(model = %registry_name, "Using cached GGUF from registry");
+        }
+
+        let sampling = arkavo_llm::SamplingConfig {
+            use_spec_decoding,
             thinking_mode: Some(arkavo_llm::ThinkingMode::Off),
             ..arkavo_llm::SamplingConfig::default()
         };
         let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
             self.model_registry.clone(),
-            registry_name.to_string(),
-            execution_config,
+            registry_name.clone(),
+            sampling,
         )
         .map_err(|e| {
             Error::ModelExecution(format!(
-                "Failed to create execution provider for {registry_name}: {e}"
+                "Failed to create provider for {registry_name}: {e}"
             ))
         })?;
-        Ok(Box::new(provider))
+        Ok(self.protect_provider(Box::new(provider)))
     }
 
     #[cfg(not(feature = "llama-cpp"))]
-    pub(crate) async fn instantiate_provider_execution(
+    pub(crate) async fn instantiate_gguf_path(
         &self,
-        model: &ModelChoice,
+        path: &Path,
+        _use_spec_decoding: bool,
     ) -> Result<Box<dyn Provider>> {
-        self.instantiate_provider(model).await
+        Err(Error::ModelExecution(format!(
+            "llama-cpp required to load GGUF {}",
+            path.display()
+        )))
     }
 
-    pub(crate) async fn instantiate_provider(
-        &self,
-        model: &ModelChoice,
-    ) -> Result<Box<dyn Provider>> {
-        // Default: spec decoding enabled unless per-model stats say otherwise.
-        // Call sites that already hold a RoutingDecision should use
-        // `instantiate_provider_with_spec` to forward the flag.
-        self.instantiate_provider_with_spec(model, true).await
-    }
-
-    /// Instantiate a provider with an explicit spec-decoding flag.
+    /// Build exactly the requested arm.
     ///
-    /// Pass `use_spec_decoding` from `RoutingDecision.use_spec_decoding` so the
-    /// router's per-model rolling stats reach the llama.cpp `SamplingConfig`.
-    /// Cloud providers ignore the flag; it only affects local llama.cpp paths.
-    pub(crate) async fn instantiate_provider_with_spec(
+    /// There is no cross-provider fallback: a call billed as one arm must not
+    /// be served by another, and a missing credential is a refusal the caller
+    /// can act on rather than a silent substitution.
+    async fn instantiate_provider_inner(
         &self,
         model: &ModelChoice,
         use_spec_decoding: bool,
     ) -> Result<Box<dyn Provider>> {
+        if let Some(substituted) = self.substituted_provider(model) {
+            // A substituted arm is still a model whose output reaches a caller;
+            // returning it unwrapped would bypass the release gate entirely.
+            return substituted.map(|provider| self.protect_provider(provider));
+        }
+        let _ = use_spec_decoding;
         tracing::debug!(model = %model.name(), use_spec_decoding, "Instantiating provider");
         match model {
+            #[cfg(feature = "llm-remote")]
             ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus | ModelChoice::ClaudeFable5 => {
                 use arkavo_llm::providers::anthropic::AnthropicProvider;
                 // Pass the routed model id so distinct arms reach distinct
                 // API models instead of collapsing to the env/default model.
                 if let Ok(provider) = AnthropicProvider::from_env_with_model(model.name()) {
-                    Ok(Box::new(provider))
+                    Ok(self.protect_provider(Box::new(provider)))
                 } else {
-                    #[cfg(feature = "gemini")]
-                    if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
-                        return Ok(Box::new(provider));
-                    }
                     Err(Error::ModelExecution(
-                        "ANTHROPIC_API_KEY not set and no fallback available".to_string(),
+                        "Requested Anthropic provider unavailable".into(),
                     ))
                 }
             }
@@ -313,56 +400,11 @@ impl super::Router {
                 // `thinkingConfig` payloads to the Gemini API.
                 let api_model = model.gemini_api_model().unwrap_or("gemini-3.5-flash");
                 let thinking = model.gemini_thinking_budget();
-                let built =
-                    arkavo_llm::GeminiProvider::for_model_with_thinking(api_model, thinking)
-                        .or_else(|_| arkavo_llm::GeminiProvider::new());
-                if let Ok(provider) = built {
-                    Ok(Box::new(provider))
-                } else {
-                    #[cfg(feature = "llama-cpp")]
-                    {
-                        let hint = ModelChoice::LocalQwen3.download_hint().unwrap_or_default();
-                        let model_path =
-                            model_discovery::find_any_gguf().await.ok_or_else(|| {
-                                Error::ModelExecution(format!(
-                                    "No local GGUF models found. Download with: {hint}"
-                                ))
-                            })?;
-
-                        let model_name = model_path
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("local-model")
-                            .to_string();
-
-                        if !self.model_registry.is_loaded(&model_name) {
-                            self.model_registry
-                                .load(&model_name, &model_path.to_string_lossy())
-                                .map_err(|e| {
-                                    Error::ModelExecution(format!(
-                                        "Failed to load fallback model: {e}"
-                                    ))
-                                })?;
-                        }
-
-                        let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
-                            self.model_registry.clone(),
-                            model_name,
-                            arkavo_llm::SamplingConfig::default(),
-                        )
-                        .map_err(|e| {
-                            Error::ModelExecution(format!(
-                                "Failed to create fallback local provider: {e}"
-                            ))
-                        })?;
-                        Ok(Box::new(provider))
-                    }
-                    #[cfg(not(feature = "llama-cpp"))]
-                    {
-                        Err(Error::ModelExecution(
-                            "Gemini API key not set and no local model fallback available. Set GEMINI_API_KEY or rebuild with llama-cpp feature.".to_string()
-                        ))
-                    }
+                match arkavo_llm::GeminiProvider::for_model_with_thinking(api_model, thinking) {
+                    Ok(provider) => Ok(self.protect_provider(Box::new(provider))),
+                    Err(_) => Err(Error::ModelExecution(
+                        "Requested Gemini provider unavailable".into(),
+                    )),
                 }
             }
             #[cfg(feature = "llama-cpp")]
@@ -375,6 +417,31 @@ impl super::Router {
                     .ok_or_else(|| Error::ModelExecution(format!("No gguf_filename for {m:?}")))?;
                 self.load_local_model(m, repo, file, use_spec_decoding)
                     .await
+            }
+            #[cfg(feature = "deepseek")]
+            ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
+                let provider = if matches!(model, ModelChoice::DeepSeekV32Speciale) {
+                    arkavo_llm::DeepSeekProvider::v32_speciale()
+                } else {
+                    arkavo_llm::DeepSeekProvider::from_env()
+                }
+                .map_err(|e| Error::ModelExecution(e.to_string()))?;
+                Ok(self.protect_provider(Box::new(provider)))
+            }
+            #[cfg(feature = "openai")]
+            ModelChoice::Gpt6Astra => {
+                use arkavo_llm::providers::{OpenAIResponsesConfig, OpenAIResponsesProvider};
+                let config = OpenAIResponsesConfig {
+                    api_key: Some(
+                        std::env::var("OPENAI_API_KEY")
+                            .map_err(|_| Error::ModelExecution("OPENAI_API_KEY not set".into()))?,
+                    ),
+                    model: model.name().into(),
+                    ..OpenAIResponsesConfig::default()
+                };
+                let provider = OpenAIResponsesProvider::new(config)
+                    .map_err(|e| Error::ModelExecution(e.to_string()))?;
+                Ok(self.protect_provider(Box::new(provider)))
             }
             #[cfg(feature = "kimi")]
             ModelChoice::KimiK2 => {
@@ -393,7 +460,7 @@ impl super::Router {
                 let provider = AnthropicProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create Kimi provider: {e}"))
                 })?;
-                Ok(Box::new(provider))
+                Ok(self.protect_provider(Box::new(provider)))
             }
             #[cfg(feature = "glm")]
             ModelChoice::Glm52 => {
@@ -420,32 +487,137 @@ impl super::Router {
                 let provider = OpenAIProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create GLM provider: {e}"))
                 })?;
-                Ok(Box::new(provider))
+                Ok(self.protect_provider(Box::new(provider)))
             }
             #[cfg(feature = "xai")]
-            ModelChoice::Grok45 => {
-                // Grok 4.5 uses the xAI Responses API (not Chat Completions)
-                // for reasoning_effort control. v1 multi-turn is full-transcript;
-                // store stays off unless XAI_STORE opts in.
-                use arkavo_llm::providers::xai_responses::{ResponsesConfig, ResponsesProvider};
+            ModelChoice::Grok47 | ModelChoice::Grok47Xhigh => {
+                // Grok 4.7 uses the xAI Responses API (not Chat Completions)
+                // for reasoning_effort control. The API model is always
+                // `grok-4.7`; `Grok47Xhigh` forces `reasoning.effort = xhigh`.
+                use arkavo_llm::providers::xai_responses::{
+                    ReasoningEffort, ResponsesConfig, ResponsesProvider,
+                };
 
                 let api_key = std::env::var("XAI_API_KEY")
                     .map_err(|_| Error::ModelExecution("XAI_API_KEY not set".to_string()))?;
                 let base_url = std::env::var("XAI_BASE_URL")
                     .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+                let api_model = model.grok_api_model().unwrap_or("grok-4.7").to_string();
 
-                let config =
-                    ResponsesConfig::for_agent(api_key, base_url, model.name().to_string());
+                let effort = if matches!(model, ModelChoice::Grok47Xhigh) {
+                    ReasoningEffort::Xhigh
+                } else {
+                    ReasoningEffort::Low
+                };
+                let config = ResponsesConfig::for_routed_arm(api_key, base_url, api_model, effort);
 
                 let provider = ResponsesProvider::new(config).map_err(|e| {
                     Error::ModelExecution(format!("Failed to create xAI Responses provider: {e}"))
                 })?;
-                Ok(Box::new(provider))
+                Ok(self.protect_provider(Box::new(provider)))
             }
             #[allow(unreachable_patterns)]
             _ => Err(Error::ModelExecution(format!(
                 "Model {model:?} not available (feature not enabled)"
             ))),
+        }
+    }
+}
+
+#[cfg(all(test, feature = "sentinel"))]
+mod substitution_tests {
+    use std::sync::Arc;
+
+    use arkavo_llm::{GateOutcome, Message, ReleaseGate, ReleaseGateFactory};
+
+    use crate::decision::ModelChoice;
+    use crate::test_support::CountingProvider;
+
+    /// Withholds only text carrying the marker, so installing it for this
+    /// process leaves every other test's provider output untouched.
+    const MARKER: &str = "SUBSTITUTED-ARM-CANARY-7f3a";
+
+    struct MarkerGate;
+    impl ReleaseGate for MarkerGate {
+        fn admit(&self, chunk: &str) -> GateOutcome {
+            if chunk.contains(MARKER) {
+                GateOutcome::Blocked
+            } else {
+                GateOutcome::Release(chunk.to_string())
+            }
+        }
+        fn finish(&self) -> GateOutcome {
+            GateOutcome::Release(String::new())
+        }
+        fn discard(&self) {}
+    }
+
+    struct MarkerFactory;
+    #[async_trait::async_trait]
+    impl ReleaseGateFactory for MarkerFactory {
+        fn create(&self, _model: &str) -> Arc<dyn ReleaseGate> {
+            Arc::new(MarkerGate)
+        }
+    }
+
+    /// Regression: a provider built by an installed `ProviderFactory` returned
+    /// before `protect_provider`, so once a real gate was installed its
+    /// completions reached the caller unexamined.
+    #[tokio::test]
+    async fn a_substituted_provider_is_gated() {
+        let _ = crate::response_policy::install(Arc::new(MarkerFactory));
+        let provider = CountingProvider::new(&format!("leaked {MARKER} text"));
+        let router = crate::Router::new_offline()
+            .await
+            .expect("router")
+            .with_provider_factory(provider.factory());
+        let model = ModelChoice::ALL_CLOUD[0].clone();
+
+        let (built, _) = router.get_provider_attributed(&model).await.expect("build");
+        // `complete_with_options` (not the `complete` convenience wrapper,
+        // which passes `max_tokens: None`) because `CountingProvider` asserts
+        // every dispatch carries an explicit output allowance — a fixture
+        // constraint unrelated to the gate this test exercises.
+        let result = built
+            .complete_with_options(vec![Message::user("hi")], Some(64))
+            .await;
+
+        let err = result.expect_err("the marker must be withheld");
+        assert!(err.to_string().contains(arkavo_llm::GATE_BLOCKED));
+    }
+
+    /// `instantiate_gguf_path` has its own substitution check (it returns
+    /// before ever touching the filesystem), so it needs its own regression
+    /// test rather than inheriting coverage from `instantiate_provider_inner`.
+    #[cfg(feature = "llama-cpp")]
+    mod gguf_path {
+        use super::*;
+        use std::path::Path;
+
+        /// Regression: same bypass as `instantiate_provider_inner`, but on the
+        /// GGUF-path arm — a substituted provider returned before
+        /// `protect_provider` reached callers unexamined.
+        #[tokio::test]
+        async fn a_substituted_gguf_provider_is_gated() {
+            let _ = crate::response_policy::install(Arc::new(MarkerFactory));
+            let provider = CountingProvider::new(&format!("leaked {MARKER} text"));
+            let router = crate::Router::new_offline()
+                .await
+                .expect("router")
+                .with_provider_factory(provider.factory());
+
+            // Substitution short-circuits before the path is ever resolved or
+            // checked for existence, so a nonexistent path is fine here.
+            let built = router
+                .instantiate_gguf_path(Path::new("any.gguf"), false)
+                .await
+                .expect("build");
+            let result = built
+                .complete_with_options(vec![Message::user("hi")], Some(64))
+                .await;
+
+            let err = result.expect_err("the marker must be withheld");
+            assert!(err.to_string().contains(arkavo_llm::GATE_BLOCKED));
         }
     }
 }

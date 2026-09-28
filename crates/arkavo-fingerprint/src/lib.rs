@@ -1,0 +1,47 @@
+//! Keyed reference index: the DLP cascade's fast tier (KP-009, KP-010, KP-011).
+//!
+//! The question this crate answers is "have I seen this content before, and
+//! what was it labelled" — fast enough to sit on the per-call path, and without
+//! storing anything an attacker who steals the index can read.
+//!
+//! Every digest is keyed with a tenant key. An unkeyed index of sensitive
+//! content is a dictionary: hash a guess, look for the digest, learn whether
+//! the guess was in the corpus. Keying is what makes a stolen index inert, so
+//! there is no path through this crate that produces an unkeyed hash.
+
+pub mod embed;
+pub mod index;
+pub mod key;
+pub mod near_tier;
+pub mod reference_match;
+pub mod semantic_calibration;
+pub mod semantic_index;
+pub mod semantic_tier;
+pub mod shingle;
+pub mod simhash;
+pub mod tier;
+
+pub use embed::{
+    Embedder, EmbeddingPooling, QuantizedVector, UNIT_OVERLAP, UNIT_WORDS, embed_units,
+    normalize_vector, semantic_units,
+};
+pub use index::{
+    EntryMeta, INDEX_FORMAT_VERSION, IndexError, MatchSummary, ReferenceIndex,
+    ReferenceIndexBuilder, SuppressionIndex, match_span,
+};
+pub use key::{IndexKey, KeyError, MIN_SECRET_BYTES, ShingleHash};
+pub use near_tier::{NEAR_TIER_BUDGET, NEAR_TIER_NAME, NearDuplicateTier};
+pub use semantic_calibration::{
+    CalibrationSample, LabelEvidence, SemanticCalibration, SemanticEvalEvidence, calibrate,
+};
+pub use semantic_index::{
+    EmbedderRecord, SEMANTIC_FORMAT_VERSION, SemanticIndex, SemanticIndexBuilder, SemanticMatch,
+    label_key,
+};
+pub use semantic_tier::{SEMANTIC_CONFIDENCE, SEMANTIC_TIER_NAME, SemanticTier};
+pub use shingle::{SHINGLE_WORDS, normalize, shingle_text, shingles, windows};
+pub use simhash::{
+    MAX_DOCUMENTS, MAX_HAMMING, MIN_SHINGLES, NearDuplicateIndex, NearDuplicateIndexBuilder,
+    NearMatch, SimHash, simhash,
+};
+pub use tier::{ReferenceTier, TIER_BUDGET, TIER_NAME, evidence_for};

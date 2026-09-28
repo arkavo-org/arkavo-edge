@@ -117,25 +117,36 @@ This ensures that expensive API calls only include tools when the model can effe
 
 Planning uses high-quality models for strategic decisions:
 
+Every provider comes out of the router the same way: refuse an arm the device
+cannot run, then the ledger, then the cloud policy, and only then build. A
+refusal never opens a connection.
+
 ```rust
-match decision.recommended_model {
-    arkavo_router::ModelChoice::LocalGemma4B
-    | arkavo_router::ModelChoice::LocalGemma12B => {
-        return Err(Error::Other(anyhow::anyhow!(
-            "Local models not yet supported for planning. Set GEMINI_API_KEY for remote planning."
-        )));
-    }
-    _ => {
-        if let Some(gemini) = self.router.get_planning_provider() {
-            Arc::new(gemini)
-        } else {
-            return Err(Error::Other(anyhow::anyhow!(
-                "Planning model not available. Set GEMINI_API_KEY for remote planning."
-            )));
-        }
-    }
-}
+// The arm is routed, not named by the caller, so an unprovisioned local
+// weight is a refusal rather than a multi-gigabyte download.
+self.router.require_provisioned(&decision.recommended_model)?;
+
+let preflight = arkavo_router::usage::estimate_request(&messages, None, max_tokens);
+let cost = self.router.usage_cost(&decision.recommended_model, &preflight);
+// Ledger first, so an exhausted cap reports as `BudgetExceeded` rather than
+// as a policy denial.
+budget.check(cost).await?;
+// `explicit = false`: nobody named this arm, so the cloud policy is asked.
+self.router
+    .authorize_call(&decision.recommended_model, cost, false, None)
+    .await?;
+
+let (provider, actual_model) = self
+    .router
+    .get_provider_attributed(&decision.recommended_model)
+    .await?;
 ```
+
+`get_provider_attributed` is the only way to obtain a provider from outside
+`arkavo-router`, and it gates nothing itself — the two calls above are the
+caller's responsibility. Skipping `authorize_call` spends on a `LocalOnly`
+install; skipping `require_provisioned` turns a routing decision into a
+download.
 
 **Current Strategy:**
 - ✅ Remote planning: Gemini Flash or Pro
@@ -167,18 +178,18 @@ The router analyzes:
 Similar to planning, adjustments use high-quality models for strategic correction:
 
 ```rust
-let decision = self
-    .router
-    .route(&adjustment_prompt)
-    .await?;
+let decision = self.router.classify(&adjustment_prompt).await?;
 
-let provider: Arc<dyn Provider> = if let Some(gemini) = self.router.get_planning_provider() {
-    Arc::new(gemini)
-} else {
-    return Err(Error::Other(anyhow::anyhow!(
-        "Adjustment requires Gemini. Set GEMINI_API_KEY."
-    )));
-};
+// Same order as planning: provisioning, ledger, policy, then build.
+self.router.require_provisioned(&decision.recommended_model)?;
+budget.check(cost).await?;
+self.router
+    .authorize_call(&decision.recommended_model, cost, false, None)
+    .await?;
+let (provider, actual_model) = self
+    .router
+    .get_provider_attributed(&decision.recommended_model)
+    .await?;
 ```
 
 **File Reference:** `crates/arkavo-orchestrator/src/cognitive_engine_planning.rs:228-248`

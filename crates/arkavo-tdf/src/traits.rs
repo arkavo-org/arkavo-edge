@@ -108,6 +108,7 @@ pub trait TdfService: TdfEncryptor + TdfDecryptor + Send + Sync {}
 impl<T: TdfEncryptor + TdfDecryptor + Send + Sync> TdfService for T {}
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use std::io::Cursor;

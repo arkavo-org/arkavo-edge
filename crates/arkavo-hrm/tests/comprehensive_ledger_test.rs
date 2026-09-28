@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_hrm::{Conductor, ContextStrategy, InMemoryTaskStore};
 use arkavo_memory::{ContextLedger, MemoryStorage};
 use std::sync::Arc;
@@ -178,7 +180,6 @@ async fn test_context_restore_tool_with_storage() {
     let start_idx = pointer.find("ID: ").unwrap() + 4;
     let end_idx = pointer.find(']').unwrap();
     let uuid_str = &pointer[start_idx..end_idx];
-    println!("Offloaded with ID: {uuid_str}");
 
     // Create the tool with the SAME shared storage
     let tool = ContextRestoreTool::new(storage.clone());
@@ -191,7 +192,6 @@ async fn test_context_restore_tool_with_storage() {
     let restored = result.get("content").and_then(|v| v.as_str()).unwrap();
     assert_eq!(restored, original_text, "Tool should restore exact content");
 
-    println!("Tool restored: {restored}");
     println!("Path injection test: PASSED");
 
     // Cleanup

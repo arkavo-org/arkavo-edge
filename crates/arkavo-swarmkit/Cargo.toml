@@ -14,7 +14,7 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 chrono = { workspace = true }
 semver = { workspace = true }
-blake3 = "1.5"
+blake3 = { workspace = true }
 base64 = { workspace = true }
 thiserror = { workspace = true }
 arkavo-budget = { path = "../arkavo-budget" }

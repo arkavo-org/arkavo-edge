@@ -115,6 +115,25 @@ pub async fn execute_with_conductor_and_learning(
 
     info!("Created HRM task {}", hrm_task.id);
 
+    // SEQ-003: built before any branch that runs tools. The 1:1 loop is not
+    // the only runner — planned subtasks, and a specialist that does not skip
+    // complexity, return from execute_with_plan without coming back here.
+    #[cfg(feature = "taint")]
+    let egress_guard = {
+        let session_id = hrm_task.id.to_string();
+        let agent_id = learning_bus
+            .map(|bus| bus.agent_id().to_string())
+            .unwrap_or_else(|| session_id.clone());
+        let mut destinations = arkavo_protocol::egress_destination::DestinationPolicy::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            destinations = destinations.workspace_root(cwd);
+        }
+        let guard = super::egress_guard::EgressGuard::new(session_id, agent_id)
+            .with_destination_policy(destinations);
+        guard.observe_input("task", &task_content);
+        std::sync::Arc::new(guard)
+    };
+
     // Helper to update both HRM intra-progress and UI progress
     let hrm_task_id = hrm_task.id;
     let update_progress = |msg: &str, pct: u8| {
@@ -178,6 +197,8 @@ pub async fn execute_with_conductor_and_learning(
             tool_memory,
             system_prompt,
             mesh_state,
+            #[cfg(feature = "taint")]
+            egress_guard.clone(),
         )
         .await
         {
@@ -285,6 +306,16 @@ pub async fn execute_with_conductor_and_learning(
 
         Arc::new(tool_registry)
     };
+
+    #[cfg(feature = "routines")]
+    if let Some(bus) = learning_bus {
+        registry_arc = super::routine_tools::with_routines(
+            registry_arc,
+            bus,
+            granted_tools,
+            egress_guard.clone(),
+        );
+    }
 
     // 4.5 Check if RLM mode should activate (large context handling)
     let input_tokens = estimate_tokens(&task_content);
@@ -462,7 +493,7 @@ pub async fn execute_with_conductor_and_learning(
 
     // Use parallel three-track loop for all agents with tools.
     let has_any_tools = !registry_arc.list_tools().is_empty();
-    let loop_result = if has_any_tools {
+    let loop_outcome = if has_any_tools {
         super::conductor_parallel::run_tool_loop_parallel(
             router,
             &registry_arc,
@@ -474,8 +505,10 @@ pub async fn execute_with_conductor_and_learning(
             tool_memory,
             compute_budget,
             granted_tools,
+            #[cfg(feature = "taint")]
+            Some(egress_guard.clone()),
         )
-        .await?
+        .await
     } else {
         super::conductor_tool_loop::run_tool_loop(
             router,
@@ -488,8 +521,29 @@ pub async fn execute_with_conductor_and_learning(
             tool_memory,
             compute_budget,
             granted_tools,
+            #[cfg(feature = "taint")]
+            Some(&egress_guard),
         )
-        .await?
+        .await
+    };
+
+    // A refused loop still has to close out the HRM task: it went Running
+    // before the loop started, so returning the refusal without recording it
+    // would leave the task running with no result and no reason. The learning
+    // updates below are deliberately skipped — no model produced an answer to
+    // score.
+    let loop_result = match loop_outcome {
+        Ok(result) => result,
+        Err(refusal) => {
+            let failed = BurstResult::failure(contract.id, refusal.clone());
+            if let Err(e) = conductor
+                .record_result(hrm_task.id, subtask.id, failed)
+                .await
+            {
+                warn!("Failed to record refused subtask {}: {e}", subtask.id);
+            }
+            return Err(refusal);
+        }
     };
 
     // Emit MCP-T behavior.trace for the completed task. Subject ID matches
@@ -652,6 +706,17 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    /// The classifier snippet is a byte budget over arbitrary task text.
+    #[test]
+    fn complexity_snippet_is_safe_for_multibyte_text() {
+        // 400 bytes hold 133 whole three-byte scalars.
+        assert_eq!(
+            complexity_snippet(&"界".repeat(200)).matches('界').count(),
+            133
+        );
+        assert_eq!(complexity_snippet("short task"), "short task");
+    }
+
     #[spec("SRV-009")]
     #[test]
     fn extract_reward_positive() {
@@ -719,16 +784,19 @@ mod tests {
 /// Returns true only when the model explicitly says MULTI — defaults to SINGLE
 /// on ambiguity, timeout, or error (false negatives are cheap, false positives
 /// cause 80+ second decomposition overhead).
+/// Trim a task to the head the complexity classifier reads.
+///
+/// Bounded to avoid wasting tokens on long cycle prompts, and cut on a
+/// character boundary because task text is arbitrary UTF-8.
+fn complexity_snippet(task_content: &str) -> &str {
+    arkavo_llm::char_boundary_prefix(task_content, 400)
+}
+
 async fn assess_complexity_with_model(
     router: &Arc<arkavo_router::Router>,
     task_content: &str,
 ) -> bool {
-    // Truncate to avoid wasting tokens on long cycle prompts
-    let snippet = if task_content.len() > 400 {
-        &task_content[..400]
-    } else {
-        task_content
-    };
+    let snippet = complexity_snippet(task_content);
 
     let prompt = format!(
         "Does this require breaking into SEPARATE INDEPENDENT subtasks that \

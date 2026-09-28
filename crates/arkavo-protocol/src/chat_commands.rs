@@ -6,7 +6,7 @@
 use crate::a2a::{A2aClient, A2aClientError};
 use crate::types::{MessageDelta, MessageDeltaContent};
 use arkavo_mcp_tools::ToolRegistry;
-use arkavo_router::Router;
+use arkavo_router::{CloudConsentPrompt, Router};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -87,16 +87,23 @@ impl ChatSession {
         router: Arc<Router>,
         tool_registry: Option<Arc<ToolRegistry>>,
     ) -> Result<Self, A2aClientError> {
-        Self::new_with_model(router, tool_registry, None).await
+        Self::new_with_model(router, tool_registry, None, None).await
     }
 
-    /// Create a new chat session with an optional model override for testing
+    /// Create a new chat session with an optional model override and the host's
+    /// channel for asking the user about cloud spend.
     pub async fn new_with_model(
         router: Arc<Router>,
         tool_registry: Option<Arc<ToolRegistry>>,
         model_name: Option<&str>,
+        cloud_consent_prompt: Option<Arc<dyn CloudConsentPrompt>>,
     ) -> Result<Self, A2aClientError> {
-        let mut client = A2aClient::with_router_and_model(router, tool_registry, model_name);
+        let mut client = A2aClient::with_router_and_model(
+            router,
+            tool_registry,
+            model_name,
+            cloud_consent_prompt,
+        );
         client.open_session().await?;
 
         Ok(Self {

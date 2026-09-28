@@ -205,6 +205,29 @@ pub struct OpenAIProviderFactory;
 #[async_trait]
 impl ProviderFactory for OpenAIProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
+        if config.default_model.as_deref() == Some("gpt-6-astra") {
+            let api_key = config
+                .auth_ref
+                .as_ref()
+                .map(std::env::var)
+                .transpose()
+                .map_err(|_| anyhow::anyhow!("OpenAI credential is missing"))?;
+            let mut responses = super::OpenAIResponsesConfig {
+                api_key,
+                ..Default::default()
+            };
+            if !config.base_url.is_empty() {
+                responses.base_url.clone_from(&config.base_url);
+            }
+            if let Some(effort) = config
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("reasoning_effort"))
+            {
+                responses.reasoning_effort = serde_json::from_value(effort.clone())?;
+            }
+            return Ok(Box::new(super::OpenAIResponsesProvider::new(responses)?));
+        }
         // Get API key from auth manager if auth_ref is provided
         let api_key = if let Some(ref auth_ref) = config.auth_ref {
             // See #204: Re-enable AuthManager when available in arkavo-llm
@@ -254,6 +277,18 @@ impl ProviderFactory for OpenAIProviderFactory {
     }
 
     async fn validate_config(&self, config: &ProviderConfig) -> Result<()> {
+        if config.default_model.as_deref() == Some("gpt-6-astra") {
+            let responses = super::OpenAIResponsesConfig {
+                base_url: if config.base_url.is_empty() {
+                    super::OpenAIResponsesConfig::default().base_url
+                } else {
+                    config.base_url.clone()
+                },
+                ..Default::default()
+            };
+            responses.validate()?;
+            return Ok(());
+        }
         if config.auth_ref.is_none() {
             return Err(anyhow::anyhow!(
                 "API key required for OpenAI provider. Set auth_ref in the node configuration"

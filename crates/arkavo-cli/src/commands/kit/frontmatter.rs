@@ -1,7 +1,7 @@
 //! Frontmatter `preflight:` / `kas:` / `budget:` → SwarmKit `runtime.*`
 //! mapping for `kit migrate-from-agents-md` (finding 2).
 //!
-//! `legacy_agents_md::parse_legacy_agents_md`'s line-based parser only
+//! `agents_md::parse_agents_md`'s line-based parser only
 //! understands a fixed set of top-level YAML keys (`KNOWN_SECTIONS`); any
 //! other top-level key — including `preflight:`, `kas:`, and `budget:` —
 //! is treated as an "unknown section" and every line inside it is skipped
@@ -18,7 +18,7 @@
 use arkavo_swarmkit::{CloudPolicyKind, RuntimeKas, RuntimePreflight};
 use serde::Deserialize;
 
-use super::legacy_agents_md_yaml::extract_frontmatter;
+use super::agents_md::extract_frontmatter;
 
 /// Runtime policy fields recovered from AGENTS.md frontmatter that the
 /// legacy line-based parser has no representation for.

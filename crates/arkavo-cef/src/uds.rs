@@ -82,7 +82,8 @@ impl UdsTransport {
         }
     }
 
-    #[allow(clippy::unused_async)]
+    // 1.98 files the same shape under a second name for functions in impl blocks.
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn try_recv_raw(&mut self) -> Result<Option<Vec<u8>>> {
         if let Some(data) = Protocol::unframe_message(&mut self.read_buf)? {
             eprintln!(

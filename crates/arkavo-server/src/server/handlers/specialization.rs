@@ -305,12 +305,16 @@ async fn inject_role_kickoff(
         .parse::<uuid::Uuid>()
         .unwrap_or_else(|_| uuid::Uuid::new_v4());
     let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+    // A role kickoff has no requester waiting on an answer, so both reply
+    // channels are dropped here and the loop's sends fail harmlessly.
+    let (outcome_tx, _outcome_rx) = tokio::sync::oneshot::channel();
     let event = AgentEvent::IncomingMessage {
         sender: "swarmkit-orchestrator".to_string(),
         content,
         task_id,
         correlation_id: CorrelationId(uuid::Uuid::new_v4()),
         reply: reply_tx,
+        outcome: outcome_tx,
     };
     let _ = tx.send(event).await;
 }

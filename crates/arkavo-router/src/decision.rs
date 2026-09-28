@@ -84,12 +84,23 @@ pub enum ModelChoice {
     /// Sampling arm to respect the cold-start exploration cap; a thinking-tier
     /// (High/Max) split can follow once this base arm graduates probation.
     Glm52,
-    /// Grok 4.5 (xAI) - flagship cloud model via the xAI Responses API.
+    /// Grok 4.7 (xAI) — flagship cloud model via the xAI Responses API.
     /// Routed through `ResponsesProvider` (`XAI_API_KEY`, base
     /// `https://api.x.ai/v1`, `POST /v1/responses`) with low reasoning effort
-    /// by default for agent latency. Single Thompson Sampling arm for cold-start;
-    /// reasoning-tier splits can follow once this base arm graduates probation.
-    Grok45,
+    /// by default for agent latency. `Grok47Xhigh` is the max-effort companion.
+    /// `Grok45` / `Grok46` remain serde aliases so persisted traces keep
+    /// loading across model generations.
+    #[serde(alias = "Grok45", alias = "Grok46")]
+    Grok47,
+    /// Grok 4.7 with `xhigh` reasoning effort — maximum depth for the hardest
+    /// problems. Distinct Thompson arm so cost and latency are visible to
+    /// routing. The API model id is still `grok-4.7`; effort is sent as
+    /// `reasoning.effort = "xhigh"`.
+    #[serde(alias = "Grok46Xhigh")]
+    Grok47Xhigh,
+    /// OpenAI flagship via Responses: 1,050,000 context, 128,000 max output,
+    /// medium reasoning by default. Premium arm, never a category preference.
+    Gpt6Astra,
 }
 
 impl ModelChoice {
@@ -131,7 +142,12 @@ impl ModelChoice {
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek-chat",
             Self::KimiK2 => "kimi-k2.5",
             Self::Glm52 => "glm-5.2",
-            Self::Grok45 => "grok-4.5",
+            Self::Gpt6Astra => "gpt-6-astra",
+            Self::Grok47 => "grok-4.7",
+            // Thompson Sampling sees each effort tier as a distinct arm, so
+            // the canonical name carries the suffix. `grok_api_model()`
+            // strips it back to the API model id for REST calls.
+            Self::Grok47Xhigh => "grok-4.7-xhigh",
         }
     }
 
@@ -161,7 +177,8 @@ impl ModelChoice {
             | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus | Self::ClaudeFable5 => "anthropic",
             Self::KimiK2 => "kimi",
-            Self::Grok45 => "grok",
+            Self::Gpt6Astra => "openai",
+            Self::Grok47 | Self::Grok47Xhigh => "grok",
         }
     }
 
@@ -189,9 +206,25 @@ impl ModelChoice {
             "deepseek-coder-v2-lite-instruct" => Some(Self::LocalDeepSeekCoder),
             "deepseek-chat" => Some(Self::DeepSeekV32),
             "kimi-k2.5" => Some(Self::KimiK2),
-            "grok-4.5" | "grok-4.5-latest" | "grok-build-latest" | "grok45" | "grok" => {
-                Some(Self::Grok45)
-            }
+            "gpt-6-astra" => Some(Self::Gpt6Astra),
+            "grok-4.7-xhigh"
+            | "grok-4.7-x-high"
+            | "grok47-xhigh"
+            | "grok-xhigh"
+            | "grok-4.6-xhigh"
+            | "grok-4.6-x-high"
+            | "grok46-xhigh" => Some(Self::Grok47Xhigh),
+            "grok-4.7"
+            | "grok-4.7-latest"
+            | "grok-build-latest"
+            | "grok47"
+            | "grok"
+            | "grok-4.6"
+            | "grok-4.6-latest"
+            | "grok46"
+            | "grok-4.5"
+            | "grok-4.5-latest"
+            | "grok45" => Some(Self::Grok47),
             "gemini-flash-latest" => Some(Self::GeminiFlash),
             "gemini-3.5-flash"
             | "gemini-3.5-flash-latest"
@@ -280,7 +313,9 @@ impl ModelChoice {
         Self::DeepSeekV32Speciale,
         Self::KimiK2,
         Self::Glm52,
-        Self::Grok45,
+        Self::Grok47,
+        Self::Grok47Xhigh,
+        Self::Gpt6Astra,
     ];
 
     pub fn is_anthropic(&self) -> bool {
@@ -351,7 +386,16 @@ impl ModelChoice {
 
     /// Cloud Grok (xAI) arm, reached via the xAI Responses API client.
     pub fn is_grok(&self) -> bool {
-        matches!(self, Self::Grok45)
+        matches!(self, Self::Grok47 | Self::Grok47Xhigh)
+    }
+
+    /// Underlying xAI API model id (strips the per-arm effort suffix).
+    /// Returns `None` for non-Grok variants.
+    pub fn grok_api_model(&self) -> Option<&'static str> {
+        match self {
+            Self::Grok47 | Self::Grok47Xhigh => Some("grok-4.7"),
+            _ => None,
+        }
     }
 
     pub fn provider(&self) -> &str {
@@ -381,7 +425,8 @@ impl ModelChoice {
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
             Self::KimiK2 => "kimi",
             Self::Glm52 => "zhipu",
-            Self::Grok45 => "xai",
+            Self::Gpt6Astra => "openai",
+            Self::Grok47 | Self::Grok47Xhigh => "xai",
         }
     }
 
@@ -419,7 +464,9 @@ impl ModelChoice {
             | Self::DeepSeekV32Speciale
             | Self::KimiK2
             | Self::Glm52
-            | Self::Grok45 => PlannerTier::Large,
+            | Self::Grok47
+            | Self::Grok47Xhigh
+            | Self::Gpt6Astra => PlannerTier::Large,
         }
     }
 
@@ -620,7 +667,9 @@ impl ModelChoice {
             Self::DeepSeekV32Speciale => "DeepSeek V3.2 Speciale",
             Self::KimiK2 => "Kimi K2.5",
             Self::Glm52 => "GLM-5.2",
-            Self::Grok45 => "Grok 4.5",
+            Self::Gpt6Astra => "GPT-6 Astra",
+            Self::Grok47 => "Grok 4.7",
+            Self::Grok47Xhigh => "Grok 4.7 (xhigh)",
         }
     }
 }
@@ -792,11 +841,23 @@ impl RoutingDecision {
                     ModelChoice::LocalMinistral8B,
                 ]
             }
-            // Grok 4.5 steps to mid-tier cloud then a local safety net.
-            (ModelChoice::Grok45, _) => {
+            // Grok 4.7 steps to mid-tier cloud then a local safety net.
+            (ModelChoice::Gpt6Astra, _) => vec![
+                ModelChoice::ClaudeSonnet,
+                ModelChoice::Gemini35Flash,
+                ModelChoice::LocalMinistral8B,
+            ],
+            (ModelChoice::Grok47, _) => {
                 vec![
                     ModelChoice::ClaudeSonnet,
                     ModelChoice::GeminiFlash,
+                    ModelChoice::LocalMinistral8B,
+                ]
+            }
+            (ModelChoice::Grok47Xhigh, _) => {
+                vec![
+                    ModelChoice::Grok47,
+                    ModelChoice::ClaudeSonnet,
                     ModelChoice::LocalMinistral8B,
                 ]
             }
@@ -808,6 +869,11 @@ impl RoutingDecision {
         let token_estimate = category.estimated_tokens();
 
         match model {
+            ModelChoice::Gpt6Astra => {
+                f64::from(token_estimate.output)
+                    .mul_add(50.0, f64::from(token_estimate.input) * 10.0)
+                    / 1_000_000.0
+            }
             ModelChoice::GeminiFlash => {
                 let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.30;
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 2.50;
@@ -896,13 +962,21 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 4.40;
                 input_cost + output_cost
             }
-            ModelChoice::Grok45 => {
-                // Grok 4.5 (xAI) list rates: $2.00/1M input, $6.00/1M output
-                // (docs.x.ai). Cached input is $0.50/1M when the API reports it;
-                // static estimates use the full input rate. Real spend should
-                // come from the response `usage` block once surfaced.
+            ModelChoice::Grok47 | ModelChoice::Grok47Xhigh => {
+                // Grok 4.7 (xAI) list rates: $2.00/1M input, $6.00/1M output
+                // below 200k prompt tokens (docs.x.ai). Cached input is $0.50/1M
+                // when the API reports it; static estimates use the full input
+                // rate. `xhigh` burns extra reasoning tokens billed as output,
+                // so that arm gets a thinking-multiplier prior — Thompson
+                // Sampling can see the cost difference. Real spend should come
+                // from the response `usage` block once surfaced.
+                let thinking_multiplier = match model {
+                    ModelChoice::Grok47Xhigh => 6.0,
+                    _ => 0.0,
+                };
+                let effective_output = (token_estimate.output as f64) * (1.0 + thinking_multiplier);
                 let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 2.00;
-                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 6.00;
+                let output_cost = (effective_output / 1_000_000.0) * 6.00;
                 input_cost + output_cost
             }
             // All local models are free
@@ -927,6 +1001,7 @@ impl RoutingDecision {
 
     fn estimate_time(model: &ModelChoice, _category: TaskCategory) -> Duration {
         match model {
+            ModelChoice::Gpt6Astra => Duration::from_secs(20),
             ModelChoice::GeminiFlash => Duration::from_secs(3),
             // Gemini 3.5 Flash sustains ~280 tok/s — faster than legacy Flash.
             // Latency scales roughly with the thinking budget; tiers are
@@ -962,8 +1037,10 @@ impl RoutingDecision {
             // GLM-5.2 reasons before answering; budget extra wall-clock on
             // hard tasks, in line with the other thinking cloud arms.
             ModelChoice::Glm52 => Duration::from_secs(8),
-            // Grok 4.5 is reasoning-capable; budget similar wall-clock.
-            ModelChoice::Grok45 => Duration::from_secs(7),
+            // Grok 4.7 is reasoning-capable; low-effort budget similar wall-clock.
+            ModelChoice::Grok47 => Duration::from_secs(7),
+            // xhigh is "maximum reasoning depth, correspondingly higher latency".
+            ModelChoice::Grok47Xhigh => Duration::from_secs(25),
         }
     }
 }
@@ -978,6 +1055,25 @@ pub struct TokenEstimate {
 #[allow(clippy::disallowed_methods)]
 #[allow(clippy::float_cmp)]
 mod tests {
+    #[test]
+    fn astra_catalog_round_trip_and_cost() {
+        let model = super::ModelChoice::Gpt6Astra;
+        assert_eq!(
+            super::ModelChoice::from_name(model.name()),
+            Some(model.clone())
+        );
+        assert_eq!(model.provider(), "openai");
+        assert!(model.is_cloud());
+        assert!(super::ModelChoice::ALL_CLOUD.contains(&model));
+        assert_eq!(model.capability(), super::PlannerTier::Large);
+        assert!(
+            super::RoutingDecision::estimate_cost(
+                &model,
+                crate::classifier::TaskCategory::CodeGeneration
+            ) > 0.0
+        );
+    }
+
     use super::*;
     use arkavo_budget::TokenCost;
     use arkavo_budget::config::{BudgetConfig, BudgetLimits};
@@ -1191,75 +1287,171 @@ mod tests {
     }
 
     #[test]
-    fn test_grok45_properties() {
-        let model = ModelChoice::Grok45;
-        assert_eq!(model.name(), "grok-4.5");
+    fn test_grok47_properties() {
+        let model = ModelChoice::Grok47;
+        assert_eq!(model.name(), "grok-4.7");
+        assert_eq!(model.grok_api_model(), Some("grok-4.7"));
         assert_eq!(model.provider(), "xai");
         assert_eq!(model.family(), "grok");
-        assert_eq!(model.display_name(), "Grok 4.5");
+        assert_eq!(model.display_name(), "Grok 4.7");
         assert!(model.is_grok());
         assert!(model.is_cloud());
         assert!(!model.is_local());
         assert!(!model.is_glm());
         assert_eq!(model.capability(), PlannerTier::Large);
-        assert!(ModelChoice::ALL_CLOUD.contains(&ModelChoice::Grok45));
+        assert!(ModelChoice::ALL_CLOUD.contains(&ModelChoice::Grok47));
+        assert!(ModelChoice::ALL_CLOUD.contains(&ModelChoice::Grok47Xhigh));
     }
 
     #[test]
-    fn test_grok45_name_resolution() {
+    fn test_grok47_xhigh_properties() {
+        let model = ModelChoice::Grok47Xhigh;
+        assert_eq!(model.name(), "grok-4.7-xhigh");
+        assert_eq!(model.grok_api_model(), Some("grok-4.7"));
+        assert_eq!(model.display_name(), "Grok 4.7 (xhigh)");
+        assert!(model.is_grok());
+        assert_eq!(model.provider(), "xai");
+        assert_eq!(model.capability(), PlannerTier::Large);
+    }
+
+    #[test]
+    fn test_grok47_name_resolution() {
         for alias in [
+            "grok-4.7",
+            "grok-4.7-latest",
+            "grok-build-latest",
+            "grok47",
+            "grok",
+            "GROK-4.7",
+            // Superseded generations migrate to the current flagship arm.
+            "grok-4.6",
+            "grok-4.6-latest",
+            "grok46",
+            "GROK-4.6",
             "grok-4.5",
             "grok-4.5-latest",
-            "grok-build-latest",
             "grok45",
-            "grok",
-            "GROK-4.5",
         ] {
             assert_eq!(
                 ModelChoice::from_name(alias),
-                Some(ModelChoice::Grok45),
-                "alias {alias} should resolve to Grok45"
+                Some(ModelChoice::Grok47),
+                "alias {alias} should resolve to Grok47"
             );
         }
         assert_eq!(
-            ModelChoice::from_name(ModelChoice::Grok45.name()),
-            Some(ModelChoice::Grok45),
+            ModelChoice::from_name(ModelChoice::Grok47.name()),
+            Some(ModelChoice::Grok47),
             "round-trip via primary name"
+        );
+        for alias in [
+            "grok-4.7-xhigh",
+            "grok-4.7-x-high",
+            "grok47-xhigh",
+            "grok-xhigh",
+            // Superseded xhigh aliases migrate to the current xhigh arm.
+            "grok-4.6-xhigh",
+            "grok-4.6-x-high",
+            "grok46-xhigh",
+        ] {
+            assert_eq!(
+                ModelChoice::from_name(alias),
+                Some(ModelChoice::Grok47Xhigh),
+                "alias {alias} should resolve to Grok47Xhigh"
+            );
+        }
+        assert_eq!(
+            ModelChoice::from_name(ModelChoice::Grok47Xhigh.name()),
+            Some(ModelChoice::Grok47Xhigh),
+            "round-trip via xhigh name"
         );
     }
 
     #[test]
-    fn test_grok45_cost_math_matches_published_rate() {
+    fn test_grok_serde_aliases_load_superseded_variants() {
+        for (persisted, expected) in [
+            ("\"Grok45\"", ModelChoice::Grok47),
+            ("\"Grok46\"", ModelChoice::Grok47),
+            ("\"Grok46Xhigh\"", ModelChoice::Grok47Xhigh),
+            ("\"Grok47\"", ModelChoice::Grok47),
+            ("\"Grok47Xhigh\"", ModelChoice::Grok47Xhigh),
+        ] {
+            let decoded: ModelChoice = serde_json::from_str(persisted)
+                .unwrap_or_else(|e| panic!("{persisted} should deserialize: {e}"));
+            assert_eq!(
+                decoded, expected,
+                "persisted trace {persisted} should load as {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_grok45_serde_alias_reads_as_grok47() {
+        let model: ModelChoice = serde_json::from_str("\"Grok45\"").expect("Grok45 alias");
+        assert_eq!(model, ModelChoice::Grok47);
+    }
+
+    #[test]
+    fn test_grok47_cost_math_matches_published_rate() {
         let cost =
-            RoutingDecision::estimate_cost(&ModelChoice::Grok45, TaskCategory::CodeGeneration);
+            RoutingDecision::estimate_cost(&ModelChoice::Grok47, TaskCategory::CodeGeneration);
         let input_cost = 800.0 / 1_000_000.0 * 2.00;
         let output_cost = 3000.0 / 1_000_000.0 * 6.00;
         let expected = input_cost + output_cost;
         assert!(
             (cost - expected).abs() < 1e-9,
-            "Grok 4.5 cost {cost} must equal {expected} at the published $2.00/$6.00 rate"
+            "Grok 4.7 cost {cost} must equal {expected} at the published $2.00/$6.00 rate"
         );
     }
 
     #[test]
-    fn test_grok45_fallback_chain_has_local_safety_net() {
+    fn test_grok47_xhigh_cost_includes_thinking_multiplier() {
+        let base =
+            RoutingDecision::estimate_cost(&ModelChoice::Grok47, TaskCategory::CodeGeneration);
+        let xhigh =
+            RoutingDecision::estimate_cost(&ModelChoice::Grok47Xhigh, TaskCategory::CodeGeneration);
+        assert!(
+            xhigh > base,
+            "xhigh prior must exceed the low-effort arm ({xhigh} vs {base})"
+        );
+    }
+
+    #[test]
+    fn test_grok47_fallback_chain_has_local_safety_net() {
         let decision = RoutingDecision::new(
-            ModelChoice::Grok45,
+            ModelChoice::Grok47,
             TaskCategory::CodeGeneration,
             0.9,
             "Test".to_string(),
         );
         let chain = &decision.fallback_chain;
-        assert!(!chain.is_empty(), "Grok 4.5 must have a fallback chain");
+        assert!(!chain.is_empty(), "Grok 4.7 must have a fallback chain");
         assert!(
             chain.last().is_some_and(ModelChoice::is_local),
-            "Grok 4.5 fallback chain must end on a local model: {chain:?}"
+            "Grok 4.7 fallback chain must end on a local model: {chain:?}"
         );
         assert_eq!(
             chain,
             &vec![
                 ModelChoice::ClaudeSonnet,
                 ModelChoice::GeminiFlash,
+                ModelChoice::LocalMinistral8B,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_grok47_xhigh_fallback_steps_down_to_base_arm() {
+        let decision = RoutingDecision::new(
+            ModelChoice::Grok47Xhigh,
+            TaskCategory::CodeGeneration,
+            0.9,
+            "Test".to_string(),
+        );
+        assert_eq!(
+            decision.fallback_chain,
+            vec![
+                ModelChoice::Grok47,
+                ModelChoice::ClaudeSonnet,
                 ModelChoice::LocalMinistral8B,
             ]
         );

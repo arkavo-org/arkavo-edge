@@ -261,7 +261,6 @@ impl Drop for MetricsSubscriptionService {
 mod tests {
     use super::*;
     use std::time::Duration;
-    use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_metrics_subscription_server() {
@@ -322,14 +321,15 @@ mod tests {
         collector.record_session_created();
         collector.record_message_sent(200);
 
-        // Wait briefly for sampling
-        sleep(Duration::from_millis(1100)).await;
-
-        // Should receive updates
-        let result = tokio::time::timeout(Duration::from_secs(1), receiver.recv()).await;
-        if let Ok(Ok(snapshot)) = result {
-            assert!(snapshot.validate_size().is_ok());
-        }
+        // Should receive updates. The sampler ticks every second; waiting on
+        // the receiver with a deadline well past that, instead of sleeping one
+        // interval and then accepting a miss, makes delivery itself the
+        // assertion without depending on how promptly the runner schedules it.
+        let snapshot = tokio::time::timeout(Duration::from_secs(5), receiver.recv())
+            .await
+            .expect("service should broadcast a snapshot within the deadline")
+            .expect("metrics channel should stay open while the service runs");
+        assert!(snapshot.validate_size().is_ok());
 
         // Stop service
         service.stop().await;

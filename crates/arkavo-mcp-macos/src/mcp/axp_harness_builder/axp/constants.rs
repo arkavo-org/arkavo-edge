@@ -16,25 +16,25 @@ Apple's beta releases often have symbol drift between the SDK and runtime. The X
 ### Solution Strategy
 1. **Minimal Mode**: Use templates without XCTest dependency
 2. **Fallback Compilation**: Target iOS 18.0 but use iOS 26 SDK
-3. **Runtime Detection**: Check for iOS 26 beta and switch to IDB/AppleScript
+3. **Runtime Detection**: Check for iOS 26 beta and switch to simctl/AppleScript
 
 ### Implementation
 The harness builder automatically:
 1. Detects iOS 26 beta from device runtime
 2. Uses minimal templates (ArkavoAXBridgeMinimal.swift)
 3. Compiles without XCTest framework
-4. Falls back to IDB for actual touch injection
+4. Falls back to simctl/AppleScript for actual touch injection
 
 ### Performance Impact
 - AXP taps: <30ms (not available on iOS 26 beta)
-- IDB taps: ~100ms (fallback for iOS 26 beta)
+- simctl taps: ~100ms (fallback for iOS 26 beta)
 - AppleScript: ~200ms (last resort)
 
 ### Recommendations
 1. Use iOS 18 simulators for testing when possible
 2. Wait for stable iOS 26 release
 3. Install matching Xcode 16 beta with iOS 26 SDK
-4. Use IDB (idb_companion) for iOS 26 beta automation
+4. Use simctl, AXP, or AppleScript for iOS 26 beta automation
 "#;
 
 /// Error codes for AXP harness operations

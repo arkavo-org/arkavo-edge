@@ -169,11 +169,7 @@ impl Provider for OllamaClient {
         _max_tokens: Option<usize>,
     ) -> Result<String> {
         let model = self.select_model(&messages).await?;
-        let request = ChatRequest {
-            model,
-            messages,
-            stream: false,
-        };
+        let request = ChatRequest::new(model, messages, false);
 
         debug!("Sending chat request to Ollama");
         let response = self
@@ -200,11 +196,7 @@ impl Provider for OllamaClient {
         messages: Vec<Message>,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
         let model = self.select_model(&messages).await?;
-        let request = ChatRequest {
-            model,
-            messages,
-            stream: true,
-        };
+        let request = ChatRequest::new(model, messages, true);
 
         debug!("Sending streaming chat request to Ollama");
         let response = self
@@ -240,9 +232,8 @@ impl Provider for OllamaClient {
                                 Ok(resp) => {
                                     responses.push(Ok(StreamResponse {
                                         content: resp.message.content,
-                                        reasoning_content: None,
                                         done: resp.done,
-                                        inference_timing: None,
+                                        ..Default::default()
                                     }));
                                 }
                                 Err(e) => {
@@ -258,9 +249,8 @@ impl Provider for OllamaClient {
                                     {
                                         responses.push(Ok(StreamResponse {
                                             content: stream_resp.response.unwrap_or_default(),
-                                            reasoning_content: None,
                                             done: stream_resp.done,
-                                            inference_timing: None,
+                                            ..Default::default()
                                         }));
                                     } else {
                                         warn!("Failed to parse response: {line}");

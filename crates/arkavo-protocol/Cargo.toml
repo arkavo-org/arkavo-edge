@@ -39,6 +39,7 @@ tower = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
+regex = { workspace = true, optional = true }
 serde_json = { workspace = true }
 
 # JWT authentication
@@ -123,14 +124,21 @@ stub_handlers = []
 mdns = ["if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 kas = ["dep:arkavo-tdf"]  # KAS A2A capability for TDF key operations
+# Taint labels and the classification-inference seam (SEQ-001, SEQ-002).
+# Off until the sequence-integrity work reaches GA.
+taint = ["dep:regex"]
 
 [dev-dependencies]
+
 # For integration tests
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 # For examples
 tracing-subscriber = { workspace = true }
 # For tests
 tempfile = { workspace = true }
+# Runtime ES256 key generation for delegation-JWT tests — test key material
+# must not be committed to the repo.
+p256 = { version = "0.13", features = ["pem"] }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-server = { path = "../arkavo-server" }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
@@ -143,10 +151,18 @@ arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 # For benchmarks
 criterion = { workspace = true }
+# Self-signed TLS listener for cert-verification regression tests
+tokio-rustls = "0.26"
+rustls = { workspace = true, features = ["std", "tls12"] }
 
 [[bench]]
 name = "a2a_latency"
 harness = false
+
+[[bench]]
+name = "taint_tracker"
+harness = false
+required-features = ["taint"]
 
 [[bin]]
 name = "export-schema"

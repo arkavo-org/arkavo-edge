@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sntpc::NtpContext;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{debug, warn};
@@ -194,18 +194,29 @@ impl SyncAgentTimeTool {
 
         debug!("Querying NTP server: {}", socket_addr);
 
-        let socket = UdpSocket::bind("0.0.0.0:0")
+        // A tokio socket rather than a std one with a read timeout: the
+        // blocking receive held the runtime thread for up to the whole
+        // timeout, and a receive with SO_RCVTIMEO is never restarted after a
+        // signal, so any child process exiting in this process could fail
+        // the query with a spurious network error.
+        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+            .await
             .map_err(|e| crate::ToolError::Other(format!("Failed to bind UDP socket: {}", e)))?;
-
-        socket
-            .set_read_timeout(Some(Duration::from_secs(DEFAULT_TIMEOUT_SECS)))
-            .map_err(|e| crate::ToolError::Other(format!("Failed to set timeout: {}", e)))?;
 
         let ntp_context = NtpContext::new(sntpc::StdTimestampGen::default());
 
-        let result = sntpc::get_time(socket_addr, &socket, ntp_context)
-            .await
-            .map_err(|e| crate::ToolError::Other(format!("NTP query failed: {:?}", e)))?;
+        let result = tokio::time::timeout(
+            Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            sntpc::get_time(socket_addr, &socket, ntp_context),
+        )
+        .await
+        .map_err(|_| {
+            crate::ToolError::Other(format!(
+                "NTP query timed out after {}s",
+                DEFAULT_TIMEOUT_SECS
+            ))
+        })?
+        .map_err(|e| crate::ToolError::Other(format!("NTP query failed: {:?}", e)))?;
 
         let offset_secs = result.offset() as f64 / 1_000_000_000.0;
         let rtt_ms = result.roundtrip() as f64 / 1_000_000.0;

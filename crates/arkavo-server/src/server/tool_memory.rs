@@ -16,6 +16,10 @@ pub struct ToolMemory {
     completed_setup_tools: HashSet<String>,
     /// Current context utilization percentage (updated per conductor call, not peak)
     context_utilization_pct: f64,
+    /// Every result ever recorded, not just the ones still in the window.
+    /// `entries` is a capped ring, so its length stops growing and cannot tell
+    /// a caller whether anything was recorded since a given point.
+    total_recorded: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +45,7 @@ impl ToolMemory {
             consecutive_same_type: 0,
             completed_setup_tools: HashSet::new(),
             context_utilization_pct: 0.0,
+            total_recorded: 0,
         }
     }
 
@@ -104,6 +109,7 @@ impl ToolMemory {
         if self.entries.len() >= self.max_entries {
             self.entries.pop_front();
         }
+        self.total_recorded += 1;
         self.entries.push_back(ToolMemoryEntry {
             tool_name,
             action_type,
@@ -124,6 +130,13 @@ impl ToolMemory {
             || lower.contains("init")
             || lower.contains("connect")
             || lower.contains("setup")
+    }
+
+    /// Count of results recorded over this memory's whole life. Compare two
+    /// readings to learn whether tool activity happened in between; `clear()`
+    /// deliberately leaves it alone so the comparison survives a context reset.
+    pub fn total_recorded(&self) -> u64 {
+        self.total_recorded
     }
 
     pub fn entry_count(&self) -> usize {
@@ -220,7 +233,7 @@ impl ToolMemory {
             if entry.is_observe {
                 // Include the full observe result (truncated to fit context)
                 if let Some(ref obs) = self.last_observe_full {
-                    let truncated = if obs.len() > 3000 { &obs[..3000] } else { obs };
+                    let truncated = arkavo_llm::char_boundary_prefix(obs, 3000);
                     let _ = writeln!(out, "[Observed]: {truncated}");
                 }
             } else if !entry.result_summary.is_empty() {
@@ -360,6 +373,18 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
     use serde_json::json;
+
+    /// An observation is tool output and can end anywhere in a UTF-8 scalar.
+    #[test]
+    fn observe_context_is_safe_for_multibyte_results() {
+        let mut memory = ToolMemory::new(4);
+        memory.add("game:observe".to_string(), &json!({}), &"界".repeat(1200));
+        let context = memory
+            .format_recent_for_context()
+            .expect("an entry was added");
+        // 3000 bytes hold 1000 whole three-byte scalars.
+        assert_eq!(context.matches('界').count(), 1000);
+    }
 
     #[spec("SRV-003")]
     #[test]
@@ -551,6 +576,25 @@ mod tests {
         );
 
         assert!(mem.action_variety_warning().is_empty());
+    }
+
+    /// The agent loop compares two readings to decide whether a cycle ran any
+    /// tools, so the count must keep rising after the window fills and must
+    /// survive a context reset.
+    #[test]
+    fn total_recorded_counts_past_the_window_and_a_clear() {
+        let mut mem = ToolMemory::new(2);
+        let args = json!({"Action": {"Type": "Build"}});
+        assert_eq!(mem.total_recorded(), 0);
+        for _ in 0..5 {
+            mem.add("tool_a".into(), &args, "ok");
+        }
+        assert_eq!(mem.entry_count(), 2, "window stays capped");
+        assert_eq!(mem.total_recorded(), 5);
+        mem.clear();
+        assert_eq!(mem.total_recorded(), 5, "a reset is not new activity");
+        mem.add("tool_a".into(), &args, "ok");
+        assert_eq!(mem.total_recorded(), 6);
     }
 
     #[spec("SRV-003")]

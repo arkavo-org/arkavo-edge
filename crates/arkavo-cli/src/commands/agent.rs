@@ -1,4 +1,5 @@
 use arkavo_config_encryption::AgentCredential;
+#[cfg(feature = "mdns")]
 use arkavo_protocol::get_service_ip;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -284,8 +285,10 @@ fn run_agent_with_options(
     }
 }
 
-// Agent configuration parsing
-#[derive(Debug, Clone)]
+// Runtime agent identity. Built from a SwarmKit kit at run time (`agent_kit`); the
+// AGENTS.md migration parser (`kit::agents_md`) produces the same shape so it can map
+// every legacy field onto the kit.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentConfig {
     pub name: String,
     pub purpose: String, // Used as system prompt for LLM
@@ -303,7 +306,27 @@ pub struct AgentConfig {
     pub swarm: Option<String>,            // Domain/swarm identifier for learning isolation
 }
 
-#[derive(Debug, Clone)]
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            purpose: String::new(),
+            model: String::new(),
+            mode: arkavo_protocol::agent_config::AgentMode::default(),
+            listen: "0.0.0.0:0".to_string(), // Dynamic port
+            mdns_enabled: true,              // Zero-config discovery
+            mcp_servers: Vec::new(),
+            api_keys: std::collections::HashMap::new(),
+            quiet: true,
+            peers: Vec::new(),
+            a2a_enabled: true,
+            a2a_service_type: None,
+            swarm: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpServerConfig {
     pub name: String,
     pub command: Option<String>,
@@ -450,6 +473,18 @@ pub async fn start_agent_server(
 
     // Set API keys in the server
     server.set_api_keys(config.api_keys.clone()).await;
+
+    // The router is on the bus by now, and its feasible arm set is fixed when it
+    // is built (`set_api_keys` above only records metadata), so whether cloud
+    // augmentation is available at all is already answerable. Ask once, here,
+    // while nothing else is running: the conductor issues routing calls this
+    // command does not, and it has no second chance to reach the operator.
+    // Cloned out of the guard first — the prompt below awaits an answer and the
+    // read lock must not be held while it waits.
+    let startup_router = learning_bus.router().read().await.clone();
+    if let Some(router) = startup_router {
+        confirm_cloud_startup(&router).await;
+    }
 
     // Initialize MCP connections from agent config only.
     // Built-in tools are not registered - agents use only their configured MCP servers.
@@ -1314,6 +1349,7 @@ impl arkavo_mcp::McpClient for McpConnectionWrapper {
 }
 
 /// Determine agent capabilities based on name and purpose
+#[cfg(feature = "mdns")]
 fn get_agent_capabilities(name: &str, purpose: &str) -> Vec<String> {
     let mut capabilities = Vec::new();
 
@@ -1370,9 +1406,123 @@ fn get_agent_capabilities(name: &str, purpose: &str) -> Vec<String> {
     capabilities
 }
 
+/// Whether startup should ask the operator to authorize cloud inference.
+///
+/// The harness requires local inference, so the resolved execution arm is
+/// always local and a cloud arm can only ever augment it. Under the default
+/// `AskBeforeCloud` policy the router refuses that augmentation until someone
+/// says yes, and it has no channel of its own to ask. Asking once here turns
+/// the refusal into a decision. An install with no cloud credentials has
+/// nothing to approve, and a non-interactive run keeps the error path — an
+/// unattended agent must not spend against a prompt nobody answered.
+fn cloud_startup_confirmation_needed(
+    policy: arkavo_budget::CloudPolicy,
+    cloud_available: bool,
+    interactive: bool,
+    already_approved: bool,
+) -> bool {
+    matches!(policy, arkavo_budget::CloudPolicy::AskBeforeCloud)
+        && cloud_available
+        && interactive
+        && !already_approved
+}
+
+/// Prompt once, before the server accepts work, and record the answer for the
+/// host's own routing calls on a yes.
+///
+/// The approval is keyed to the host, not to a session: `arkavo agent` issues
+/// no routing calls itself — the conductor does, many per task, starting with
+/// intent decomposition — and those carry no session id. It therefore never
+/// authorizes a chat session, which always names itself when it routes, so a
+/// remote client of this agent is still asked its own question.
+async fn confirm_cloud_startup(router: &arkavo_router::Router) {
+    use crate::cloud_consent::TtyCloudConsent;
+    use arkavo_router::{CloudConsentPrompt, CloudConsentRequest};
+
+    if !cloud_startup_confirmation_needed(
+        router.cloud_policy(),
+        router.cloud_augmentation_available(),
+        TtyCloudConsent::is_interactive(),
+        router.cloud_approved(None),
+    ) {
+        return;
+    }
+
+    if TtyCloudConsent::new()
+        .ask(CloudConsentRequest::Session)
+        .await
+    {
+        router.approve_cloud_for_host();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_budget::CloudPolicy;
+    use arkavo_test_macros::spec;
+
+    #[test]
+    #[spec("ASTRA-004")]
+    fn an_interactive_startup_with_cloud_arms_asks_once() {
+        assert!(cloud_startup_confirmation_needed(
+            CloudPolicy::AskBeforeCloud,
+            true,
+            true,
+            false
+        ));
+    }
+
+    /// A standing approval on the router answers the question, so a resumed or
+    /// re-entered startup path does not ask again.
+    #[test]
+    #[spec("ASTRA-004")]
+    fn a_standing_approval_suppresses_the_prompt() {
+        assert!(!cloud_startup_confirmation_needed(
+            CloudPolicy::AskBeforeCloud,
+            true,
+            true,
+            true
+        ));
+    }
+
+    /// The harness always resolves to a local arm, so the question is only
+    /// worth asking when a cloud arm is configured to augment it.
+    #[test]
+    #[spec("ASTRA-004")]
+    fn an_install_with_no_cloud_arm_is_never_prompted() {
+        assert!(!cloud_startup_confirmation_needed(
+            CloudPolicy::AskBeforeCloud,
+            false,
+            true,
+            false
+        ));
+    }
+
+    /// Regression: an unattended run must reach the router's policy error
+    /// rather than block on a console nobody is watching.
+    #[test]
+    #[spec("ASTRA-004")]
+    fn non_tty_keeps_the_error_path() {
+        assert!(!cloud_startup_confirmation_needed(
+            CloudPolicy::AskBeforeCloud,
+            true,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    #[spec("ASTRA-004")]
+    fn other_policies_do_not_prompt() {
+        // LocalOnly refuses cloud outright and CloudWithinCap already authorizes
+        // it; neither is a question for the operator.
+        for policy in [CloudPolicy::LocalOnly, CloudPolicy::CloudWithinCap] {
+            assert!(!cloud_startup_confirmation_needed(
+                policy, true, true, false
+            ));
+        }
+    }
 
     // An unrecognized option must error, not silently boot an agent (regression: the bare
     // `arkavo <flag>` route dispatches here, and unknown dash args were previously ignored).

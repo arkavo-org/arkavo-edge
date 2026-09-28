@@ -205,6 +205,7 @@ pub fn tokenize_with_images(
 
     let text_input = ffi::mtmd_input_text {
         text: text_cstring.as_ptr(),
+        text_len: text_cstring.as_bytes().len(),
         add_special: true,
         parse_special: true,
     };

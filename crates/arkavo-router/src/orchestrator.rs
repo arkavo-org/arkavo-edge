@@ -7,7 +7,7 @@ use crate::{Error, Result, Router};
 use arkavo_budget::TokenCost;
 use arkavo_budget::cost::TokenUsage;
 use arkavo_budget::provider_costs::ProviderPricing;
-use arkavo_budget::tracker::{ArchitectCostMetadata, BudgetTracker, SpendingRecord};
+use arkavo_budget::tracker::{BudgetTracker, SpendingRecord};
 use arkavo_llm::Message;
 use arkavo_mcp_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
@@ -115,6 +115,9 @@ pub struct CostOrchestrator {
     /// model's built-in static estimate. Populated from the SwarmKit manifest
     /// at authoring time — never fetched from a vendor endpoint at runtime.
     pricing: ProviderPricing,
+    /// Substitutes provider construction for the architect phases. See
+    /// [`crate::Router::with_provider_factory`].
+    provider_factory: Option<Arc<dyn crate::ProviderFactory>>,
 }
 
 impl CostOrchestrator {
@@ -141,7 +144,23 @@ impl CostOrchestrator {
             budget_threshold: 0.80,
             cloud_policy: arkavo_budget::CloudPolicy::default(),
             pricing,
+            provider_factory: None,
         })
+    }
+
+    /// Route model selection through an explicitly configured selector rather
+    /// than the ambient environment.
+    #[must_use]
+    pub fn with_selector(mut self, selector: ModelSelector) -> Self {
+        self.selector = Arc::new(selector);
+        self
+    }
+
+    /// Substitute provider construction for the architect phases.
+    #[must_use]
+    pub fn with_provider_factory(mut self, factory: Arc<dyn crate::ProviderFactory>) -> Self {
+        self.provider_factory = Some(factory);
+        self
     }
 
     pub async fn route_with_budget(&self, task: &str, agent_id: &str) -> Result<RoutingDecision> {
@@ -202,7 +221,9 @@ impl CostOrchestrator {
         // budget-store error — fails closed: the route is denied, never
         // authorized. Engine-time actual usage reconciles this reservation
         // against the real spend (see `record_actual_spending`; issue #587).
-        self.budget_tracker
+        let budget_start = std::time::Instant::now();
+        let reservation = self
+            .budget_tracker
             .try_spend(
                 agent_id.to_string(),
                 decision.recommended_model.provider().to_string(),
@@ -210,19 +231,22 @@ impl CostOrchestrator {
                 TokenUsage::new(estimated.input, estimated.output),
                 estimated_token_cost,
             )
-            .await
-            .map_err(|e| {
-                // Fail closed on ANY reservation failure, but don't discard the
-                // cause: an over-limit denial and a budget-store/persistence
-                // error both deny here yet mean very different things to an
-                // operator. Log and surface the underlying error instead of
-                // collapsing every failure into a bare "cannot afford".
-                tracing::warn!(error = %e, "budget reservation denied for agent {agent_id}");
-                Error::BudgetExceeded(format!(
-                    "Agent {agent_id} reservation denied for estimated cost ${:.4}: {e}",
-                    decision.estimated_cost_usd
-                ))
-            })?;
+            .await;
+        arkavo_observability::subsystem_timing::global_timing()
+            .dispatch_gate
+            .record(budget_start.elapsed().as_millis() as u64);
+        reservation.map_err(|e| {
+            // Fail closed on ANY reservation failure, but don't discard the
+            // cause: an over-limit denial and a budget-store/persistence
+            // error both deny here yet mean very different things to an
+            // operator. Log and surface the underlying error instead of
+            // collapsing every failure into a bare "cannot afford".
+            tracing::warn!(error = %e, "budget reservation denied for agent {agent_id}");
+            Error::BudgetExceeded(format!(
+                "Agent {agent_id} reservation denied for estimated cost ${:.4}: {e}",
+                decision.estimated_cost_usd
+            ))
+        })?;
 
         let mut routing_metrics = self.routing_metrics.write().await;
         routing_metrics.record_routing(&classification, &decision);
@@ -353,24 +377,12 @@ impl CostOrchestrator {
         Ok(0.0)
     }
 
-    /// Record engine-time actual spending for a routed call.
+    /// Append an engine-time spending record for a routed call.
     ///
-    /// `route_with_budget` now *reserves* the estimated cost up front (see the
-    /// `try_spend` reservation there), so this must reconcile the reservation
-    /// against the real usage — record the delta (`actual - estimated`), not a
-    /// fresh add — or the call is billed twice. Wiring the live engine caller
-    /// that performs that reconciliation is tracked by issue #587; until then
-    /// this entry point has no production caller.
-    ///
-    /// Reconciliation is required because the reservation is **not** refunded
-    /// on its own: a route whose downstream call fails, costs less than
-    /// estimated, or never runs leaves the estimate reserved. The
-    /// `route_with_budget` path (and `BudgetMiddleware`'s own actual-recording)
-    /// are currently dormant — `CostOrchestrator` is constructed only in tests
-    /// and `route_with_architect` has no production caller — so this cannot
-    /// over-count or double-count today. Before wiring the path live (#587),
-    /// the reconcile here must replace, not stack on, any middleware
-    /// actual-recording for the same call.
+    /// `route_with_budget` *reserves* the estimated cost up front (the
+    /// `try_spend` reservation there), so this adds to that reservation rather
+    /// than replacing it. Nothing reconciles the two today, which is why no
+    /// production path calls both for the same call.
     pub async fn record_actual_spending(
         &self,
         agent_id: String,
@@ -450,75 +462,25 @@ impl CostOrchestrator {
             ));
         }
 
-        // Create architect plan
-        let planner = ArchitectPlanner::new();
+        // One router clone bills both phases against the shared tracker under
+        // the calling agent's identity. Planning and every subtask attempt
+        // record their own measured usage through `CallBudget`, so this method
+        // must not re-record their cost afterwards — that would double-charge
+        // the agent for the same calls.
+        let router = Arc::new(self.create_router_for_executor(agent_id).await?);
+        let planner = ArchitectPlanner::new()
+            .with_availability(self.selector.availability.clone())
+            .with_router(router.clone());
         let plan = planner
             .create_plan(task, complexity.clone())
             .await
             .map_err(|e| Error::ArchitectError(e.to_string()))?;
 
-        // Record planning cost (estimate ~10% of total architect cost for planning)
-        let planning_cost_usd = plan.architect_estimate_usd * 0.1;
-        let planning_cost_metadata = ArchitectCostMetadata {
-            plan_id: plan.id,
-            phase: "planning".to_string(),
-            subtask_index: None,
-            subtask_id: None,
-            opus_only_estimate: plan.opus_only_estimate_usd,
-        };
-
-        let planning_cost = TokenCost::from_dollars(planning_cost_usd);
-        let input_tokens = complexity.estimated_output_tokens;
-        let output_tokens = complexity.estimated_output_tokens / 2;
-        let _ = self
-            .budget_tracker
-            .record_architect_spending(
-                agent_id.to_string(),
-                "anthropic".to_string(),
-                "claude-opus".to_string(),
-                arkavo_budget::cost::TokenUsage::new(input_tokens, output_tokens),
-                planning_cost,
-                planning_cost_metadata,
-            )
-            .await;
-
-        // Execute the plan
-        let router = self.create_router_for_executor().await?;
-        let executor = ArchitectExecutor::new(Arc::new(router));
+        let executor = ArchitectExecutor::new(router);
         let result = executor
             .execute(&plan, messages, tool_registry)
             .await
             .map_err(|e| Error::ArchitectError(e.to_string()))?;
-
-        // Record execution costs for each subtask
-        for subtask_result in &result.subtask_results {
-            let opus_per_subtask = if !plan.subtasks.is_empty() {
-                plan.opus_only_estimate_usd / plan.subtasks.len() as f64
-            } else {
-                0.0
-            };
-
-            let exec_metadata = ArchitectCostMetadata {
-                plan_id: plan.id,
-                phase: "execution".to_string(),
-                subtask_index: Some(subtask_result.index),
-                subtask_id: Some(subtask_result.subtask_id),
-                opus_only_estimate: opus_per_subtask,
-            };
-
-            let subtask_cost = TokenCost::from_dollars(subtask_result.actual_cost_usd);
-            let _ = self
-                .budget_tracker
-                .record_architect_spending(
-                    agent_id.to_string(),
-                    subtask_result.model_used.provider().to_string(),
-                    subtask_result.model_used.name().to_string(),
-                    arkavo_budget::cost::TokenUsage::new(0, 0),
-                    subtask_cost,
-                    exec_metadata,
-                )
-                .await;
-        }
 
         // Update metrics
         let mut metrics = self.orchestrator_metrics.write().await;
@@ -544,16 +506,29 @@ impl CostOrchestrator {
         Ok(ArchitectRoutingResult::Architect(result))
     }
 
-    /// Create a minimal router for the executor
-    async fn create_router_for_executor(&self) -> Result<Router> {
-        Router::new().await
-    }
-
-    /// Get architect savings summary from budget tracker
-    pub async fn get_architect_savings_summary(
-        &self,
-    ) -> arkavo_budget::tracker::ArchitectUsageSummary {
-        self.budget_tracker.get_architect_summary().await
+    /// Router for the architect phases: it carries the shared budget tracker
+    /// and the calling agent's ledger identity so planning and subtask spend
+    /// land on that agent's budget with the model that actually served them.
+    async fn create_router_for_executor(&self, agent_id: &str) -> Result<Router> {
+        let mut router = Router::new()
+            .await?
+            .with_cloud_policy(self.cloud_policy)
+            .with_budget_tracker(self.budget_tracker.clone())
+            .with_budget_agent(agent_id);
+        if let Some(factory) = &self.provider_factory {
+            router = router.with_provider_factory(factory.clone());
+        }
+        // Carry the orchestrator's own selector onto the executor router, so
+        // an injected selector — e.g. a test fixing local weights instead of
+        // consulting the host's HuggingFace cache — actually reaches the
+        // planner instead of being discarded in favor of a freshly built
+        // default selector. A full snapshot, not `ModelSelector::with_parts`:
+        // the latter is a test-only seam that hardcodes `gpu_available: true`
+        // and an unconstrained memory budget, which in this production path
+        // would silently override the orchestrator's real GPU/memory state
+        // and could pick 8B+ models on a CPU-only host.
+        router = router.with_selector(self.selector.snapshot()).await;
+        Ok(router)
     }
 }
 
@@ -785,5 +760,138 @@ mod tests {
 
         assert!(decision.current_usage_percent >= 0.0);
         assert!(!decision.reasoning.is_empty());
+    }
+
+    /// The orchestrator used to record the planning cost as a hardcoded
+    /// `anthropic`/`claude-opus` charge and then re-record every subtask, on
+    /// top of whatever the phases themselves spent. Planning and execution now
+    /// bill once each, through `CallBudget`, under the calling agent and the
+    /// model that actually served the call.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn architect_phases_bill_once_each_with_real_attribution() {
+        use crate::test_support::{CountingProvider, only};
+
+        const COMPLEX_TASK: &str = "Refactor the authentication system. First, update the user \
+             model to support OAuth. Then, create new API endpoints for token refresh. After \
+             that, update the frontend components to handle the new auth flow. Finally, write \
+             comprehensive tests for all the changes.";
+        const TWO_STEP_PLAN: &str = r#"{"subtasks":[
+            {"description":"first step","category":"general","dependencies":[]},
+            {"description":"second step","category":"general","dependencies":[]}]}"#;
+
+        let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+        let provider = CountingProvider::new(TWO_STEP_PLAN);
+        let orchestrator = CostOrchestrator::new(tracker.clone())
+            .await
+            .unwrap()
+            .with_cloud_policy(arkavo_budget::CloudPolicy::CloudWithinCap)
+            .with_selector(ModelSelector::with_availability(only("openai"), false))
+            .with_provider_factory(provider.factory());
+
+        let result = orchestrator
+            .route_with_architect(COMPLEX_TASK, "github-orchestrator", Vec::new(), None)
+            .await
+            .unwrap();
+        assert!(result.is_architect());
+        assert_eq!(
+            provider.calls(),
+            3,
+            "one planning call plus one per subtask"
+        );
+
+        let history = tracker.get_spending_history(20).await;
+        assert_eq!(
+            history.len(),
+            3,
+            "every real call is charged exactly once: {history:?}"
+        );
+        assert!(
+            history
+                .iter()
+                .all(|entry| entry.agent_id == "github-orchestrator"),
+            "spend stays on the calling agent's budget"
+        );
+        assert!(
+            history
+                .iter()
+                .all(|entry| entry.model == "gpt-6-astra" && entry.provider == "openai"),
+            "attribution follows the serving model, not a hardcoded guess: {history:?}"
+        );
+    }
+
+    /// `create_router_for_executor` used to build the executor's `Router` from
+    /// scratch, discarding the orchestrator's own injected `ModelSelector` in
+    /// favor of a fresh default one (`LocalWeights::HuggingFaceCache`) that
+    /// consults the real cache directory. On a machine with the Qwen weights
+    /// already cached that silently kept every subtask on the local model
+    /// instead of the configured cloud provider. A first fix reconstructed a
+    /// selector via `ModelSelector::with_parts`, which only takes
+    /// availability and local-weights and hardcodes `gpu_available: true`
+    /// and an unconstrained memory budget — reintroducing the same class of
+    /// bug for hardware instead of cache, silently picking 8B+ models on a
+    /// CPU-only host. Fixed by carrying a full `ModelSelector::snapshot`
+    /// instead. Asserted structurally on the executor router's own selector
+    /// — not by faking a populated `HF_HOME`/cache directory and observing
+    /// the routing outcome — because
+    /// `is_local_model_cached` only ever consults the cache when the
+    /// `llama-cpp` feature is compiled in; a filesystem-based version of this
+    /// test would pass in CI's `--no-default-features` router job whether or
+    /// not the propagation bug were present, giving no real coverage, and
+    /// mutating the process-wide `HF_HOME` environment variable would race
+    /// every other test's `std::env::var` reads under `cargo test`'s default
+    /// multi-threaded runner.
+    #[spec("ASTRA-005")]
+    #[tokio::test]
+    async fn create_router_for_executor_carries_the_orchestrators_selector() {
+        use crate::test_support::only;
+
+        // A CPU-only, memory-constrained host: gpu_available and
+        // max_memory_bytes gate model-size selection (best_available_local_model),
+        // so a snapshot that drops them would silently reintroduce a
+        // GPU-assuming, unconstrained selector on the executor router — the
+        // same class of bug as the cache-consulting default, just for
+        // hardware instead of cache state.
+        let mut selector = ModelSelector::with_availability(only("openai"), false);
+        selector.gpu_available = false;
+        selector.set_memory_budget(4 * 1024 * 1024 * 1024);
+
+        let tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await.unwrap());
+        let orchestrator = CostOrchestrator::new(tracker)
+            .await
+            .unwrap()
+            .with_selector(selector);
+
+        let router = orchestrator
+            .create_router_for_executor("github-orchestrator")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            router.selector.local_weights(),
+            crate::selector::LocalWeights::Fixed(false),
+            "the orchestrator's fixed local-weights answer must reach the \
+             executor router instead of being replaced by a fresh selector \
+             that would consult the real HuggingFace cache"
+        );
+        assert!(
+            router.selector.availability.openai,
+            "the orchestrator's provider availability must reach the executor router"
+        );
+        assert!(
+            !router.selector.gpu_available,
+            "the orchestrator's real gpu_available answer must reach the executor \
+             router, not `with_parts`'s hardcoded true — a wrong true would pick \
+             8B+ models on a CPU-only device"
+        );
+        assert_eq!(
+            router
+                .selector
+                .max_memory_bytes
+                .load(std::sync::atomic::Ordering::Relaxed),
+            4 * 1024 * 1024 * 1024,
+            "the orchestrator's memory budget must reach the executor router, \
+             not `with_parts`'s hardcoded unconstrained (0) default"
+        );
     }
 }

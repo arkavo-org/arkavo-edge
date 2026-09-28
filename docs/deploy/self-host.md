@@ -1,13 +1,21 @@
 # Self-Hosting Arkavo Edge
 
-This guide covers deploying and operating Arkavo Edge with the Bidirectional Chat Protocol v2 in production environments.
+This guide covers deploying and operating Arkavo Edge's AG-UI web gateway in
+production environments.
+
+Arkavo Edge is configured entirely through environment variables — there is no
+configuration file. The long-running server mode is the AG-UI web gateway,
+started with `arkavo ui`. There are no `arkavo serve` or `arkavo db`
+subcommands, and the gateway does not expose a Prometheus endpoint; see the
+monitoring section below for what is actually available.
 
 ## Prerequisites
 
-- Rust 1.75+ (for building from source)
-- SQLite 3.35+ (for session persistence)
-- TLS certificates (for secure communication)
-- JWT signing keys (for authentication)
+- Rust (stable), CMake, and ccache for building local inference from source
+- Provisioned local models and enough device memory to run them
+- Optional cloud credentials to augment local models
+- A reverse proxy (nginx, ingress, etc.) if you need TLS or authentication —
+  the gateway itself is unauthenticated (see Security)
 
 ## Installation
 
@@ -15,140 +23,135 @@ This guide covers deploying and operating Arkavo Edge with the Bidirectional Cha
 
 ```bash
 # Clone the repository
-git clone https://github.com/arkavo-org/arkavo-edge.git
+git clone --recurse-submodules https://github.com/arkavo-org/arkavo-edge.git
 cd arkavo-edge
 
-# Build release binary
-cargo build --release --features chat-v2
+# Build the local agent harness with optional cloud augmentation
+cargo build --release -p arkavo \
+  --no-default-features \
+  --features llama-cpp,memory,mdns,mcp-tools,llm-remote,openai,web-ui
 
 # Binary will be at target/release/arkavo
 ```
 
 ### Using Docker
 
-```dockerfile
-FROM rust:1.75 as builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release --features chat-v2
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    sqlite3 \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /app/target/release/arkavo /usr/local/bin/arkavo
-EXPOSE 8080
-CMD ["arkavo", "serve"]
-```
+The root [container image](container.md) is utility-only and does not support
+agent inference. Container examples below require an image built with local
+inference support and a mounted, provisioned model cache. Cloud credentials
+alone cannot start the harness. `ARKAVO_SKIP_FIRST_RUN=1` suppresses interactive
+setup; it never waives the local model requirement.
 
 ## Configuration
 
-### Basic Configuration
-
-Create a configuration file at `/etc/arkavo/config.yaml`:
-
-```yaml
-server:
-  host: 0.0.0.0
-  port: 8080
-  
-auth:
-  method: jwt
-  jwt_secret: ${JWT_SECRET}
-  jwt_audience: arkavo-chat
-  jwt_issuer: auth-service
-  
-persistence:
-  enabled: true
-  db_path: /var/lib/arkavo/sessions.db
-  retention_hours: 24
-  
-tls:
-  enabled: true
-  cert_path: /etc/arkavo/certs/server.crt
-  key_path: /etc/arkavo/certs/server.key
-  ca_path: /etc/arkavo/certs/ca.crt
-  
-chat:
-  max_inflight_deltas: 100
-  session_ttl_seconds: 3600
-  max_context_length: 4096
-  
-rate_limiting:
-  enabled: true
-  requests_per_second: 100
-  burst_size: 200
-```
-
-### Environment Variables
-
-All configuration can be overridden via environment variables:
+All configuration is via environment variables. There is no config file.
 
 ```bash
-# Authentication
-export ARKAVO_JWT_SECRET="your-secret-key"
-export ARKAVO_JWT_AUDIENCE="arkavo-chat"
-export ARKAVO_JWT_ISSUER="auth-service"
+# Local model cache (required) — where provisioned GGUF weights live.
+# get_hf_cache_dir() reads HF_HOME/hub; set it explicitly rather than
+# relying on $HOME, especially in containers.
+export HF_HOME=/data/hf-cache
 
-# Persistence
-export ARKAVO_SESSION_DB_PATH="/var/lib/arkavo/sessions.db"
-export ARKAVO_SESSION_RETENTION_HOURS="24"
+# LLM provider credentials (optional — augment local inference, never replace it)
+export GEMINI_API_KEY="..."       # Gemini
+export OPENAI_API_KEY="..."       # OpenAI-compatible providers
+export DEEPSEEK_API_KEY="..."     # DeepSeek
 
-# Performance
-export ARKAVO_MAX_INFLIGHT_DELTAS="100"
-export ARKAVO_SESSION_TTL_SECONDS="3600"
+# Container / unattended operation
+export ARKAVO_SKIP_FIRST_RUN=1    # Skip the interactive first-run prompt/downloader.
+                                   # Local models are still required: with no weights
+                                   # under HF_HOME/hub, `arkavo ui` still fails with
+                                   # "The agent harness requires local models."
 
-# TLS
-export ARKAVO_TLS_CERT="/etc/arkavo/certs/server.crt"
-export ARKAVO_TLS_KEY="/etc/arkavo/certs/server.key"
-export ARKAVO_TLS_CA="/etc/arkavo/certs/ca.crt"
+# Logging
+export ARKAVO_DEBUG=1             # General debug logging
+export ARKAVO_DEBUG_CHAT=1        # Chat/template/token debug logging
 ```
+
+Never bake API keys into the image; pass them with `docker run -e ...` or your
+orchestrator's secret mechanism.
+
+## Running the Server
+
+```bash
+# Start the AG-UI web gateway on the default port (7700)
+arkavo ui
+
+# Custom port
+arkavo ui --port 8080
+```
+
+The gateway serves:
+
+- `/` — the web UI (plus `/static/*` assets)
+- `/ws` — AG-UI WebSocket event stream
+- `/api/agent` and `/api/agent/capabilities` — agent execution API
+- `/agent/:id` and `/api/dataflow/*path` — proxy routes
+- `/debug` — debug WebSocket feed
+
+The API routes are rate-limited per source IP; static assets are not.
 
 ## Deployment Architectures
 
 ### Single Instance
 
-Suitable for development and small deployments:
+Suitable for development and small deployments. Provision the model cache
+once, then start the gateway against it — `GEMINI_API_KEY` augments local
+inference but does not replace it:
 
 ```bash
-arkavo serve \
-  --config /etc/arkavo/config.yaml \
-  --log-level info
+# One-time: download the recommended model into the cache.
+HF_HOME=/data/hf-cache arkavo model download
+
+# Then run the gateway.
+HF_HOME=/data/hf-cache GEMINI_API_KEY=... ARKAVO_SKIP_FIRST_RUN=1 arkavo ui --port 7700
 ```
 
-### High Availability
+### Docker Compose
 
-For production deployments with multiple instances:
+`arkavo-edge:latest` here is a locally built **local-enabled** image — the
+recipe in "From Source" above, containerized — not the root repo's utility
+[container image](container.md), which has no `llama-cpp` backend and
+cannot start `ui`. `model-provision` reuses that utility image, since
+`model download` is a utility command that needs no local backend, only the
+shared cache volume:
 
 ```yaml
 # docker-compose.yml
-version: '3.8'
-
 services:
-  arkavo-1:
-    image: arkavo:latest
+  # One-time: populate the model cache before `arkavo` starts. Uses the root
+  # repo's utility image (container.md) since `model download` needs no
+  # local backend.
+  model-provision:
+    image: arkavo-edge-utility:latest
+    command: ["model", "download"]
     environment:
-      - ARKAVO_INSTANCE_ID=1
-      - ARKAVO_JWT_SECRET=${JWT_SECRET}
+      - HF_HOME=/hf-cache
     volumes:
-      - sessions-db:/var/lib/arkavo
-      - ./certs:/etc/arkavo/certs:ro
+      - arkavo-hf-cache:/hf-cache
+
+  arkavo:
+    image: arkavo-edge:latest
+    command: ["ui", "--port", "7700"]
+    environment:
+      - HF_HOME=/hf-cache
+      - GEMINI_API_KEY=${GEMINI_API_KEY}  # optional: augments local inference
+      - ARKAVO_SKIP_FIRST_RUN=1
+      # Not set by the image (see container.md); the AG-UI gateway defaults
+      # to loopback-only. The container's network namespace, not the
+      # process's own bind address, is the real isolation boundary — the
+      # port is reachable only where it's published (below).
+      - ARKAVO_AGUI_BIND=0.0.0.0
+    volumes:
+      - arkavo-hf-cache:/hf-cache
+      - arkavo-data:/data
+    working_dir: /data
+    depends_on:
+      model-provision:
+        condition: service_completed_successfully
     networks:
       - arkavo-net
-    
-  arkavo-2:
-    image: arkavo:latest
-    environment:
-      - ARKAVO_INSTANCE_ID=2
-      - ARKAVO_JWT_SECRET=${JWT_SECRET}
-    volumes:
-      - sessions-db:/var/lib/arkavo
-      - ./certs:/etc/arkavo/certs:ro
-    networks:
-      - arkavo-net
-  
+
   nginx:
     image: nginx:alpine
     ports:
@@ -157,19 +160,35 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
     depends_on:
-      - arkavo-1
-      - arkavo-2
+      - arkavo
     networks:
       - arkavo-net
 
 volumes:
-  sessions-db:
+  arkavo-hf-cache:
+  arkavo-data:
 
 networks:
   arkavo-net:
 ```
 
+The `working_dir` matters: persistent state (SQLite memory/event stores) lives
+under `.arkavo/` relative to the process working directory, so point it at a
+mounted volume to survive container replacement. `arkavo-hf-cache` is a
+separate volume so the (larger, mostly read-only) model cache and the
+(small, frequently written) SQLite state don't share a backup/restore unit.
+Both images run as the non-root `arkavo` user (uid 10001); a freshly
+created named volume is root-owned, so if `model-provision` fails with a
+permission error, `chown -R 10001 <volume mountpoint>` once (e.g. via a
+throwaway root container) or set the volume's ownership through your
+storage driver.
+
 ### Kubernetes Deployment
+
+`arkavo-edge:latest` is the same locally built local-enabled image as the
+compose example. The init container reuses the root repo's utility image
+(`arkavo-edge-utility:latest`) to provision the shared model cache —
+`model download` needs no local backend, only the PVC:
 
 ```yaml
 apiVersion: apps/v1
@@ -177,7 +196,7 @@ kind: Deployment
 metadata:
   name: arkavo-edge
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: arkavo-edge
@@ -186,37 +205,84 @@ spec:
       labels:
         app: arkavo-edge
     spec:
+      # Both images run as the non-root `arkavo` user (uid 10001; see the
+      # Dockerfile's `useradd`). fsGroup adds gid 10001 as a supplemental
+      # group on a freshly provisioned PVC so the init container's
+      # `model download` and the main container's reads agree on ownership,
+      # regardless of that user's own primary group.
+      securityContext:
+        fsGroup: 10001
+      initContainers:
+      - name: model-provision
+        image: arkavo-edge-utility:latest
+        args: ["model", "download"]
+        env:
+        - name: HF_HOME
+          value: /hf-cache
+        volumeMounts:
+        - name: hf-cache
+          mountPath: /hf-cache
       containers:
       - name: arkavo
-        image: arkavo:latest
+        image: arkavo-edge:latest
+        args: ["ui", "--port", "7700"]
         ports:
-        - containerPort: 8080
+        - containerPort: 7700
         env:
-        - name: ARKAVO_JWT_SECRET
+        - name: HF_HOME
+          value: /hf-cache
+        # Not set by the image (see container.md); the pod's network
+        # namespace, not the process's own bind address, is the real
+        # isolation boundary — the Service below is the actual access
+        # control point.
+        - name: ARKAVO_AGUI_BIND
+          value: "0.0.0.0"
+        - name: ARKAVO_SKIP_FIRST_RUN
+          value: "1"
+        - name: GEMINI_API_KEY  # optional: augments local inference
           valueFrom:
             secretKeyRef:
               name: arkavo-secrets
-              key: jwt-secret
+              key: gemini-api-key
         volumeMounts:
-        - name: sessions
-          mountPath: /var/lib/arkavo
-        - name: certs
-          mountPath: /etc/arkavo/certs
-          readOnly: true
+        - name: hf-cache
+          mountPath: /hf-cache
+        - name: data
+          mountPath: /data
+        workingDir: /data
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 7700
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 7700
+          initialDelaySeconds: 5
+          periodSeconds: 15
         resources:
+          # Sized for the default recommended model (Gemma 4 12B, ~7GB GGUF)
+          # plus its inference working set; scale to whatever
+          # `arkavo model download` actually provisions above. The no-arg
+          # form picks a model from the *node's* detected RAM, not the pod's
+          # memory limit, but the auto-detected default never exceeds
+          # Gemma 4 12B (larger models require an explicit name), so these
+          # values are a safe ceiling for it regardless of host size.
           requests:
-            memory: "256Mi"
-            cpu: "250m"
+            memory: "10Gi"
+            cpu: "2"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "16Gi"
+            cpu: "4"
       volumes:
-      - name: sessions
+      - name: hf-cache
         persistentVolumeClaim:
-          claimName: arkavo-sessions
-      - name: certs
-        secret:
-          secretName: arkavo-tls
+          claimName: arkavo-hf-cache
+      - name: data
+        persistentVolumeClaim:
+          claimName: arkavo-data
 ---
 apiVersion: v1
 kind: Service
@@ -226,298 +292,55 @@ spec:
   selector:
     app: arkavo-edge
   ports:
-  - port: 8080
-    targetPort: 8080
+  - port: 80
+    targetPort: 7700
   type: ClusterIP
 ```
 
-## Security Setup
+The memory store is workspace-local, so run `replicas: 1` with a PVC, or
+accept that each replica has its own independent state. Terminate TLS at the
+ingress.
+
+## Security
+
+The AG-UI gateway defaults to loopback-only binding
+(`crates/arkavo-agui/src/gateway_bind.rs`); set `ARKAVO_AGUI_BIND` (e.g. to
+`0.0.0.0`) to opt out and listen on another interface. The root repo's
+[container image](container.md) does **not** set this — it cannot run `ui`
+at all — so the compose and Kubernetes examples above set
+`ARKAVO_AGUI_BIND=0.0.0.0` themselves so the port they publish is actually
+reachable: the container's network namespace is the real isolation
+boundary, not the gateway's own bind address. Either way the gateway has
+**no authentication**: anyone who can reach the listening interface
+(loopback, a published container port, or a wider bind on bare metal) can
+drive the agent. Until gateway authentication lands:
+
+- Never publish the port directly to untrusted networks.
+- Put the gateway behind a reverse proxy that enforces TLS and
+  authentication (OAuth proxy, basic auth, mTLS — your choice).
+- Or restrict exposure to trusted networks (loopback, VPN, cluster-internal).
+
+The gateway does apply security headers and per-IP rate limiting
+(`arkavo_protocol::ip_rate_limit_middleware`), but those are not a substitute
+for authentication.
+
+### Reverse Proxy Example (nginx)
 
-### JWT Configuration
-
-1. **Generate signing keys**:
-```bash
-# For HS256 (symmetric)
-openssl rand -base64 32 > jwt-secret.key
-
-# For RS256 (asymmetric)
-openssl genrsa -out jwt-private.pem 2048
-openssl rsa -in jwt-private.pem -pubout -out jwt-public.pem
-```
-
-2. **Configure auth backend**:
-```yaml
-auth:
-  method: jwt
-  algorithm: RS256
-  public_key_path: /etc/arkavo/keys/jwt-public.pem
-  audience: arkavo-chat
-  issuer: your-auth-service
-```
-
-### TLS/mTLS Setup
-
-1. **Generate certificates**:
-```bash
-# Generate CA
-openssl genrsa -out ca.key 4096
-openssl req -new -x509 -days 365 -key ca.key -out ca.crt
-
-# Generate server certificate
-openssl genrsa -out server.key 2048
-openssl req -new -key server.key -out server.csr
-openssl x509 -req -days 365 -in server.csr -CA ca.crt -CAkey ca.key -out server.crt
-
-# For mTLS, generate client certificates
-openssl genrsa -out client.key 2048
-openssl req -new -key client.key -out client.csr
-openssl x509 -req -days 365 -in client.csr -CA ca.crt -CAkey ca.key -out client.crt
-```
-
-2. **Configure TLS**:
-```yaml
-tls:
-  enabled: true
-  cert_path: /etc/arkavo/certs/server.crt
-  key_path: /etc/arkavo/certs/server.key
-  ca_path: /etc/arkavo/certs/ca.crt
-  verify_client: true  # Enable for mTLS
-  minimum_version: TLS1.3
-```
-
-## Database Management
-
-### Initial Setup
-
-```bash
-# Create database directory
-mkdir -p /var/lib/arkavo
-
-# Initialize database (automatic on first run)
-arkavo db init --path /var/lib/arkavo/sessions.db
-```
-
-### Backup and Restore
-
-```bash
-# Backup
-sqlite3 /var/lib/arkavo/sessions.db ".backup /backup/sessions-$(date +%Y%m%d).db"
-
-# Restore
-sqlite3 /var/lib/arkavo/sessions.db ".restore /backup/sessions-20240115.db"
-```
-
-### Maintenance
-
-```bash
-# Vacuum database (reclaim space)
-sqlite3 /var/lib/arkavo/sessions.db "VACUUM;"
-
-# Clean old sessions
-arkavo db cleanup --older-than 7d --path /var/lib/arkavo/sessions.db
-
-# Analyze for query optimization
-sqlite3 /var/lib/arkavo/sessions.db "ANALYZE;"
-```
-
-## Monitoring
-
-### Health Checks
-
-```bash
-# HTTP health endpoint
-curl https://your-server/.well-known/agent.json
-
-# Response
-{
-  "status": "healthy",
-  "version": "2.0.0",
-  "uptime": 3600,
-  "sessions_active": 42
-}
-```
-
-### Metrics
-
-Prometheus metrics available at `/metrics`:
-
-```prometheus
-# Session metrics
-arkavo_sessions_active 42
-arkavo_sessions_total 1234
-arkavo_sessions_duration_seconds_bucket{le="60"} 100
-arkavo_sessions_duration_seconds_bucket{le="300"} 200
-
-# Message metrics
-arkavo_messages_sent_total 5678
-arkavo_messages_received_total 4321
-arkavo_deltas_sent_total 98765
-
-# Back-pressure metrics
-arkavo_backpressure_pauses_total 10
-arkavo_inflight_deltas 25
-
-# Performance metrics
-arkavo_request_duration_seconds{method="chat_open"} 0.025
-arkavo_llm_generation_duration_seconds 1.234
-```
-
-### Logging
-
-Configure logging levels:
-
-```yaml
-logging:
-  level: info  # debug, info, warn, error
-  format: json  # json, pretty
-  output: /var/log/arkavo/arkavo.log
-  
-  # Per-module configuration
-  modules:
-    arkavo_protocol: debug
-    arkavo_llm: info
-    arkavo_auth: debug
-```
-
-Example log output:
-```json
-{
-  "timestamp": "2024-01-15T10:30:00Z",
-  "level": "INFO",
-  "module": "arkavo_protocol::chat_session",
-  "message": "Session created",
-  "session_id": "550e8400-e29b-41d4-a716-446655440000",
-  "user": "user123",
-  "scopes": ["chat.read", "chat.write"]
-}
-```
-
-## Performance Tuning
-
-### Connection Pooling
-
-```yaml
-database:
-  max_connections: 20
-  min_connections: 5
-  connection_timeout: 30
-  idle_timeout: 600
-```
-
-### Buffer Configuration
-
-```yaml
-buffers:
-  message_channel_size: 64
-  delta_channel_size: 512
-  max_message_size: 1048576  # 1MB
-```
-
-### Worker Threads
-
-```yaml
-runtime:
-  worker_threads: 4  # Default: CPU cores
-  blocking_threads: 16
-  stack_size: 2097152  # 2MB
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **High memory usage**
-   - Check for session leaks: `arkavo debug sessions --active`
-   - Reduce session TTL
-   - Enable aggressive cleanup
-
-2. **Slow response times**
-   - Check database performance: `arkavo db analyze`
-   - Review back-pressure settings
-   - Enable connection pooling
-
-3. **Authentication failures**
-   - Verify JWT secret/keys match
-   - Check token expiration
-   - Review audience/issuer configuration
-
-4. **WebSocket disconnections**
-   - Increase keep-alive interval
-   - Check proxy timeout settings
-   - Review TLS configuration
-
-### Debug Commands
-
-```bash
-# Show active sessions
-arkavo debug sessions --active
-
-# Test authentication
-arkavo debug auth --token "eyJhbGc..."
-
-# Database statistics
-arkavo db stats --path /var/lib/arkavo/sessions.db
-
-# Performance profiling
-arkavo debug profile --duration 60s
-```
-
-## Backup Strategy
-
-### Automated Backups
-
-```bash
-#!/bin/bash
-# /etc/arkavo/backup.sh
-
-BACKUP_DIR="/backup/arkavo"
-DB_PATH="/var/lib/arkavo/sessions.db"
-RETENTION_DAYS=7
-
-# Create backup
-sqlite3 $DB_PATH ".backup $BACKUP_DIR/sessions-$(date +%Y%m%d-%H%M%S).db"
-
-# Remove old backups
-find $BACKUP_DIR -name "sessions-*.db" -mtime +$RETENTION_DAYS -delete
-
-# Upload to S3 (optional)
-aws s3 sync $BACKUP_DIR s3://your-bucket/arkavo-backups/
-```
-
-Add to crontab:
-```cron
-0 */6 * * * /etc/arkavo/backup.sh
-```
-
-## Scaling Guidelines
-
-### Vertical Scaling
-- **Memory**: 256MB minimum, 512MB recommended per instance
-- **CPU**: 0.5 cores minimum, 1 core recommended
-- **Disk**: 10GB for database (depends on retention)
-
-### Horizontal Scaling
-- Use shared storage for session database
-- Configure session affinity in load balancer
-- Consider using PostgreSQL for multi-instance deployments
-
-### Load Balancer Configuration
-
-nginx example:
 ```nginx
 upstream arkavo_backend {
-    least_conn;
-    server arkavo-1:8080 max_fails=3 fail_timeout=30s;
-    server arkavo-2:8080 max_fails=3 fail_timeout=30s;
-    server arkavo-3:8080 max_fails=3 fail_timeout=30s;
+    server arkavo:7700 max_fails=3 fail_timeout=30s;
 }
 
 server {
     listen 443 ssl http2;
-    
+
     ssl_certificate /etc/nginx/certs/server.crt;
     ssl_certificate_key /etc/nginx/certs/server.key;
-    
+
+    # Enforce authentication here, e.g.:
+    # auth_basic "arkavo";
+    # auth_basic_user_file /etc/nginx/.htpasswd;
+
     location / {
         proxy_pass http://arkavo_backend;
         proxy_http_version 1.1;
@@ -527,39 +350,82 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # WebSocket settings
+
+        # WebSocket connections are long-lived
         proxy_read_timeout 3600;
         proxy_send_timeout 3600;
     }
 }
 ```
 
-## Migration Guide
+## Persistence
 
-### From v1 to v2
+State lives in SQLite databases under `.arkavo/memory_server/` relative to the
+working directory (memories, event store, TDF audit, federated memory). The
+databases are created automatically on first use — there is no init command.
 
-1. **Update configuration**:
-   - Add JWT configuration
-   - Configure persistence
-   - Update TLS settings
+### Backup and Restore
 
-2. **Database migration**:
 ```bash
-# Export v1 data
-arkavo-v1 export --format json > sessions.json
+# Backup (from the working directory of the running instance)
+sqlite3 .arkavo/memory_server/memories.db ".backup /backup/memories-$(date +%Y%m%d).db"
 
-# Import to v2
-arkavo import --format json --input sessions.json
+# Restore
+sqlite3 .arkavo/memory_server/memories.db ".restore /backup/memories-20260101.db"
 ```
 
-3. **Client updates**:
-   - Update to handle new delta format
-   - Implement metrics acknowledgment
-   - Add JWT token to requests
+For unattended backups, stop writes (or rely on SQLite's online backup) and
+copy the whole `.arkavo/` directory; upload to object storage as needed.
+
+## Monitoring
+
+There is no Prometheus `/metrics` endpoint, but the gateway does serve
+liveness and readiness probes:
+
+- `GET /healthz` — returns `200 ok` once the listener is bound.
+- `GET /readyz` — returns `200` while the health registry reports healthy
+  or degraded, `503` otherwise.
+- **Logs**: the gateway logs to stdout; increase verbosity with
+  `ARKAVO_DEBUG=1` and `ARKAVO_DEBUG_CHAT=1`. Collect stdout with your
+  container/platform log pipeline.
+- **Debug WebSocket**: `/debug` streams internal events for live inspection
+  from the web UI.
+- **Health reporters**: internal component health (router connectivity,
+  learning pipeline, UI generator) is surfaced as AG-UI events over the
+  WebSocket, in addition to the coarser `/readyz` verdict.
+
+For container orchestration health checks, use `/readyz` and `/healthz`
+directly (see the Kubernetes example above), rather than a bare TCP check —
+a bound listener does not mean the gateway is actually healthy.
+
+## Troubleshooting
+
+- **Gateway unreachable externally**: it binds loopback only by default —
+  set `ARKAVO_AGUI_BIND=0.0.0.0` yourself (the root repo's [container
+  image](container.md) does not set this — it cannot run `ui` at all; see
+  the compose/Kubernetes examples above) before checking proxy, firewall,
+  and port-mapping configuration.
+- **Agent requests fail**: verify that the build supports local inference and
+  that local models are provisioned. For cloud augmentation failures, verify
+  provider credentials and cloud policy.
+- **State lost after container restart**: the working directory was not a
+  mounted volume — set `working_dir`/`workingDir` to a persistent mount.
+- **Interactive first-run prompt in a container**: set
+  `ARKAVO_SKIP_FIRST_RUN=1`. This only suppresses the prompt/downloader —
+  it does not provision models. With no weights under `HF_HOME/hub`,
+  `arkavo ui` still fails with "The agent harness requires local models."
+  until the cache is populated (see Configuration and the deployment
+  examples above).
+
+## Scaling Guidelines
+
+- **Memory**: include the selected local models and their inference working sets
+- **CPU**: size for local inference throughput and latency
+- **Disk**: sized for the `.arkavo/` SQLite stores and model caches
+- **Horizontal scaling**: not currently meaningful for shared state — memory
+  is workspace-local SQLite. Run one replica per workspace, or front
+  independent instances with your own routing.
 
 ## Support
 
 - GitHub Issues: https://github.com/arkavo-org/arkavo-edge/issues
-- Documentation: https://docs.arkavo.org
-- Community Discord: https://discord.gg/arkavo

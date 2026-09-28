@@ -104,6 +104,16 @@ impl CriticPipeline {
                 continue;
             }
 
+            // A block is not softened by later evidence (SENT-014).
+            if had_failure && check.skip_after_failure() {
+                checks_skipped += 1;
+                tracing::debug!(
+                    check_id = check.id(),
+                    "An earlier check failed; skipping an evidence-only check"
+                );
+                continue;
+            }
+
             // Run the check
             let result = check.verify(input).await;
             checks_run += 1;
@@ -198,6 +208,7 @@ mod tests {
             finish_reason: None,
             inference_timing: None,
             quality_gate_retries: 0,
+            ..Default::default()
         }
     }
 
@@ -343,6 +354,7 @@ mod tests {
                 finish_reason: None,
                 inference_timing: None,
                 quality_gate_retries: 0,
+                ..Default::default()
             },
             vec![tool],
         );

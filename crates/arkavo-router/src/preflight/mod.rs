@@ -48,9 +48,9 @@ pub mod normalize;
 mod result;
 
 pub use config::{
-    AgentConfig, BudgetYamlConfig, KasYamlConfig, PolicyAction, PolicyConfig, PolicyFileConfig,
-    PreflightConfig, agent_config_from_runtime, build_moderator_from_config, load_agent_config,
-    load_policies_from_config,
+    AgentConfig, BudgetYamlConfig, KasTrustedRootYaml, KasYamlConfig, PolicyAction, PolicyConfig,
+    PolicyFileConfig, PreflightConfig, agent_config_from_runtime, build_moderator_from_config,
+    load_agent_config, load_policies_from_config,
 };
 pub use features::PreflightFeature;
 pub use moderator::{PolicyId, PreflightModerator};

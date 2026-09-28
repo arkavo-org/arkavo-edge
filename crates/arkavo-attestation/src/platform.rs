@@ -199,4 +199,25 @@ mod tests {
             assert_eq!(caps.attestation_type, AttestationType::SoftwareFingerprint);
         }
     }
+
+    /// Regression for #698: the macOS backend claimed hardware binding and
+    /// freshness for unsigned ioreg text. No backend this crate selects signs
+    /// a nonce-bound quote yet, so whichever one is chosen must claim neither.
+    #[test]
+    fn test_selected_attestor_claims_no_unbacked_hardware_properties() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let attestor = create_attestor(identity, detect_platform_code());
+        let caps = attestor.get_capabilities();
+
+        assert!(
+            !caps.supports_hardware_binding,
+            "{:?} claims hardware binding without a hardware-signed quote",
+            caps.attestation_type
+        );
+        assert!(
+            !caps.supports_freshness,
+            "{:?} claims freshness without a verifier nonce",
+            caps.attestation_type
+        );
+    }
 }

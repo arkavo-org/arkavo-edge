@@ -110,7 +110,9 @@ impl LlmClient {
         }
     }
 
-    #[allow(clippy::unused_async)]
+    // async is kept for API stability: callers await these constructors, and
+    // neither cfg branch awaits today. 1.98 added a second lint for the same shape.
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn from_local_model(model_name: &str, model_path: String) -> Result<Self> {
         #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         {
@@ -127,7 +129,9 @@ impl LlmClient {
         }
     }
 
-    #[allow(clippy::unused_async)]
+    // async is kept for API stability: callers await these constructors, and
+    // neither cfg branch awaits today. 1.98 added a second lint for the same shape.
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn from_llamacpp_model(model_name: &str, model_path: String) -> Result<Self> {
         #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         {
@@ -144,7 +148,9 @@ impl LlmClient {
         }
     }
 
-    #[allow(clippy::unused_async)]
+    // async is kept for API stability: callers await these constructors, and
+    // neither cfg branch awaits today. 1.98 added a second lint for the same shape.
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn from_llamacpp_model_with_config(
         model_name: &str,
         model_path: String,
@@ -297,22 +303,16 @@ mod tests {
         let chunks = vec![
             Ok(StreamResponse {
                 content: "Hel".to_string(),
-                reasoning_content: None,
-                done: false,
-                inference_timing: None,
+                ..Default::default()
             }),
             Err(Error::Stream("mid-stream failure".to_string())),
             Ok(StreamResponse {
                 content: "lo".to_string(),
-                reasoning_content: None,
-                done: false,
-                inference_timing: None,
+                ..Default::default()
             }),
             Ok(StreamResponse {
-                content: String::new(),
-                reasoning_content: None,
                 done: true,
-                inference_timing: None,
+                ..Default::default()
             }),
         ];
         let provider = MockProvider::with_stream(chunks);

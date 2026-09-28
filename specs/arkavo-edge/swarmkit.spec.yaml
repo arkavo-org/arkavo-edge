@@ -922,7 +922,7 @@ scenarios:
     name: runtime.kas.trusted_roots parses and validates DIDs
     criticality: critical
     given:
-      - Manifest with runtime.kas.trusted_roots entries (did, optional name)
+      - Manifest with runtime.kas.trusted_roots entries (did, optional name, optional base64 public_key)
       - Existing kits omit trusted_roots entirely
     when: parse_yaml and validate run
     then:
@@ -931,6 +931,8 @@ scenarios:
       - Empty/malformed dids are rejected with InvalidTrustedRootDid
       - Kits without trusted_roots still validate
       - Empty trusted_roots is omitted on serialization (byte-identical round trip)
+      - agent_config_from_runtime carries every root (did, name, public_key) into KasYamlConfig.trusted_roots
     refs:
       - crates/arkavo-swarmkit/src/runtime_config.rs
-    changed: "2026-07-11"
+      - crates/arkavo-router/src/preflight/config.rs
+    changed: "2026-09-28"

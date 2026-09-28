@@ -29,9 +29,14 @@ members = [
     "crates/arkavo-router",
     "crates/arkavo-context",
     "crates/arkavo-events",
+    "crates/arkavo-fingerprint",
+    "crates/arkavo-sentinel",
+    "crates/arkavo-knowledge-pack",
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
+    "crates/arkavo-gguf-tdf",
+    "crates/arkavo-identity",
     "crates/arkavo-mcp-code-search",
     "crates/arkavo-browser",
     "crates/arkavo-mcp-workspace",
@@ -45,6 +50,9 @@ members = [
     "crates/arkavo-device-identity",
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
+    "crates/arkavo-cwt",
+    "crates/arkavo-dispatch-gate",
+    "crates/arkavo-permit",
     "crates/arkavo-registration",
     "crates/arkavo-agent",
     "crates/arkavo-agent-auth",
@@ -81,8 +89,10 @@ members = [
     "crates/arkavo-swarmkit",
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
+    "crates/arkavo-mcp-proxy",
     "crates/arkavo-shadow-consolidation",
     "crates/arkavo-lesson-synthesis",
+    "crates/arkavo-routines",
     "tests/golden_dataset",
     ".cargo/xtask",
 ]
@@ -114,6 +124,9 @@ default-members = [
     "crates/arkavo-router",
     "crates/arkavo-context",
     "crates/arkavo-events",
+    "crates/arkavo-fingerprint",
+    "crates/arkavo-sentinel",
+    "crates/arkavo-knowledge-pack",
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
@@ -126,8 +139,12 @@ default-members = [
     "crates/arkavo-snpe",
     "crates/arkavo-orchestrator",
     "crates/arkavo-device-identity",
+    "crates/arkavo-identity",
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
+    "crates/arkavo-cwt",
+    "crates/arkavo-dispatch-gate",
+    "crates/arkavo-permit",
     "crates/arkavo-registration",
     "crates/arkavo-agent-auth",
     "crates/arkavo-hrm",
@@ -145,6 +162,7 @@ default-members = [
     "crates/arkavo-swarmkit",
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
+    "crates/arkavo-mcp-proxy",
     "crates/arkavo-shadow-consolidation",
     ".cargo/xtask",
 ]
@@ -153,7 +171,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.89.0"
+version = "0.98.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -189,16 +207,16 @@ keyring = "3.6"
 # Common utilities
 url = "2.5"
 http = "1.1"
-lru = "0.16"
+lru = "0.18"
 anthropic-agent-sdk = { path = "crates/anthropic-agent-sdk" }
 async-stream = "0.3"
 tower = "0.5"
 semver = { version = "1.0", features = ["serde"] }
-bytemuck = "1.20"
 cfg-if = "1.0"
 libc = "0.2"
 notify = "8.0"
 sha2 = "0.10"
+blake3 = "1.5"
 dirs = "6.0"
 toml = "0.8"
 serde_yaml = "0.9"
@@ -208,6 +226,9 @@ bytes = "1.8"
 parking_lot = "0.12"
 sysinfo = "0.34"
 ed25519-dalek = "2.1"
+coset = "0.4"
+ciborium = "0.2"
+p256 = { version = "0.13", features = ["ecdsa"] }
 fast_qr = { version = "0.13", default-features = false }
 hex = "0.4"
 
@@ -389,3 +410,61 @@ too_many_lines = "allow"
 # Deny warnings in CI to catch TODO placeholders and other issues
 deny-warnings = true
 
+
+# gguf-tdf: keep the AES-GCM path optimized in dev builds. At opt-level 0
+# software AES runs ~7 MB/s and a multi-GB protected load looks like a hang.
+# Hardware AES on aarch64 additionally needs `--cfg aes_armv8`
+# (.cargo/config.toml).
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
+[profile.dev.package.ctr]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3
+[profile.dev.package.polyval]
+opt-level = 3
+[profile.dev.package.cipher]
+opt-level = 3
+[profile.dev.package.opentdf-crypto]
+opt-level = 3
+[profile.dev.package.arkavo-gguf-tdf]
+opt-level = 3
+
+# Taint tracking: the sequence-integrity invariant is <50µs added per tool
+# call, and that cost is dominated by pattern classification and the parameter
+# digest. At opt-level 0 both run an order of magnitude slower than they ship,
+# so a debug run cannot tell a real regression from the profile.
+[profile.dev.package.regex]
+opt-level = 3
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
+opt-level = 3
+[profile.dev.package.aho-corasick]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3
+
+# Semantic tier: every check scores each prompt unit against every stored
+# int8 vector and anchor. At opt-level 0 that loop runs unvectorised, so the
+# per-check latency a debug run reports would describe the profile rather
+# than the tier.
+[profile.dev.package.arkavo-fingerprint]
+opt-level = 3
+
+# Dispatch gate: every evaluation verifies an Ed25519 permit signature and an
+# Ed25519 proof-of-possession, and the gate's 25ms p95 budget is asserted in
+# its tests. At opt-level 0 the field arithmetic runs about a hundred times
+# slower than it ships (p50 ~16ms against ~0.2ms), which put the debug p95
+# within a few milliseconds of the budget and over it on any loaded runner.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519-dalek]
+opt-level = 3

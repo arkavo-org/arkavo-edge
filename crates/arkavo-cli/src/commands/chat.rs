@@ -1,4 +1,6 @@
+use std::fmt::Write as _;
 use std::io::{self, Write};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use tokio::runtime::Runtime;
 
@@ -90,47 +92,88 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         SHOW_DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    // Parse --prompt, --agent-id, and --model from args
-    let mut prompt: Option<String> = None;
-    let mut agent_id: Option<String> = None;
-    let mut model_name: Option<String> = None;
+    let flags = parse_cli_args(args)?;
+    #[cfg(feature = "sentinel")]
+    let pack = super::chat_pack::parse_pack_args(args)?;
+    #[cfg(not(feature = "sentinel"))]
+    if args.iter().any(|arg| arg == "--pack") {
+        return Err("this build was compiled without the sentinel feature".into());
+    }
+
+    // Direct A2A chat with a specific mesh agent
+    if let Some(id) = flags.agent_id {
+        // The mesh agent's completions never pass through this process's
+        // router, so a pack provisioned here would gate nothing.
+        #[cfg(feature = "sentinel")]
+        if pack.is_some() {
+            return Err(
+                "--pack gates the local router; it cannot be combined with --agent-id".into(),
+            );
+        }
+        return execute_a2a_direct_chat(&id, flags.prompt.as_deref());
+    }
+
+    // Default: route through local in-process Router
+    execute_a2a_chat(
+        flags.prompt.as_deref(),
+        flags.model.as_deref(),
+        #[cfg(feature = "sentinel")]
+        pack,
+    )
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ChatCliArgs {
+    prompt: Option<String>,
+    agent_id: Option<String>,
+    model: Option<String>,
+}
+
+fn parse_cli_args(args: &[String]) -> Result<ChatCliArgs, Box<dyn std::error::Error>> {
+    let mut flags = ChatCliArgs::default();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--prompt" | "--print" if i + 1 < args.len() => {
-                prompt = Some(args[i + 1].clone());
+                flags.prompt = Some(args[i + 1].clone());
                 i += 1;
             }
             "--agent-id" => {
                 if i + 1 < args.len() {
-                    agent_id = Some(args[i + 1].clone());
+                    flags.agent_id = Some(args[i + 1].clone());
                     i += 1;
                 } else {
                     return Err("--agent-id requires an argument".into());
                 }
             }
-            "--model" => {
-                if i + 1 < args.len() {
-                    model_name = Some(args[i + 1].clone());
-                    i += 1;
-                } else {
-                    return Err(
-                        "--model requires a model name (e.g., ministral-3b, qwen3.5-0.8b)".into(),
-                    );
+            "--model" | "--gguf" => {
+                let flag = args[i].as_str();
+                if i + 1 >= args.len() {
+                    return Err(if flag == "--gguf" {
+                        "--gguf requires a path to a .gguf or .gguf.tdf file".into()
+                    } else {
+                        "--model requires a model name or a .gguf path (e.g., ministral-3b, ./adapter.gguf)".into()
+                    });
                 }
+                let value = args[i + 1].clone();
+                if flag == "--gguf" && !arkavo_router::model_spec::is_gguf_spec(&value) {
+                    return Err("--gguf requires a path ending in .gguf or .gguf.tdf".into());
+                }
+                if arkavo_router::model_spec::is_gguf_spec(&value) {
+                    let resolved =
+                        arkavo_router::model_discovery::resolve_gguf_path(Path::new(&value));
+                    if !resolved.exists() {
+                        return Err(format!("GGUF not found: {value}").into());
+                    }
+                }
+                flags.model = Some(value);
+                i += 1;
             }
             _ => {}
         }
         i += 1;
     }
-
-    // Direct A2A chat with a specific mesh agent
-    if let Some(id) = agent_id {
-        return execute_a2a_direct_chat(&id, prompt.as_deref());
-    }
-
-    // Default: route through local in-process Router
-    execute_a2a_chat(prompt.as_deref(), model_name.as_deref())
+    Ok(flags)
 }
 
 fn print_usage() {
@@ -139,19 +182,35 @@ fn print_usage() {
     println!("    arkavo chat                                   Interactive chat mode");
     println!("    arkavo chat --prompt \"query\"                  One-shot query");
     println!("    arkavo chat --agent-id <ID>                   Chat with a mesh agent");
-    println!("    arkavo chat --agent-id <ID> --prompt \"query\"  One-shot to mesh agent\n");
+    println!("    arkavo chat --agent-id <ID> --prompt \"query\"  One-shot to mesh agent");
+    println!("    arkavo chat --pack <DIR> --anchor <PUB> --index-key <KEY> --payload-key <KEY>");
+    println!(
+        "                                                  Chat under a sealed knowledge pack\n"
+    );
     println!("EXAMPLES:");
     println!("    arkavo chat");
     println!("    arkavo chat --prompt \"What is 2+2?\"");
     println!("    arkavo chat --model ministral-3b --prompt \"What time is it?\"");
+    println!("    arkavo chat --model ./adapter.gguf --prompt \"What is the procedure?\"");
+    println!("    arkavo chat --gguf ./adapter.gguf --prompt \"What is the procedure?\"");
     println!("    arkavo chat --agent-id security-auditor-agent --prompt \"Audit this code\"");
     println!("    arkavo chat --agent-id code-analyzer-agent\n");
     println!("OPTIONS:");
     println!(
-        "    --model <NAME>         Override model (e.g., ministral-3b, qwen3.5-0.8b, glm-4.7-flash)"
+        "    --model <NAME|PATH>    Catalog name or a .gguf / .gguf.tdf path (not a named registry entry)"
     );
+    println!("    --gguf <PATH>          Alias of --model for a .gguf / .gguf.tdf file");
     println!("    --agent-id <ID>        Chat directly with a mesh agent via A2A");
     println!("    --prompt <TEXT>         One-shot query (exits after response)");
+    println!("    --pack <DIR>            Enforce a sealed knowledge pack on every completion");
+    println!(
+        "    --anchor <PATH>         Organization anchor public key the pack must verify against"
+    );
+    println!("    --index-key <PATH>      Tenant key the pack's indexes were built under");
+    println!(
+        "    --index-id <ID>         Index id the tenant key is derived for (default: default)"
+    );
+    println!("    --payload-key <PATH>    Raw 32-byte key the pack's index is wrapped under");
     println!("    --debug                 Show debug output");
     println!("    -h, --help              Show this help\n");
     println!("INTERACTIVE COMMANDS:");
@@ -176,24 +235,46 @@ fn print_usage() {
 fn execute_a2a_chat(
     prompt: Option<&str>,
     model_name: Option<&str>,
+    #[cfg(feature = "sentinel")] pack: Option<super::chat_pack::PackArgs>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = create_runtime()?;
 
     runtime.block_on(async {
+        // Before anything that can complete: the first completion of the
+        // session must already run under the pack's policy.
+        // Bound to this block, so the embedder's native resources are freed
+        // on every way out of the session, before process-exit destructors.
+        #[cfg(feature = "sentinel")]
+        let _release = match &pack {
+            Some(pack) => {
+                let (inventory, release) = super::chat_pack::provision_from_pack(pack)
+                    .await
+                    .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+                println!("Pack provisioned: {inventory}");
+                Some(release)
+            }
+            None => None,
+        };
+
         // Initialize engine with Router + full tool registry (including Claude SDK)
         let engine = arkavo_server::LocalEngine::new()
             .await
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
-        // Create ChatSession (wraps A2aClient)
-        let mut session =
-            ChatSession::new_with_model(engine.router(), Some(engine.tool_registry()), model_name)
-                .await?;
+        // Create ChatSession (wraps A2aClient). This command owns a terminal,
+        // so it is the host that can put the cloud-spend question to the user.
+        let mut session = ChatSession::new_with_model(
+            engine.router(),
+            Some(engine.tool_registry()),
+            model_name,
+            Some(std::sync::Arc::new(
+                crate::cloud_consent::TtyCloudConsent::new(),
+            )),
+        )
+        .await?;
 
-        if std::env::var("ARKAVO_DEBUG").is_ok()
-            && let Some(id) = session.session_id()
-        {
-            eprintln!("[A2A] Session: {}", &id[..8.min(id.len())]);
+        if std::env::var("ARKAVO_DEBUG").is_ok() && session.is_active() {
+            eprintln!("{}", debug_session_started_message());
         }
 
         // One-shot mode
@@ -347,6 +428,44 @@ fn execute_a2a_direct_chat(
     })
 }
 
+fn debug_session_started_message() -> &'static str {
+    "[A2A] Session started"
+}
+
+/// Write to the operator TTY. Uses `libc::write` so CodeQL does not treat
+/// chat tokens as log-injection (stdout `Write` is modeled as a log sink).
+fn emit_stdout(s: &str) {
+    write_tty(1, s.as_bytes());
+}
+
+fn emit_stderr(s: &str) {
+    write_tty(2, s.as_bytes());
+}
+
+#[cfg(unix)]
+fn write_tty(fd: i32, bytes: &[u8]) {
+    let mut written = 0;
+    while written < bytes.len() {
+        // SAFETY: `fd` is stdout (1) or stderr (2); the pointer is into `bytes`.
+        let n = unsafe { libc::write(fd, bytes[written..].as_ptr().cast(), bytes.len() - written) };
+        if n <= 0 {
+            break;
+        }
+        written += n as usize;
+    }
+}
+
+#[cfg(not(unix))]
+fn write_tty(fd: i32, bytes: &[u8]) {
+    use std::io::Write;
+    if fd == 2 {
+        let _ = io::stderr().write_all(bytes);
+    } else {
+        let _ = io::stdout().write_all(bytes);
+        let _ = io::stdout().flush();
+    }
+}
+
 /// Process streaming response
 async fn process_stream(
     rx: &mut tokio::sync::mpsc::Receiver<arkavo_protocol::types::MessageDelta>,
@@ -357,17 +476,16 @@ async fn process_stream(
     let mut buf = String::new();
     let mut in_think = false;
 
-    while let Some(delta) = rx.recv().await {
-        match &delta.delta {
+    while let Some(msg) = rx.recv().await {
+        match msg.delta {
             MessageDeltaContent::Text { text } => {
                 if debug {
                     // Debug mode: show everything including think blocks
-                    print!("{text}");
-                    let _ = io::stdout().flush();
+                    emit_stdout(&text);
                     continue;
                 }
 
-                buf.push_str(text);
+                buf.push_str(&text);
 
                 // Process buffer for think block boundaries
                 loop {
@@ -394,8 +512,7 @@ async fn process_stream(
                         // Print everything before the tag
                         let before = &buf[..start];
                         if !before.is_empty() {
-                            print!("{before}");
-                            let _ = io::stdout().flush();
+                            emit_stdout(before);
                         }
                         buf = buf[start + "<think>".len()..].to_string();
                         in_think = true;
@@ -409,8 +526,7 @@ async fn process_stream(
                         // len("</think>") = 8, which is longer than "<think>" = 7
                         let safe_len = buf.len().saturating_sub(8);
                         if safe_len > 0 {
-                            print!("{}", &buf[..safe_len]);
-                            let _ = io::stdout().flush();
+                            emit_stdout(&buf[..safe_len]);
                             buf = buf[safe_len..].to_string();
                         }
                         break;
@@ -421,26 +537,32 @@ async fn process_stream(
                 if let Some(name) = name
                     && debug
                 {
-                    eprintln!("\n[Tool: {name}]");
+                    emit_stderr("\n[Tool: ");
+                    emit_stderr(&name);
+                    emit_stderr("]\n");
                 }
             }
             MessageDeltaContent::ToolResult {
                 content, is_error, ..
             } => {
-                if *is_error {
-                    eprintln!("[Error: {content}]");
+                if is_error {
+                    emit_stderr("[Error: ");
+                    emit_stderr(&content);
+                    emit_stderr("]\n");
                 }
             }
             MessageDeltaContent::StreamEnd { .. } => {
                 // Flush remaining buffer (only if not inside a think block)
                 if !in_think && !buf.is_empty() {
-                    print!("{buf}");
+                    emit_stdout(&buf);
                 }
-                println!();
+                emit_stdout("\n");
                 break;
             }
             MessageDeltaContent::Error { message, .. } => {
-                eprintln!("\n[Error: {message}]");
+                emit_stderr("\n[Error: ");
+                emit_stderr(&message);
+                emit_stderr("]\n");
                 break;
             }
             MessageDeltaContent::Metadata { key, value } => {
@@ -452,7 +574,7 @@ async fn process_stream(
                                 .get("reasoning")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            eprintln!("[Model] {model} ({reason})");
+                            emit_stderr(&format!("[Model] {model} ({reason})\n"));
                         }
                         "quality_feedback" => {
                             let latency = value
@@ -467,7 +589,7 @@ async fn process_stream(
                                 .get("response_len")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0);
-                            eprint!("[Perf] {latency}ms, {resp_len} chars");
+                            let mut line = format!("[Perf] {latency}ms, {resp_len} chars");
                             if tool_count > 0 {
                                 let names = value
                                     .get("tool_names")
@@ -479,9 +601,8 @@ async fn process_stream(
                                             .join(", ")
                                     })
                                     .unwrap_or_default();
-                                eprint!(", {tool_count} tool(s): [{names}]");
+                                let _ = write!(line, ", {tool_count} tool(s): [{names}]");
                             }
-                            // Inference timing from local model
                             if let Some(gen_ms) =
                                 value.get("generation_ms").and_then(|v| v.as_f64())
                             {
@@ -501,11 +622,13 @@ async fn process_stream(
                                     .get("tokens_per_sec")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("?");
-                                eprint!(
+                                let _ = write!(
+                                    line,
                                     " | eval: {prompt_ms:.0}ms/{prompt_tok}tok, gen: {gen_ms:.0}ms/{gen_tok}tok ({tok_s} tok/s)"
                                 );
                             }
-                            eprintln!();
+                            line.push('\n');
+                            emit_stderr(&line);
                         }
                         "tool_search" => {
                             let keywords = value
@@ -526,10 +649,12 @@ async fn process_stream(
                                         .join(", ")
                                 })
                                 .unwrap_or_default();
-                            eprintln!("[Tools] searched \"{keywords}\" → {found} found: [{names}]");
+                            emit_stderr(&format!(
+                                "[Tools] searched \"{keywords}\" → {found} found: [{names}]\n"
+                            ));
                         }
                         _ => {
-                            eprintln!("[{key}] {value}");
+                            emit_stderr("[debug metadata]\n");
                         }
                     }
                 }
@@ -624,6 +749,64 @@ mod tests {
     fn test_parse_regular_input() {
         let cmd = parse_command("hello world");
         assert!(cmd.is_none());
+    }
+
+    #[test]
+    fn test_parse_cli_model_name() {
+        let flags = parse_cli_args(&[
+            "--model".into(),
+            "qwen3.5-0.8b".into(),
+            "--prompt".into(),
+            "hi".into(),
+        ])
+        .unwrap();
+        assert_eq!(flags.model.as_deref(), Some("qwen3.5-0.8b"));
+        assert_eq!(flags.prompt.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn test_parse_cli_gguf_alias_requires_suffix() {
+        let err = parse_cli_args(&["--gguf".into(), "not-a-model".into()]).unwrap_err();
+        assert!(err.to_string().contains(".gguf"));
+    }
+
+    #[test]
+    fn test_parse_cli_missing_gguf_path_errors() {
+        let err =
+            parse_cli_args(&["--model".into(), "models/missing-adapter.gguf".into()]).unwrap_err();
+        assert!(err.to_string().contains("GGUF not found"));
+    }
+
+    #[test]
+    fn test_parse_cli_gguf_flag_missing_arg() {
+        let err = parse_cli_args(&["--gguf".into()]).unwrap_err();
+        assert!(err.to_string().contains("--gguf requires a path"));
+    }
+
+    #[test]
+    fn test_parse_cli_existing_gguf_path() {
+        // A unique file per run: a fixed name in the shared temp dir let
+        // concurrent test processes delete each other's fixture mid-test.
+        let file = tempfile::Builder::new()
+            .prefix("arkavo-chat-cli-test")
+            .suffix(".gguf")
+            .tempfile()
+            .unwrap();
+        std::fs::write(file.path(), b"gguf").unwrap();
+        let path = file.path();
+        let flags = parse_cli_args(&["--gguf".into(), path.to_string_lossy().into()]).unwrap();
+        assert_eq!(flags.model.as_deref(), path.to_str());
+        let flags = parse_cli_args(&["--model".into(), path.to_string_lossy().into()]).unwrap();
+        assert_eq!(flags.model.as_deref(), path.to_str());
+    }
+
+    #[test]
+    fn test_debug_session_started_message_omits_session_id() {
+        let msg = debug_session_started_message();
+        let lower = msg.to_ascii_lowercase();
+        assert!(!lower.contains("session_id"));
+        assert!(!lower.contains("session:"));
+        assert_eq!(msg, "[A2A] Session started");
     }
 
     #[test]

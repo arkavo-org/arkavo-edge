@@ -127,3 +127,5 @@ mod tests {
         assert!(!id.to_string().is_empty());
     }
 }
+
+pub mod history_window;

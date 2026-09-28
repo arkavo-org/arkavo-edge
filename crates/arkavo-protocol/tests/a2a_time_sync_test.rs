@@ -3,7 +3,7 @@
 use arkavo_protocol::{A2aMcpBridge, a2a::A2aClient};
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
 async fn run_concurrent_a2a_requests<F, Fut>(
@@ -40,6 +40,29 @@ where
     }
 
     results
+}
+
+/// The wall-clock second as the time tool reads it (`Utc::now().timestamp()`
+/// floors the same system clock).
+fn unix_now() -> i64 {
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is after the epoch");
+    i64::try_from(since_epoch.as_secs()).expect("seconds since epoch fit in i64")
+}
+
+/// Assert every reported second falls inside the window read around the
+/// calls. A fixed drift bound between sequential answers fails whenever the
+/// calls themselves straddle more seconds than the bound, which a slow or
+/// loaded runner does; the window bound holds however long the calls take
+/// while still catching any agent whose clock disagrees with the system's.
+fn assert_within_window(label: &str, timestamps: &[i64], before: i64, after: i64) {
+    for (i, &ts) in timestamps.iter().enumerate() {
+        assert!(
+            (before..=after).contains(&ts),
+            "{label} {i} reported {ts}, outside the observed window [{before}, {after}]"
+        );
+    }
 }
 
 fn calculate_statistics(latencies: &[f64]) -> (f64, f64, f64, f64) {
@@ -103,6 +126,7 @@ async fn test_a2a_time_query_with_timezones() {
     let timezones = vec!["UTC", "America/New_York", "Europe/London", "Asia/Tokyo"];
     let mut unix_timestamps = Vec::new();
 
+    let before = unix_now();
     for tz in timezones {
         let response = client
             .call_mcp_tool(
@@ -117,11 +141,10 @@ async fn test_a2a_time_query_with_timezones() {
         unix_timestamps.push(response.result["unix_seconds"].as_i64().unwrap());
     }
 
-    let first = unix_timestamps[0];
-    for &ts in &unix_timestamps[1..] {
-        let diff = (ts - first).abs();
-        assert!(diff <= 1, "Timestamp difference too large: {}", diff);
-    }
+    let after = unix_now();
+
+    // Every timezone must report the same instant: the UTC epoch seconds.
+    assert_within_window("Timezone query", &unix_timestamps, before, after);
 }
 
 #[tokio::test]
@@ -135,6 +158,7 @@ async fn test_a2a_multi_agent_time_consistency() {
     }
 
     let mut unix_times = Vec::new();
+    let before = unix_now();
     for agent in &agents {
         let response = agent
             .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
@@ -145,15 +169,9 @@ async fn test_a2a_multi_agent_time_consistency() {
         unix_times.push(response.result["unix_seconds"].as_i64().unwrap());
     }
 
-    let first_time = unix_times[0];
-    for &time in &unix_times[1..] {
-        let drift = (time - first_time).abs();
-        assert!(
-            drift <= 1,
-            "Time drift too large between agents: {}s",
-            drift
-        );
-    }
+    let after = unix_now();
+
+    assert_within_window("Agent", &unix_times, before, after);
 }
 
 #[tokio::test]
@@ -253,38 +271,61 @@ async fn test_a2a_invalid_tool_request() {
     assert!(response.error.unwrap().contains("not found"));
 }
 
+fn median(mut samples: Vec<Duration>) -> Duration {
+    samples.sort_unstable();
+    samples[samples.len() / 2]
+}
+
 #[tokio::test]
 async fn test_a2a_tool_latency_overhead() {
-    let bridge = A2aMcpBridge::new().await.expect("Failed to create bridge");
+    // Both calls take microseconds, so a single sample of each is dominated by
+    // scheduler noise on a shared runner. Compare medians of interleaved
+    // samples against an absolute budget rather than a ratio of two samples.
+    const WARMUP: usize = 8;
+    const SAMPLES: usize = 64;
+    const OVERHEAD_BUDGET: Duration = Duration::from_millis(5);
 
-    let direct_start = Instant::now();
-    let _direct_result = bridge
-        .call_tool(arkavo_protocol::McpToolRequest {
-            tool_name: "get_agent_time".to_string(),
-            params: json!({"format": "unix"}),
-        })
-        .await;
-    let direct_latency = direct_start.elapsed().as_secs_f64() * 1000.0;
+    let direct = A2aMcpBridge::new().await.expect("Failed to create bridge");
+    let client =
+        A2aClient::with_mcp_bridge(A2aMcpBridge::new().await.expect("Failed to create bridge"));
+    let request = || arkavo_protocol::McpToolRequest {
+        tool_name: "get_agent_time".to_string(),
+        params: json!({"format": "unix"}),
+    };
 
-    let client = A2aClient::with_mcp_bridge(bridge);
-    let a2a_start = Instant::now();
-    let _a2a_result = client
-        .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
-        .await
-        .unwrap();
-    let a2a_latency = a2a_start.elapsed().as_secs_f64() * 1000.0;
+    for _ in 0..WARMUP {
+        direct.call_tool(request()).await;
+        client
+            .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
+            .await
+            .unwrap();
+    }
 
+    let mut direct_samples = Vec::with_capacity(SAMPLES);
+    let mut a2a_samples = Vec::with_capacity(SAMPLES);
+    for _ in 0..SAMPLES {
+        let start = Instant::now();
+        direct.call_tool(request()).await;
+        direct_samples.push(start.elapsed());
+
+        let start = Instant::now();
+        client
+            .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
+            .await
+            .unwrap();
+        a2a_samples.push(start.elapsed());
+    }
+
+    let direct_median = median(direct_samples);
+    let a2a_median = median(a2a_samples);
+    let overhead = a2a_median.saturating_sub(direct_median);
     println!(
-        "Direct: {:.3}ms, A2A: {:.3}ms, Overhead: {:.3}ms",
-        direct_latency,
-        a2a_latency,
-        a2a_latency - direct_latency
+        "Direct median: {direct_median:?}, A2A median: {a2a_median:?}, Overhead: {overhead:?}"
     );
 
     assert!(
-        a2a_latency < direct_latency * 10.0,
-        "A2A overhead too large: {:.2}x",
-        a2a_latency / direct_latency
+        overhead < OVERHEAD_BUDGET,
+        "A2A median overhead {overhead:?} exceeds {OVERHEAD_BUDGET:?}"
     );
 }
 
@@ -302,6 +343,7 @@ async fn test_a2a_orchestrator_pattern() {
     }
 
     let mut agent_times = Vec::new();
+    let before = unix_now();
     for (name, agent) in &agents {
         let response = agent
             .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
@@ -319,14 +361,20 @@ async fn test_a2a_orchestrator_pattern() {
         })
         .await;
 
+    let after = unix_now();
+
     assert!(orchestrator_response.success);
     let orchestrator_time = orchestrator_response.result["unix_seconds"]
         .as_i64()
         .unwrap();
 
     for (i, &agent_time) in agent_times.iter().enumerate() {
-        let drift = (agent_time - orchestrator_time).abs();
-        println!("Agent {}: drift {}s", i, drift);
-        assert!(drift <= 2, "Agent {} drift too large: {}s", i, drift);
+        println!(
+            "Agent {}: drift {}s",
+            i,
+            (agent_time - orchestrator_time).abs()
+        );
     }
+    assert_within_window("Orchestrator", &[orchestrator_time], before, after);
+    assert_within_window("Agent", &agent_times, before, after);
 }

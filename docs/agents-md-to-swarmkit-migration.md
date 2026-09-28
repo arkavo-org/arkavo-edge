@@ -355,7 +355,7 @@ Same as local workflow **Tier F**:
 
 `arkavo kit migrate-from-agents-md`:
 
-1. Parse legacy markdown (reuse existing parser **only inside this command** until S6 deletes it).
+1. Parse the AGENTS.md with `commands::kit::agents_md` — the parser lives only under `kit` and has no runtime caller. It merges YAML frontmatter with `##` agent sections (a section overrides frontmatter field by field) and rejects an agent with a blank name, or a name with no letters or digits to form a role id.
 2. Emit one-role kit per `##` agent, or multi-role kit if multiple sections in one file.
 3. Map `purpose` → identity skill instructions + objective.goal.
 4. Map frontmatter YAML → `runtime.*`.

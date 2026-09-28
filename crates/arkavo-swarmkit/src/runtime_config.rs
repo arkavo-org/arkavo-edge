@@ -82,6 +82,11 @@ pub struct TrustedRoot {
     pub did: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Base64 Ed25519 public key. The DID:key already embeds the verifying key; when
+    /// both are present the server drops a root whose key contradicts its DID, so a
+    /// copy-paste mistake cannot silently widen trust.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
 }
 
 /// MCP server process/URL metadata for tool bridges.
@@ -474,6 +479,7 @@ kas:
                 trusted_roots: vec![TrustedRoot {
                     did: "not-a-did".into(),
                     name: None,
+                    public_key: None,
                 }],
                 ..Default::default()
             }),
@@ -494,6 +500,7 @@ kas:
                 trusted_roots: vec![TrustedRoot {
                     did: String::new(),
                     name: None,
+                    public_key: None,
                 }],
                 ..Default::default()
             }),

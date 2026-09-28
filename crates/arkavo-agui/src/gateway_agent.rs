@@ -22,6 +22,9 @@ pub struct RunAgentParams {
     agent_id: Option<String>,
 }
 
+// axum implements IntoResponse for Result<T, E> only when E does, and Response
+// carries no such impl once boxed, so the Err variant cannot shrink here.
+#[allow(clippy::result_large_err)]
 pub async fn run_agent_handler(
     Query(params): Query<RunAgentParams>,
     State(state): State<AppState>,

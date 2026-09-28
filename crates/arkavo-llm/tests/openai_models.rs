@@ -27,10 +27,7 @@ async fn test_gpt_4o_model() {
     let messages = vec![Message {
         role: Role::User,
         content: "What model are you? Reply with just your model name.".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let start = Instant::now();
@@ -66,10 +63,7 @@ async fn test_gpt_4_turbo_model() {
     let messages = vec![Message {
         role: Role::User,
         content: "Generate a haiku about Rust programming. Reply with just the haiku.".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let start = Instant::now();
@@ -108,10 +102,7 @@ async fn test_gpt_35_turbo_model() {
     let messages = vec![Message {
         role: Role::User,
         content: "What is 2 + 2? Reply with just the number.".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let start = Instant::now();
@@ -157,10 +148,7 @@ async fn test_model_performance_comparison() {
                 let messages = vec![Message {
                     role: Role::User,
                     content: test_prompt.to_string(),
-                    images: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_calls: Vec::new(),
+                    ..Default::default()
                 }];
 
                 let start = Instant::now();
@@ -208,20 +196,14 @@ async fn test_context_window_handling() {
         Message {
             role: Role::System,
             content: format!("Remember this text: {long_text}"),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         },
         Message {
             role: Role::User,
             content:
                 "How many times does the word 'fox' appear in the text I asked you to remember?"
                     .to_string(),
-            images: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_calls: Vec::new(),
+            ..Default::default()
         },
     ];
 
@@ -253,18 +235,12 @@ async fn test_json_mode_response() {
         Message {
             role: Role::System,
             content: "You must respond with valid JSON only.".to_string(),
-            images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+            ..Default::default()
         },
         Message {
             role: Role::User,
             content: r#"Create a JSON object with fields: "name" (string), "age" (number), and "active" (boolean)."#.to_string(),
-            images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+            ..Default::default()
         },
     ];
 
@@ -306,10 +282,7 @@ async fn test_model_fallback() {
     let messages = vec![Message {
         role: Role::User,
         content: "Hello".to_string(),
-        images: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_calls: Vec::new(),
+        ..Default::default()
     }];
 
     let result = provider.complete(messages.clone()).await;
