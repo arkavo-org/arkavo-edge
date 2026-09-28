@@ -268,37 +268,47 @@ impl IpRateLimiter {
         let mut attempts = 0;
         let max_attempts = self.config.max_ip_entries * 2; // Safety limit
 
-        // Process entries from the queue until we reach target size
+        // Process entries from the queue until we reach target size. The queue
+        // may be empty before we reach the target, or it may be full of stale
+        // entries that exhaust the attempt budget; both cases fall through to the
+        // deterministic sweep below so the map is always brought under capacity.
         while self.limiters.len() > target_size && attempts < max_attempts {
             attempts += 1;
 
-            if let Some((ip, accessed_at)) = self.access_queue.pop() {
-                // Check if this IP is still in the map
-                if let Some(entry) = self.limiters.get(&ip) {
-                    // If it's the same access time or expired, remove it
-                    if entry.last_accessed == accessed_at
+            let Some((ip, accessed_at)) = self.access_queue.pop() else {
+                break;
+            };
+
+            // Decide whether to evict while only holding a read guard, then drop
+            // it before removing. Holding a dashmap `Ref` across `remove` on the
+            // same key deadlocks the shard against itself.
+            let should_remove = match self.limiters.get(&ip) {
+                Some(entry) => {
+                    entry.last_accessed == accessed_at
                         || (self.config.ip_entry_ttl_seconds > 0
                             && now.duration_since(accessed_at) > ttl)
-                    {
-                        self.limiters.remove(&ip);
-                    }
-                    // Otherwise, this is a stale queue entry, skip it
                 }
-            } else {
-                // Queue is empty but map is still too large
-                // Fall back to removing oldest entries directly
-                let mut oldest_entries: Vec<_> = self
-                    .limiters
-                    .iter()
-                    .map(|entry| (*entry.key(), entry.value().last_accessed))
-                    .collect();
-                oldest_entries.sort_by_key(|&(_, accessed)| accessed);
+                None => false,
+            };
+            if should_remove {
+                self.limiters.remove(&ip);
+            }
+            // Otherwise, this is a stale queue entry, skip it.
+        }
 
-                let to_remove = self.limiters.len() - target_size;
-                for (ip, _) in oldest_entries.into_iter().take(to_remove) {
-                    self.limiters.remove(&ip);
-                }
-                break;
+        // If the queue drained or the attempt budget was exhausted before we hit
+        // the target, remove the oldest entries directly so capacity is enforced.
+        if self.limiters.len() > target_size {
+            let mut oldest_entries: Vec<_> = self
+                .limiters
+                .iter()
+                .map(|entry| (*entry.key(), entry.value().last_accessed))
+                .collect();
+            oldest_entries.sort_by_key(|&(_, accessed)| accessed);
+
+            let to_remove = self.limiters.len().saturating_sub(target_size);
+            for (ip, _) in oldest_entries.into_iter().take(to_remove) {
+                self.limiters.remove(&ip);
             }
         }
     }
