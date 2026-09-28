@@ -10461,6 +10461,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13d84c42dedf8b01d52b62272684741866938260e74b9e58851f680b2a92854b"
 dependencies = [
  "cfg-if",
+ "tokio",
 ]
 
 [[package]]

@@ -6,9 +6,9 @@ use arkavo_mcp_tools::{
 };
 use arkavo_memory::MemoryStorage;
 use serde_json::json;
-use std::net::UdpSocket;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::net::UdpSocket;
 
 async fn create_test_registry() -> ToolRegistry {
     let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
@@ -23,22 +23,23 @@ const NTP_EPOCH_OFFSET: u64 = 2_208_988_800;
 ///
 /// The sync tests used to query public NTP servers, so whether their success
 /// branch ran at all depended on the runner's network, and a slow or dropped
-/// reply cost them a two-second read timeout per server. A responder on
-/// 127.0.0.1 always answers, which lets them require success. The crate's
-/// own `NtpServer` sits behind the `ntp-server` feature that CI does not
-/// build, and cannot report the port it bound, so this is the few lines of
-/// RFC 4330 the client needs.
-fn start_local_sntp_server(stratum: u8) -> u16 {
-    let socket = UdpSocket::bind("127.0.0.1:0").expect("bind local SNTP responder");
+/// reply cost them a two-second timeout per server. A responder on 127.0.0.1
+/// always answers, which lets them require success. The crate's own
+/// `NtpServer` sits behind the `ntp-server` feature that CI does not build,
+/// and cannot report the port it bound, so this is the few lines of RFC 4330
+/// the client needs.
+///
+/// It runs as a task on the calling test's runtime, which `#[tokio::test]`
+/// makes single-threaded, so a sync tool that blocked that thread while
+/// waiting for the reply would starve the responder and fail the test.
+async fn start_local_sntp_server(stratum: u8) -> u16 {
+    let socket = UdpSocket::bind("127.0.0.1:0")
+        .await
+        .expect("bind local SNTP responder");
     let port = socket.local_addr().expect("responder address").port();
-    // Bounds the thread's life once the tests stop asking; it is otherwise
-    // left to end with the test process.
-    socket
-        .set_read_timeout(Some(Duration::from_secs(30)))
-        .expect("responder read timeout");
-    std::thread::spawn(move || {
+    tokio::spawn(async move {
         let mut request = [0u8; 48];
-        while let Ok((len, peer)) = socket.recv_from(&mut request) {
+        while let Ok((len, peer)) = socket.recv_from(&mut request).await {
             if len < request.len() {
                 continue;
             }
@@ -61,7 +62,7 @@ fn start_local_sntp_server(stratum: u8) -> u16 {
             response[24..32].copy_from_slice(&request[40..48]);
             response[32..40].copy_from_slice(&timestamp);
             response[40..48].copy_from_slice(&timestamp);
-            let _ = socket.send_to(&response, peer);
+            let _ = socket.send_to(&response, peer).await;
         }
     });
     port
@@ -136,7 +137,7 @@ async fn test_get_agent_time_all_formats() {
 
 #[tokio::test]
 async fn test_sync_agent_time_with_local_server() {
-    let port = start_local_sntp_server(2);
+    let port = start_local_sntp_server(2).await;
     let tool = SyncAgentTimeTool::new();
 
     let response = tool
@@ -230,7 +231,7 @@ async fn test_get_time_status_initial() {
 
 #[tokio::test]
 async fn test_end_to_end_workflow() {
-    let port = start_local_sntp_server(2);
+    let port = start_local_sntp_server(2).await;
     let registry = create_test_registry().await;
 
     let get_time = registry.get("get_agent_time").unwrap();
@@ -273,7 +274,7 @@ async fn test_multiple_ntp_servers() {
     // Each responder reports its own stratum, so a reply cannot be credited
     // to the wrong server.
     for stratum in [1u8, 2, 3] {
-        let port = start_local_sntp_server(stratum);
+        let port = start_local_sntp_server(stratum).await;
         let response = tool
             .execute(json!({
                 "server": "127.0.0.1",
