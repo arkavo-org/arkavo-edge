@@ -501,7 +501,9 @@ mod tests {
             .await;
         let url = format!("{}/.well-known/cose-keys", server.uri());
 
-        let keys = std::sync::Arc::new(CachedKeySet::new(&url, Duration::from_millis(50)));
+        // A long ttl, crossed on demand with `expire`, so neither suppression
+        // below depends on the scheduler finishing a step inside a few ms.
+        let keys = std::sync::Arc::new(CachedKeySet::new(&url, Duration::from_secs(60)));
         // Prime the cache: one fetch, then the miss is suppressed by the ttl.
         assert!(matches!(
             keys.verify(&token, &opts("arkavo-kas")).await,
@@ -511,7 +513,7 @@ mod tests {
 
         // Let the ttl lapse so both of the next verifications are entitled to
         // refetch, then run them together.
-        tokio::time::sleep(Duration::from_millis(120)).await;
+        keys.expire();
         let (first, second) = tokio::join!(
             {
                 let keys = keys.clone();
