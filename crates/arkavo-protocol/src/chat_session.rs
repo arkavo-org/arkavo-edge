@@ -2066,7 +2066,19 @@ mod tests {
         // but leave the metrics entry in place.
         sessions.write().await.remove(&session_id);
 
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        // The handler notices the closed channel on its own task, so poll for
+        // the transition with a generous deadline instead of guessing how long
+        // a loaded scheduler takes to run it.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline
+            && session_metrics
+                .read()
+                .await
+                .get(&session_id)
+                .is_some_and(|m| m.state != SessionState::Zombie)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
 
         let metrics = session_metrics.read().await;
         let metric = metrics

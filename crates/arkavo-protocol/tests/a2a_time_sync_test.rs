@@ -42,6 +42,29 @@ where
     results
 }
 
+/// The wall-clock second as the time tool reads it (`Utc::now().timestamp()`
+/// floors the same system clock).
+fn unix_now() -> i64 {
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is after the epoch");
+    i64::try_from(since_epoch.as_secs()).expect("seconds since epoch fit in i64")
+}
+
+/// Assert every reported second falls inside the window read around the
+/// calls. A fixed drift bound between sequential answers fails whenever the
+/// calls themselves straddle more seconds than the bound, which a slow or
+/// loaded runner does; the window bound holds however long the calls take
+/// while still catching any agent whose clock disagrees with the system's.
+fn assert_within_window(label: &str, timestamps: &[i64], before: i64, after: i64) {
+    for (i, &ts) in timestamps.iter().enumerate() {
+        assert!(
+            (before..=after).contains(&ts),
+            "{label} {i} reported {ts}, outside the observed window [{before}, {after}]"
+        );
+    }
+}
+
 fn calculate_statistics(latencies: &[f64]) -> (f64, f64, f64, f64) {
     if latencies.is_empty() {
         return (0.0, 0.0, 0.0, 0.0);
@@ -103,6 +126,7 @@ async fn test_a2a_time_query_with_timezones() {
     let timezones = vec!["UTC", "America/New_York", "Europe/London", "Asia/Tokyo"];
     let mut unix_timestamps = Vec::new();
 
+    let before = unix_now();
     for tz in timezones {
         let response = client
             .call_mcp_tool(
@@ -117,11 +141,10 @@ async fn test_a2a_time_query_with_timezones() {
         unix_timestamps.push(response.result["unix_seconds"].as_i64().unwrap());
     }
 
-    let first = unix_timestamps[0];
-    for &ts in &unix_timestamps[1..] {
-        let diff = (ts - first).abs();
-        assert!(diff <= 1, "Timestamp difference too large: {}", diff);
-    }
+    let after = unix_now();
+
+    // Every timezone must report the same instant: the UTC epoch seconds.
+    assert_within_window("Timezone query", &unix_timestamps, before, after);
 }
 
 #[tokio::test]
@@ -135,6 +158,7 @@ async fn test_a2a_multi_agent_time_consistency() {
     }
 
     let mut unix_times = Vec::new();
+    let before = unix_now();
     for agent in &agents {
         let response = agent
             .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
@@ -145,15 +169,9 @@ async fn test_a2a_multi_agent_time_consistency() {
         unix_times.push(response.result["unix_seconds"].as_i64().unwrap());
     }
 
-    let first_time = unix_times[0];
-    for &time in &unix_times[1..] {
-        let drift = (time - first_time).abs();
-        assert!(
-            drift <= 1,
-            "Time drift too large between agents: {}s",
-            drift
-        );
-    }
+    let after = unix_now();
+
+    assert_within_window("Agent", &unix_times, before, after);
 }
 
 #[tokio::test]
@@ -325,6 +343,7 @@ async fn test_a2a_orchestrator_pattern() {
     }
 
     let mut agent_times = Vec::new();
+    let before = unix_now();
     for (name, agent) in &agents {
         let response = agent
             .call_mcp_tool("get_agent_time", json!({"format": "unix"}))
@@ -342,14 +361,20 @@ async fn test_a2a_orchestrator_pattern() {
         })
         .await;
 
+    let after = unix_now();
+
     assert!(orchestrator_response.success);
     let orchestrator_time = orchestrator_response.result["unix_seconds"]
         .as_i64()
         .unwrap();
 
     for (i, &agent_time) in agent_times.iter().enumerate() {
-        let drift = (agent_time - orchestrator_time).abs();
-        println!("Agent {}: drift {}s", i, drift);
-        assert!(drift <= 2, "Agent {} drift too large: {}s", i, drift);
+        println!(
+            "Agent {}: drift {}s",
+            i,
+            (agent_time - orchestrator_time).abs()
+        );
     }
+    assert_within_window("Orchestrator", &[orchestrator_time], before, after);
+    assert_within_window("Agent", &agent_times, before, after);
 }
