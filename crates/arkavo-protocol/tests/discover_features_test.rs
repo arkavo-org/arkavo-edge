@@ -13,14 +13,16 @@ mod discover_features_tests {
         // Start test server
         let mut config = ServerConfig::default();
         config.bind_address = "127.0.0.1".to_string();
-        config.port = 18901; // Use specific test port
+        // Port 0 lets the OS pick a free port, so concurrent test runs on
+        // one host cannot collide with AddrInUse.
+        config.port = 0;
         config.task_store_path = None; // Use in-memory database for tests
 
         let server = A2aServer::new(config.clone());
-        let handle = server.start().await.unwrap();
+        let (handle, port) = server.start_with_port().await.unwrap();
 
         // Create client
-        let url = format!("ws://{}:{}", config.bind_address, config.port);
+        let url = format!("ws://{}:{}", config.bind_address, port);
         let client = WsClientBuilder::default().build(&url).await.unwrap();
 
         // Test proactive disclosure
@@ -57,14 +59,16 @@ mod discover_features_tests {
         // Start test server
         let mut config = ServerConfig::default();
         config.bind_address = "127.0.0.1".to_string();
-        config.port = 18902; // Use different test port
+        // Port 0 lets the OS pick a free port, so concurrent test runs on
+        // one host cannot collide with AddrInUse.
+        config.port = 0;
         config.task_store_path = None; // Use in-memory database for tests
 
         let server = A2aServer::new(config.clone());
-        let handle = server.start().await.unwrap();
+        let (handle, port) = server.start_with_port().await.unwrap();
 
         // Create client
-        let url = format!("ws://{}:{}", config.bind_address, config.port);
+        let url = format!("ws://{}:{}", config.bind_address, port);
         let client = WsClientBuilder::default().build(&url).await.unwrap();
 
         // Test query with protocol filter
@@ -104,7 +108,9 @@ mod discover_features_tests {
         // Start test server with MCP
         let mut config = ServerConfig::default();
         config.bind_address = "127.0.0.1".to_string();
-        config.port = 18903; // Use another different test port
+        // Port 0 lets the OS pick a free port, so concurrent test runs on
+        // one host cannot collide with AddrInUse.
+        config.port = 0;
         config.task_store_path = None; // Use in-memory database for tests
 
         let server = A2aServer::new(config.clone());
@@ -120,10 +126,10 @@ mod discover_features_tests {
             )
             .await;
 
-        let handle = server.start().await.unwrap();
+        let (handle, port) = server.start_with_port().await.unwrap();
 
         // Create client
-        let url = format!("ws://{}:{}", config.bind_address, config.port);
+        let url = format!("ws://{}:{}", config.bind_address, port);
         let client = WsClientBuilder::default().build(&url).await.unwrap();
 
         // Query only MCP tools

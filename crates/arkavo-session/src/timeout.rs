@@ -144,7 +144,13 @@ impl TimeoutTracker {
 
     /// Records activity to prevent idle timeout
     pub fn record_activity(&mut self) {
-        self.last_activity = Instant::now();
+        self.record_activity_at(Instant::now());
+    }
+
+    // Taking the clock reading as an argument lets tests place activity and
+    // checks at exact offsets instead of racing real sleeps against the timeout.
+    fn record_activity_at(&mut self, now: Instant) {
+        self.last_activity = now;
     }
 
     /// Checks if the session has timed out (absolute or idle)
@@ -158,8 +164,10 @@ impl TimeoutTracker {
     /// - `TimeoutStatus::AbsoluteExpired` if absolute timeout exceeded
     /// - `TimeoutStatus::IdleExpired` if idle timeout exceeded
     pub fn check_timeout(&self) -> TimeoutStatus {
-        let now = Instant::now();
+        self.check_timeout_at(Instant::now())
+    }
 
+    fn check_timeout_at(&self, now: Instant) -> TimeoutStatus {
         // SESS-001: Check absolute timeout (session lifetime)
         let absolute_elapsed = now.duration_since(self.created_at);
         if absolute_elapsed >= self.config.absolute_timeout {
@@ -286,15 +294,28 @@ mod tests {
             check_interval: Duration::from_secs(1),
         };
         let mut tracker = TimeoutTracker::new(config);
+        let start = tracker.created_at;
 
-        // Act: Wait half the timeout, record activity, wait half again
-        std::thread::sleep(Duration::from_millis(50));
+        // Act: Record activity at 60ms, then check at 120ms. Synthetic instants
+        // keep the margins exact; real sleeps could overshoot the timeout.
+        tracker.record_activity_at(start + Duration::from_millis(60));
+        let checked_at = start + Duration::from_millis(120);
+
+        // Assert: 120ms since creation would be idle-expired, but only 60ms
+        // have passed since the activity, so the reset kept it active.
+        assert!(checked_at.duration_since(start) >= config.idle_timeout);
+        assert_eq!(tracker.check_timeout_at(checked_at), TimeoutStatus::Active);
+
+        // The reset timer still expires once a full idle period passes.
+        assert_eq!(
+            tracker.check_timeout_at(start + Duration::from_millis(160)),
+            TimeoutStatus::IdleExpired
+        );
+
+        // The public entry point stamps activity with the real clock.
+        let before = Instant::now();
         tracker.record_activity();
-        std::thread::sleep(Duration::from_millis(50));
-        let status = tracker.check_timeout();
-
-        // Assert: Should still be active (activity reset the timer)
-        assert_eq!(status, TimeoutStatus::Active);
+        assert!(tracker.last_activity >= before);
     }
 
     // ============================================================================

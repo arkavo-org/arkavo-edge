@@ -238,6 +238,26 @@ impl CachedKeySet {
         drop(guard);
         Ok(keys)
     }
+
+    /// Backdate the cache so it is exactly one ttl old.
+    ///
+    /// Tests that need an expired cache otherwise sleep through a short ttl,
+    /// and a short ttl also shrinks the window in which a fresh fetch must
+    /// suppress the next one: a scheduler stall longer than the ttl then
+    /// reads as a second fetch. Aging the entry lets those tests keep a long
+    /// ttl and cross it on demand.
+    #[cfg(test)]
+    pub(crate) fn expire(&self) {
+        let mut cached = self
+            .cached
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(cached) = cached.as_mut() {
+            cached.fetched_at = Instant::now()
+                .checked_sub(self.ttl)
+                .expect("monotonic clock has run for longer than the ttl");
+        }
+    }
 }
 
 #[cfg(test)]

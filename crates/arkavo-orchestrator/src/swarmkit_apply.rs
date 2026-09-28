@@ -175,14 +175,21 @@ pub trait BundleShipper: Send + Sync {
 #[derive(Default)]
 pub struct EnvTokenVault;
 
-#[async_trait]
-impl TokenVault for EnvTokenVault {
-    async fn tokens_for_role(&self, role: &RoleSpec) -> HashMap<String, String> {
+impl EnvTokenVault {
+    /// The server-to-variable mapping over any lookup. The trait method
+    /// hands it the process environment; tests hand it a closure, because
+    /// the environment is shared by every test thread in the binary and
+    /// writing to it races their reads (and clobbers a developer's real
+    /// token for the rest of the run).
+    fn tokens_with(
+        role: &RoleSpec,
+        var: impl Fn(&str) -> Option<String>,
+    ) -> HashMap<String, String> {
         let mut out = HashMap::new();
         for grant in &role.mcp_tools {
             match grant.server.as_str() {
                 "arkavo-github" | "github-mcp" => {
-                    if let Ok(tok) = std::env::var("GITHUB_TOKEN") {
+                    if let Some(tok) = var("GITHUB_TOKEN") {
                         out.insert("GITHUB_TOKEN".to_string(), tok);
                     }
                 }
@@ -191,6 +198,13 @@ impl TokenVault for EnvTokenVault {
             }
         }
         out
+    }
+}
+
+#[async_trait]
+impl TokenVault for EnvTokenVault {
+    async fn tokens_for_role(&self, role: &RoleSpec) -> HashMap<String, String> {
+        Self::tokens_with(role, |name| std::env::var(name).ok())
     }
 }
 
@@ -579,24 +593,21 @@ mod env_token_vault_tests {
         }
     }
 
-    // Set/clear of the process-global GITHUB_TOKEN is sequenced inside one
-    // test so the two assertions can't race under `cargo test` (which runs
-    // test fns as threads in a single process and shares the environment).
-    // `set_var`/`remove_var` are `unsafe` on edition 2024.
-    #[tokio::test]
-    async fn reads_github_token_for_github_server_then_empty_when_absent() {
-        let vault = EnvTokenVault::default();
+    // The variable is supplied through the lookup rather than written to
+    // the process environment, which every test thread shares.
+    #[test]
+    fn reads_github_token_for_github_server_then_empty_when_absent() {
         let role = role_with_server("arkavo-github");
 
-        unsafe { std::env::set_var("GITHUB_TOKEN", "test-ghtoken-abc123") };
-        let tokens = vault.tokens_for_role(&role).await;
+        let tokens = EnvTokenVault::tokens_with(&role, |name| {
+            (name == "GITHUB_TOKEN").then(|| "test-ghtoken-abc123".to_string())
+        });
         assert_eq!(
             tokens.get("GITHUB_TOKEN"),
             Some(&"test-ghtoken-abc123".to_string())
         );
 
-        unsafe { std::env::remove_var("GITHUB_TOKEN") };
-        let tokens = vault.tokens_for_role(&role).await;
+        let tokens = EnvTokenVault::tokens_with(&role, |_| None);
         assert!(
             tokens.is_empty(),
             "no token should be returned when env var is unset"

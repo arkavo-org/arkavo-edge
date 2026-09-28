@@ -171,7 +171,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.97.1"
+version = "0.97.2"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -457,4 +457,14 @@ opt-level = 3
 # per-check latency a debug run reports would describe the profile rather
 # than the tier.
 [profile.dev.package.arkavo-fingerprint]
+opt-level = 3
+
+# Dispatch gate: every evaluation verifies an Ed25519 permit signature and an
+# Ed25519 proof-of-possession, and the gate's 25ms p95 budget is asserted in
+# its tests. At opt-level 0 the field arithmetic runs about a hundred times
+# slower than it ships (p50 ~16ms against ~0.2ms), which put the debug p95
+# within a few milliseconds of the budget and over it on any loaded runner.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519-dalek]
 opt-level = 3

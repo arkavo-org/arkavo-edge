@@ -23,7 +23,10 @@ tracing.workspace = true
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-permit = { path = "../arkavo-permit" }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# `test-util` pauses the clock in the tests whose subject is the order of a
+# lock, a write timeout and a retirement: on virtual time that order is fixed
+# by the deadlines rather than by how quickly a loaded runner schedules them.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 
 [lints]
 workspace = true

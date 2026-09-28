@@ -307,23 +307,28 @@ mod tests {
         // the 50µs per-call invariant. The tier must not spend that on the
         // caller's thread — it stops and hands the span to asynchronous
         // scoring, which is the degradation KP-011 specifies.
+        //
+        // The deferral is decided by span size before any hashing, so the
+        // assertion is on which path was taken, not on a wall-clock sample a
+        // preempted runner could blow. `tier()` carries a 1s budget: had the
+        // tier scored inline instead, it would have finished and matched.
         let tier = tier();
         let large = std::iter::repeat_n(CLASSIFIED, 60)
             .collect::<Vec<_>>()
             .join(" ");
+        assert!(large.len() > MAX_INLINE_BYTES);
 
-        let started = Instant::now();
         let report = tier.examine(&large);
-        let elapsed = started.elapsed();
 
+        let TierOutcome::Unavailable { reason } = &report.outcome else {
+            panic!("the tier spent the whole span inline: {report:?}");
+        };
         assert!(
-            report.is_unavailable(),
-            "the tier spent the whole span inline"
+            reason.contains("inline limit"),
+            "deferral was not decided by span size: {reason}"
         );
-        assert!(
-            elapsed < TIER_BUDGET * 4,
-            "deferral took {elapsed:?}, far past the {TIER_BUDGET:?} budget"
-        );
+        // ...and the deferred path still produces the finding.
+        assert!(!tier.examine_unbudgeted(&large).findings().is_empty());
     }
 
     #[spec("KP-011")]

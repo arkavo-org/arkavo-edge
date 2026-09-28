@@ -417,7 +417,11 @@ mod tests {
     /// as the upstream cared to ignore it — and every request would then
     /// block on the lock rather than on a timeout of its own. It gives up on
     /// the connection's timeout instead, and says the connection is gone.
-    #[tokio::test]
+    ///
+    /// On a paused clock, so the write timeout and the polling below are
+    /// measured in virtual time: the poll cannot run out before the writer
+    /// has had every chance to hit its timeout, however loaded the runner.
+    #[tokio::test(start_paused = true)]
     async fn a_refusal_write_that_cannot_finish_gives_up_and_closes_the_connection() {
         // A duplex whose far half is alive but never read: a write past its
         // buffer blocks exactly as a pipe to a server that stopped reading
@@ -514,7 +518,11 @@ mod tests {
     /// to be abandoned. The connection is retired during that wait, and the
     /// check under the lock is what keeps the refusal off the end of the
     /// partial line.
-    #[tokio::test]
+    ///
+    /// On a paused clock, so neither the wait for the writer to take the
+    /// refusal nor the window in which nothing may arrive depends on how
+    /// quickly a loaded runner schedules the writer task.
+    #[tokio::test(start_paused = true)]
     async fn a_refusal_that_waited_for_the_stdin_is_never_spliced_onto_the_abandoned_line() {
         use tokio::io::AsyncReadExt;
 
