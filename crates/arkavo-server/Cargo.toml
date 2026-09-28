@@ -10,6 +10,7 @@ keywords = ["server", "a2a", "json-rpc", "agent", "protocol"]
 categories = ["network-programming", "web-programming"]
 
 [dependencies]
+arkavo-routines = { path = "../arkavo-routines", optional = true }
 # Core async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 async-trait = { workspace = true }
@@ -120,6 +121,8 @@ clap = { workspace = true, optional = true }
 
 [features]
 default = ["kas"]
+# Pilot only: routine replay always includes the session egress boundary.
+routines = ["dep:arkavo-routines", "taint"]
 demo = ["clap", "tracing-subscriber"]
 stub_handlers = []
 mdns = ["if-addrs"]

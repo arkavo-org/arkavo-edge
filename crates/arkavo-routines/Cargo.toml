@@ -1,0 +1,23 @@
+[package]
+name = "arkavo-routines"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Evidence-backed, policy-gated tool routine learning"
+
+[dependencies]
+arkavo-mcp = { path = "../arkavo-mcp" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true
