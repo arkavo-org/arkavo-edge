@@ -1345,7 +1345,7 @@ async fn apply_reward_correction(router: &Arc<arkavo_router::Router>, reward_sig
 /// Searches the result JSON tree for any object containing `"Success": false`
 /// (case-insensitive key) paired with a `"Message"` field. Works with
 /// double-wrapped JSON (`{"result": "..."}`) and arbitrarily nested structures.
-fn detect_semantic_failure(result_json: &str) -> Option<String> {
+pub(super) fn detect_semantic_failure(result_json: &str) -> Option<String> {
     let outer: serde_json::Value = serde_json::from_str(result_json).ok()?;
 
     // Unwrap the MCP double-wrapping: {"result": "{...}"}
