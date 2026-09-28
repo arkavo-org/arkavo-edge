@@ -1,12 +1,13 @@
 //! `arkavo swarmkit play <kit>` — run a SwarmKit as a live agent flight by
 //! mapping each role to the existing agent runtime (`start_agent_server`).
-//!
-//! This module currently provides only the pure mapping function
-//! [`kit_to_agent_configs`]; the command/dispatch layer is a separate task.
 
 use crate::commands::agent::{AgentConfig, McpServerConfig};
 use arkavo_protocol::agent_config::AgentMode;
 use arkavo_swarmkit::{McpServerDef, manifest::Manifest};
+use std::future::Future;
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::mpsc;
+use tokio::sync::watch;
 
 /// First listen port assigned to role index 0; subsequent roles get
 /// consecutive ports. Deterministic so peer wiring is reproducible.
@@ -136,7 +137,6 @@ fn slug(name: &str) -> String {
 }
 
 /// `arkavo swarmkit play <kit.yaml> [--role <id>]`
-#[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut kit_path: Option<String> = None;
     let mut only_role: Option<String> = None;
@@ -232,55 +232,80 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // `start_agent_server`'s future is `!Send` (it holds a `Box<dyn Error>`
-    // across an await), so it cannot be `tokio::spawn`ed onto shared worker
-    // threads. Give each role its OWN OS thread with its own current-thread
-    // runtime, so blocking/CPU work (e.g. local inference) in one role does
-    // not stall the others' tick loops.
-    // Track each role name alongside its thread handle so that a panicked
-    // role thread (whose closure never returns a value) is still counted as a
-    // failure on join — otherwise `join().ok().flatten()` would silently drop
-    // the panic and the command would exit 0 despite a crashed role.
+    supervise(configs, |cfg, mut shutdown| async move {
+        let stop = async move {
+            // An Err here means the supervisor dropped the sender, which only
+            // happens once it is done; stopping is the right response either way.
+            let _ = shutdown.wait_for(|stop| *stop).await;
+        };
+        crate::commands::agent::start_agent_server_until(&cfg, false, stop).await
+    })
+    .map_err(Into::into)
+}
+
+/// Run each role on its own OS thread and supervise them as one swarm.
+///
+/// `start_agent_server`'s future is `!Send` (it holds a `Box<dyn Error>`
+/// across an await), so roles cannot be `tokio::spawn`ed onto shared workers;
+/// each gets its own thread and current-thread runtime so blocking work in
+/// one role (e.g. local inference) does not stall the others.
+///
+/// The first role to stop, whether by error, panic, Ctrl-C or a clean return,
+/// flips the shared shutdown signal so its siblings tear down too. Without
+/// that, a crashed hub would leave the advisors blocked on Ctrl-C and the
+/// command would hang instead of exiting non-zero. Returns the first failure.
+fn supervise<F, Fut>(configs: Vec<AgentConfig>, run: F) -> Result<(), String>
+where
+    F: Fn(AgentConfig, watch::Receiver<bool>) -> Fut + Clone + Send + 'static,
+    Fut: Future<Output = Result<(), Box<dyn std::error::Error>>>,
+{
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let (done_tx, done_rx) = mpsc::channel::<(String, Result<(), String>)>();
     let mut handles = Vec::new();
     for cfg in configs {
-        let role_name = cfg.name.clone();
-        let handle = std::thread::spawn(move || -> Option<String> {
-            let name = cfg.name.clone();
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => rt,
-                Err(e) => {
-                    eprintln!("[swarmkit] role '{name}' runtime init failed: {e}");
-                    return Some(name);
-                }
-            };
-            match rt.block_on(crate::commands::agent::start_agent_server(&cfg, false)) {
-                Ok(()) => None,
-                Err(e) => {
-                    eprintln!("[swarmkit] role '{name}' exited: {e}");
-                    Some(name)
-                }
-            }
-        });
-        handles.push((role_name, handle));
+        let name = cfg.name.clone();
+        let (run, shutdown, done) = (run.clone(), shutdown_rx.clone(), done_tx.clone());
+        handles.push(std::thread::spawn(move || {
+            // Catch the panic here so a crashed role still reports in and
+            // counts as a failure rather than vanishing from the tally.
+            let outcome = panic::catch_unwind(AssertUnwindSafe(|| run_role(cfg, shutdown, run)))
+                .unwrap_or_else(|_| Err("panicked".to_string()));
+            // Fails only if the supervisor is gone, and then nobody is listening.
+            let _ = done.send((name, outcome));
+        }));
     }
-    let mut failures: Vec<String> = Vec::new();
-    for (role_name, handle) in handles {
-        match handle.join() {
-            Ok(Some(failed)) => failures.push(failed),
-            Ok(None) => {}
-            Err(_) => {
-                eprintln!("[swarmkit] role '{role_name}' panicked");
-                failures.push(role_name);
-            }
+    // Drop our sender so the loop below ends once every role has reported.
+    drop(done_tx);
+
+    let mut first_failure = None;
+    for (name, outcome) in done_rx {
+        shutdown_tx.send_replace(true);
+        if let Err(e) = outcome {
+            eprintln!("[swarmkit] role '{name}' exited: {e}");
+            first_failure.get_or_insert_with(|| format!("role '{name}' failed: {e}"));
         }
     }
-    if !failures.is_empty() {
-        return Err(format!("swarmkit roles failed: {}", failures.join(", ")).into());
+    for handle in handles {
+        // Every role already reported (panics included), so this cannot block
+        // or carry a new failure; it just reaps the threads.
+        let _ = handle.join();
     }
-    Ok(())
+    first_failure.map_or(Ok(()), Err)
+}
+
+/// Owns a fresh runtime on the role's dedicated thread, so no outer async
+/// context exists for `block_on` to deadlock against.
+#[allow(clippy::disallowed_methods)]
+fn run_role<F, Fut>(cfg: AgentConfig, shutdown: watch::Receiver<bool>, run: F) -> Result<(), String>
+where
+    F: Fn(AgentConfig, watch::Receiver<bool>) -> Fut,
+    Fut: Future<Output = Result<(), Box<dyn std::error::Error>>>,
+{
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("runtime init failed: {e}"))?;
+    rt.block_on(run(cfg, shutdown)).map_err(|e| e.to_string())
 }
 
 fn print_usage() {
@@ -316,5 +341,68 @@ mod tests {
         assert_eq!(survivor.purpose, "Role: specialist");
         // swarm identifier is the slugified kit name.
         assert_eq!(survivor.swarm.as_deref(), Some("declared-mcp-server-kit"));
+    }
+
+    /// Copies of the fixture role under the given names, standing in for a hub
+    /// plus advisors; `supervise` only cares about names.
+    fn swarm_configs(names: &[&str]) -> Vec<AgentConfig> {
+        let yaml = include_str!("../../../arkavo-swarmkit/tests/fixtures/declared_mcp_server.yaml");
+        let base = kit_to_agent_configs(&arkavo_swarmkit::parse_yaml(yaml).unwrap()).remove(0);
+        names
+            .iter()
+            .map(|n| AgentConfig {
+                name: (*n).to_string(),
+                ..base.clone()
+            })
+            .collect()
+    }
+
+    /// Runs `supervise` off-thread and fails the test instead of hanging it.
+    fn supervise_within<F, Fut>(configs: Vec<AgentConfig>, run: F) -> Result<(), String>
+    where
+        F: Fn(AgentConfig, watch::Receiver<bool>) -> Fut + Clone + Send + 'static,
+        Fut: Future<Output = Result<(), Box<dyn std::error::Error>>>,
+    {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || tx.send(supervise(configs, run)));
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("swarm hung after a role stopped instead of tearing down")
+    }
+
+    #[test]
+    fn failing_role_tears_down_siblings_and_returns_error() {
+        let configs = swarm_configs(&["hub", "advisor-a", "advisor-b"]);
+        let result = supervise_within(configs, |cfg, mut shutdown| async move {
+            if cfg.name == "hub" {
+                return Err("bind failed".into());
+            }
+            // Like a live agent, siblings only stop when told to.
+            let _ = shutdown.wait_for(|stop| *stop).await;
+            Ok(())
+        });
+        assert_eq!(result.unwrap_err(), "role 'hub' failed: bind failed");
+    }
+
+    #[test]
+    fn panicking_role_tears_down_siblings_and_returns_error() {
+        let configs = swarm_configs(&["hub", "advisor"]);
+        let result = supervise_within(configs, |cfg, mut shutdown| async move {
+            assert_ne!(cfg.name, "advisor", "advisor role crashed");
+            let _ = shutdown.wait_for(|stop| *stop).await;
+            Ok(())
+        });
+        assert_eq!(result.unwrap_err(), "role 'advisor' failed: panicked");
+    }
+
+    #[test]
+    fn clean_role_exit_stops_swarm_without_error() {
+        let configs = swarm_configs(&["hub", "advisor"]);
+        let result = supervise_within(configs, |cfg, mut shutdown| async move {
+            if cfg.name != "hub" {
+                let _ = shutdown.wait_for(|stop| *stop).await;
+            }
+            Ok(())
+        });
+        assert_eq!(result, Ok(()));
     }
 }

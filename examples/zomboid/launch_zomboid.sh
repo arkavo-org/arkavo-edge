@@ -24,7 +24,7 @@ case "${1:-start}" in
         ;;
 esac
 
-if [ ! -S /tmp/.gamerl 2>/dev/null ] && [ ! -f "$HOME/Zomboid/Lua/gamerl_response.json" ]; then
+if [ ! -f "$HOME/Zomboid/Lua/gamerl_response.json" ]; then
     echo "[WARN] Project Zomboid GameRL IPC not found at ~/Zomboid/Lua/"
     echo "       Start Project Zomboid with the GameRL mod and load a save first."
 fi

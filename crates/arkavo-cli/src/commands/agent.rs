@@ -1156,10 +1156,24 @@ fn parse_yaml_properties(
 }
 
 #[allow(clippy::future_not_send)]
-#[allow(clippy::missing_panics_doc)]
 pub async fn start_agent_server(
     config: &AgentConfig,
     show_trust_qr: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    start_agent_server_until(config, show_trust_qr, std::future::pending()).await
+}
+
+/// Run the agent server until Ctrl-C or until `shutdown` resolves.
+///
+/// A supervisor running several agents in one process (e.g.
+/// `swarmkit play`) needs to stop the survivors when a sibling dies; Ctrl-C
+/// alone would leave them running forever.
+#[allow(clippy::future_not_send)]
+#[allow(clippy::missing_panics_doc)]
+pub async fn start_agent_server_until(
+    config: &AgentConfig,
+    show_trust_qr: bool,
+    shutdown: impl std::future::Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::mcp_spawner::McpProcessManager;
     use arkavo_crypto::AgentKeypair;
@@ -1801,7 +1815,10 @@ pub async fn start_agent_server(
     }
 
     // Keep the server running
-    tokio::signal::ctrl_c().await?;
+    tokio::select! {
+        signal = tokio::signal::ctrl_c() => signal?,
+        () = shutdown => {}
+    }
 
     // Stop notification handler if running
     if let Some(handle) = notification_handle {
