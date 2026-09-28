@@ -9,6 +9,7 @@ invariants:
   - ES256 only; any other COSE algorithm is refused before a key is even looked up
   - Signing keys come from the issuer's published COSE key set, matched on raw kid bytes
   - An unknown kid never turns into a key-set fetch per verification
+  - The audience check cannot be skipped; an empty expected audience refuses every token
 
 scenarios:
   - id: ACWT-001
@@ -39,6 +40,8 @@ scenarios:
       - A signature made by a different key is refused as BadSignature
       - A token whose exp precedes now beyond the allowed skew is refused as Expired
       - An audience absent from the token's aud is refused as AudienceMismatch
+      - A token with no aud, empty or omitted, is refused as AudienceMismatch
+      - An empty expected audience is refused as NoExpectedAudience before the token is read
     refs:
       - crates/arkavo-cwt/src/verify.rs
 

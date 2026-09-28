@@ -77,33 +77,34 @@ impl OpenTdfService {
     }
 
     /// Convert arkavo-tdf Policy to opentdf Policy.
-    fn to_opentdf_policy(policy: &Policy) -> opentdf::Policy {
-        // Convert attributes to opentdf AttributePolicy conditions
-        let body: Vec<opentdf::AttributePolicy> = policy
+    ///
+    /// Every attribute must parse. Dropping one that does not would bind the
+    /// ciphertext to a weaker policy than the caller asked for, so a typo in an
+    /// FQN would silently release data the restriction was meant to protect.
+    fn to_opentdf_policy(policy: &Policy) -> Result<opentdf::Policy, TdfError> {
+        let body = policy
             .attributes
             .iter()
-            .filter_map(|attr| {
-                // Parse FQN to get namespace and name
-                opentdf::fqn::AttributeFqn::parse(&attr.attribute)
-                    .ok()
-                    .map(|fqn| {
-                        opentdf::AttributePolicy::condition(
-                            fqn.to_identifier(),
-                            opentdf::Operator::In,
-                            opentdf::AttributeValue::StringArray(attr.values.clone()),
-                        )
-                    })
+            .map(|attr| {
+                let fqn = opentdf::fqn::AttributeFqn::parse(&attr.attribute).map_err(|e| {
+                    TdfError::Policy(format!("Invalid attribute FQN '{}': {e}", attr.attribute))
+                })?;
+                Ok(opentdf::AttributePolicy::condition(
+                    fqn.to_identifier(),
+                    opentdf::Operator::In,
+                    opentdf::AttributeValue::StringArray(attr.values.clone()),
+                ))
             })
-            .collect();
+            .collect::<Result<Vec<_>, TdfError>>()?;
 
-        opentdf::Policy::new(
+        Ok(opentdf::Policy::new(
             policy
                 .id
                 .clone()
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             body,
             policy.dissemination.clone(),
-        )
+        ))
     }
 }
 
@@ -116,7 +117,7 @@ impl Default for OpenTdfService {
 #[async_trait]
 impl TdfEncryptor for OpenTdfService {
     async fn encrypt(&self, plaintext: &[u8], policy: &Policy) -> Result<TdfManifest, TdfError> {
-        let opentdf_policy = Self::to_opentdf_policy(policy);
+        let opentdf_policy = Self::to_opentdf_policy(policy)?;
 
         // Use ZTDF-JSON format for inline payloads
         let envelope = opentdf::jsonrpc::TdfJsonRpc::encrypt(plaintext)
@@ -271,6 +272,7 @@ impl TdfDecryptor for OpenTdfService {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::PolicyBuilder;
@@ -382,6 +384,50 @@ mod tests {
         let manifest = service.encrypt_stream(reader, &policy).await.unwrap();
 
         assert!(!manifest.payload.value.is_empty());
+    }
+
+    /// Regression for #700: a malformed FQN used to be dropped during
+    /// conversion, so the TDF was sealed under the remaining, narrower policy.
+    #[tokio::test]
+    async fn encrypt_refuses_a_policy_with_a_malformed_attribute() {
+        let service = OpenTdfService::with_kas_url("https://kas.example.com");
+        // Both FQNs pass PolicyBuilder's URL check; the second lacks the
+        // `/attr/` segment an attribute FQN requires.
+        let policy = PolicyBuilder::new()
+            .attribute("https://arkavo.net/attr/role", &["admin"])
+            .attribute("https://arkavo.net/clearance", &["secret"])
+            .build()
+            .unwrap();
+
+        let err = service
+            .encrypt(b"must not be sealed under a weaker policy", &policy)
+            .await
+            .expect_err("a malformed attribute must fail encryption");
+        match err {
+            TdfError::Policy(msg) => assert!(
+                msg.contains("https://arkavo.net/clearance"),
+                "the error should name the offending FQN: {msg}"
+            ),
+            other => panic!("expected a policy error, got {other:?}"),
+        }
+
+        let stream_err = service
+            .encrypt_stream(std::io::Cursor::new(b"streamed".to_vec()), &policy)
+            .await
+            .expect_err("the streaming path must refuse the same policy");
+        assert!(matches!(stream_err, TdfError::Policy(_)));
+    }
+
+    #[test]
+    fn policy_conversion_keeps_every_valid_attribute() {
+        let policy = PolicyBuilder::new()
+            .attribute("https://arkavo.net/attr/role", &["admin"])
+            .attribute("https://arkavo.net/attr/clearance", &["secret"])
+            .build()
+            .unwrap();
+
+        let converted = OpenTdfService::to_opentdf_policy(&policy).expect("valid policy");
+        assert_eq!(converted.body.attributes.len(), 2);
     }
 
     #[spec("TDFS-003")]

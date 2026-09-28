@@ -55,6 +55,8 @@ pub enum CwtError {
     IssuerMismatch { expected: String, actual: String },
     #[error("audience {expected} is not in the token's aud")]
     AudienceMismatch { expected: String },
+    #[error("no expected audience configured; every token is refused")]
+    NoExpectedAudience,
     #[error("malformed COSE key set: {0}")]
     KeySet(String),
     #[error("could not fetch the COSE key set: {0}")]

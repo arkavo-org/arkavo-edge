@@ -1290,9 +1290,7 @@ impl A2aServer {
             event_writer: self.event_writer.read().await.clone(),
             session_id: self.session_id.clone(),
             event_sequence: self.event_sequence.clone(),
-            auth_backend: Arc::new(arkavo_protocol::auth::JwtAuthBackend::new(
-                "change-me-in-production",
-            )),
+            auth_backend: super::config_helpers::session_auth_backend(),
             registration_service: Arc::new(
                 arkavo_agent::registration::RegistrationService::new()
                     .with_delegation_config(&super::config_helpers::delegation_config_from_env()?)?,

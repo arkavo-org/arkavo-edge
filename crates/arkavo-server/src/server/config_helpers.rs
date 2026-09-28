@@ -1,5 +1,6 @@
 use arkavo_protocol::agent_config::parse_agents_config;
 use arkavo_protocol::agent_specialization::RoleContext;
+use arkavo_protocol::auth::{AuthBackend, MultiAuthBackend};
 use arkavo_protocol::error::{A2aError, Result};
 use arkavo_protocol::mcp_registry::McpRegistry;
 use std::sync::Arc;
@@ -272,6 +273,16 @@ pub(super) fn delegation_config_from_env()
     Ok(config)
 }
 
+/// Backend that verifies the bearer token a client presents to `chat_open`.
+///
+/// No identity issuer key is configured for session tokens, so the backend
+/// trusts no issuer and rejects every token. Verifying against a shared secret
+/// compiled into the binary would let anyone who reads the source mint a
+/// session under any identity.
+pub(super) fn session_auth_backend() -> Arc<dyn AuthBackend> {
+    Arc::new(MultiAuthBackend::new())
+}
+
 /// Clean up old configuration backups
 pub(super) async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count: usize) {
     if let Ok(mut entries) = tokio::fs::read_dir(backup_dir).await {
@@ -294,6 +305,51 @@ pub(super) async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count
         // Remove old backups
         for (path, _) in backups.iter().skip(keep_count) {
             let _ = tokio::fs::remove_file(path).await;
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod tests {
+    use super::*;
+    use arkavo_protocol::auth::JwtClaims;
+    use jsonwebtoken::{EncodingKey, Header, encode};
+
+    fn hs256_token(secret: &str) -> String {
+        let now = chrono::Utc::now().timestamp();
+        let claims = JwtClaims {
+            sub: "attacker-chosen-identity".to_string(),
+            exp: Some(now + 3600),
+            iat: Some(now),
+            scopes: Some(vec!["admin".to_string()]),
+            additional: serde_json::Map::new(),
+        };
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .expect("HS256 encoding of plain claims cannot fail")
+    }
+
+    /// Regression for #708: the server verified session tokens with the
+    /// literal secret `change-me-in-production`, so anyone could forge one.
+    #[tokio::test]
+    async fn session_backend_rejects_token_signed_with_former_hardcoded_secret() {
+        let forged = hs256_token("change-me-in-production");
+        let result = session_auth_backend().validate_token(&forged).await;
+        assert!(
+            result.is_err(),
+            "a token signed with a secret published in source must never authenticate"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_backend_rejects_tokens_when_no_issuer_is_configured() {
+        let backend = session_auth_backend();
+        for token in [hs256_token(""), hs256_token("any-secret"), String::new()] {
+            assert!(backend.validate_token(&token).await.is_err());
         }
     }
 }

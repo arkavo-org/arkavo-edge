@@ -1,6 +1,4 @@
-use arkavo_attestation::{
-    AttestationType, SecurityState, detect_platform_code, evidence, platform,
-};
+use arkavo_attestation::{SecurityState, detect_platform_code, evidence, platform};
 use arkavo_device_identity::{AgentIdentity, get_or_create_device_id};
 
 const TEST_APP_VERSION: &str = "0.38.2";
@@ -75,13 +73,17 @@ fn test_end_to_end_device_attestation_flow() {
             | SecurityState::Unknown
     ));
 
+    // No backend signs a verifier-nonce-bound hardware quote, so whichever one
+    // was selected must claim neither property (#698).
+    assert!(!capabilities.supports_freshness);
+    assert!(!capabilities.supports_hardware_binding);
+
     #[cfg(target_os = "macos")]
     {
-        println!("macOS-specific assertions:");
+        use arkavo_attestation::AttestationType;
+
         if capabilities.attestation_type == AttestationType::SecureEnclave {
             println!("✓ Using Secure Enclave attestation");
-            assert!(capabilities.supports_freshness);
-            assert!(capabilities.supports_hardware_binding);
         } else {
             println!("✓ Fallback to software fingerprint (expected on some systems)");
         }
