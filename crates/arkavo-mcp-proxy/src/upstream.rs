@@ -568,7 +568,14 @@ mod tests {
     /// behind it takes the lock, finds the connection gone, and is refused
     /// having written nothing at all — `Closed`, and so refundable — instead
     /// of putting its line on the end of the abandoned one.
-    #[tokio::test]
+    ///
+    /// The clock is paused, so the ordering below is set by the deadlines
+    /// alone. On a real clock it rested on the queued request reaching the
+    /// lock within a 200 ms window, and on serializing 2 MiB in a debug build
+    /// taking less than the 300 ms head start the stalling write was given;
+    /// a loaded runner could miss either. Virtual time moves only when every
+    /// task is waiting, so each step has finished before the next deadline.
+    #[tokio::test(start_paused = true)]
     async fn a_request_queued_behind_an_abandoned_write_is_refused_before_it_writes() {
         // `sleep` never reads its stdin, so the pipe fills and stays full.
         let conn = Arc::new(
@@ -596,6 +603,10 @@ mod tests {
         // connection is retired — with 200 ms of its own bound still to run,
         // which is what tells `Closed` here from a timeout of its own.
         tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            conn.stdin.try_lock().is_err(),
+            "the stalling write must hold the shared stdin before the request queues behind it"
+        );
         let queued = conn
             .request(&json!(2), "tools/call", None)
             .await
@@ -626,7 +637,11 @@ mod tests {
     /// the lock. It refuses with `Closed`: not one byte of this message
     /// reached the pipe, so the call it carries provably never ran and
     /// whatever was spent admitting it is returned.
-    #[tokio::test]
+    ///
+    /// The clock is paused so the sleep below cannot end before the spawned
+    /// write has been polled: virtual time advances only once every task is
+    /// waiting, which here means the write is queued for the lock.
+    #[tokio::test(start_paused = true)]
     async fn a_write_that_waited_for_the_stdin_finds_a_retired_connection_closed() {
         use tokio::io::AsyncReadExt;
 
@@ -651,6 +666,10 @@ mod tests {
             }
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !waiting.is_finished(),
+            "the write must be queued for the held stdin, not already done"
+        );
 
         // That writer ran out of time: the connection is retired while this
         // write is still queued for the lock, and only then does the lock

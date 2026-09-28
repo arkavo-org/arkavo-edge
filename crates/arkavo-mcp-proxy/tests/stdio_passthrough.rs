@@ -108,6 +108,23 @@ fn recording_config(record: &Path) -> ProxyConfig {
     )
 }
 
+/// Wait for the fixture to record `needle`, returning the whole record.
+///
+/// Only for a call nothing answers: every other call's response is written
+/// after its record, so reading the file once is enough. A call that times
+/// out has no response to order against, and the fixture may still be
+/// getting to it when the proxy gives up waiting.
+async fn wait_for_record(record: &Path, needle: &str) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let recorded = std::fs::read_to_string(record).unwrap_or_default();
+        if recorded.contains(needle) || tokio::time::Instant::now() >= deadline {
+            return recorded;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 struct TestClient {
     writer: tokio::io::WriteHalf<DuplexStream>,
     lines: tokio::io::Lines<BufReader<tokio::io::ReadHalf<DuplexStream>>>,
@@ -812,8 +829,11 @@ async fn a_timed_out_call_keeps_its_invocation_spent() {
     let args = json!({});
     let meta = permit_meta(&issuer, &holder, "never_replies", &args, 1);
 
+    // The timeout only has to outlast the fixture's start-up, since the
+    // handshake is bounded by it too; what is under test is the budget after
+    // it fires, not how quickly it does.
     let record_file = record_file();
-    let config = recording_config(&record_file).with_timeout(Duration::from_millis(300));
+    let config = recording_config(&record_file).with_timeout(Duration::from_secs(2));
     let (mut client, handle) =
         start_proxy(config, Arc::new(PermitPolicy::new(permit_gate(&issuer))));
     client.handshake().await;
@@ -847,7 +867,7 @@ async fn a_timed_out_call_keeps_its_invocation_spent() {
 
     // The upstream records every tools/call it is handed, which is what makes
     // "it may have run" more than a guess here: the call did arrive.
-    let recorded = std::fs::read_to_string(&record_file).expect("record file");
+    let recorded = wait_for_record(&record_file, "never_replies").await;
     assert!(
         recorded.contains("never_replies"),
         "the timed-out call did reach the upstream: {recorded}"
