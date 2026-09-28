@@ -84,13 +84,11 @@ scenarios:
       - The private key is non-extractable (no API returns the private scalar)
       - A did:key (P-256 multicodec 0x1200) is derived from the public key
       - attestation_type reported as SecureEnclave with hardware_binding true
-    refs:
-      - crates/arkavo-attestation/src/platform/macos.rs:7-219
-      - crates/arkavo-crypto/src/lib.rs:302-432
+    refs: [crates/arkavo-attestation/src/attestation_key.rs, crates/arkavo-attestation/src/secure_enclave.rs]
     edge_cases:
       - condition: Secure Enclave unavailable
         expected: Software P-256 key created, flagged hardware_binding=false, assurance tier None
-    changed: "2026-06-15"
+    changed: "2026-06-16"
 
   - id: HATT-002
     name: Generate non-extractable attestation key in TPM 2.0 (Linux, Windows)
@@ -119,8 +117,6 @@ scenarios:
   - id: HATT-003
     name: Signed attestation quote over a verifier-supplied nonce
     criticality: critical
-    wip: true
-    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [APP-ATTEST, TPM2]
     conformance_status: verified
     given:
@@ -131,13 +127,11 @@ scenarios:
       - The quote is a signature over {nonce, agent did:key, platform measurements}
       - Freshness derives from the verifier nonce, not only a local timestamp
       - The quote replaces the v1 platform-metadata-plus-timestamp evidence blob
-    refs:
-      - crates/arkavo-attestation/src/lib.rs:37-68
-      - crates/arkavo-attestation/src/evidence.rs:1-54
+    refs: [crates/arkavo-attestation/src/quote.rs]
     edge_cases:
       - condition: No nonce supplied by verifier
         expected: Quote rejected as non-fresh; verifier must challenge
-    changed: "2026-06-15"
+    changed: "2026-06-16"
 
   - id: HATT-004
     name: Apple App Attest attestation object format (macOS)
@@ -215,6 +209,7 @@ scenarios:
       - Nonce freshness checked
       - Quote's did:key matches the attested key
       - Quote is bound to the session via a TLS-exporter channel binding to defeat a relayed-but-fresh quote
+    refs: [crates/arkavo-attestation/src/verifier.rs, crates/arkavo-attestation/src/quote.rs]
     edge_cases:
       - condition: Stale or replayed nonce
         expected: Rejected
@@ -224,13 +219,11 @@ scenarios:
         expected: Rejected
       - condition: Fresh quote relayed over a different channel (MITM)
         expected: Rejected by channel binding
-    changed: "2026-06-15"
+    changed: "2026-06-16"
 
   - id: HATT-008
     name: Attestation strength drives the MCP-T VERIFICATION dimension
     criticality: high
-    wip: true
-    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     conformance: [MCP-T-020]
     conformance_status: verified
     given:
@@ -240,12 +233,11 @@ scenarios:
       - The MCP-T verification dimension reflects quote strength and assurance tier (hardware vs software)
       - evidence_count derives from the attestation rather than a single boolean
       - The binary has_verified_did input is retired as the source of VERIFICATION
-    refs:
-      - crates/arkavo-trust/src/mapper.rs:14-90
+    refs: [crates/arkavo-trust/src/mapper.rs]
     edge_cases:
       - condition: Existing AgentTrustInput consumers still set has_verified_did
         expected: Field deprecated, not deleted; code change shipped as a separate reviewed diff
-    changed: "2026-06-15"
+    changed: "2026-06-16"
 
   - id: HATT-009
     name: Re-attestation on TTL expiry produces a fresh quote
@@ -261,10 +253,8 @@ scenarios:
       - Agent re-enters trusted-agent Phase 2 with a fresh nonce and produces a new quote
       - On success the agent remains Trusted with refreshed evidence
       - On failure the agent transitions to Suspended
-    refs:
-      - specs/arkavo-edge/trusted-agent.spec.yaml:88-93
-      - crates/arkavo-attestation/src/evidence.rs:16-27
-    changed: "2026-06-15"
+    refs: [crates/arkavo-attestation/src/freshness.rs]
+    changed: "2026-06-16"
 
   - id: HATT-010
     name: Software fallback is never Trusted
@@ -278,27 +268,23 @@ scenarios:
       - attestation_type is SoftwareFingerprint
       - hardware_binding is false
       - Maximum security state is Suspicious or Unknown, never Trusted, regardless of domain policy
-    refs:
-      - crates/arkavo-attestation/src/platform.rs:10-49
-    changed: "2026-06-15"
+    refs: [crates/arkavo-attestation/src/attestation_key.rs, crates/arkavo-attestation/src/policy.rs]
+    changed: "2026-06-16"
 
   - id: HATT-011
     name: Compromised platform downgrades and is rejected for high-criticality domains
     criticality: high
-    wip: true
-    issue: https://github.com/arkavo-org/arkavo-edge/issues/628
     given:
       - Jailbreak, debug, or root indicators present
     when: Security state is assessed
     then:
       - SecurityState is Compromised
       - Attestation is rejected for high-criticality domains
-    refs:
-      - crates/arkavo-attestation/src/evidence.rs:32-54
+    refs: [crates/arkavo-attestation/src/policy.rs]
     edge_cases:
       - condition: Mixed indicators
         expected: Most conservative state chosen
-    changed: "2026-06-15"
+    changed: "2026-06-16"
 
   - id: HATT-012
     name: Hardware key loss and rotation
@@ -314,10 +300,11 @@ scenarios:
       - A new attestation key is generated in hardware
       - The agent re-attests and re-registers
       - The old did:key is revoked (ties agent-credentials.spec.yaml AGC-005)
+    refs: [crates/arkavo-attestation/src/attestation_key.rs]
     edge_cases:
       - condition: TPM2_Clear invalidates the AK mid-life
         expected: Full re-provision; prior quotes no longer verify
-    changed: "2026-06-15"
+    changed: "2026-06-16"
 
   - id: HATT-013
     name: Virtualized TPM is capped at the Medium assurance tier
@@ -332,7 +319,8 @@ scenarios:
     then:
       - Assurance tier is Medium per assurance_ladder
       - The agent is capped below Trusted unless domain policy explicitly permits vTPM
-    changed: "2026-06-15"
+    refs: [crates/arkavo-attestation/src/attestation_key.rs]
+    changed: "2026-06-16"
 
 # Security considerations (audience: offensive-security reviewers; pattern mirrors trusted-agent SEC-TA-*)
 security:

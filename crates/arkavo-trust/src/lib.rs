@@ -6,7 +6,7 @@ pub mod signing;
 pub mod store;
 pub mod types;
 
-pub use mapper::{AgentTrustInput, compute_trust_score};
+pub use mapper::{AgentTrustInput, AttestationStrength, compute_trust_score};
 pub use service::{SharedTrustService, TrustService};
 pub use store::TrustStore;
 
