@@ -69,8 +69,7 @@ pub fn resolve_agent_configs(
 
     if let Some(port) = port {
         for config in &mut configs {
-            let host = config.listen.split(':').next().unwrap_or("0.0.0.0");
-            config.listen = format!("{host}:{port}");
+            config.listen = listen_with_port(&config.listen, port);
         }
     }
 
@@ -97,6 +96,30 @@ pub fn resolve_agent_configs(
         )
         .into()),
     }
+}
+
+/// Replace the port of a `listen` address, keeping its host.
+///
+/// IP literals go through [`std::net::SocketAddr`] so an IPv6 host keeps its
+/// brackets — splitting on the first `:` would reduce `[::]:8080` to `[`.
+/// Hostnames only lose a trailing numeric `:port`, and an address that never
+/// had a port keeps its whole host.
+fn listen_with_port(listen: &str, port: u16) -> String {
+    use std::net::{IpAddr, SocketAddr};
+
+    if let Ok(addr) = listen.parse::<SocketAddr>() {
+        return SocketAddr::new(addr.ip(), port).to_string();
+    }
+    let unbracketed = listen.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = unbracketed.parse::<IpAddr>() {
+        return SocketAddr::new(ip, port).to_string();
+    }
+    let host = match listen.rsplit_once(':') {
+        Some((host, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => host,
+        _ => listen,
+    };
+    let host = if host.is_empty() { "0.0.0.0" } else { host };
+    format!("{host}:{port}")
 }
 
 /// Map every role in a loaded kit to an [`AgentConfig`]. Kit-level `runtime`
@@ -253,6 +276,42 @@ mod tests {
         let configs = resolve_agent_configs(None, None, None, dir.path()).unwrap();
         assert_eq!(configs.len(), 1);
         assert_eq!(configs[0].listen, DEFAULT_LISTEN);
+    }
+
+    #[test]
+    fn listen_with_port_replaces_ipv4_port() {
+        assert_eq!(listen_with_port("0.0.0.0:0", 8080), "0.0.0.0:8080");
+        assert_eq!(listen_with_port("127.0.0.1:9000", 8080), "127.0.0.1:8080");
+    }
+
+    #[test]
+    fn listen_with_port_keeps_bracketed_ipv6_host() {
+        // Regression: splitting on the first ':' turned `[::]:8080` into `[:9090`.
+        assert_eq!(listen_with_port("[::]:8080", 9090), "[::]:9090");
+        assert_eq!(listen_with_port("[::1]:0", 9090), "[::1]:9090");
+        assert_eq!(listen_with_port("[fe80::1]", 9090), "[fe80::1]:9090");
+        assert_eq!(listen_with_port("::1", 9090), "[::1]:9090");
+    }
+
+    #[test]
+    fn listen_with_port_handles_hostnames_with_and_without_port() {
+        assert_eq!(listen_with_port("localhost", 8080), "localhost:8080");
+        assert_eq!(listen_with_port("localhost:3000", 8080), "localhost:8080");
+        assert_eq!(listen_with_port("", 8080), "0.0.0.0:8080");
+    }
+
+    #[test]
+    fn port_override_preserves_ipv6_listen_from_kit() {
+        let dir = tempdir();
+        let kit = minimal_kit_yaml().replacen("kit:", "runtime:\n  listen: \"[::]:8080\"\nkit:", 1);
+        let path = dir.path().join("agent.swarmkit.yaml");
+        fs::write(&path, kit).unwrap();
+
+        let configs = resolve_agent_configs(Some(&path), None, Some(9090), dir.path()).unwrap();
+        assert!(!configs.is_empty());
+        for config in configs {
+            assert_eq!(config.listen, "[::]:9090");
+        }
     }
 
     #[test]

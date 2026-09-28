@@ -123,15 +123,33 @@ pub(super) fn is_safe_backup_filename(name: &str) -> bool {
 /// the router hint is a flat string (e.g. `"ministral-3b"`); the mapping
 /// table between the two lives in the CLI's kit model_map, so hot-reload
 /// cannot recompute the hint — it can only detect divergence (by
-/// normalized substring match) and warn that a restart is needed.
+/// comparing the hint's name tokens) and warn that a restart is needed.
 pub(super) fn pending_model_change(
     family: &str,
     size: Option<&str>,
     current_model: &str,
 ) -> Option<String> {
     let current = current_model.to_lowercase();
-    let family_matches = current.contains(&family.to_lowercase());
-    let size_matches = size.is_none_or(|s| current.contains(&s.to_lowercase()));
+    let family_lc = family.to_lowercase();
+    // Tokens, not substrings: `3b` must not match inside `13b`, nor `llama`
+    // inside `codellama`. `.` stays in-token so `qwen3.5` and `0.6b` survive.
+    let tokens: Vec<&str> = current
+        .split(['-', '_', '/', ':', ' '])
+        .filter(|t| !t.is_empty())
+        .collect();
+    // A family token may carry a trailing generation number (`gemma4`,
+    // `qwen3.5`) but not further letters (`gemmax` is another family).
+    let family_matches = tokens.iter().any(|t| {
+        t.strip_prefix(family_lc.as_str()).is_some_and(|rest| {
+            rest.chars()
+                .next()
+                .is_none_or(|c| c.is_ascii_digit() || c == '.')
+        })
+    });
+    let size_matches = size.is_none_or(|s| {
+        let s = s.to_lowercase();
+        tokens.iter().any(|t| *t == s)
+    });
     if family_matches && size_matches {
         return None;
     }
@@ -437,6 +455,43 @@ provenance:
             None
         );
         assert_eq!(pending_model_change("qwen", None, "qwen3.5-9b"), None);
+        assert_eq!(
+            pending_model_change("qwen", Some("0.6B"), "qwen3-0.6b"),
+            None
+        );
+        assert_eq!(
+            pending_model_change("ministral", Some("13B"), "ministral-13b"),
+            None
+        );
+    }
+
+    #[test]
+    fn pending_model_change_does_not_match_size_or_family_substrings() {
+        // Regression: substring matching treated `3b` as present in `13b`.
+        assert_eq!(
+            pending_model_change("ministral", Some("3B"), "ministral-13b"),
+            Some("ministral 3B".to_string())
+        );
+        assert_eq!(
+            pending_model_change("llama", None, "codellama-7b"),
+            Some("llama".to_string())
+        );
+        assert_eq!(
+            pending_model_change("gemma", None, "gemmax-2b"),
+            Some("gemma".to_string())
+        );
+    }
+
+    #[test]
+    fn pending_model_change_matches_case_insensitively_and_keeps_kit_spelling() {
+        assert_eq!(
+            pending_model_change("Ministral", Some("3B"), "MINISTRAL-3B"),
+            None
+        );
+        assert_eq!(
+            pending_model_change("Ministral", Some("8B"), "ministral-3b"),
+            Some("Ministral 8B".to_string())
+        );
     }
 
     #[test]

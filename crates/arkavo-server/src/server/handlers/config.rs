@@ -204,6 +204,16 @@ where
         None
     };
 
+    // A fresh install has no `.arkavo/`; without a backup nothing else
+    // creates it, and the write would misreport a missing parent directory
+    // as a read-only filesystem.
+    if let Some(parent) = kit_path.parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(e) = tokio::fs::create_dir_all(parent).await
+    {
+        warn!("Failed to create kit directory {}: {}", parent.display(), e);
+    }
+
     if let Err(_e) = tokio::fs::write(&kit_path, &request.content).await {
         timer.error();
         return Ok(AgentConfigUpdateResponse {
@@ -523,11 +533,17 @@ provenance:
 
     impl TestCwd {
         fn new() -> Self {
+            let cwd = Self::fresh();
+            std::fs::create_dir_all(".arkavo").unwrap();
+            cwd
+        }
+
+        /// A working directory with no `.arkavo/`, as on a fresh install.
+        fn fresh() -> Self {
             let guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let original = std::env::current_dir().unwrap();
             let tempdir = tempfile::tempdir().unwrap();
             std::env::set_current_dir(tempdir.path()).unwrap();
-            std::fs::create_dir_all(".arkavo").unwrap();
             Self {
                 _guard: guard,
                 original,
@@ -647,6 +663,35 @@ provenance:
         // No prior file existed, so no backup should have been created.
         assert!(response.backup_path.is_none());
         assert!(std::path::Path::new(DEFAULT_KIT_PATH).exists());
+    }
+
+    #[tokio::test]
+    async fn update_without_backup_creates_missing_arkavo_dir() {
+        let _cwd = TestCwd::fresh();
+        assert!(!std::path::Path::new(".arkavo").exists());
+        let metrics = create_test_metrics();
+        let rate_limiter = create_test_rate_limiter();
+
+        let response = handle_config_update(
+            &metrics,
+            &rate_limiter,
+            AgentConfigUpdateRequest {
+                agent_id: "agent".to_string(),
+                content: MINIMAL_KIT_YAML.to_string(),
+                expected_version: None,
+                create_backup: false,
+            },
+            |_content| async { Ok(()) },
+        )
+        .await
+        .unwrap();
+
+        assert!(response.success, "update should succeed: {response:?}");
+        assert!(response.error.is_none());
+        assert_eq!(
+            std::fs::read_to_string(DEFAULT_KIT_PATH).unwrap(),
+            MINIMAL_KIT_YAML
+        );
     }
 
     #[tokio::test]
