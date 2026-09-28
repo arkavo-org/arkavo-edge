@@ -47,14 +47,25 @@ async fn circuit_check_evaluates_within_latency_budget() {
     let check = CircuitCheck::new();
     let input = make_input("test input");
 
-    let start = std::time::Instant::now();
-    let _result = check.verify(&input).await;
-    let elapsed = start.elapsed();
+    // A single cold sample measures page faults and whatever else the runner
+    // was doing, not the check. Warm up first, then judge the p95 of many
+    // samples so one preemption cannot decide the outcome.
+    for _ in 0..20 {
+        let _ = check.verify(&input).await;
+    }
+    let mut samples: Vec<std::time::Duration> = Vec::with_capacity(200);
+    for _ in 0..200 {
+        let start = std::time::Instant::now();
+        let _result = check.verify(&input).await;
+        samples.push(start.elapsed());
+    }
+    samples.sort_unstable();
+    let p95 = samples[samples.len() * 95 / 100];
 
     assert!(
-        elapsed.as_micros() < 1000,
-        "SEQ-010: CircuitCheck took {}μs, budget is <1000μs",
-        elapsed.as_micros()
+        p95.as_micros() < 1000,
+        "SEQ-010: CircuitCheck p95 was {}μs, budget is <1000μs",
+        p95.as_micros()
     );
 }
 
