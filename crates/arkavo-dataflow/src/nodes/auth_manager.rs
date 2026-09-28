@@ -75,11 +75,14 @@ impl AuthManager {
         Ok(manager)
     }
 
-    /// Create a new authentication manager for testing
+    /// Create a new authentication manager for testing.
+    ///
+    /// The master key is passed in rather than read from `ARKAVO_MASTER_KEY`
+    /// because `cargo test` runs tests as threads of one process: a test that
+    /// set or removed the variable raced every other test reading it.
     #[cfg(test)]
-    pub async fn new_for_test() -> Result<Self> {
-        // First validate the master key if provided
-        if let Ok(master_key) = std::env::var("ARKAVO_MASTER_KEY") {
+    pub async fn new_for_test(master_key: Option<&str>) -> Result<Self> {
+        if let Some(master_key) = master_key {
             if master_key.len() < 32 {
                 return Err(anyhow::anyhow!(
                     "Master key must be at least 32 characters long for security"
