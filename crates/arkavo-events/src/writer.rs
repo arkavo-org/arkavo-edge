@@ -184,6 +184,17 @@ mod tests {
     use arkavo_test_macros::spec;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// Delivery happens on the writer's spawned task, so a fixed sleep before
+    /// asserting races a loaded scheduler. Polling until the condition holds,
+    /// with a deadline far past any healthy delivery, removes that race while
+    /// a lost event still fails the test.
+    async fn wait_until(condition: impl Fn() -> bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !condition() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
     fn make_event(seq: u64) -> Event {
         Event::new(
             "test-session".to_string(),
@@ -218,7 +229,7 @@ mod tests {
             writer.write(make_event(i)).await.unwrap();
         }
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        wait_until(|| counter.load(Ordering::SeqCst) >= 25).await;
         assert_eq!(counter.load(Ordering::SeqCst), 25);
     }
 
@@ -244,9 +255,10 @@ mod tests {
             writer.write(make_event(i)).await.unwrap();
         }
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        // Should have flushed once when batch_size reached
-        assert!(flush_count.load(Ordering::SeqCst) >= 1);
+        // Should have flushed once when batch_size reached; the 60s interval
+        // cannot fire inside the wait's deadline, so only the batch can.
+        wait_until(|| flush_count.load(Ordering::SeqCst) >= 1).await;
+        assert_eq!(flush_count.load(Ordering::SeqCst), 1);
     }
 
     #[spec("EVENT-005")]
@@ -270,7 +282,7 @@ mod tests {
             writer.write(make_event(i)).await.unwrap();
         }
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        wait_until(|| total.load(Ordering::SeqCst) >= 50).await;
         assert_eq!(total.load(Ordering::SeqCst), 50);
     }
 
@@ -285,9 +297,13 @@ mod tests {
             })
             .build();
 
-        // Abort the writer loop so the receiver is dropped
+        // Abort the writer loop so the receiver is dropped. Waiting on the
+        // channel's own close signal, rather than a sleep, guarantees the
+        // aborted task has actually released the receiver.
         writer._handle.abort();
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::timeout(Duration::from_secs(5), writer.sender.closed())
+            .await
+            .expect("aborted writer loop never dropped its receiver");
 
         // Write should now fail with BufferFull (receiver gone)
         let result = writer.write(make_event(0)).await;
@@ -329,9 +345,18 @@ mod tests {
             "Nothing should be flushed before drop"
         );
 
-        // Drop writer — sender closes, writer_loop enters `else` branch
-        drop(writer);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Drop the sender so writer_loop takes its `None` branch, then join the
+        // loop: once it has exited, the final flush has run, with no timing
+        // guess involved.
+        let EventWriter {
+            sender,
+            _handle: writer_loop,
+        } = writer;
+        drop(sender);
+        tokio::time::timeout(Duration::from_secs(5), writer_loop)
+            .await
+            .expect("writer loop did not exit after its sender dropped")
+            .expect("writer loop panicked");
 
         assert_eq!(
             total.load(Ordering::SeqCst),
@@ -367,7 +392,10 @@ mod tests {
             writer.write(make_event(i)).await.unwrap();
         }
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        wait_until(|| {
+            counter1.load(Ordering::SeqCst) >= 20 && counter2.load(Ordering::SeqCst) >= 20
+        })
+        .await;
 
         // Both handlers should receive all events
         assert_eq!(counter1.load(Ordering::SeqCst), 20);
