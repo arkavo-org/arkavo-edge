@@ -42,6 +42,53 @@ async fn test_rate_limit_eviction_with_background_task() {
     cleanup_handle.abort();
 }
 
+/// Regression test for the eviction path in `evict_lru_entries`.
+///
+/// Inserting far more distinct IPs than `max_ip_entries` forces repeated
+/// eviction where the popped queue entry's IP is still live with a matching
+/// access time. Previously this held a dashmap read `Ref` across a `remove` on
+/// the same key, which self-deadlocked the shard and hung the nightly fuzzer.
+/// It also exhausted the attempt budget on stale entries without the fallback
+/// sweep, letting the map grow past capacity. This test would hang (or trip the
+/// capacity assertion) before the fix and must finish quickly after it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_eviction_stays_under_capacity_under_churn() {
+    let max_ip_entries = 100;
+    let config = RateLimitConfig {
+        max_requests_per_second: 1000,
+        burst_size: 100,
+        enabled: true,
+        max_ip_entries,
+        ip_entry_ttl_seconds: 3600, // long TTL: eviction is driven by capacity, not expiry
+    };
+
+    let result = time::timeout(Duration::from_secs(30), async move {
+        let limiter = IpRateLimiter::new(config);
+
+        // Insert many more distinct IPs than capacity, checking the invariant
+        // throughout. The /16 spread guarantees ~5000 unique addresses.
+        for i in 0..5000u32 {
+            let ip: IpAddr = format!("10.0.{}.{}", (i / 256) % 256, i % 256)
+                .parse()
+                .unwrap();
+            let _ = limiter.check_rate_limit(ip);
+
+            assert!(
+                limiter.entry_count() <= max_ip_entries,
+                "entry count {} exceeded max {} during churn",
+                limiter.entry_count(),
+                max_ip_entries
+            );
+        }
+
+        limiter.cleanup_old_entries();
+        assert!(limiter.entry_count() <= max_ip_entries);
+    })
+    .await;
+
+    assert!(result.is_ok(), "eviction churn deadlocked or timed out");
+}
+
 #[tokio::test]
 async fn test_rate_limit_headers() {
     let config = RateLimitConfig {

@@ -27,7 +27,7 @@ jobs:
           - fuzz_tdf_policy
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -50,7 +50,7 @@ jobs:
         run: cargo install cargo-fuzz --locked
 
       - name: Cache corpus
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: crates/arkavo-protocol/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
@@ -64,7 +64,7 @@ jobs:
 
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crash-${{ matrix.target }}
           path: crates/arkavo-protocol/fuzz/artifacts/${{ matrix.target }}/
@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
