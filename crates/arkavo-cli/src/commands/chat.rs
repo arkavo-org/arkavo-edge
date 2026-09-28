@@ -785,13 +785,19 @@ mod tests {
 
     #[test]
     fn test_parse_cli_existing_gguf_path() {
-        let path = std::env::temp_dir().join("arkavo-chat-cli-test.gguf");
-        std::fs::write(&path, b"gguf").unwrap();
+        // A unique file per run: a fixed name in the shared temp dir let
+        // concurrent test processes delete each other's fixture mid-test.
+        let file = tempfile::Builder::new()
+            .prefix("arkavo-chat-cli-test")
+            .suffix(".gguf")
+            .tempfile()
+            .unwrap();
+        std::fs::write(file.path(), b"gguf").unwrap();
+        let path = file.path();
         let flags = parse_cli_args(&["--gguf".into(), path.to_string_lossy().into()]).unwrap();
         assert_eq!(flags.model.as_deref(), path.to_str());
         let flags = parse_cli_args(&["--model".into(), path.to_string_lossy().into()]).unwrap();
         assert_eq!(flags.model.as_deref(), path.to_str());
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
