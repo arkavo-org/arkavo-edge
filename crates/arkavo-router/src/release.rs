@@ -17,7 +17,9 @@
 
 use std::sync::Arc;
 
-use arkavo_llm::{GATE_BLOCKED, GateOutcome, ReleaseGate, StreamResponse, gated};
+use arkavo_llm::{
+    GATE_BLOCKED, GateOutcome, ReleaseGate, ReleaseGateFactory, StreamResponse, gated,
+};
 use futures::StreamExt;
 
 use crate::stream::{RouteStream, StreamChunk};
@@ -50,6 +52,17 @@ pub fn gate_completion(gate: &Arc<dyn ReleaseGate>, content: &str) -> Result<Str
             released.push_str(&text);
             Ok(released)
         }
+    }
+}
+
+/// Wrap a stream in a gate of its own from `gates`, or return it untouched.
+///
+/// A fresh gate per call is what keeps completions the router runs at the same
+/// time out of each other's holdback buffers.
+pub fn gate_stream_from(stream: RouteStream, gates: Option<&ReleaseGateFactory>) -> RouteStream {
+    match gates {
+        Some(gates) => gate_stream(stream, gates()),
+        None => stream,
     }
 }
 
@@ -303,7 +316,9 @@ mod tests {
             eprintln!("Skipping: Router::new_offline requires llama-cpp");
             return;
         };
-        router.set_release_gate(Recorder::new(Some("CANARY")));
+        router.set_release_gate(Arc::new(|| -> Arc<dyn ReleaseGate> {
+            Recorder::new(Some("CANARY"))
+        }));
 
         let stream = router.gated_stream(RouteStream::from_response(RouteResponse {
             content: "leading CANARY trailing".to_string(),
@@ -318,5 +333,72 @@ mod tests {
 
         assert!(refusal.is_some_and(|r| r.contains(GATE_BLOCKED)));
         assert!(seen.is_empty(), "{seen}");
+    }
+
+    /// A gate that holds everything until the completion ends, so text two
+    /// completions admitted to one buffer would come out together.
+    struct HoldAll(Mutex<String>);
+
+    impl ReleaseGate for HoldAll {
+        fn admit(&self, chunk: &str) -> GateOutcome {
+            self.0.lock().expect("lock").push_str(chunk);
+            GateOutcome::Release(String::new())
+        }
+
+        fn finish(&self) -> GateOutcome {
+            GateOutcome::Release(std::mem::take(&mut *self.0.lock().expect("lock")))
+        }
+
+        fn discard(&self) {
+            self.0.lock().expect("lock").clear();
+        }
+    }
+
+    fn channel_stream() -> (
+        futures::channel::mpsc::UnboundedSender<Result<StreamChunk>>,
+        RouteStream,
+    ) {
+        let (tx, rx) = futures::channel::mpsc::unbounded();
+        (tx, RouteStream::new(Box::pin(rx), metadata()))
+    }
+
+    /// Regression: the router held one gate and every completion shared it, so
+    /// two in flight at once fed one holdback buffer and the first to finish
+    /// released the other's held text as its own. Each completion now gets a
+    /// gate of its own and releases only what it produced.
+    #[tokio::test]
+    async fn interleaved_completions_release_only_their_own_text() {
+        use futures::FutureExt;
+
+        let gates: ReleaseGateFactory =
+            Arc::new(|| -> Arc<dyn ReleaseGate> { Arc::new(HoldAll(Mutex::new(String::new()))) });
+
+        let (first_tx, first) = channel_stream();
+        let (second_tx, second) = channel_stream();
+        let mut first = gate_stream_from(first, Some(&gates));
+        let mut second = gate_stream_from(second, Some(&gates));
+
+        // Each admits a chunk and holds it, with the other's admit in between.
+        let chunk = |text: &str| {
+            Ok(StreamChunk {
+                content: text.to_string(),
+                done: false,
+            })
+        };
+        first_tx.unbounded_send(chunk("alpha ")).expect("send");
+        assert!(first.next().now_or_never().is_none(), "held, not released");
+        second_tx.unbounded_send(chunk("bravo ")).expect("send");
+        assert!(second.next().now_or_never().is_none(), "held, not released");
+        first_tx.unbounded_send(chunk("alpha end")).expect("send");
+        assert!(first.next().now_or_never().is_none(), "held, not released");
+        drop(first_tx);
+        drop(second_tx);
+
+        let (first_seen, first_refusal) = drain(first).await;
+        let (second_seen, second_refusal) = drain(second).await;
+
+        assert!(first_refusal.is_none() && second_refusal.is_none());
+        assert_eq!(first_seen, "alpha alpha end");
+        assert_eq!(second_seen, "bravo ");
     }
 }

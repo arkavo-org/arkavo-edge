@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
+
+import pytest
+import torch
 
 from eval import (
+    classify,
     false_positives_at_threshold,
     neutralize_control_tokens,
     recall_at_threshold,
@@ -137,3 +142,33 @@ def test_neutralize_control_tokens_is_idempotent() -> None:
 def test_neutralize_control_tokens_leaves_ordinary_text_alone() -> None:
     span = "Acetaminophen is a common over-the-counter analgesic."
     assert neutralize_control_tokens(span) == span
+
+
+class _Encoded(dict):
+    def to(self, _device):
+        return self
+
+
+class _SplittingTokenizer:
+    """Encodes ``confidential`` as two tokens, as some vocabularies do."""
+
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+        return "".join(m["content"] for m in messages)
+
+    def __call__(self, text, add_special_tokens=False, return_tensors=None):
+        return _Encoded(input_ids=torch.tensor([[0]]))
+
+    def encode(self, label, add_special_tokens=False):
+        return {"public": [1], "internal": [2], "confidential": [3, 4]}[label]
+
+
+class _Logits:
+    def __call__(self, **_ids):
+        return SimpleNamespace(logits=torch.zeros(1, 1, 8))
+
+
+def test_classify_refuses_a_label_that_is_not_one_token() -> None:
+    # Scoring by the first piece alone would score "confidential" by a token
+    # it may share with other words; the calibration would be silently wrong.
+    with pytest.raises(ValueError, match="'confidential'"):
+        classify(_Logits(), _SplittingTokenizer(), "cpu", "a span", "system")

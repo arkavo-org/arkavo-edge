@@ -21,6 +21,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from train import SYSTEM as TRAIN_SYSTEM  # noqa: E402
+from train import label_token_id  # noqa: E402
 
 LABELS = ("public", "internal", "confidential")
 
@@ -50,13 +51,12 @@ def classify(model, tok, device, span: str, system: str) -> tuple[str, dict[str,
     prompt = tok.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-    ids = tok(prompt, return_tensors="pt").to(device)
+    # Tokenized alone, as train.py tokenizes it before appending the label's
+    # token: the logit read here is the one training put the label on.
+    ids = tok(prompt, add_special_tokens=False, return_tensors="pt").to(device)
     with torch.no_grad():
         logits = model(**ids).logits[0, -1]
-    scores = {}
-    for label in LABELS:
-        lid = tok.encode(label, add_special_tokens=False)
-        scores[label] = float(logits[lid[0]]) if lid else float("-inf")
+    scores = {label: float(logits[label_token_id(tok, label)]) for label in LABELS}
     # Temperature-1 softmax over the three labels only.
     vals = torch.tensor([scores[l] for l in LABELS])
     probs = torch.softmax(vals, dim=0)
@@ -136,6 +136,11 @@ def main() -> None:
     parser.add_argument("--system", default=TRAIN_SYSTEM)
     parser.add_argument("--detector-version", default="qwen3.5-0.8b-lora")
     parser.add_argument("--target-fpr", type=float, default=0.01)
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print each row's index, method, gold and predicted label",
+    )
     args = parser.parse_args()
 
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -150,7 +155,7 @@ def main() -> None:
     rows = json.loads((args.data / "eval.json").read_text())
     results = []
     by_method: dict[str, list[bool]] = defaultdict(list)
-    for row in rows:
+    for index, row in enumerate(rows):
         pred, probs = classify(model, tok, device, row["text"], args.system)
         ok = pred == row["sensitivity"]
         by_method[row["method"]].append(ok)
@@ -165,11 +170,12 @@ def main() -> None:
                 "probs": probs,
             }
         )
-        flag = "ok" if ok else "MISS"
-        print(
-            f"[{flag}] {row['method']:<18} gold={row['sensitivity']:<13} "
-            f"pred={pred:<13} p_conf={probs['confidential']:.2f} {row['source_id']}"
-        )
+        # By index rather than source id: stdout ends up in CI logs and shared
+        # terminals, and the per-row detail -- source ids and probabilities --
+        # is in the eval.json written below for whoever holds the data.
+        if args.verbose:
+            flag = "ok" if ok else "MISS"
+            print(f"[{flag}] row {index} {row['method']:<18} gold={row['sensitivity']:<13} pred={pred}")
 
     summary = {
         method: {"n": len(v), "correct": sum(v)}

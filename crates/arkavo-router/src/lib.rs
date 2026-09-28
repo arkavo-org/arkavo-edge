@@ -280,9 +280,10 @@ pub struct Router {
     /// Inspects generated text before it is returned (SENT-007). `None` is the
     /// default and the only state the shipped binary reaches on its own: with
     /// no gate every completion path is byte for byte what it was before this
-    /// field existed. One gate serves one session, so it is shared across that
-    /// session's completions rather than rebuilt per message.
-    release_gate: Option<Arc<dyn arkavo_llm::ReleaseGate>>,
+    /// field existed. A factory rather than a gate: a gate buffers the text of
+    /// the completion it inspects, and completions on one router can run
+    /// concurrently, so each gets a gate of its own.
+    release_gate: Option<arkavo_llm::ReleaseGateFactory>,
 }
 
 impl Router {
@@ -413,31 +414,28 @@ impl Router {
     }
 
     /// Inspect every completion this router produces before returning it
-    /// (SENT-007).
+    /// (SENT-007), each through its own gate from `gates`.
     ///
     /// The builder form, for a router that is about to be shared behind an
     /// `Arc` — which is how every embedder holds one, so there is no later
     /// moment at which `set_release_gate` could be called.
     #[must_use]
-    pub fn with_release_gate(mut self, gate: Arc<dyn arkavo_llm::ReleaseGate>) -> Self {
-        self.release_gate = Some(gate);
+    pub fn with_release_gate(mut self, gates: arkavo_llm::ReleaseGateFactory) -> Self {
+        self.release_gate = Some(gates);
         self
     }
 
     /// Set the gate on a router the caller still owns exclusively.
-    pub fn set_release_gate(&mut self, gate: Arc<dyn arkavo_llm::ReleaseGate>) {
-        self.release_gate = Some(gate);
+    pub fn set_release_gate(&mut self, gates: arkavo_llm::ReleaseGateFactory) {
+        self.release_gate = Some(gates);
     }
 
-    /// Wrap a stream in the gate, if one is set.
+    /// Wrap a stream in a gate of its own, if gating is set.
     ///
     /// Without a gate the stream is returned by value and untouched, so an
     /// ungated router's stream path is the one it had before the gate existed.
     fn gated_stream(&self, stream: RouteStream) -> RouteStream {
-        match &self.release_gate {
-            Some(gate) => release::gate_stream(stream, gate.clone()),
-            None => stream,
-        }
+        release::gate_stream_from(stream, self.release_gate.as_ref())
     }
 
     /// Set the spend-plane cloud policy (default `AskBeforeCloud`).
@@ -1374,8 +1372,8 @@ impl Router {
         // SENT-007: inspection happens before anything else touches the text,
         // and before it is returned. A think block is model output too, and
         // `ARKAVO_DEBUG` prints it, so it is gated rather than stripped first.
-        if let Some(gate) = &self.release_gate {
-            response.content = release::gate_completion(gate, &response.content)?;
+        if let Some(gates) = &self.release_gate {
+            response.content = release::gate_completion(&gates(), &response.content)?;
         }
 
         // Strip <think> blocks that small models may still emit

@@ -23,7 +23,7 @@ impl LocalEngine {
     }
 
     /// Create a LocalEngine whose router inspects every completion before
-    /// returning it (SENT-007).
+    /// returning it (SENT-007), each through a fresh gate from `release_gate`.
     ///
     /// The gate is handed in here rather than set afterwards because the router
     /// is shared behind an `Arc` — and that `Arc` cloned into the tool registry
@@ -31,7 +31,7 @@ impl LocalEngine {
     /// is exclusively owned. `None` builds exactly the engine `new` built
     /// before this existed.
     pub async fn new_with_release_gate(
-        release_gate: Option<Arc<dyn arkavo_llm::ReleaseGate>>,
+        release_gate: Option<arkavo_llm::ReleaseGateFactory>,
     ) -> Result<Self, String> {
         let router = Router::new()
             .await
@@ -65,7 +65,7 @@ impl LocalEngine {
             None => router,
         };
         let router = match release_gate {
-            Some(gate) => router.with_release_gate(gate),
+            Some(gates) => router.with_release_gate(gates),
             None => router,
         };
 

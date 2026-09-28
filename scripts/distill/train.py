@@ -24,15 +24,47 @@ SYSTEM = (
 LABELS = ("public", "internal", "confidential")
 
 
-def prompt_and_full(tok, span: str, label: str, system: str = SYSTEM) -> tuple[str, str]:
+def prompt_text(tok, span: str, system: str = SYSTEM) -> str:
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": span},
     ]
-    prompt = tok.apply_chat_template(
+    return tok.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-    return prompt, prompt + label
+
+
+def label_token_id(tok, label: str) -> int:
+    """The single token a label is scored and trained as.
+
+    eval.py reads each label's probability from one logit, the one after the
+    prompt, so a label that encodes to more than one token would be scored by
+    its first piece alone -- and two labels sharing that piece would score
+    identically. Refusing it here makes a tokenizer that splits a label a loud
+    failure in both scripts instead of a silently wrong calibration.
+    """
+    ids = tok.encode(label, add_special_tokens=False)
+    if len(ids) != 1:
+        raise ValueError(f"label {label!r} encodes to {len(ids)} tokens {ids}; expected exactly 1")
+    return ids[0]
+
+
+def encode_example(tok, prompt: str, label: str, max_len: int) -> tuple[list[int], list[int]]:
+    """Input ids for prompt then label, and loss targets on the label alone.
+
+    The two are tokenized separately and concatenated. Tokenizing the joined
+    string lets a merge span the seam, and masking ``len(prompt_ids)`` tokens
+    of it then lands a token off -- training on a prompt token or on half the
+    label. Separate encoding is also exactly what eval.py scores: the logits
+    after the prompt alone, at the label's own token.
+
+    A row longer than ``max_len`` loses the end of its prompt, never the label:
+    a row whose label is cut off has nothing left to train on.
+    """
+    label_ids = [label_token_id(tok, label)]
+    prompt_ids = tok(prompt, add_special_tokens=False)["input_ids"]
+    prompt_ids = prompt_ids[: max(max_len - len(label_ids), 0)]
+    return prompt_ids + label_ids, [-100] * len(prompt_ids) + label_ids
 
 
 class LabelSet(Dataset):
@@ -47,18 +79,10 @@ class LabelSet(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         row = self.rows[idx]
-        prompt, full = prompt_and_full(
-            self.tok, row["text"], row["sensitivity"], self.system
-        )
-        prompt_ids = self.tok(prompt, add_special_tokens=False)["input_ids"]
-        full_ids = self.tok(full, add_special_tokens=False)["input_ids"]
-        if len(full_ids) > self.max_len:
-            full_ids = full_ids[: self.max_len]
-            prompt_ids = prompt_ids[: min(len(prompt_ids), self.max_len - 1)]
-        labels = [-100] * len(prompt_ids) + full_ids[len(prompt_ids) :]
-        labels = labels[: len(full_ids)]
+        prompt = prompt_text(self.tok, row["text"], self.system)
+        input_ids, labels = encode_example(self.tok, prompt, row["sensitivity"], self.max_len)
         return {
-            "input_ids": torch.tensor(full_ids, dtype=torch.long),
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
             "labels": torch.tensor(labels, dtype=torch.long),
         }
 
@@ -112,6 +136,10 @@ def main() -> None:
     for row in rows:
         if row["sensitivity"] not in LABELS:
             raise SystemExit(f"unknown sensitivity {row['sensitivity']}")
+    # Before the model loads, so a tokenizer that splits a label fails in
+    # seconds rather than at the first batch.
+    for label in LABELS:
+        label_token_id(tok, label)
 
     model = AutoModelForCausalLM.from_pretrained(
         args.base, dtype=torch.bfloat16, trust_remote_code=True

@@ -123,7 +123,12 @@ struct ChatCliArgs {
 
 #[cfg(feature = "sentinel")]
 impl ChatCliArgs {
-    /// The classification ceiling the gate enforces, `internal` by default.
+    /// The answering model's classification ceiling, `internal` by default.
+    ///
+    /// It sets how the gate buffers — at `confidential` nothing partial is
+    /// streamed (SENT-009) — and not what it releases: any finding above
+    /// `public` is withheld whatever the ceiling, because the ceiling says what
+    /// the model may hold, not what its reader may see.
     fn ceiling(&self) -> arkavo_protocol::data_classification::SensitivityLevel {
         self.ceiling
             .unwrap_or(arkavo_protocol::data_classification::SensitivityLevel::Internal)
@@ -263,7 +268,12 @@ fn print_usage() {
     {
         println!("    --sentinel <PATH>       Inspect completions with this detector .gguf");
         println!("    --calibration <PATH>    Thresholds for --sentinel (required with it)");
-        println!("    --ceiling <LEVEL>       public | internal | confidential (default internal)");
+        println!(
+            "    --ceiling <LEVEL>       Model classification: public | internal | confidential"
+        );
+        println!(
+            "                            (default internal; confidential streams nothing partial)"
+        );
     }
     println!("    --debug                 Show debug output");
     println!("    -h, --help              Show this help\n");
@@ -278,28 +288,29 @@ fn print_usage() {
     println!("    /help             Show all commands");
 }
 
-/// Build the release gate this invocation runs under, if any (SENT-007).
+/// Build the release gates this invocation runs under, if any (SENT-007).
 ///
-/// One gate serves the session: the router holds it for as long as it holds the
-/// session, and the gate resets itself between completions.
+/// The detector is loaded once and shared; the router asks for a gate per
+/// completion, so no two completions share a holdback buffer.
 #[cfg(feature = "sentinel")]
 fn arm_release_gate(
     flags: &ChatCliArgs,
-) -> Result<Option<std::sync::Arc<dyn arkavo_llm::ReleaseGate>>, Box<dyn std::error::Error>> {
+) -> Result<Option<arkavo_llm::ReleaseGateFactory>, Box<dyn std::error::Error>> {
     let (Some(detector), Some(calibration)) = (&flags.sentinel, &flags.calibration) else {
         return Ok(None);
     };
-    let (gate, armed) = crate::sentinel_wiring::armed_gate(detector, calibration, flags.ceiling())?;
+    let (gates, armed) =
+        crate::sentinel_wiring::armed_gate(detector, calibration, flags.ceiling())?;
     // stderr, not stdout: a one-shot's stdout is the answer, and an operator
     // notice is not part of it.
     eprintln!("{armed}");
-    Ok(Some(std::sync::Arc::new(gate)))
+    Ok(Some(gates))
 }
 
 #[cfg(not(feature = "sentinel"))]
 fn arm_release_gate(
     _flags: &ChatCliArgs,
-) -> Result<Option<std::sync::Arc<dyn arkavo_llm::ReleaseGate>>, Box<dyn std::error::Error>> {
+) -> Result<Option<arkavo_llm::ReleaseGateFactory>, Box<dyn std::error::Error>> {
     Ok(None)
 }
 

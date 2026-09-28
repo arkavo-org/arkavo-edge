@@ -8,13 +8,14 @@
 //! compiles neither adapter and behaves exactly as it did before.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use arkavo_critic::{ClassificationSource, SentinelCheck, SentinelEvidence};
 use arkavo_fingerprint::IndexKey;
 use arkavo_gguf_tdf::{Classification, PayloadKeyUnwrapper};
 use arkavo_knowledge_pack::{LoadError, VerifiedPack, load_pack};
-use arkavo_llm::{GateOutcome, ReleaseGate};
+use arkavo_llm::{GateOutcome, ReleaseGate, ReleaseGateFactory};
 use arkavo_protocol::RegexInferencer;
 use arkavo_protocol::data_classification::SensitivityLevel;
 use arkavo_sentinel::{
@@ -62,22 +63,21 @@ impl ClassificationSource for CascadeSource {
 /// A holdback buffer driven by the cascade, as the stream path sees it.
 ///
 /// The lock is held only across a buffer operation, never across inspection, so
-/// a slow tier delays the completion it is inspecting rather than every stream
-/// sharing this gate.
+/// a slow tier holds up only the completion it is inspecting.
 ///
-/// One gate serves a session rather than a single completion, because the
-/// router holds it for as long as it holds the session. The buffer is therefore
-/// replaced after each completion that finishes cleanly: without that, the
-/// overlap carried into the next completion's first window would be the *end of
-/// the previous answer*, and the gate would be judging text no model ever
-/// produced in one span. A buffer that blocked is not replaced — a blocked
-/// session stays blocked, which is the safe direction.
+/// The buffer holds one completion's text, so completions in flight at once each
+/// need their own gate; the router builds one per completion from a
+/// [`ReleaseGateFactory`]. Completions run through one gate in turn are still
+/// safe: the buffer is replaced after each that clears, or the next first
+/// window would open with the *end of the previous answer*. A blocked buffer is
+/// not replaced — a blocked gate stays blocked, the safe direction.
 pub struct CascadeGate {
     cascade: Arc<Cascade>,
     ceiling: SensitivityLevel,
     window_bytes: usize,
     overlap_bytes: usize,
     holdback: Mutex<Holdback>,
+    tripped: Arc<AtomicBool>,
 }
 
 impl CascadeGate {
@@ -117,7 +117,25 @@ impl CascadeGate {
             window_bytes,
             overlap_bytes,
             holdback: Mutex::new(Self::fresh_buffer(ceiling, window_bytes, overlap_bytes)),
+            tripped: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Refuse everything once any gate holding `tripped` has blocked.
+    ///
+    /// Gates are per completion but a block is a verdict on the session: a
+    /// fresh gate after a refusal would let a caller re-ask, and bisect what it
+    /// cannot see by where each attempt stops (SENT-011).
+    #[must_use]
+    pub fn sharing_block(mut self, tripped: Arc<AtomicBool>) -> Self {
+        self.tripped = tripped;
+        self
+    }
+
+    fn block(&self) -> GateOutcome {
+        self.buffer().block();
+        self.tripped.store(true, Ordering::Release);
+        GateOutcome::Blocked
     }
 
     fn fresh_buffer(
@@ -153,7 +171,7 @@ impl CascadeGate {
                 // release of nothing: it is the refusal, still standing. Saying
                 // `Release` here would hand the caller an empty completion and,
                 // worse, let `finish` mistake a blocked buffer for a clean one
-                // and reset it — unblocking the session the block was meant to
+                // and reset it — unblocking the gate the block was meant to
                 // end.
                 if state == HoldbackState::Blocked {
                     return GateOutcome::Blocked;
@@ -176,12 +194,15 @@ impl CascadeGate {
             // `CascadeSource`, where a classification of Public is worth
             // recording; it is only here, where the question is whether to
             // withhold, that it means nothing.
+            // The line is Public, not `self.ceiling`: the ceiling is the model's
+            // own classification and sets how the buffer streams (SENT-009),
+            // not the reader's clearance — releasing up to it would release
+            // the very corpus that gave the model that classification.
             let withhold = evidence
                 .findings()
                 .any(|finding| finding.sensitivity > SensitivityLevel::Public);
             if withhold || evidence.has_gap() {
-                self.buffer().block();
-                return GateOutcome::Blocked;
+                return self.block();
             }
             released.push_str(&self.buffer().release());
         }
@@ -217,8 +238,9 @@ fn ceiling_name(ceiling: SensitivityLevel) -> &'static str {
 ///
 /// The pattern tier runs first because it is the cheap one and the cascade's
 /// order is its contract; the distilled detector runs second, against the
-/// thresholds the same file names. Returns the gate and the one line that says
-/// what was armed, so the caller decides where that line goes.
+/// thresholds the same file names. Returns a factory that builds a gate per
+/// completion over that one loaded cascade, and the one line that says what was
+/// armed, so the caller decides where that line goes.
 ///
 /// This is the unsigned path: a pack (see [`SentinelRuntime::from_pack`])
 /// carries its thresholds under a signature, and these two files carry nothing
@@ -228,7 +250,7 @@ pub fn armed_gate(
     detector: &Path,
     calibration: &Path,
     ceiling: SensitivityLevel,
-) -> Result<(CascadeGate, String), String> {
+) -> Result<(ReleaseGateFactory, String), String> {
     let json = std::fs::read_to_string(calibration)
         .map_err(|e| format!("cannot read calibration {}: {e}", calibration.display()))?;
     // A table that will not parse is not an empty table. An empty one calibrates
@@ -252,22 +274,34 @@ pub fn armed_gate(
         cascade.tier_names().join(", "),
         ceiling_name(ceiling)
     );
-    let gate = CascadeGate::with_holdback(
-        cascade,
-        ceiling,
-        SENTINEL_WINDOW_BYTES,
-        SENTINEL_WINDOW_BYTES / 4,
-    );
-    Ok((gate, armed))
+    let tripped = Arc::new(AtomicBool::new(false));
+    let gates: ReleaseGateFactory = Arc::new(move || -> Arc<dyn ReleaseGate> {
+        Arc::new(
+            CascadeGate::with_holdback(
+                cascade.clone(),
+                ceiling,
+                SENTINEL_WINDOW_BYTES,
+                SENTINEL_WINDOW_BYTES / 4,
+            )
+            .sharing_block(tripped.clone()),
+        )
+    });
+    Ok((gates, armed))
 }
 
 impl ReleaseGate for CascadeGate {
     fn admit(&self, chunk: &str) -> GateOutcome {
+        if self.tripped.load(Ordering::Acquire) {
+            return GateOutcome::Blocked;
+        }
         self.buffer().push(chunk);
         self.drain()
     }
 
     fn finish(&self) -> GateOutcome {
+        if self.tripped.load(Ordering::Acquire) {
+            return GateOutcome::Blocked;
+        }
         self.buffer().finish();
         let outcome = self.drain();
         if matches!(outcome, GateOutcome::Release(_)) {
@@ -283,12 +317,9 @@ impl ReleaseGate for CascadeGate {
 
     fn discard(&self) {
         // The consumer went away, so the held text is dropped uninspected
-        // (SENT-007 edge case) — and the buffer that held it goes with it. One
-        // gate serves a session, and `Holdback::discard` leaves a buffer in a
-        // state that offers no window ever again; keeping it would make the
-        // next completion look like an empty release, exactly as a blocked one
-        // did. Replacing it drops the text just as thoroughly and leaves the
-        // session able to answer.
+        // (SENT-007 edge case) — and the buffer goes with it: a
+        // `Holdback::discard`ed buffer offers no window again, so a next
+        // completion through this gate would look like an empty release.
         *self.buffer() = Self::fresh_buffer(self.ceiling, self.window_bytes, self.overlap_bytes);
     }
 }
@@ -462,7 +493,7 @@ mod tests {
         );
     }
 
-    /// One gate serves a session, so a completion that cleared must not leave
+    /// A gate may run completions in turn, so one that cleared must not leave
     /// its tail — or its spent finished flag — in the buffer the next one is
     /// judged in.
     #[spec("SENT-007")]
@@ -611,7 +642,7 @@ mod tests {
     /// came back empty and every message after that streamed ungated.
     #[spec("SENT-007")]
     #[test]
-    fn a_blocked_session_stays_blocked() {
+    fn a_blocked_gate_stays_blocked() {
         let gate = gate_with(Arc::new(OnNeedle("CANARY")), SensitivityLevel::Internal);
 
         gate.admit("a completion carrying CANARY");
@@ -625,7 +656,68 @@ mod tests {
         assert_eq!(gate.finish(), GateOutcome::Blocked);
     }
 
-    /// Regression: a discarded buffer offers no window either, so the session
+    /// Each completion has its own gate, and a block in one still refuses the
+    /// next: gates sharing a block flag are one session's, and a session that
+    /// could simply ask again after a refusal could probe its way past it.
+    #[spec("SENT-011")]
+    #[test]
+    fn a_block_in_one_completion_refuses_the_next_completions_gate() {
+        let tripped = Arc::new(AtomicBool::new(false));
+        let gate = || {
+            gate_with(Arc::new(OnNeedle("CANARY")), SensitivityLevel::Internal)
+                .sharing_block(tripped.clone())
+        };
+
+        let first = gate();
+        first.admit("a completion carrying CANARY");
+        assert_eq!(first.finish(), GateOutcome::Blocked);
+
+        let second = gate();
+        assert_eq!(second.admit("entirely clean text"), GateOutcome::Blocked);
+        assert_eq!(second.finish(), GateOutcome::Blocked);
+    }
+
+    /// Gates that share nothing are independent: one completion's finding does
+    /// not refuse another's clean text.
+    #[spec("SENT-007")]
+    #[test]
+    fn separate_gates_do_not_share_a_block_unless_told_to() {
+        let first = gate_with(Arc::new(OnNeedle("CANARY")), SensitivityLevel::Internal);
+        let second = gate_with(Arc::new(OnNeedle("CANARY")), SensitivityLevel::Internal);
+
+        first.admit("a completion carrying CANARY");
+        assert_eq!(first.finish(), GateOutcome::Blocked);
+
+        second.admit("entirely clean text");
+        assert_eq!(
+            second.finish(),
+            GateOutcome::Release("entirely clean text".to_string())
+        );
+    }
+
+    /// The ceiling picks how the buffer streams, not what may be released: an
+    /// Internal finding is withheld under an Internal ceiling. A ceiling is the
+    /// answering model's classification, and releasing up to it would release
+    /// the very corpus that gave the model that classification.
+    #[spec("SENT-009")]
+    #[test]
+    fn a_finding_at_the_ceiling_is_still_withheld() {
+        let tier = SentinelTier::new(
+            Arc::new(FixedScores(vec![label(
+                "internal",
+                SensitivityLevel::Internal,
+                1.0,
+            )])),
+            calibrated(),
+        );
+        let gate = gate_with(Arc::new(tier), SensitivityLevel::Internal);
+
+        gate.admit("the staff rota for the loading dock");
+
+        assert_eq!(gate.finish(), GateOutcome::Blocked);
+    }
+
+    /// Regression: a discarded buffer offers no window either, so the gate
     /// that survives a dropped consumer must not inherit one. Discarding drops
     /// the held text and leaves the gate able to judge the next completion,
     /// rather than swallowing it and resetting underneath it.

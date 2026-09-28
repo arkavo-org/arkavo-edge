@@ -46,6 +46,15 @@ pub trait ReleaseGate: Send + Sync {
     fn discard(&self);
 }
 
+/// Builds the gate for one completion.
+///
+/// A gate's buffer holds the text of the completion it is inspecting, so a
+/// holder that serves several completions — a router, which can run them
+/// concurrently — keeps this rather than a gate, and asks it for a fresh one
+/// each time. One shared gate would put two interleaved streams into one
+/// buffer, releasing each other's windows and blocking each other's text.
+pub type ReleaseGateFactory = Arc<dyn Fn() -> Arc<dyn ReleaseGate> + Send + Sync>;
+
 /// Message a consumer receives when a gate blocks a completion.
 ///
 /// Uniform and uninformative on purpose (SENT-011): a message that named the
@@ -94,11 +103,12 @@ where
                     return Poll::Ready(Some(finish(&this.gate, &mut this.blocked, None)));
                 }
                 Poll::Ready(Some(Err(e))) => {
-                    // The provider stopped mid-completion. The gate outlives
-                    // this stream, so text it admitted but has not yet windowed
-                    // would otherwise sit in its buffer and be prefixed onto
-                    // the next completion — the same cross-completion
-                    // contamination the abandoned-consumer path discards for.
+                    // The provider stopped mid-completion. A gate can outlive
+                    // this stream when its holder drives several completions
+                    // through it in turn, so text it admitted but has not yet
+                    // windowed would otherwise sit in its buffer and be
+                    // prefixed onto the next one — the same contamination the
+                    // abandoned-consumer path discards for.
                     // `discard` and not `finish`: an error is not an
                     // inspection, and there is no consumer left to release to.
                     this.gate.discard();
@@ -180,10 +190,10 @@ where
 }
 
 impl<S> Drop for GatedStream<S> {
-    /// A consumer that walks away leaves held text behind, and a gate outlives
-    /// the completion it was inspecting — it is the session's, not this
-    /// stream's. Telling it the completion is over is what keeps the abandoned
-    /// text from being carried into the next one. `discard` and not `finish`:
+    /// A consumer that walks away leaves held text behind, and a gate can
+    /// outlive the completion it was inspecting when its holder reuses it for
+    /// the next one in turn. Telling it the completion is over is what keeps
+    /// the abandoned text from being carried forward. `discard` and not `finish`:
     /// a disconnect is not an inspection, so the text is dropped rather than
     /// judged and released to nobody.
     fn drop(&mut self) {
@@ -556,8 +566,8 @@ mod tests {
     }
 
     /// And a completion that ran to its end has nothing to discard: finishing
-    /// already inspected the tail, and a discard here would tell a session-wide
-    /// gate to throw away a completion that was properly closed.
+    /// already inspected the tail, and a discard here would tell a reused gate
+    /// to throw away a completion that was properly closed.
     #[tokio::test]
     async fn dropping_a_finished_stream_discards_nothing() {
         let gate = Counting::new();
