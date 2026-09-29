@@ -119,9 +119,9 @@ Recommended edge models:
 
 The prefrontal cortex (PFC) manages executive functions: planning, maintaining multiple goal states, inhibition, and delegating sub-tasks.
 
-**Implementation:** The `arkavo-orchestrator` acts as the PFC. It sits above the mesh, polling external environments (GitHub webhooks), autonomously classifying requirements, breaking them into sub-tasks, and dispatching them to specialized agents. To ensure plans are executed safely, the orchestrator utilizes `workspace_container` to spawn isolated Docker/Podman environments with strict resource quotas -- effectively "inhibiting" agents from impacting the host OS.
+**Implementation:** The `arkavo-orchestrator` acts as the PFC. It sits above the mesh, polling external environments (GitHub webhooks), autonomously classifying requirements, breaking them into sub-tasks, and dispatching them to specialized agents. The `workspace_container` tool can run commands in isolated Docker/Podman containers with resource quotas when a model chooses it; the orchestrator does not route plan execution through it, and other tools run on the host with the agent's privileges.
 
-**Crates:** `arkavo-orchestrator` (GitHub webhook orchestration, agent assignment), `arkavo-workspace` (container isolation)
+**Crates:** `arkavo-orchestrator` (GitHub webhook orchestration, agent assignment), `arkavo-mcp-workspace` (opt-in container isolation via `workspace_container`)
 
 ## The Amygdala: Parallel Safety Circuits
 
@@ -133,7 +133,7 @@ The amygdala processes threats fast, operating concurrently with slower reasonin
 |------|----------|
 | `sec_semgrep` | SAST scanning via Semgrep |
 | `sbom_syft` | SBOM generation and dependency vulnerability checks via Syft |
-| Egress filter | IP-level SSRF prevention blocking metadata endpoints and private ranges |
+| Egress filter | IP-level SSRF prevention for metadata endpoints and private ranges; enforced only by `EgressGuard` in builds with the non-default `taint` feature |
 | Input validation | Unicode normalization, path traversal prevention, injection blocking |
 | Preflight moderation | TØR-G circuit evaluation blocks policy-violating requests before LLM inference |
 | Budget governor | Per-agent token and cost budgets with alerts at configurable thresholds |
@@ -141,7 +141,7 @@ The amygdala processes threats fast, operating concurrently with slower reasonin
 
 These tools can immediately flag or block unsafe code modifications before they are ever committed. Preflight moderation and budget enforcement act as **metabolic governors** -- the amygdala intervenes before resources are spent, not after.
 
-**Crates:** `arkavo-mcp-tools` (semgrep, syft wrappers), `arkavo-validation` (input sanitization), `arkavo-protocol` (egress filtering), `arkavo-budget` (cost tracking and enforcement)
+**Crates:** `arkavo-mcp-tools` (semgrep, syft wrappers), `arkavo-validation` (input sanitization), `arkavo-protocol` (egress filtering, `taint` feature), `arkavo-budget` (cost tracking and enforcement)
 
 ---
 

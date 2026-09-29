@@ -107,7 +107,7 @@ async fn sync_once(
     // agents the local node sees on the mesh. We have no scoring
     // evidence about them yet (per-peer attestation/cross-agent
     // outcomes are a follow-up), so the AgentTrustInput is empty
-    // beyond the verification flag. The panel still renders an entry
+    // beyond anti-pattern weights. The panel still renders an entry
     // per peer so operators can see the peer set.
     let peer_ids = learning_bus.peer_ids().await;
     let peer_count = peer_ids.len();

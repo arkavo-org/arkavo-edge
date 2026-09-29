@@ -21,7 +21,7 @@ Arkavo Edge has budget tracking built in. You set a ceiling, the system enforces
 | **Budget control** | None. No spending caps, no token tracking | Budget tracking with per-session/per-day caps, configurable via `budget:` block in AGENTS.md |
 | **PII protection** | None built in | Preflight policies block PII before it reaches any model, configurable via `preflight:` block in AGENTS.md |
 | **Offline operation** | Requires internet. Cloud API failure = total failure | Local models work air-gapped on a Raspberry Pi |
-| **CVEs** | CVE-2026-25253 (CVSS 8.8): unauthenticated WebSocket RCE | Rust memory safety, no unauthenticated endpoints |
+| **CVEs** | CVE-2026-25253 (CVSS 8.8): unauthenticated WebSocket RCE | Rust memory safety. The A2A agent listener does not yet authenticate callers; see [Network exposure](#network-exposure) |
 | **Binary size** | Node.js ≥22 + npm dependency tree | < 60MB single binary, no runtime dependencies |
 | **Credential storage** | Plaintext JSON/Markdown files, targeted by infostealers | AES-256-GCM encrypted credential vault with OS keychain integration (macOS Keychain, Linux SecretService, Windows Credential Manager) |
 
@@ -96,7 +96,7 @@ and daily automation.
 What you get today that OpenClaw doesn't have:
 
 - **`model: ministral-3b`**: Running locally via Ollama. Zero cost. Zero latency to an API. Zero dependency on any vendor's terms of service.
-- **Loopback-only binding**: No unauthenticated network exposure.
+- **Loopback-only binding**: The A2A agent listener binds 127.0.0.1 unless you pass `--listen` or set `runtime.listen` in your SwarmKit kit, and the AG-UI gateway binds 127.0.0.1 unless you set `ARKAVO_AGUI_BIND`. Neither authenticates callers yet, so any local process can reach them; expose them only on a network you trust.
 - **Single binary**: No Node.js, no npm, no dependency tree to audit or compromise.
 - **Preflight PII blocking**: Configurable via `preflight:` block in AGENTS.md YAML frontmatter. PII is caught before it reaches the model.
 - **Budget enforcement**: Configurable via `budget:` block in AGENTS.md YAML frontmatter. Per-session and per-day spending caps enforced automatically.
@@ -254,7 +254,7 @@ These aren't bolt-on features. They're architectural decisions that OpenClaw can
 
 **OpenClaw**: Default bind is `0.0.0.0:18789`, exposing the API to all network interfaces. Censys found 30,000+ publicly exposed instances. CVE-2026-25253 allowed unauthenticated WebSocket connections to execute arbitrary commands.
 
-**Arkavo**: By default an agent is discoverable and reachable on the local network: it listens on every interface on an OS-assigned port and announces itself over mDNS. Its RPC endpoint is not authenticated yet, so run it on networks you trust. `--bind 127.0.0.1` keeps an agent on this machine, and a kit can pin an address with `runtime.listen`. The methods that read and replace the kit are served only on a loopback endpoint, and the web UI gateway listens on loopback unless `ARKAVO_AGUI_BIND` says otherwise.
+**Arkavo**: Binds to loopback by default. The A2A agent listener and the AG-UI gateway listen on 127.0.0.1 until you pass `--bind` or set `runtime.listen` in a SwarmKit kit (`ARKAVO_AGUI_BIND` for the gateway), and the agent warns at startup when its listener is exposed. No default internet exposure. The A2A listener does not authenticate callers yet: any local process can send it tasks, and so can any host that reaches an exposed listener. A2A discovery uses mDNS, and a loopback agent is announced only to agents on the same machine.
 
 ### Supply chain
 

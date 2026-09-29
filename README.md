@@ -230,9 +230,12 @@ For offensive-security reviewers: here's what is real today and what is still on
 | **RPC endpoint authentication** | Not yet | The agent's RPC endpoint does not authenticate callers, and it is served without TLS. By default it is reachable from the local network, so run agents on networks you trust. `--bind 127.0.0.1`, or a loopback `runtime.listen` in the kit, keeps the endpoint on this machine. The methods that read and replace the kit are served only on a loopback endpoint. |
 | **SEP / TPM hardware attestation** | In crate, not crypto-bound | `arkavo-attestation` detects the Secure Enclave on Apple Silicon and reports a security state, but the evidence is platform metadata, not a Secure-Enclave-signed quote. TPM backend is not implemented. |
 | **Hardware-bound key storage** | Not yet | Device identity and agent keypairs are stored on disk with filesystem permissions; they are not yet stored in the Secure Enclave, Keychain (non-extractable), or a TPM. |
-| **Verifiable remote attestation** | Not yet | Trust scoring currently treats identity as verified once a DID:key is known; there is no remote verification of attestation evidence yet. |
+| **Verifiable remote attestation** | Not yet | No attestation evidence or DID proof is verified. Published trust scores report every subject as unattested (VERIFICATION 0), including the local agent's own score; gossip peers are identified by discovery names, not proven DIDs. |
+| **Tool execution confinement** | Not yet | `shell_exec` and other process-spawning tools run as the agent's OS user with its files, network and environment variables. Only `workspace_container` isolates execution, and only for commands the model chooses to run in a container. OS-level confinement is planned. |
+| **Outbound SSRF / egress filtering** | Not in the default build | The private-range and cloud-metadata filter is enforced only by `EgressGuard`, which ships behind the non-default `taint` feature. Default-build tools make outbound requests without it. |
+| **Agent listener authentication** | Not yet | The A2A agent listener binds loopback (`127.0.0.1`) by default; `--listen <address>` or `runtime.listen` in a SwarmKit kit exposes it to other hosts, and the agent warns at startup when it does. It does not authenticate callers, so any local process, and any host that can reach an exposed listener, can send it tasks. The AG-UI gateway also binds loopback by default. |
 
-This split is intentional: encryption, access control, and identity are shipping now; hardware-bound trust roots are being built in the open.
+This split is intentional: encryption, access control, and identity are shipping now; hardware-bound trust roots, tool-execution confinement and default-build egress filtering are being built in the open.
 
 ## Platform Support
 
