@@ -13,7 +13,7 @@ use tracing::{info, warn};
 
 use super::super::config_helpers::{
     DEFAULT_KIT_PATH, cleanup_old_backups, is_safe_backup_filename, kit_filename_of,
-    resolve_kit_path, validate_kit_yaml,
+    resolve_kit_path, validate_kit_update, validate_kit_yaml,
 };
 
 pub async fn handle_config_get(
@@ -185,7 +185,7 @@ where
         }
     }
 
-    if let Err(validation_error) = validate_kit_yaml(&request.content) {
+    if let Err(validation_error) = validate_kit_update(&request.content) {
         timer.error();
         return Ok(AgentConfigUpdateResponse {
             success: false,
@@ -417,6 +417,7 @@ pub async fn handle_config_restore(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use arkavo_protocol::rate_limit::RateLimitConfig;
@@ -511,6 +512,18 @@ provenance:
       algorithm: ed25519
       signature: "AAA"
 "#;
+
+    /// `yaml` with its empty `kit.id` replaced by the id of its content, as
+    /// a producer publishes it.
+    fn with_kit_id(yaml: &str) -> String {
+        let manifest = arkavo_swarmkit::parse_yaml(yaml).expect("fixture kit parses");
+        let id = arkavo_swarmkit::kit_id_for(&manifest).expect("fixture kit has an id");
+        assert!(
+            yaml.contains("id: \"\""),
+            "fixture must start without an id"
+        );
+        yaml.replacen("id: \"\"", &format!("id: \"{id}\""), 1)
+    }
 
     fn create_test_metrics() -> Arc<MetricsCollector> {
         Arc::new(MetricsCollector::new(false))
@@ -638,6 +651,76 @@ provenance:
         assert!(!std::path::Path::new(DEFAULT_KIT_PATH).exists());
     }
 
+    /// Regression: a manifest with an empty `kit.id` skipped the content
+    /// hash check, so an update was accepted with nothing tying it to the
+    /// content its producer published.
+    #[tokio::test]
+    async fn update_rejects_a_manifest_without_a_kit_id() {
+        let _cwd = TestCwd::new();
+        let metrics = create_test_metrics();
+        let rate_limiter = create_test_rate_limiter();
+        let reloaded = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reloaded_by_update = reloaded.clone();
+
+        let response = handle_config_update(
+            &metrics,
+            &rate_limiter,
+            AgentConfigUpdateRequest {
+                agent_id: "agent".to_string(),
+                content: MINIMAL_KIT_YAML.to_string(),
+                expected_version: None,
+                create_backup: true,
+            },
+            |_content| async move {
+                reloaded_by_update.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(!response.success);
+        match response.error {
+            Some(ConfigError::ValidationFailed { details }) => {
+                assert!(details.contains("kit.id is empty"), "{details}");
+            }
+            other => panic!("expected a validation failure, got {other:?}"),
+        }
+        assert!(!std::path::Path::new(DEFAULT_KIT_PATH).exists());
+        assert!(!reloaded.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn update_rejects_a_manifest_whose_kit_id_is_not_its_content() {
+        let _cwd = TestCwd::new();
+        let metrics = create_test_metrics();
+        let rate_limiter = create_test_rate_limiter();
+
+        // The id of one manifest on the content of another.
+        let edited = with_kit_id(MINIMAL_KIT_YAML).replacen("say hello", "say goodbye", 1);
+
+        let response = handle_config_update(
+            &metrics,
+            &rate_limiter,
+            AgentConfigUpdateRequest {
+                agent_id: "agent".to_string(),
+                content: edited,
+                expected_version: None,
+                create_backup: true,
+            },
+            |_content| async { Ok(()) },
+        )
+        .await
+        .unwrap();
+
+        assert!(!response.success);
+        assert!(matches!(
+            response.error,
+            Some(ConfigError::ValidationFailed { .. })
+        ));
+        assert!(!std::path::Path::new(DEFAULT_KIT_PATH).exists());
+    }
+
     #[tokio::test]
     async fn update_creates_kit_at_default_path_when_none_exists() {
         let _cwd = TestCwd::new();
@@ -649,7 +732,7 @@ provenance:
             &rate_limiter,
             AgentConfigUpdateRequest {
                 agent_id: "agent".to_string(),
-                content: MINIMAL_KIT_YAML.to_string(),
+                content: with_kit_id(MINIMAL_KIT_YAML),
                 expected_version: None,
                 create_backup: true,
             },
@@ -677,7 +760,7 @@ provenance:
             &rate_limiter,
             AgentConfigUpdateRequest {
                 agent_id: "agent".to_string(),
-                content: MINIMAL_KIT_YAML.to_string(),
+                content: with_kit_id(MINIMAL_KIT_YAML),
                 expected_version: None,
                 create_backup: false,
             },
@@ -690,7 +773,7 @@ provenance:
         assert!(response.error.is_none());
         assert_eq!(
             std::fs::read_to_string(DEFAULT_KIT_PATH).unwrap(),
-            MINIMAL_KIT_YAML
+            with_kit_id(MINIMAL_KIT_YAML)
         );
     }
 
@@ -708,7 +791,7 @@ provenance:
             &rate_limiter,
             AgentConfigUpdateRequest {
                 agent_id: "agent".to_string(),
-                content: OTHER_VALID_KIT_YAML.to_string(),
+                content: with_kit_id(OTHER_VALID_KIT_YAML),
                 expected_version: Some("stale-version-hash".to_string()),
                 create_backup: true,
             },
@@ -739,7 +822,7 @@ provenance:
             &rate_limiter,
             AgentConfigUpdateRequest {
                 agent_id: "agent".to_string(),
-                content: OTHER_VALID_KIT_YAML.to_string(),
+                content: with_kit_id(OTHER_VALID_KIT_YAML),
                 expected_version: None,
                 create_backup: true,
             },
@@ -796,7 +879,7 @@ provenance:
             &rate_limiter,
             AgentConfigUpdateRequest {
                 agent_id: "agent".to_string(),
-                content: OTHER_VALID_KIT_YAML.to_string(),
+                content: with_kit_id(OTHER_VALID_KIT_YAML),
                 expected_version: None,
                 create_backup: true,
             },
