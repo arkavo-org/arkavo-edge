@@ -25,6 +25,9 @@ thiserror = { workspace = true }
 # For agent discovery
 mdns-sd = { workspace = true, optional = true }
 
+[dev-dependencies]
+jsonrpsee = { workspace = true }
+
 [features]
 default = ["mdns"]
 mdns = ["dep:mdns-sd"]

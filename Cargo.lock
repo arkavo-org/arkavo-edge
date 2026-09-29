@@ -1558,6 +1558,7 @@ dependencies = [
  "arkavo-protocol",
  "async-trait",
  "chrono",
+ "jsonrpsee",
  "mdns-sd",
  "serde",
  "serde_json",
