@@ -7,6 +7,32 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
+/// Environment variable that turns spec decoding off for every local model.
+/// Any value other than empty, `0` or `false` counts as set.
+pub const DISABLE_ENV: &str = "ARKAVO_DISABLE_SPEC_DECODING";
+
+/// Applies the operator's switch to a spec-decoding decision.
+///
+/// Spec decoding drafts tokens from text already in the context and keeps the
+/// ones the model confirms, so a fault in it looks like a model fault: wrong
+/// words in text copied from the prompt. Turning it off while changing nothing
+/// else tells the two apart. The accept-rate statistics cannot do that; they
+/// measure how often drafts are kept, not whether the kept tokens are right.
+pub fn permitted(requested: bool) -> bool {
+    let permitted = apply_switch(requested, std::env::var(DISABLE_ENV).ok().as_deref());
+    if requested && !permitted {
+        tracing::info!("spec decoding is off for this request: {DISABLE_ENV} is set");
+    }
+    permitted
+}
+
+fn apply_switch(requested: bool, switch: Option<&str>) -> bool {
+    let switched_off = switch.map(str::trim).is_some_and(|value| {
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    });
+    requested && !switched_off
+}
+
 pub struct SpecStats {
     window: u32,
     threshold_pct: u32,
@@ -117,6 +143,36 @@ impl SpecStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_switch_turns_a_granted_request_off() {
+        for value in ["1", "true", "TRUE", "yes", " 1 "] {
+            assert!(!apply_switch(true, Some(value)), "{value:?} should disable");
+        }
+    }
+
+    #[test]
+    fn an_unset_or_negative_switch_leaves_the_decision_alone() {
+        for value in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("0"),
+            Some("false"),
+            Some("False"),
+        ] {
+            assert!(apply_switch(true, value), "{value:?} should not disable");
+        }
+    }
+
+    /// The switch only ever removes spec decoding. A request the accept-rate
+    /// statistics already refused stays refused whatever the variable holds.
+    #[test]
+    fn the_switch_never_turns_spec_decoding_on() {
+        for value in [None, Some("0"), Some("false"), Some("1")] {
+            assert!(!apply_switch(false, value), "{value:?} enabled spec");
+        }
+    }
 
     #[test]
     fn unknown_model_enables_spec() {
