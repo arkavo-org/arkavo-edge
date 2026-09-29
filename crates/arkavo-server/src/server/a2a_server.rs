@@ -1267,7 +1267,19 @@ impl A2aServer {
             warn!("Failed to start file watcher: {}", e);
         }
 
-        let handle = server.start(rpc_impl.into_rpc());
+        let mut rpc_module = rpc_impl.into_rpc();
+        let withheld =
+            super::local_only::restrict_to_bound_address(&mut rpc_module, actual_addr.ip())?;
+        if !withheld.is_empty() {
+            warn!(
+                "A2A server is bound to {}, which is reachable from the network; \
+                 not serving {}",
+                actual_addr,
+                withheld.join(", ")
+            );
+        }
+
+        let handle = server.start(rpc_module);
 
         info!("A2A server started successfully on {}", actual_addr);
         info!(

@@ -29,6 +29,7 @@ mod learning_bus_gossip;
 mod learning_bus_synthesis;
 mod llm_intent_analyzer;
 mod local_engine;
+mod local_only;
 mod mcp_bridge;
 mod policy_cache;
 mod rlm_bridge;
@@ -38,6 +39,8 @@ mod startup;
 #[cfg(feature = "swarm-apply")]
 mod swarm_apply_tool;
 mod synthesis;
+#[cfg(test)]
+mod test_support;
 mod token_estimator;
 mod tool_memory;
 mod tool_pattern_cache;
