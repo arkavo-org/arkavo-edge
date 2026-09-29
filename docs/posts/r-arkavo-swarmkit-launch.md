@@ -74,16 +74,19 @@ Each kit ships with a signed YAML manifest, a six-section README, and a closeout
 
 ## Run it
 
-```bash
-cargo run -p arkavo-swarmkit --example validate_kit -- \
-  examples/compliance-kit/compliance-kit.swarmkit.yaml
-```
-
-Or auto-launch via the gateway:
+From a checkout of the repository, with `arkavo` installed:
 
 ```bash
-ARKAVO_SWARMKIT_PATH=examples/compliance-kit/compliance-kit.swarmkit.yaml arkavo
+arkavo kit validate examples/compliance-kit/compliance-kit.swarmkit.yaml
 ```
+
+Or load the kit into the gateway that `arkavo ui` starts:
+
+```bash
+ARKAVO_SWARMKIT_PATH=examples/compliance-kit/compliance-kit.swarmkit.yaml arkavo ui
+```
+
+Loading a kit builds per-role policy, trace, and panel entries. It does not start the roles; run each one with `arkavo agent -c <kit> -n <role-id> -p <port>`.
 
 ## And the role names are yours
 
