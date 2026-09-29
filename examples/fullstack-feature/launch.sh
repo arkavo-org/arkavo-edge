@@ -17,7 +17,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${BINARY:-$SCRIPT_DIR/../../target/debug/arkavo}"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 KIT="$SCRIPT_DIR/fullstack-feature.swarmkit.yaml"
 PID_FILE="$SCRIPT_DIR/.agent_pids"
 LOG_DIR="$SCRIPT_DIR/logs"
@@ -69,8 +71,7 @@ check_prerequisites() {
     echo -e "${CYAN}Checking prerequisites...${NC}"
 
     if [ ! -f "$BINARY" ]; then
-        echo -e "${RED}Error: Arkavo binary not found at $BINARY${NC}"
-        echo "Run: cargo build"
+        explain_missing_arkavo_binary
         exit 1
     fi
     echo -e "  ${GREEN}✓${NC} Arkavo binary found"

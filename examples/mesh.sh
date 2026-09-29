@@ -4,7 +4,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${BINARY:-$SCRIPT_DIR/../target/debug/arkavo}"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/common/resolve_binary.sh"
+resolve_arkavo_binary || true
 PID_FILE="$SCRIPT_DIR/.mesh_pids"
 
 # Colors
@@ -19,8 +21,7 @@ start_mesh() {
     > "$PID_FILE"
 
     if [ ! -f "$BINARY" ]; then
-        echo -e "${RED}Binary not found at $BINARY${NC}"
-        echo "Please run: cargo build"
+        explain_missing_arkavo_binary
         exit 1
     fi
 

@@ -6,12 +6,14 @@
 #
 # Usage:
 #   ./run.sh              # Run with default model
-#   ./run.sh --model glm  # Run with GLM-4.7-Flash
+#   ./run.sh --model glm-4.7-flash  # Run with GLM-4.7-Flash
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${SCRIPT_DIR}/../../target/debug/arkavo"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "${SCRIPT_DIR}/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 
 # Colors
 GREEN='\033[0;32m'
@@ -39,11 +41,7 @@ echo ""
 
 # Check prerequisites
 if [ ! -f "$BINARY" ]; then
-    echo -e "${RED}Error: Arkavo binary not found${NC}"
-    echo ""
-    echo "Please build first:"
-    echo "  cd $(dirname "$SCRIPT_DIR")"
-    echo "  cargo build"
+    explain_missing_arkavo_binary
     exit 1
 fi
 
@@ -56,4 +54,4 @@ echo ""
 # Run a simple chat query (no repo context for simple greeting)
 cd "$SCRIPT_DIR"
 # shellcheck disable=SC2086
-"$BINARY" chat $MODEL_FLAG --repo-context off --prompt "Hello! Please introduce yourself briefly. What are you and what can you help with?"
+"$BINARY" chat $MODEL_FLAG --prompt "Hello! Please introduce yourself briefly. What are you and what can you help with?"

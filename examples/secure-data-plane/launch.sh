@@ -4,7 +4,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${SCRIPT_DIR}/../../target/debug/arkavo"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "${SCRIPT_DIR}/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 PID_FILE="${SCRIPT_DIR}/logs/pids"
 KIT="${SCRIPT_DIR}/secure-data-plane.swarmkit.yaml"
 # Only sourced for colors and print_agent_status; start_agent's --config
@@ -42,8 +44,8 @@ echo ""
 
 # Check prerequisites
 if [ ! -f "$BINARY" ]; then
-    echo -e "${RED}Error: Arkavo binary not found${NC}"
-    echo "Build with: cargo build --features kas,iroh"
+    explain_missing_arkavo_binary
+    echo "A source build for this demo needs the KAS and Iroh features: cargo build --features kas,iroh" >&2
     exit 1
 fi
 

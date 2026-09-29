@@ -6,12 +6,14 @@
 #   ./demo.sh all          # Run all scenarios
 #   ./demo.sh <scenario>   # Run specific scenario
 #   ./demo.sh --list       # List available scenarios
-#   ./demo.sh --model glm <scenario>  # Run with specific model (e.g., glm, qwen3)
+#   ./demo.sh --model glm-4.7-flash <scenario>  # Run with a specific model (e.g., glm-4.7-flash, qwen3.5-9b)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${BINARY:-$SCRIPT_DIR/../target/debug/arkavo}"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/common/resolve_binary.sh"
+resolve_arkavo_binary || true
 
 # Colors
 GREEN='\033[0;32m'
@@ -90,8 +92,8 @@ check_prerequisites() {
     if [ -f "$BINARY" ]; then
         echo -e "  ${GREEN}✓${NC} Arkavo binary found"
     else
-        echo -e "  ${RED}✗${NC} Arkavo binary not found at $BINARY"
-        echo "    Run: cargo build"
+        echo -e "  ${RED}✗${NC} Arkavo binary not found"
+        explain_missing_arkavo_binary
         errors=$((errors + 1))
     fi
 
@@ -197,7 +199,7 @@ run_scenario() {
         # Use chat or task based on scenario type
         if [ "$scenario_type" = "chat" ]; then
             # shellcheck disable=SC2086
-            "$BINARY" chat $model_flag --repo-context off --prompt "$task_desc" 2>&1 || true
+            "$BINARY" chat $model_flag --prompt "$task_desc" 2>&1 || true
         else
             # shellcheck disable=SC2086
             "$BINARY" task $model_flag --yes "$task_desc" 2>&1 || true

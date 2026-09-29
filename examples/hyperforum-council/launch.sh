@@ -4,14 +4,16 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ARKAVO_BIN="${ARKAVO_BIN:-$(cd "$SCRIPT_DIR/../.." && pwd)/target/debug/arkavo}"
+# Resolved as: $ARKAVO_BIN (or $BINARY) if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
+ARKAVO_BIN="$BINARY"
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
 # Verify arkavo binary exists
 if [[ ! -x "$ARKAVO_BIN" ]]; then
-    echo "Error: arkavo binary not found at $ARKAVO_BIN"
-    echo "Build with: cargo build"
+    explain_missing_arkavo_binary
     exit 1
 fi
 

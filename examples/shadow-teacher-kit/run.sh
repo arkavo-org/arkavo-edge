@@ -13,10 +13,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="${BINARY:-${PROJECT_ROOT}/target/debug/arkavo}"
-if [ ! -f "$BINARY" ]; then
-    BINARY="${PROJECT_ROOT}/target/release/arkavo"
-fi
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 LOG_DIR="$SCRIPT_DIR/logs"
 OUT_DIR="$SCRIPT_DIR/out"
 PID_FILE="$SCRIPT_DIR/.agent_pids"
@@ -37,7 +36,7 @@ fail()    { echo -e "${RED}[ERROR]${NC} $1"; }
 mkdir -p "$LOG_DIR" "$OUT_DIR"
 
 check_prerequisites() {
-    [ -f "$BINARY" ] || { fail "arkavo binary not found — run: cargo build"; exit 1; }
+    [ -f "$BINARY" ] || { explain_missing_arkavo_binary; exit 1; }
     ok "arkavo binary: $BINARY"
     for cmd in jq curl "$SQLITE"; do
         command -v "$cmd" >/dev/null || { fail "$cmd is required"; exit 1; }
