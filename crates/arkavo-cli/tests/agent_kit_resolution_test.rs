@@ -137,6 +137,7 @@ fn explicit_config_path_resolves_one_agent_config() {
 
 #[test]
 fn discovery_finds_kit_in_dot_arkavo_without_explicit_c() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempdir();
     init_kit(dir.path(), "discoverable-agent").expect("init_kit should succeed");
 
@@ -239,6 +240,7 @@ fn port_override_replaces_only_the_port_part_of_listen() {
 
 #[test]
 fn agents_md_present_without_a_kit_falls_back_to_default_and_does_not_parse_it() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempdir();
     fs::write(
         dir.path().join("AGENTS.md"),
@@ -259,6 +261,7 @@ fn agents_md_present_without_a_kit_falls_back_to_default_and_does_not_parse_it()
 
 #[test]
 fn nothing_present_falls_back_to_default_config() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempdir();
 
     let configs = resolve_agent_configs(None, None, None, dir.path()).expect("zero-config default");
@@ -274,6 +277,7 @@ fn nothing_present_falls_back_to_default_config() {
 /// selectable role id of some kit.
 #[test]
 fn name_flag_with_no_kit_anywhere_errors_with_no_kit_wording() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempdir();
 
     let err = resolve_agent_configs(None, Some("bogus"), None, dir.path())
@@ -390,11 +394,13 @@ fn explicit_config_path_to_invalid_yaml_is_fatal_with_no_default_fallback() {
     assert!(!err.to_string().is_empty());
 }
 
-/// `ARKAVO_SWARMKIT_PATH` is process-global; this serializes the one test
-/// in this binary that mutates it, matching the pattern used elsewhere in
-/// the repo for this same env var (`arkavo-agui`'s
-/// `swarm_flight_registry.rs`, via `serial_test`) without adding a new
-/// dependency for a single call site.
+/// `ARKAVO_SWARMKIT_PATH` is process-global; this serializes the tests in
+/// this binary that mutate it with the tests that read it through kit
+/// discovery, matching the pattern used elsewhere in the repo for this same
+/// env var (`arkavo-agui`'s `swarm_flight_registry.rs`, via `serial_test`)
+/// without adding a new dependency. A discovery test that runs while the
+/// variable holds another test's value resolves that value, not its own
+/// temp directory.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 /// Regression (finding 1): an explicit `-c` kit's preflight/KAS/budget
