@@ -37,23 +37,44 @@ pub(crate) fn require_inside_root(root: &Path, location: &Path) -> Result<()> {
     }
 }
 
+/// Repository internals a workspace-controlled symlink could redirect into
+/// another repository's objects, refs or index.
+const GIT_INTERNALS: [&str; 7] = [
+    "objects",
+    "objects/info",
+    "refs",
+    "HEAD",
+    "index",
+    "packed-refs",
+    "logs",
+];
+
 /// Require every location an opened repository reads or writes to lie inside
 /// `root`: its working directory (or git directory when bare), its git
 /// directory, and its common directory. A workspace-controlled `.git` can name
 /// an outer repository through `commondir` (refs and objects are then written
-/// there) or through `objects/info/alternates` (its objects become readable),
-/// so the working directory alone proves nothing. A legitimate linked worktree
-/// passes only when its main repository is inside the root too.
+/// there), so the working directory alone proves nothing. A legitimate linked
+/// worktree passes only when its main repository is inside the root too.
+///
+/// Object alternates and symlinked core internals are refused outright rather
+/// than resolved: libgit2's alternates resolution (nested chains, non-dot
+/// relative entries against the process cwd) is not something a path check
+/// should mirror. Other crafted-`.git` vectors are a residual for OS
+/// confinement.
 pub(crate) fn require_repo_inside_root(root: &Path, repo: &git2::Repository) -> Result<()> {
     require_inside_root(root, repo.workdir().unwrap_or_else(|| repo.path()))?;
-    require_inside_root(root, repo.path())?;
     let common = repo.commondir();
+    require_inside_root(root, repo.path())?;
     require_inside_root(root, common)?;
-    require_alternates_inside_root(root, &common.join("objects"))
+    require_no_alternates(common)?;
+    for dir in [repo.path(), common] {
+        require_no_symlinked_internals(dir)?;
+    }
+    Ok(())
 }
 
-fn require_alternates_inside_root(root: &Path, objects_dir: &Path) -> Result<()> {
-    let listing = match std::fs::read_to_string(objects_dir.join("info").join("alternates")) {
+fn require_no_alternates(common: &Path) -> Result<()> {
+    let listing = match std::fs::read_to_string(common.join("objects/info/alternates")) {
         Ok(listing) => listing,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => {
@@ -62,21 +83,55 @@ fn require_alternates_inside_root(root: &Path, objects_dir: &Path) -> Result<()>
             )));
         }
     };
-    for line in listing.lines().map(str::trim) {
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        // Git also accepts C-style quoted paths; refusing them is safer than
-        // re-implementing that unquoting inside a security check.
-        if line.starts_with('"') {
-            return Err(ToolError::PolicyDenied(
-                "quoted entry in objects/info/alternates".to_string(),
-            ));
-        }
-        // Relative entries resolve against the objects directory, as in git.
-        require_inside_root(root, &objects_dir.join(line))?;
+    if listing
+        .lines()
+        .map(str::trim)
+        .any(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        return Err(ToolError::PolicyDenied(
+            "repositories with object alternates are not supported inside the workspace"
+                .to_string(),
+        ));
     }
     Ok(())
+}
+
+fn require_no_symlinked_internals(git_dir: &Path) -> Result<()> {
+    for name in GIT_INTERNALS {
+        let entry = git_dir.join(name);
+        match std::fs::symlink_metadata(&entry) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(ToolError::PolicyDenied(format!(
+                    "{} is a symlink; git internals must not be symlinks inside the workspace",
+                    entry.display()
+                )));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(ToolError::PolicyDenied(format!("{}: {e}", entry.display())));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A workspace `.git` (directory, or the file linked worktrees use) decides
+/// which repository the git tools open and where they write. A file-tool write
+/// there could re-point it at another repository, so mutations refuse any path
+/// with a `.git` component; reads stay allowed.
+pub(crate) fn refuse_git_component(resolved: &Path) -> Result<()> {
+    let has_git = resolved
+        .components()
+        .any(|c| c.as_os_str().eq_ignore_ascii_case(".git"));
+    if has_git {
+        Err(ToolError::PolicyDenied(format!(
+            "{} is inside a .git entry; file tools cannot modify it",
+            resolved.display()
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -110,16 +165,80 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn quoted_alternates_entry_is_refused() {
-        let ws = TempDir::new().unwrap();
-        let objects = ws.path().join("objects");
+    fn write_alternates(objects: &Path, contents: &str) {
         std::fs::create_dir_all(objects.join("info")).unwrap();
-        std::fs::write(objects.join("info/alternates"), "\"quoted\"\n").unwrap();
-        assert!(matches!(
-            require_alternates_inside_root(ws.path(), &objects),
-            Err(ToolError::PolicyDenied(_))
-        ));
+        std::fs::write(objects.join("info/alternates"), contents).unwrap();
+    }
+
+    #[test]
+    fn any_alternates_entry_is_refused_but_blank_and_comment_only_files_pass() {
+        let ws = TempDir::new().unwrap();
+        let common = ws.path().join(".git");
+        for entry in [
+            "/abs/elsewhere/objects",
+            "../../objects",
+            "sibling/objects",
+            "\"quoted\"",
+            "objects2",
+        ] {
+            write_alternates(&common.join("objects"), &format!("{entry}\n"));
+            assert!(
+                matches!(
+                    require_no_alternates(&common),
+                    Err(ToolError::PolicyDenied(_))
+                ),
+                "{entry}"
+            );
+        }
+        write_alternates(&common.join("objects"), "\n# nothing here\n  \n");
+        assert!(require_no_alternates(&common).is_ok());
+        assert!(require_no_alternates(&ws.path().join("no-such-git-dir")).is_ok());
+    }
+
+    #[test]
+    fn git_component_is_refused_case_insensitively_and_other_paths_pass() {
+        for bad in [
+            "/w/.git",
+            "/w/.git/objects/info/alternates",
+            "/w/sub/.GIT/x",
+        ] {
+            assert!(
+                matches!(
+                    refuse_git_component(Path::new(bad)),
+                    Err(ToolError::PolicyDenied(_))
+                ),
+                "{bad}"
+            );
+        }
+        for ok in ["/w/.github/x", "/w/src/lib.rs", "/w/gitignore", "/w/a.git"] {
+            assert!(refuse_git_component(Path::new(ok)).is_ok(), "{ok}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_git_internals_are_refused_and_missing_ones_pass() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let git_dir = ws.path().join(".git");
+        std::fs::create_dir(&git_dir).unwrap();
+        assert!(require_no_symlinked_internals(&git_dir).is_ok());
+        for name in ["objects", "refs", "HEAD", "index", "packed-refs", "logs"] {
+            let link = git_dir.join(name);
+            std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+            assert!(
+                matches!(
+                    require_no_symlinked_internals(&git_dir),
+                    Err(ToolError::PolicyDenied(_))
+                ),
+                "{name}"
+            );
+            std::fs::remove_file(&link).unwrap();
+        }
+        // `objects/info` is checked separately from `objects`.
+        std::fs::create_dir_all(git_dir.join("objects")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), git_dir.join("objects/info")).unwrap();
+        assert!(require_no_symlinked_internals(&git_dir).is_err());
     }
 
     #[test]

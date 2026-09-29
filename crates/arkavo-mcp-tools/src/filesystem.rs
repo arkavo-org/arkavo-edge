@@ -72,6 +72,14 @@ impl FileSystemKit {
     fn validate_path(&self, path: &str) -> Result<PathBuf> {
         crate::confine::within_root(&self.root, path)
     }
+
+    /// Mutations additionally refuse `.git` entries, which decide what the git
+    /// tools open and write (MCP-011).
+    fn validate_mutation_path(&self, path: &str) -> Result<PathBuf> {
+        let resolved = self.validate_path(path)?;
+        crate::confine::refuse_git_component(&resolved)?;
+        Ok(resolved)
+    }
 }
 
 impl Default for FileSystemKit {
@@ -217,7 +225,7 @@ impl Tool for FileSystemKit {
 
                 let overwrite = params["overwrite"].as_bool().unwrap_or(true);
 
-                let abs_path = self.validate_path(file_path)?;
+                let abs_path = self.validate_mutation_path(file_path)?;
 
                 // Check if file exists and overwrite is false
                 if abs_path.exists() && !overwrite {
@@ -254,7 +262,7 @@ impl Tool for FileSystemKit {
                     .as_str()
                     .ok_or_else(|| ToolError::Mcp("Missing 'content' parameter".to_string()))?;
 
-                let abs_path = self.validate_path(file_path)?;
+                let abs_path = self.validate_mutation_path(file_path)?;
 
                 // Check if file exists
                 if !abs_path.exists() {
@@ -299,7 +307,7 @@ impl Tool for FileSystemKit {
 
                 let mode = params["mode"].as_str().unwrap_or("replace");
 
-                let abs_path = self.validate_path(file_path)?;
+                let abs_path = self.validate_mutation_path(file_path)?;
 
                 // Check if file exists
                 if !abs_path.exists() {
@@ -693,5 +701,62 @@ mod tests {
             }))
             .await;
         assert!(matches!(out, Err(ToolError::PolicyDenied(_))));
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn mutations_cannot_touch_git_entries_but_reads_and_other_writes_work() {
+        let ws = TempDir::new().unwrap();
+        fs::create_dir_all(ws.path().join(".git/objects/info")).unwrap();
+        fs::write(ws.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let kit = FileSystemKit::with_root(ws.path());
+
+        let attempts = [
+            json!({ "action": "write_file", "file_path": ".git/objects/info/alternates", "content": "/outer/objects" }),
+            json!({ "action": "append_file", "file_path": ".git/HEAD", "content": "x" }),
+            json!({ "action": "edit_file", "file_path": ".git/HEAD", "line_number": 1, "new_content": "x", "mode": "replace" }),
+            json!({ "action": "write_file", "file_path": ".git", "content": "gitdir: /outer/.git" }),
+        ];
+        for attempt in attempts {
+            let out = kit.execute(attempt.clone()).await;
+            assert!(
+                matches!(out, Err(ToolError::PolicyDenied(_))),
+                "{attempt}: {out:?}"
+            );
+        }
+        assert!(!ws.path().join(".git/objects/info/alternates").exists());
+        assert!(ws.path().join(".git").is_dir());
+        assert_eq!(
+            fs::read_to_string(ws.path().join(".git/HEAD")).unwrap(),
+            "ref: refs/heads/main\n"
+        );
+
+        // Reads stay allowed, and ordinary writes (even `.github`) still work.
+        let read = kit
+            .execute(json!({ "action": "read_file", "file_path": ".git/HEAD" }))
+            .await
+            .unwrap();
+        assert_eq!(read["success"], true);
+        let write = kit
+            .execute(
+                json!({ "action": "write_file", "file_path": ".github/ci.yml", "content": "a" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(write["success"], true);
+    }
+
+    #[cfg(unix)]
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn a_symlink_to_git_internals_cannot_be_written_through() {
+        let ws = TempDir::new().unwrap();
+        fs::create_dir_all(ws.path().join(".git/objects")).unwrap();
+        std::os::unix::fs::symlink(ws.path().join(".git/objects"), ws.path().join("alias"))
+            .unwrap();
+        let out = FileSystemKit::with_root(ws.path())
+            .execute(json!({ "action": "write_file", "file_path": "alias/x", "content": "a" }))
+            .await;
+        assert!(matches!(out, Err(ToolError::PolicyDenied(_))), "{out:?}");
     }
 }

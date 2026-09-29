@@ -12,12 +12,15 @@ use std::path::{Path, PathBuf};
 ///
 /// `open_repo` discovers upward, so a root with no `.git` of its own would
 /// open an enclosing repository (a monorepo parent, a dotfiles repo) and let
-/// add, commit and diff act outside the workspace. The opened repository's
-/// working directory, git directory, common directory and object alternates
-/// must therefore all lie inside `root`. A linked worktree passes only when
-/// its main repository is inside the root as well: a `.git` file or
-/// `commondir` written by the workspace can otherwise point refs and objects
-/// at any repository on the host.
+/// add, commit and diff act outside the workspace. After opening, exactly this
+/// is checked: the working directory (or git directory, when bare), git
+/// directory and common directory all lie inside `root`; `objects/info/alternates`
+/// holds no entry; and `objects`, `objects/info`, `refs`, `HEAD`, `index`,
+/// `packed-refs` and `logs` under the git and common directories are not
+/// symlinks. A linked worktree therefore passes only when its main repository is
+/// inside the root too. The file tools refuse to write any `.git` entry, so the
+/// workspace cannot forge these through this crate; other crafted-`.git`
+/// vectors remain a residual owned by OS confinement.
 fn safe_open_repo(
     git_manager: &GitManager,
     root: &Path,
@@ -865,37 +868,78 @@ mod tests {
 
     #[spec("MCP-011")]
     #[tokio::test]
-    async fn git_status_refuses_object_alternates_pointing_outside_the_root() {
+    async fn git_status_refuses_any_object_alternates_entry() {
         let (outer, ws) = nested_workspace();
-        // A genuine repository inside the workspace, then an alternate that
-        // makes an outer repository's objects readable through it.
         GitManager::new().init_repo(&ws).unwrap();
         let outer_objects = fs::canonicalize(outer.path().join(".git/objects")).unwrap();
         let alternates = ws.join(".git/objects/info/alternates");
         fs::create_dir_all(alternates.parent().unwrap()).unwrap();
-        fs::write(&alternates, format!("{}\n", outer_objects.display())).unwrap();
-
-        let err = GitStatusKit::with_root(&ws)
-            .execute(json!({}))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
-
-        // A relative alternate resolves against the objects directory.
-        fs::write(&alternates, "../../../.git/objects\n").unwrap();
-        let err = GitStatusKit::with_root(&ws)
-            .execute(json!({}))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
-
-        // An alternate that stays inside the root is accepted.
-        fs::write(&alternates, "# shared\n../../ws-objects\n").unwrap();
         fs::create_dir_all(ws.join("ws-objects")).unwrap();
+
+        let outside_absolute = format!("{}\n", outer_objects.display());
+        for entry in [
+            outside_absolute.as_str(),
+            "../../../.git/objects\n",
+            "ws-objects\n",
+            "../../ws-objects\n",
+            "# shared\n../../ws-objects\n",
+        ] {
+            fs::write(&alternates, entry).unwrap();
+            let err = GitStatusKit::with_root(&ws)
+                .execute(json!({}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PolicyDenied(_)), "{entry}: {err}");
+        }
+
+        // A file with only blanks and comments names nothing and is accepted.
+        fs::write(&alternates, "\n# nothing\n").unwrap();
         let status = GitStatusKit::with_root(&ws).execute(json!({})).await;
         assert!(
             !matches!(status, Err(ToolError::PolicyDenied(_))),
             "{status:?}"
         );
+    }
+
+    /// A repository inside the workspace whose `.git/<name>` is a symlink into
+    /// the outer repository's `.git/<name>`.
+    #[cfg(unix)]
+    fn workspace_with_symlinked_internal(name: &str) -> (TempDir, PathBuf) {
+        let (outer, ws) = nested_workspace();
+        GitManager::new().init_repo(&ws).unwrap();
+        let inner = ws.join(".git").join(name);
+        if inner.is_dir() {
+            fs::remove_dir_all(&inner).unwrap();
+        } else {
+            fs::remove_file(&inner).unwrap();
+        }
+        let target = fs::canonicalize(outer.path().join(".git").join(name)).unwrap();
+        std::os::unix::fs::symlink(target, &inner).unwrap();
+        (outer, ws)
+    }
+
+    #[cfg(unix)]
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_kits_refuse_symlinked_objects_and_refs_and_leave_the_outer_repository_alone() {
+        for name in ["objects", "refs"] {
+            let (outer, ws) = workspace_with_symlinked_internal(name);
+            let before = ref_and_object_snapshot(outer.path());
+
+            let err = GitStatusKit::with_root(&ws)
+                .execute(json!({}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PolicyDenied(_)), "{name}: {err}");
+            let err = GitCommitKit::with_root(&ws)
+                .execute(json!({ "message": "pwn" }))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PolicyDenied(_)), "{name}: {err}");
+
+            assert_eq!(ref_and_object_snapshot(outer.path()), before, "{name}");
+            let outer_repo = git2::Repository::open(outer.path()).unwrap();
+            assert!(outer_repo.find_reference("refs/heads/pwn").is_err());
+        }
     }
 }

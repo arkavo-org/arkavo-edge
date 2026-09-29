@@ -177,7 +177,7 @@ scenarios:
       - The call is refused with PolicyDenied and nothing is read or written
       - Absolute and relative paths inside the root keep working
       - The arkavo-mcp-macos FileSystemKit and the arkavo-mcp-tools git tools apply the same boundary
-      - A git tool opens only a repository whose working directory, git directory, common directory and object alternates are all inside the root, so a workspace without its own .git never falls through to an enclosing repository
+      - A git tool opens only a repository whose working directory, git directory and common directory are all inside the root, that has no object alternates, and whose core internals (objects, refs, HEAD, index, packed-refs, logs) are not symlinks, so a workspace without its own .git never falls through to an enclosing repository
     refs: [crates/arkavo-mcp-tools/src/filesystem.rs, crates/arkavo-mcp-macos/src/mcp/filesystem_tools.rs, crates/arkavo-mcp-tools/src/git.rs]
     changed: "2026-09-29"
     edge_cases:
@@ -187,8 +187,14 @@ scenarios:
         expected: Git tools work
       - condition: Workspace is a linked worktree whose main repository is outside the root, or its .git names an outer repository through commondir
         expected: Git tools refuse with PolicyDenied, because refs and objects would be written outside the root
-      - condition: The repository's objects/info/alternates names a path outside the root
-        expected: Git tools refuse with PolicyDenied, because the outer repository's objects would become readable
+      - condition: The repository's objects/info/alternates holds any entry (absolute, relative or in-root)
+        expected: Git tools refuse with PolicyDenied ("repositories with object alternates are not supported inside the workspace"); a blank or comment-only file is accepted
+      - condition: objects, objects/info, refs, HEAD, index, packed-refs or logs under the git directory or common directory is a symlink
+        expected: Git tools refuse with PolicyDenied, because refs and objects would be written into another repository
+      - condition: A file-tool write, append or edit resolves to a path with a .git component (the directory or a file named .git)
+        expected: Refused with PolicyDenied (an error in arkavo-mcp-macos); reads of .git stay allowed
+      - condition: Any other crafted .git inside the workspace
+        expected: Not detected by these checks; a residual owned by OS confinement
 
   - id: MCP-012
     name: TDF tool path confinement
