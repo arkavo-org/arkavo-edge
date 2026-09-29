@@ -26,7 +26,7 @@ with a zero-spend dry run.
 ## Requirements
 
 - `cargo build` from the repo root (debug binary is fine)
-- The local model: `hf download ggml-org/gemma-4-E4B-it-GGUF gemma-4-E4B-it-Q4_K_M.gguf`
+- The local model: `hf download ggml-org/gemma-4-E4B-it-GGUF gemma-4-E4B-it-Q4_0.gguf`
   (both workers share it; episode synthesis reuses the loaded model)
 - `jq`, `curl`, `sqlite3`
 - `node`/`npx` — the workers get filesystem tools from
