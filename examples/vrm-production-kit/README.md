@@ -72,7 +72,8 @@ deterministic dev signing key (`[7u8; 32]`) is for reproducibility.
 To regenerate signatures when content changes:
 
 ```bash
-cargo run -p arkavo-swarmkit-runtime --example sign_vrm_production_skills
+cargo run -p arkavo-swarmkit-runtime --example sign_vrm_production_skills -- \
+  examples/vrm-production-kit/vrm-production-kit.swarmkit.yaml
 ```
 
 Then update the YAML's `signature` fields, set `kit.id` to `""`, and recompute it:

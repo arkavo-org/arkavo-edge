@@ -70,7 +70,8 @@ producers replace it with their own.
 To regenerate signatures when content changes:
 
 ```bash
-cargo run -p arkavo-swarmkit-runtime --example sign_code_review_skills
+cargo run -p arkavo-swarmkit-runtime --example sign_code_review_skills -- \
+  examples/code-review-kit/code-review-kit.swarmkit.yaml
 ```
 
 Edit the YAML's `signature` and `signed_by` fields with the output, set
