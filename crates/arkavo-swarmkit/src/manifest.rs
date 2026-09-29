@@ -114,6 +114,8 @@ pub struct DeliverableSpec {
     pub classification: Option<String>,
 }
 
+/// The `type` of an input or deliverable. These five spellings are the
+/// whole vocabulary; anything else is a parse error that lists them.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PayloadType {
@@ -135,6 +137,42 @@ mod tests {
         assert_eq!(s, "\"tdf-ref\"");
         let back: PayloadType = serde_json::from_str(&s).unwrap();
         assert_eq!(back, PayloadType::TdfRef);
+    }
+
+    /// The accepted values are not written down for kit authors anywhere
+    /// but here, so the parse error is where they learn them. Pins both the
+    /// vocabulary and the fact that the error spells it out.
+    #[test]
+    fn unknown_payload_type_error_lists_every_accepted_value() {
+        const ACCEPTED: [&str; 5] = ["text", "json", "binary", "tdf-ref", "iroh-ticket"];
+        for value in ACCEPTED {
+            let yaml = format!("name: report\ntype: {value}\n");
+            serde_yaml::from_str::<DeliverableSpec>(&yaml)
+                .unwrap_or_else(|e| panic!("{value} must be accepted: {e}"));
+        }
+
+        for (kind, err) in [
+            (
+                "deliverable",
+                serde_yaml::from_str::<DeliverableSpec>("name: report\ntype: markdown\n")
+                    .unwrap_err()
+                    .to_string(),
+            ),
+            (
+                "input",
+                serde_yaml::from_str::<InputSpec>("name: brief\ntype: markdown\n")
+                    .unwrap_err()
+                    .to_string(),
+            ),
+        ] {
+            assert!(err.contains("`markdown`"), "{kind}: {err}");
+            for value in ACCEPTED {
+                assert!(
+                    err.contains(&format!("`{value}`")),
+                    "{kind} error must list {value}: {err}"
+                );
+            }
+        }
     }
 
     #[test]
