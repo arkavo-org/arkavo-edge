@@ -9,6 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod advertise;
+mod gpu_residency;
 pub mod listen;
 
 #[allow(clippy::disallowed_methods)]
@@ -246,6 +247,8 @@ fn run_agent_with_options(
     // see the same kit this just resolved, even when it came from an
     // explicit -c path that isn't itself cwd-discoverable.
     export_resolved_kit_path(cli_config_path, &cwd);
+
+    gpu_residency::release_gpu_memory_when_idle();
 
     // Set verbose mode - default is quiet (verbose = false)
     agent_config.quiet = !verbose;
