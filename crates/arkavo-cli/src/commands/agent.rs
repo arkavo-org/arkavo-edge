@@ -136,6 +136,11 @@ fn print_usage() {
     println!("    --trust             Show the agent authorization QR code (DID:key) on startup,");
     println!("                        for scanning to authorize/trust this agent");
     println!();
+    println!("NETWORK:");
+    println!("    The agent listens on 127.0.0.1 unless the kit sets runtime.listen, for example");
+    println!("    runtime.listen: \"0.0.0.0:8342\" to accept connections from other machines.");
+    println!("    The RPC endpoint is unauthenticated: anyone who can reach it can call it.");
+    println!();
     println!("EXAMPLES:");
     println!("    arkavo agent                           # Run with auto-discovery");
     println!("    arkavo agent --config agent.swarmkit.yaml  # Run with a specific kit");
@@ -289,8 +294,8 @@ impl Default for AgentConfig {
             purpose: String::new(),
             model: String::new(),
             mode: arkavo_protocol::agent_config::AgentMode::default(),
-            listen: "0.0.0.0:0".to_string(), // Dynamic port
-            mdns_enabled: true,              // Zero-config discovery
+            listen: listen::DEFAULT_LISTEN.to_string(),
+            mdns_enabled: true, // Zero-config discovery
             mcp_servers: Vec::new(),
             api_keys: std::collections::HashMap::new(),
             quiet: true,
@@ -628,6 +633,13 @@ pub async fn start_agent_server(
     }
 
     let (handle, actual_port) = server.start_with_port().await?;
+
+    // Shown even in a quiet run: whoever started the agent has to learn that
+    // it is reachable from the network whether or not they asked for output.
+    let bound_addr = std::net::SocketAddr::new(listen_addr.ip(), actual_port);
+    if let Some(warning) = listen::exposure_warning(bound_addr) {
+        eprintln!("{warning}");
+    }
 
     // Start orchestrator loop for any agent with a purpose
     if !config.purpose.is_empty() {
@@ -970,8 +982,7 @@ pub async fn start_agent_server(
 
     if !quiet {
         // Display the actual bound address (using actual_port from OS if port was 0)
-        let ready_addr = std::net::SocketAddr::new(listen_addr.ip(), actual_port);
-        println!("Ready at {ready_addr}");
+        println!("Ready at {bound_addr}");
     }
 
     // Keep the server running
