@@ -5,8 +5,11 @@
 
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
+
 use crate::manifest::Manifest;
 use crate::runtime_config::{AgentRuntimeConfig, agent_runtime_config_from_manifest};
+use crate::validate::{ValidationError, validate_not_expired};
 use crate::{ParseError, parse_yaml};
 
 /// Environment variable for an explicit kit path (gateway + CLI).
@@ -41,6 +44,13 @@ pub enum DiscoverError {
         path: PathBuf,
         #[source]
         source: ParseError,
+    },
+
+    #[error("{path}: {source}")]
+    Expired {
+        path: PathBuf,
+        #[source]
+        source: ValidationError,
     },
 }
 
@@ -107,13 +117,38 @@ pub fn discover_kit_path(cwd: &Path) -> Result<PathBuf, DiscoverError> {
 }
 
 /// Load and validate the discovered kit, returning process-facing config.
+///
+/// This is the read view used by in-process policy and prompt loaders, and
+/// it does not apply the expiry gate. Those callers fall back to defaults
+/// when loading fails, so rejecting here would drop a running agent's kit
+/// policy the moment the kit expired. Expiry is decided once, when a kit is
+/// loaded to be started, by [`load_kit_file`].
 pub fn load_discovered_kit(cwd: &Path) -> Result<DiscoveredKit, DiscoverError> {
     let path = discover_kit_path(cwd)?;
-    load_kit_file(&path)
+    read_kit_file(&path)
 }
 
-/// Load a specific kit file path.
+/// Load a specific kit file path to run it, rejecting a kit that has expired
+/// by the system clock.
 pub fn load_kit_file(path: &Path) -> Result<DiscoveredKit, DiscoverError> {
+    load_kit_file_at(path, Utc::now())
+}
+
+/// [`load_kit_file`] with the current time supplied by the caller, so the
+/// expiry decision is reproducible.
+pub fn load_kit_file_at(path: &Path, now: DateTime<Utc>) -> Result<DiscoveredKit, DiscoverError> {
+    let discovered = read_kit_file(path)?;
+    validate_not_expired(&discovered.manifest, now).map_err(|source| DiscoverError::Expired {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(discovered)
+}
+
+/// Read, parse and structurally validate a kit file without deciding whether
+/// it has expired. For callers that report expiry themselves alongside other
+/// findings; anything about to run the kit uses [`load_kit_file`].
+pub fn read_kit_file(path: &Path) -> Result<DiscoveredKit, DiscoverError> {
     let content = std::fs::read_to_string(path).map_err(|source| DiscoverError::Io {
         path: path.to_path_buf(),
         source,
@@ -228,6 +263,53 @@ provenance:
         fs::write(dir.join("AGENTS.md"), "# AGENTS.md\n## x\npurpose: y\n").unwrap();
         let err = discover_kit_path(&dir).unwrap_err();
         assert!(matches!(err, DiscoverError::AgentsMdUnsupported { .. }));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn at(raw: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(raw)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    /// Regression: the agent start path loads kits through `load_kit_file`,
+    /// which used to accept a kit months past its `kit.expires`.
+    #[test]
+    fn load_kit_file_rejects_an_expired_kit() {
+        let dir = tempfile_dir();
+        write_minimal_kit(&dir, "agent.swarmkit.yaml");
+        let path = dir.join("agent.swarmkit.yaml");
+
+        let before_expiry = load_kit_file_at(&path, at("2026-05-01T00:00:00Z")).unwrap();
+        assert_eq!(before_expiry.config.kit_name, "hello");
+
+        let err = load_kit_file_at(&path, at("2026-05-29T00:00:01Z")).unwrap_err();
+        assert!(matches!(err, DiscoverError::Expired { .. }), "got {err:?}");
+        let message = err.to_string();
+        assert!(message.contains("agent.swarmkit.yaml"), "{message}");
+        assert!(
+            message.contains("expired on 2026-05-29T00:00:00Z"),
+            "{message}"
+        );
+
+        // The fixture's expiry is a fixed date in the past, so the
+        // clock-reading entry point must reject it as well.
+        assert!(matches!(
+            load_kit_file(&path),
+            Err(DiscoverError::Expired { .. })
+        ));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The read view keeps serving a kit after it expires: its callers
+    /// replace a failed load with defaults, which would silently drop the
+    /// kit's policy from a running agent.
+    #[test]
+    fn load_discovered_kit_still_reads_an_expired_kit() {
+        let dir = tempfile_dir();
+        write_minimal_kit(&dir, "agent.swarmkit.yaml");
+        let discovered = load_discovered_kit(&dir).unwrap();
+        assert!(validate_not_expired(&discovered.manifest, at("2026-09-29T00:00:00Z")).is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 

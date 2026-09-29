@@ -28,7 +28,7 @@ pub use coordination::{
 };
 pub use discover::{
     ARKAVO_DIR, DiscoverError, DiscoveredKit, SWARMKIT_PATH_ENV, discover_kit_path,
-    load_discovered_kit, load_kit_file,
+    load_discovered_kit, load_kit_file, load_kit_file_at, read_kit_file,
 };
 pub use governance::{
     ProposalApprovalMechanism, ProposalBlastRadius, ProposalGovernanceSpec, ProposalOriginSpec,
@@ -49,7 +49,7 @@ pub use runtime_config::{
     RuntimeValidationError, TrustedRoot, agent_runtime_config_from_manifest, validate_runtime,
 };
 pub use skill_content::{SkillContent, SkillResource};
-pub use validate::{ValidationError, validate};
+pub use validate::{ValidationError, validate, validate_not_expired};
 
 /// Parse a SwarmKit manifest from a JSON string and run cross-block validation.
 pub fn parse_json(json: &str) -> Result<Manifest, ParseError> {
