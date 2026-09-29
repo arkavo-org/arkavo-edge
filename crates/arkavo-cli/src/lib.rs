@@ -44,6 +44,12 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .first()
         .is_some_and(|a| matches!(a.as_str(), "-h" | "--help" | "help" | "-v" | "--version"));
 
+    // A command line that will be refused is refused here, before first-run
+    // setup can offer a model download on its behalf.
+    if args.first().is_some_and(|command| command == "chat") {
+        commands::chat::check_args(&args[1..])?;
+    }
+
     startup_policy::validate_local_backend(
         args,
         cfg!(any(feature = "llama-cpp", feature = "snpe")),

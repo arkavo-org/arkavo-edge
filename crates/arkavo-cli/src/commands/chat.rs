@@ -1,6 +1,8 @@
+mod args;
+
+use args::parse_cli_args;
 use std::fmt::Write as _;
 use std::io::{self, Write};
-use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use tokio::runtime::Runtime;
 
@@ -78,11 +80,26 @@ fn create_runtime() -> std::io::Result<Runtime> {
         .build()
 }
 
+/// Refuse a command line `execute` would refuse, without starting anything.
+///
+/// Called before first-run setup, which would otherwise offer a
+/// multi-gigabyte download on behalf of a command that cannot run.
+pub fn check_args(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if wants_help(args) {
+        return Ok(());
+    }
+    parse_cli_args(args).map(|_| ())
+}
+
+fn wants_help(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--help" || arg == "-h")
+}
+
 /// Execute the chat command
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Check for --help flag first
-    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+    if wants_help(args) {
         print_usage();
         return Ok(());
     }
@@ -96,7 +113,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "sentinel")]
     let pack = super::chat_pack::parse_pack_args(args)?;
     #[cfg(not(feature = "sentinel"))]
-    if args.iter().any(|arg| arg == "--pack") {
+    if args
+        .iter()
+        .any(|arg| args::PACK_FLAGS.contains(&arg.as_str()))
+    {
         return Err("this build was compiled without the sentinel feature".into());
     }
 
@@ -120,60 +140,6 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "sentinel")]
         pack,
     )
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-struct ChatCliArgs {
-    prompt: Option<String>,
-    agent_id: Option<String>,
-    model: Option<String>,
-}
-
-fn parse_cli_args(args: &[String]) -> Result<ChatCliArgs, Box<dyn std::error::Error>> {
-    let mut flags = ChatCliArgs::default();
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--prompt" | "--print" if i + 1 < args.len() => {
-                flags.prompt = Some(args[i + 1].clone());
-                i += 1;
-            }
-            "--agent-id" => {
-                if i + 1 < args.len() {
-                    flags.agent_id = Some(args[i + 1].clone());
-                    i += 1;
-                } else {
-                    return Err("--agent-id requires an argument".into());
-                }
-            }
-            "--model" | "--gguf" => {
-                let flag = args[i].as_str();
-                if i + 1 >= args.len() {
-                    return Err(if flag == "--gguf" {
-                        "--gguf requires a path to a .gguf or .gguf.tdf file".into()
-                    } else {
-                        "--model requires a model name or a .gguf path (e.g., ministral-3b, ./adapter.gguf)".into()
-                    });
-                }
-                let value = args[i + 1].clone();
-                if flag == "--gguf" && !arkavo_router::model_spec::is_gguf_spec(&value) {
-                    return Err("--gguf requires a path ending in .gguf or .gguf.tdf".into());
-                }
-                if arkavo_router::model_spec::is_gguf_spec(&value) {
-                    let resolved =
-                        arkavo_router::model_discovery::resolve_gguf_path(Path::new(&value));
-                    if !resolved.exists() {
-                        return Err(format!("GGUF not found: {value}").into());
-                    }
-                }
-                flags.model = Some(value);
-                i += 1;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    Ok(flags)
 }
 
 fn print_usage() {
@@ -221,7 +187,13 @@ fn print_usage() {
     println!("    /read <file>      Read a file into context");
     println!("    /list [dir]       List files in directory");
     println!("    /exit, /quit      Exit chat");
-    println!("    /help             Show all commands");
+    println!("    /help             Show all commands\n");
+    println!("ENVIRONMENT:");
+    println!(
+        "    {}   Seconds allowed for one inference",
+        arkavo_protocol::chat_timeout::CHAT_TIMEOUT_ENV
+    );
+    println!("                               (default: 180 local, 3600 cloud)");
 }
 
 /// Execute A2A chat mode using ChatSession from arkavo-protocol
@@ -280,9 +252,11 @@ fn execute_a2a_chat(
         // One-shot mode
         if let Some(prompt) = prompt {
             let mut rx = session.send_message(prompt).await?;
-            process_stream(&mut rx).await;
+            // A one-shot run has nothing but its exit status to tell a
+            // script whether it got an answer, so the failure is returned.
+            let outcome = process_stream(&mut rx).await;
             session.cmd_exit().await;
-            return Ok(());
+            return outcome.map_err(Into::into);
         }
 
         // Interactive REPL
@@ -317,7 +291,12 @@ fn execute_a2a_chat(
 
             match session.send_message(&input).await {
                 Ok(mut rx) => {
-                    process_stream(&mut rx).await;
+                    // The session goes on; the failure is only shown.
+                    if let Err(message) = process_stream(&mut rx).await {
+                        emit_stderr("\n[Error: ");
+                        emit_stderr(&message);
+                        emit_stderr("]\n");
+                    }
                 }
                 Err(e) => {
                     eprintln!("Error sending message: {e}");
@@ -335,10 +314,7 @@ fn execute_a2a_direct_chat(
     agent_id: &str,
     prompt: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use arkavo_protocol::{
-        http::HttpTransport,
-        transport::{A2aEndpoint, A2aTransport, TlsConfig, TransportConfig},
-    };
+    use arkavo_protocol::transport::A2aTransport;
 
     let discovered = super::mesh::discover_mesh_agents()?;
     if discovered.is_empty() {
@@ -377,34 +353,13 @@ fn execute_a2a_direct_chat(
 
     let runtime = create_runtime()?;
     runtime.block_on(async {
-        let transport_config = TransportConfig {
-            timeout_ms: 60000,
-            max_retries: 2,
-            tls_config: TlsConfig {
-                require_tls: false,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let transport = HttpTransport::new(transport_config)?;
-        let endpoint = A2aEndpoint {
-            url: address.clone(),
-            agent_id: agent.agent_id.clone(),
-            public_key: None,
-        };
-
-        transport
-            .connect(&endpoint)
-            .await
-            .map_err(|e| format!("Failed to connect: {e}"))?;
-        println!("  Connected\n");
+        let transport = agent_transport(address, &agent.agent_id).await?;
 
         // One-shot mode
         if let Some(text) = prompt {
-            super::mesh::send_and_poll_agent(&transport, text).await?;
+            let outcome = direct_exchange(&transport, text, &mut io::stdout()).await;
             transport.close().await.ok();
-            return Ok(());
+            return outcome;
         }
 
         // Interactive REPL
@@ -417,15 +372,64 @@ fn execute_a2a_direct_chat(
             if input == "/exit" || input == "/quit" || input == "/q" {
                 break;
             }
-            match super::mesh::send_and_poll_agent(&transport, &input).await {
-                Ok(()) => {}
-                Err(e) => eprintln!("Error: {e}"),
+            if let Err(e) = direct_exchange(&transport, &input, &mut io::stdout()).await {
+                eprintln!("Error: {e}");
             }
         }
 
         transport.close().await.ok();
         Ok(())
     })
+}
+
+/// A transport aimed at a mesh agent.
+///
+/// `connect` records the endpoint and sends nothing, so a transport from
+/// here says nothing about whether the agent is reachable. The command used
+/// to print "Connected" at this point and then fail with "Connection
+/// refused" on the first request.
+async fn agent_transport(
+    address: &str,
+    agent_id: &str,
+) -> Result<arkavo_protocol::http::HttpTransport, Box<dyn std::error::Error>> {
+    use arkavo_protocol::{
+        http::HttpTransport,
+        transport::{A2aEndpoint, A2aTransport, TlsConfig, TransportConfig},
+    };
+
+    let transport = HttpTransport::new(TransportConfig {
+        timeout_ms: 60000,
+        max_retries: 2,
+        tls_config: TlsConfig {
+            require_tls: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    })?;
+    let endpoint = A2aEndpoint {
+        url: address.to_string(),
+        agent_id: agent_id.to_string(),
+        public_key: None,
+    };
+    transport
+        .connect(&endpoint)
+        .await
+        .map_err(|e| format!("Failed to connect: {e}"))?;
+    Ok(transport)
+}
+
+/// One exchange with a mesh agent: writes the agent's answer to `out`, and
+/// nothing at all when the exchange fails.
+async fn direct_exchange<W: Write>(
+    transport: &arkavo_protocol::http::HttpTransport,
+    text: &str,
+    out: &mut W,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let answer = super::mesh::send_and_poll_agent(transport, text).await?;
+    if !answer.is_empty() {
+        writeln!(out, "{answer}")?;
+    }
+    Ok(())
 }
 
 fn debug_session_started_message() -> &'static str {
@@ -466,10 +470,15 @@ fn write_tty(fd: i32, bytes: &[u8]) {
     }
 }
 
-/// Process streaming response
+/// Print a streamed response as it arrives.
+///
+/// Returns the failure instead of printing it, because the caller decides
+/// what a failure means: a one-shot run must exit non-zero, an interactive
+/// session shows it and carries on. A stream that closes without an end
+/// marker is a failure too; the answer on screen may be cut short.
 async fn process_stream(
     rx: &mut tokio::sync::mpsc::Receiver<arkavo_protocol::types::MessageDelta>,
-) {
+) -> Result<(), String> {
     use arkavo_protocol::types::MessageDeltaContent;
 
     let debug = std::env::var("ARKAVO_DEBUG").is_ok();
@@ -557,14 +566,9 @@ async fn process_stream(
                     emit_stdout(&buf);
                 }
                 emit_stdout("\n");
-                break;
+                return Ok(());
             }
-            MessageDeltaContent::Error { message, .. } => {
-                emit_stderr("\n[Error: ");
-                emit_stderr(&message);
-                emit_stderr("]\n");
-                break;
-            }
+            MessageDeltaContent::Error { message, .. } => return Err(message),
             MessageDeltaContent::Metadata { key, value } => {
                 if debug {
                     match key.as_str() {
@@ -661,6 +665,7 @@ async fn process_stream(
             }
         }
     }
+    Err("the response stream closed before the answer was complete".to_string())
 }
 
 /// Read user input for REPL
@@ -675,6 +680,7 @@ fn read_user_input() -> Result<String, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_protocol::types::MessageDelta;
 
     #[test]
     fn test_parse_new_command() {
@@ -751,53 +757,106 @@ mod tests {
         assert!(cmd.is_none());
     }
 
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| (*v).to_owned()).collect()
+    }
+
+    /// The check that runs ahead of first-run setup agrees with what
+    /// `execute` goes on to do: help is always allowed, a refused command
+    /// line is refused.
     #[test]
-    fn test_parse_cli_model_name() {
-        let flags = parse_cli_args(&[
-            "--model".into(),
-            "qwen3.5-0.8b".into(),
-            "--prompt".into(),
-            "hi".into(),
+    fn check_args_refuses_what_execute_would_refuse() {
+        assert!(check_args(&strings(&["--prompt", "hi"])).is_ok());
+        assert!(check_args(&[]).is_ok());
+        assert!(check_args(&strings(&["--promt", "hi", "--help"])).is_ok());
+
+        let err = check_args(&strings(&["--promt", "hi"])).unwrap_err();
+        assert!(err.to_string().contains("unknown option '--promt'"));
+    }
+
+    fn delta(content: arkavo_protocol::types::MessageDeltaContent) -> MessageDelta {
+        MessageDelta {
+            session_id: "session".to_string(),
+            message_id: "message".to_string(),
+            sequence: 0,
+            delta: content,
+            timestamp: chrono::Utc::now(),
+        }
+    }
+
+    async fn outcome_of(
+        deltas: Vec<arkavo_protocol::types::MessageDeltaContent>,
+    ) -> Result<(), String> {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        for content in deltas {
+            tx.send(delta(content)).await.unwrap();
+        }
+        drop(tx);
+        process_stream(&mut rx).await
+    }
+
+    /// Regression: an inference failure or timeout was printed and the
+    /// process still exited 0.
+    #[tokio::test]
+    async fn failed_inference_is_returned_to_the_caller() {
+        use arkavo_protocol::types::{MessageDeltaContent, StreamEndReason};
+
+        let outcome = outcome_of(vec![
+            MessageDeltaContent::Error {
+                code: "ROUTER_ERROR".to_string(),
+                message: "Failed to route message: Chat inference timed out after 180s".to_string(),
+            },
+            MessageDeltaContent::StreamEnd {
+                reason: StreamEndReason::Complete,
+            },
         ])
-        .unwrap();
-        assert_eq!(flags.model.as_deref(), Some("qwen3.5-0.8b"));
-        assert_eq!(flags.prompt.as_deref(), Some("hi"));
+        .await;
+        assert_eq!(
+            outcome,
+            Err("Failed to route message: Chat inference timed out after 180s".to_string())
+        );
     }
 
-    #[test]
-    fn test_parse_cli_gguf_alias_requires_suffix() {
-        let err = parse_cli_args(&["--gguf".into(), "not-a-model".into()]).unwrap_err();
-        assert!(err.to_string().contains(".gguf"));
+    #[tokio::test]
+    async fn completed_stream_is_a_success() {
+        use arkavo_protocol::types::{MessageDeltaContent, StreamEndReason};
+
+        let outcome = outcome_of(vec![MessageDeltaContent::StreamEnd {
+            reason: StreamEndReason::Complete,
+        }])
+        .await;
+        assert_eq!(outcome, Ok(()));
     }
 
-    #[test]
-    fn test_parse_cli_missing_gguf_path_errors() {
-        let err =
-            parse_cli_args(&["--model".into(), "models/missing-adapter.gguf".into()]).unwrap_err();
-        assert!(err.to_string().contains("GGUF not found"));
+    #[tokio::test]
+    async fn stream_that_closes_without_an_end_is_a_failure() {
+        let outcome = outcome_of(Vec::new()).await;
+        assert!(outcome.unwrap_err().contains("closed before"));
     }
 
-    #[test]
-    fn test_parse_cli_gguf_flag_missing_arg() {
-        let err = parse_cli_args(&["--gguf".into()]).unwrap_err();
-        assert!(err.to_string().contains("--gguf requires a path"));
+    /// An address nothing listens on: the port was free a moment ago and
+    /// the listener that claimed it is gone.
+    fn unreachable_address() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        format!("http://127.0.0.1:{port}")
     }
 
-    #[test]
-    fn test_parse_cli_existing_gguf_path() {
-        // A unique file per run: a fixed name in the shared temp dir let
-        // concurrent test processes delete each other's fixture mid-test.
-        let file = tempfile::Builder::new()
-            .prefix("arkavo-chat-cli-test")
-            .suffix(".gguf")
-            .tempfile()
-            .unwrap();
-        std::fs::write(file.path(), b"gguf").unwrap();
-        let path = file.path();
-        let flags = parse_cli_args(&["--gguf".into(), path.to_string_lossy().into()]).unwrap();
-        assert_eq!(flags.model.as_deref(), path.to_str());
-        let flags = parse_cli_args(&["--model".into(), path.to_string_lossy().into()]).unwrap();
-        assert_eq!(flags.model.as_deref(), path.to_str());
+    /// Regression: `--agent-id` printed "Connected" before any request was
+    /// made, so an unreachable agent produced "Connected" followed by
+    /// "Connection refused".
+    #[tokio::test]
+    async fn unreachable_agent_is_an_error_and_nothing_is_reported_first() {
+        let transport = agent_transport(&unreachable_address(), "absent-agent")
+            .await
+            .expect("recording an endpoint makes no request");
+
+        let mut out = Vec::new();
+        let outcome = direct_exchange(&transport, "hello", &mut out).await;
+
+        assert!(outcome.is_err(), "an unreachable agent must be an error");
+        assert_eq!(String::from_utf8(out).unwrap(), "");
     }
 
     #[test]

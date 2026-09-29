@@ -106,11 +106,15 @@ pub fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Erro
     Ok(Vec::new())
 }
 
-/// Send a message to an agent via A2A and poll until the task completes
+/// Send a message to an agent via A2A and poll until the task completes.
+///
+/// Returns the text of the agent's answer, empty when it completed without
+/// one. Printing is left to the caller so that nothing reaches the terminal
+/// for an exchange that failed.
 pub async fn send_and_poll_agent(
     transport: &arkavo_protocol::http::HttpTransport,
     text: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error>> {
     use arkavo_protocol::{
         transport::{A2aRequest, A2aResponse, A2aTransport},
         types::{
@@ -171,14 +175,8 @@ pub async fn send_and_poll_agent(
 
                 match task_resp.status {
                     TaskStatus::Completed => {
-                        if let Some(result_msg) = task_resp.result {
-                            for part in result_msg.parts {
-                                if let MessagePart::Text { content } = part {
-                                    println!("{content}");
-                                }
-                            }
-                        }
-                        return Ok(());
+                        let parts = task_resp.result.map(|m| m.parts).unwrap_or_default();
+                        return Ok(answer_text(parts));
                     }
                     TaskStatus::Failed => {
                         let msg = task_resp
@@ -202,9 +200,36 @@ pub async fn send_and_poll_agent(
     }
 }
 
+/// The text of an agent's answer, one line per text part.
+fn answer_text(parts: Vec<arkavo_protocol::types::MessagePart>) -> String {
+    parts
+        .into_iter()
+        .filter_map(|part| match part {
+            arkavo_protocol::types::MessagePart::Text { content } => Some(content),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn answer_text_joins_text_parts_in_order() {
+        use arkavo_protocol::types::MessagePart;
+        let parts = vec![
+            MessagePart::Text {
+                content: "first".to_string(),
+            },
+            MessagePart::Text {
+                content: "second".to_string(),
+            },
+        ];
+        assert_eq!(answer_text(parts), "first\nsecond");
+        assert_eq!(answer_text(Vec::new()), "");
+    }
 
     #[test]
     fn test_discover_returns_vec() {
