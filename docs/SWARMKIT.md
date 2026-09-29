@@ -73,7 +73,7 @@ It does not:
 - spawn a process or load a model for any role;
 - execute `handoffs` or pass work from one role to the next;
 - apply the `evaluation` rubric or the `completion` rules;
-- take the kit's `inputs` or write its `deliverables`;
+- take the kit's `inputs` or write its `deliverables` (their `type` accepts `text`, `json`, `binary`, `tdf-ref`, `iroh-ticket`);
 - build the roles' TDF attribute-release policies;
 - enforce skill signatures, unless `ARKAVO_SWARMKIT_VERIFY=required` is set. By default signatures are parsed and not enforced, because the example kits are signed with a local development key.
 
@@ -142,7 +142,7 @@ arkavo kit validate examples/my-kit/my-kit.swarmkit.yaml
 
 `kit.id` is a hash of the manifest, so any edit makes the declared id stale. Set `kit.id: ""` while you edit; `arkavo kit validate` then prints the computed id. Paste it into `kit.id` when the manifest is final.
 
-Skill signatures cover the skill content, so an edited skill needs a new signature. The signing helpers are source-only and each one signs the skills of one example kit with a development key: `cargo run -p arkavo-swarmkit-runtime --example sign_campaign_skills` prints the payload, `signature`, and `signed_by` values for the campaign-kit skills. To sign different content, change the skill text in the helper to match your manifest.
+Skill signatures cover the skill content, so an edited skill needs a new signature. The signing helpers are source-only and sign with a development key. Each reads the skills from the kit file it is given: `cargo run -p arkavo-swarmkit-runtime --example sign_campaign_skills -- <kit path>` prints the `signature` and `signed_by` values for every skill in that kit.
 
 Per-kit READMEs in `examples/<kit>/README.md` document each kit's role decomposition, evaluation rubric, and TDF attribute-release sets.
 

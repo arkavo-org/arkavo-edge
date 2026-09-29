@@ -66,7 +66,8 @@ producers replace it with their own.
 To regenerate signatures when content changes:
 
 ```bash
-cargo run -p arkavo-swarmkit-runtime --example sign_campaign_skills
+cargo run -p arkavo-swarmkit-runtime --example sign_campaign_skills -- \
+  examples/campaign-kit/campaign-kit.swarmkit.yaml
 ```
 
 Edit the YAML's `signature` and `signed_by` fields with the output, set
