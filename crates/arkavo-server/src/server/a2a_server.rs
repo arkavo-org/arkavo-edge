@@ -294,6 +294,12 @@ impl A2aServer {
         self.agent_metadata.write().await.role_id = role_id;
     }
 
+    /// Set the short description the agent card publishes. The card never
+    /// carries the agent's purpose.
+    pub async fn set_agent_description(&self, description: Option<String>) {
+        self.agent_metadata.write().await.description = description;
+    }
+
     pub async fn set_api_keys(&self, api_keys: std::collections::HashMap<String, String>) {
         let mut metadata = self.agent_metadata.write().await;
         metadata.api_keys = api_keys;

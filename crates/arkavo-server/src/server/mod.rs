@@ -1,4 +1,7 @@
 mod a2a_server;
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod agent_card_tests;
 mod agent_cycle_reply;
 mod agent_event;
 mod agent_loop;
@@ -1154,7 +1157,20 @@ impl A2aRpcServer for A2aRpcImpl {
             #[cfg(feature = "kas")]
             kas_enabled: true,
         };
-        let card = well_known::build_agent_card(&state).await;
+        let mut card = well_known::build_agent_card(&state).await;
+        // The card is served without authentication. The builder fills
+        // `description` from the agent's purpose, which is the text the
+        // model runs under; the card carries the kit's short role
+        // description, or nothing when the role has none.
+        card.description = self
+            .agent_metadata
+            .read()
+            .await
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|description| !description.is_empty())
+            .map(str::to_string);
         serde_json::to_value(card).map_err(|e| {
             ErrorObjectOwned::owned(-32603, format!("Serialization error: {e}"), None::<()>)
         })
