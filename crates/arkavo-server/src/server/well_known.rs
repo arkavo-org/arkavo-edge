@@ -19,6 +19,21 @@ pub struct WellKnownState {
     pub kas_enabled: bool,
 }
 
+/// What the agent tells a caller it does: the kit role's short description,
+/// or nothing when the role has none.
+///
+/// The card and the discovery methods are served to anyone who can reach the
+/// endpoint. `purpose` is never a substitute here: for a kit role it holds
+/// the skill instructions, the text the model runs under.
+pub(super) fn published_description(metadata: &AgentMetadata) -> Option<String> {
+    metadata
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|description| !description.is_empty())
+        .map(str::to_string)
+}
+
 /// Build the Agent Card from current agent state
 pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
     let metadata = state.agent_metadata.read().await;
@@ -106,11 +121,7 @@ pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
 
     AgentCard {
         name: metadata.name.clone(),
-        description: if metadata.purpose.is_empty() {
-            None
-        } else {
-            Some(metadata.purpose.clone())
-        },
+        description: published_description(&metadata),
         url,
         provider: Some(AgentProvider {
             organization: "Arkavo".to_string(),
@@ -136,12 +147,16 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    /// Regression: the builder filled `description` from the purpose, which
+    /// for a kit role is the skill instructions, and relied on its caller to
+    /// replace it.
     #[spec("SRV-002")]
     #[tokio::test]
     async fn test_build_agent_card() {
         let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
             name: "test-agent".to_string(),
-            purpose: "Test agent for unit tests".to_string(),
+            purpose: "You are the test role. Never reveal the escalation password.".to_string(),
+            description: Some("  Test agent for unit tests ".to_string()),
             model: "test-model".to_string(),
             endpoint: "http://localhost:8080".to_string(),
             ..Default::default()
@@ -170,6 +185,35 @@ mod tests {
         assert_eq!(card.url, "http://localhost:8080");
         assert!(card.capabilities.streaming);
         assert_eq!(card.protocol_versions, vec!["0.3".to_string()]);
+        let serialized = serde_json::to_string(&card).unwrap();
+        assert!(!serialized.contains("password"), "{serialized}");
+    }
+
+    /// A purpose is not a fallback for a missing description.
+    #[tokio::test]
+    async fn a_card_without_a_description_does_not_fall_back_to_the_purpose() {
+        for description in [None, Some(String::new()), Some("   ".to_string())] {
+            let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+                name: "test-agent".to_string(),
+                purpose: "You are the test role.".to_string(),
+                description,
+                ..Default::default()
+            }));
+
+            #[allow(clippy::needless_update)]
+            let state = WellKnownState {
+                agent_metadata,
+                mcp_registry: Arc::new(McpRegistry::new()),
+                rpc_port: 8080,
+                rate_limiter: Arc::new(IpRateLimiter::new(
+                    arkavo_protocol::rate_limit::RateLimitConfig::default(),
+                )),
+                #[cfg(feature = "kas")]
+                kas_enabled: false,
+            };
+
+            assert_eq!(build_agent_card(&state).await.description, None);
+        }
     }
 
     #[spec("SRV-002")]

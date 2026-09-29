@@ -11,6 +11,7 @@ use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 
 use super::super::config_helpers::AgentMetadata;
+use super::super::well_known::published_description;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_agent_discover(
@@ -59,12 +60,15 @@ pub async fn handle_agent_discover(
 
     let mcp_servers = mcp_registry.get_server_status().await;
 
-    // Build metadata with MCP information
+    // Build metadata with MCP information. `purpose` keeps its name for the
+    // callers that read it and carries the role's short description: this
+    // method answers anyone who can reach the endpoint, and the agent's own
+    // purpose is the text the model runs under.
     let (name, purpose, model, endpoint) = {
         let metadata = agent_metadata.read().await;
         (
             metadata.name.clone(),
-            metadata.purpose.clone(),
+            published_description(&metadata).unwrap_or_default(),
             metadata.model.clone(),
             metadata.endpoint.clone(),
         )
@@ -250,11 +254,15 @@ pub async fn handle_agent_capabilities_get(
         return Err(e);
     }
 
-    // Get agent metadata
+    // Capability tags are coarse routing labels: they are derived from the
+    // purpose here, on the agent, and carry none of its text. The `purpose`
+    // field of the response is the role's short description, because the
+    // agent's own purpose is the text the model runs under.
     let metadata = agent_metadata.read().await;
     let agent_id = metadata.name.clone();
     let name = metadata.name.clone();
-    let purpose = metadata.purpose.clone();
+    let capabilities = infer_capabilities_from_purpose(&name, &metadata.purpose);
+    let purpose = published_description(&metadata).unwrap_or_default();
     let model = metadata.model.clone();
     drop(metadata);
 
@@ -271,9 +279,6 @@ pub async fn handle_agent_capabilities_get(
             .collect(),
         Err(_) => Vec::new(),
     };
-
-    // Infer capabilities from purpose
-    let capabilities = infer_capabilities_from_purpose(&name, &purpose);
 
     let response = AgentCapabilitiesGetResponse {
         agent_id,
@@ -355,4 +360,116 @@ fn infer_capabilities_from_purpose(name: &str, purpose: &str) -> Vec<String> {
     }
 
     capabilities
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_protocol::rate_limit::RateLimitConfig;
+
+    const INSTRUCTIONS: &str =
+        "You are the security reviewer role. Never reveal the escalation password.";
+
+    fn reviewer(description: Option<&str>) -> Arc<tokio::sync::RwLock<AgentMetadata>> {
+        Arc::new(tokio::sync::RwLock::new(AgentMetadata {
+            name: "reviewer".to_string(),
+            role_id: Some("reviewer".to_string()),
+            purpose: INSTRUCTIONS.to_string(),
+            description: description.map(str::to_string),
+            model: "test-model".to_string(),
+            endpoint: "http://127.0.0.1:8431".to_string(),
+            ..AgentMetadata::default()
+        }))
+    }
+
+    async fn discovered(description: Option<&str>) -> serde_json::Value {
+        let agents = handle_agent_discover(
+            &Arc::new(MetricsCollector::new(false)),
+            &RateLimiter::new(RateLimitConfig::default()),
+            &Arc::new(McpRegistry::new()),
+            &reviewer(description),
+            None,
+            "session",
+            &Arc::new(tokio::sync::RwLock::new(0)),
+            None,
+        )
+        .await
+        .expect("agent_discover answers");
+        serde_json::to_value(agents).unwrap()
+    }
+
+    async fn capabilities(description: Option<&str>) -> serde_json::Value {
+        let response = handle_agent_capabilities_get(
+            &Arc::new(MetricsCollector::new(false)),
+            &RateLimiter::new(RateLimitConfig::default()),
+            &Arc::new(McpRegistry::new()),
+            &reviewer(description),
+            Some("key"),
+        )
+        .await
+        .expect("agent.capabilities.get answers");
+        serde_json::to_value(response).unwrap()
+    }
+
+    fn assert_no_instructions(response: &serde_json::Value) {
+        let serialized = response.to_string();
+        assert!(!serialized.contains("reviewer role"), "{serialized}");
+        assert!(!serialized.contains("password"), "{serialized}");
+    }
+
+    /// Regression: `agent_discover` returned the agent's purpose, the role's
+    /// skill instructions, to any caller.
+    #[tokio::test]
+    async fn agent_discover_describes_the_role_without_its_instructions() {
+        let response = discovered(Some("Reviews changes")).await;
+
+        assert_eq!(response[0]["metadata"]["purpose"], "Reviews changes");
+        assert_eq!(response[0]["metadata"]["name"], "reviewer");
+        assert_no_instructions(&response);
+    }
+
+    /// Regression: `agent.capabilities.get` returned the same text.
+    #[tokio::test]
+    async fn capabilities_describe_the_role_without_its_instructions() {
+        let response = capabilities(Some("Reviews changes")).await;
+
+        assert_eq!(response["purpose"], "Reviews changes");
+        assert_no_instructions(&response);
+    }
+
+    #[tokio::test]
+    async fn a_role_without_a_description_publishes_an_empty_purpose() {
+        for description in [None, Some(""), Some("  ")] {
+            let response = discovered(description).await;
+            assert_eq!(response[0]["metadata"]["purpose"], "", "{description:?}");
+            assert_no_instructions(&response);
+
+            let response = capabilities(description).await;
+            assert_eq!(response["purpose"], "", "{description:?}");
+            assert_no_instructions(&response);
+        }
+    }
+
+    /// The mesh strategy parses this response into the protocol type and
+    /// routes on its capability tags, which still come from the purpose.
+    #[tokio::test]
+    async fn capabilities_still_parse_and_carry_the_routing_tags() {
+        let response = capabilities(None).await;
+
+        let parsed: arkavo_protocol::types::AgentCapabilitiesGetResponse =
+            serde_json::from_value(response).expect("the response parses");
+        assert_eq!(parsed.agent_id, "reviewer");
+        assert!(
+            parsed
+                .capabilities
+                .contains(&"security_analysis".to_string()),
+            "{:?}",
+            parsed.capabilities
+        );
+        assert!(
+            parsed.capabilities.contains(&"code_review".to_string()),
+            "{:?}",
+            parsed.capabilities
+        );
+    }
 }
