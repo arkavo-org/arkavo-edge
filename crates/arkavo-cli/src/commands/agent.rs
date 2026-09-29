@@ -113,45 +113,43 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn print_usage() {
-    println!("Arkavo Agent - Configure and run AI agents");
-    println!();
-    println!("USAGE:");
-    println!("    arkavo agent [OPTIONS]");
-    println!("    arkavo agent init <name>");
-    println!();
-    println!("SUBCOMMANDS:");
-    println!(
-        "    init <name>         [DEPRECATED] alias for 'arkavo kit init <name>'; writes .arkavo/<name>.swarmkit.yaml"
-    );
-    println!("    run                 Run an agent (alias for default behavior)");
-    println!("    help                Print this help message");
-    println!();
-    println!("OPTIONS:");
-    println!(
-        "    -c, --config <FILE> SwarmKit manifest path (default: discover .arkavo/*.swarmkit.yaml or ./*.swarmkit.yaml)"
-    );
-    println!("    -p, --port <PORT>   Override the listen port (default: random available port)");
-    println!(
-        "    -n, --name <NAME>   Select a role by id from a multi-role kit (default: the first role)"
-    );
-    println!("    -v, --verbose       Show startup messages and status");
-    println!("    --trust             Show the agent authorization QR code (DID:key) on startup,");
-    println!("                        for scanning to authorize/trust this agent");
-    println!();
-    println!("NETWORK:");
-    println!("    The agent listens on 127.0.0.1 unless the kit sets runtime.listen, for example");
-    println!("    runtime.listen: \"0.0.0.0:8342\" to accept connections from other machines.");
-    println!("    The RPC endpoint is unauthenticated: anyone who can reach it can call it.");
-    println!();
-    println!("EXAMPLES:");
-    println!("    arkavo agent                           # Run with auto-discovery");
-    println!("    arkavo agent --config agent.swarmkit.yaml  # Run with a specific kit");
-    println!("    arkavo agent --port 8343 -v            # Run on specific port with verbose");
-    println!(
-        "    arkavo agent -c team.swarmkit.yaml -n worker -p 8343  # Run one role of a multi-role kit"
-    );
-    println!("    arkavo agent run --trust               # Show the QR code to trust this agent");
+    println!("{USAGE}");
 }
+
+const USAGE: &str = r#"Arkavo Agent - Configure and run AI agents
+
+USAGE:
+    arkavo agent [OPTIONS]
+    arkavo agent init <name>
+
+SUBCOMMANDS:
+    init <name>         [DEPRECATED] alias for 'arkavo kit init <name>'; writes .arkavo/<name>.swarmkit.yaml
+    run                 Run an agent (alias for default behavior)
+    help                Print this help message
+
+OPTIONS:
+    -c, --config <FILE> SwarmKit manifest path (default: discover .arkavo/*.swarmkit.yaml or ./*.swarmkit.yaml)
+    -p, --port <PORT>   Override the listen port (default: random available port)
+    -n, --name <NAME>   Select a role by id from a multi-role kit (default: the first role)
+    -v, --verbose       Show startup messages and status
+    --trust             Show the agent authorization QR code (DID:key) on startup
+                        and keep the agent on loopback: it listens on 127.0.0.1
+                        and is not announced on the network
+
+NETWORK:
+    By default the agent listens on every interface and announces itself over mDNS,
+    so other devices on the local network can discover and reach it. The RPC
+    endpoint is not authenticated yet: run the agent on networks you trust.
+    --trust keeps the agent on this machine, whatever the kit says.
+    A kit can pin an address with runtime.listen, for example
+    runtime.listen: "127.0.0.1:8342".
+
+EXAMPLES:
+    arkavo agent                           # Run with auto-discovery
+    arkavo agent --config agent.swarmkit.yaml  # Run with a specific kit
+    arkavo agent --port 8343 -v            # Run on specific port with verbose
+    arkavo agent -c team.swarmkit.yaml -n worker -p 8343  # Run one role of a multi-role kit
+    arkavo agent run --trust               # Show the QR code and stay on loopback"#;
 
 /// Deprecated: `arkavo agent init` no longer writes AGENTS.md.
 ///
@@ -194,8 +192,13 @@ pub(crate) fn default_agent_name() -> String {
     format!("{hostname}-{folder_name}")
 }
 
+/// What `arkavo agent` starts with: the agent, the address its `listen`
+/// parses to, and the line to show when `--trust` set aside the listen
+/// address the kit asked for.
+type StartupConfig = (AgentConfig, std::net::SocketAddr, Option<String>);
+
 /// Resolve the single agent this process will run, and the address it will
-/// listen on.
+/// listen on. With `trust` that address is loopback.
 ///
 /// Mirrors legacy multi-agent behavior by only ever starting the first
 /// resolved entry, unless -n/--name narrowed the result to one role.
@@ -207,16 +210,19 @@ fn resolve_startup_config(
     cli_config_path: Option<&Path>,
     name: Option<&str>,
     port: Option<u16>,
+    trust: bool,
     cwd: &Path,
-) -> Result<(AgentConfig, std::net::SocketAddr), Box<dyn std::error::Error>> {
-    use crate::commands::agent_kit::resolve_agent_configs;
+) -> Result<StartupConfig, Box<dyn std::error::Error>> {
+    use crate::commands::agent_kit::resolve_agent_configs_for_start;
 
-    let agent_config = resolve_agent_configs(cli_config_path, name, port, cwd)?
+    let (configs, trust_notice) =
+        resolve_agent_configs_for_start(cli_config_path, name, port, trust, cwd)?;
+    let agent = configs
         .into_iter()
         .next()
         .ok_or("No agent configuration available")?;
-    let listen_addr = listen::parse_listen(&agent_config.listen)?;
-    Ok((agent_config, listen_addr))
+    let listen_addr = listen::parse_listen(&agent.listen)?;
+    Ok((agent, listen_addr, trust_notice))
 }
 
 #[allow(clippy::disallowed_methods)]
@@ -235,12 +241,19 @@ fn run_agent_with_options(
 
     // Resolve config from a SwarmKit kit: -c/--config > discovery > the
     // zero-config default. AGENTS.md is never read on this path (S6).
-    let (mut agent_config, _listen_addr) = resolve_startup_config(
+    let (mut agent_config, _listen_addr, trust_notice) = resolve_startup_config(
         cli_config_path,
         override_name.as_deref(),
         override_port,
+        trust,
         &cwd,
     )?;
+
+    // Shown in a quiet run too: the kit asked for an address and the agent
+    // is not on it.
+    if let Some(notice) = trust_notice {
+        eprintln!("{notice}");
+    }
 
     // Export the resolved kit path so server-side policy loaders (preflight,
     // budget, KAS — which re-discover their own kit from process cwd/env)
@@ -342,7 +355,7 @@ fn has_required_args(schema: &serde_json::Value) -> bool {
 #[allow(clippy::missing_panics_doc)]
 pub async fn start_agent_server(
     config: &AgentConfig,
-    show_trust_qr: bool,
+    trust: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::mcp_spawner::McpProcessManager;
     use arkavo_crypto::AgentKeypair;
@@ -359,6 +372,16 @@ pub async fn start_agent_server(
     // First, before any identity or process state is created: a listen
     // address that cannot be understood must leave nothing behind.
     let listen_addr = listen::parse_listen(&config.listen)?;
+
+    // `--trust` promises loopback. The address is moved there when the
+    // configuration is resolved; a caller that skipped that step is refused
+    // here instead of being bound to the network.
+    if trust && !listen::is_loopback(listen_addr.ip()) {
+        return Err(format!(
+            "--trust keeps the agent on loopback, and {listen_addr} is not a loopback address"
+        )
+        .into());
+    }
 
     // Load or create persisted device keypair (Phase 1 identity anchor)
     use arkavo_device_identity::keypair as device_keypair_store;
@@ -655,6 +678,7 @@ pub async fn start_agent_server(
 
     // Shown even in a quiet run: whoever started the agent has to learn that
     // it is reachable from the network whether or not they asked for output.
+    // This is every start without `--trust` or a loopback address in the kit.
     if let Some(warning) = listen::exposure_warning(bound_addr) {
         eprintln!("{warning}");
     }
@@ -671,7 +695,7 @@ pub async fn start_agent_server(
 
     // Generate and display QR code for registration. Shown in verbose runs, or on demand
     // via `--trust` (which surfaces only the QR, without the rest of the verbose output).
-    if !quiet || show_trust_qr {
+    if !quiet || trust {
         use arkavo_device_identity::get_or_create_device_id;
         use arkavo_registration::{AgentDescriptor, qr::display_authorization_qr};
 
@@ -1128,7 +1152,7 @@ fn broadcast_agent_mdns_sync(
         // this a loopback address is announced nowhere, not even to this
         // machine; with it the record still never leaves the machine. An
         // agent on a network address needs it too: this daemon also browses,
-        // and agents on this machine listen on loopback by default.
+        // and an agent started with `--trust` is announced on loopback only.
         mdns.enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])?;
 
         // Start browsing for other agents
@@ -1500,6 +1524,34 @@ mod tests {
         assert!(execute(&["--trsut".to_string()]).is_err()); // typo of --trust
     }
 
+    /// Regression: the help said the agent listens on 127.0.0.1 unless the
+    /// kit says otherwise, and described `--trust` as showing a QR code only.
+    #[test]
+    fn help_describes_the_network_default_and_what_trust_changes() {
+        let (options, network) = USAGE
+            .split_once("NETWORK:")
+            .expect("the help has a NETWORK section");
+        let network = network.split("EXAMPLES:").next().unwrap();
+
+        let trust = options
+            .split_once("--trust")
+            .expect("--trust is listed under OPTIONS")
+            .1;
+        assert!(trust.contains("QR code"), "{trust}");
+        assert!(trust.contains("loopback"), "{trust}");
+        assert!(trust.contains("not announced on the network"), "{trust}");
+
+        assert!(network.contains("every interface"), "{network}");
+        assert!(network.contains("mDNS"), "{network}");
+        assert!(network.contains("not authenticated"), "{network}");
+        assert!(network.contains("--trust"), "{network}");
+        assert!(network.contains("runtime.listen"), "{network}");
+        assert!(
+            !network.contains("listens on 127.0.0.1 unless"),
+            "{network}"
+        );
+    }
+
     /// A single-role kit whose `runtime.listen` is `listen`.
     fn write_kit_listening_on(dir: &Path, listen: &str) -> std::path::PathBuf {
         let yaml = format!(
@@ -1562,11 +1614,14 @@ provenance:
         let dir = tempfile::tempdir().unwrap();
         let kit = write_kit_listening_on(dir.path(), "[::1]:8080");
 
-        let (config, listen_addr) =
-            resolve_startup_config(Some(&kit), None, None, dir.path()).unwrap();
+        for trust in [false, true] {
+            let (config, listen_addr, trust_notice) =
+                resolve_startup_config(Some(&kit), None, None, trust, dir.path()).unwrap();
 
-        assert_eq!(config.name, "agent");
-        assert_eq!(listen_addr, "[::1]:8080".parse().unwrap());
+            assert_eq!(config.name, "agent");
+            assert_eq!(listen_addr, "[::1]:8080".parse().unwrap());
+            assert_eq!(trust_notice, None);
+        }
     }
 
     #[test]
@@ -1574,13 +1629,90 @@ provenance:
         let dir = tempfile::tempdir().unwrap();
         for bad in ["localhost:8080", "127.0.0.1", "8080", "not an address"] {
             let kit = write_kit_listening_on(dir.path(), bad);
-            let err = resolve_startup_config(Some(&kit), None, None, dir.path())
-                .expect_err("an unparseable listen address must not resolve")
+            for trust in [false, true] {
+                let err = resolve_startup_config(Some(&kit), None, None, trust, dir.path())
+                    .expect_err("an unparseable listen address must not resolve")
+                    .to_string();
+                assert!(
+                    err.contains("Invalid listen address"),
+                    "{bad:?} gave an unexpected error: {err}"
+                );
+            }
+        }
+    }
+
+    /// Regression: `-p` gave an address with no host the default's host, so
+    /// a `runtime.listen` that stops startup was bound once a port was named.
+    #[test]
+    fn a_port_override_does_not_supply_a_missing_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let kit = write_kit_listening_on(dir.path(), ":3000");
+        for trust in [false, true] {
+            let err = resolve_startup_config(Some(&kit), None, Some(8080), trust, dir.path())
+                .expect_err("a listen address with no host must not resolve")
                 .to_string();
-            assert!(
-                err.contains("Invalid listen address"),
-                "{bad:?} gave an unexpected error: {err}"
-            );
+            assert!(err.contains("Invalid listen address"), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_start_with_no_kit_listens_on_every_interface() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, listen_addr, trust_notice) =
+            resolve_startup_config(None, None, None, false, dir.path()).unwrap();
+
+        assert_eq!(listen_addr, "0.0.0.0:0".parse().unwrap());
+        assert_eq!(config.listen, "0.0.0.0:0");
+        assert!(config.mdns_enabled);
+        assert_eq!(trust_notice, None);
+    }
+
+    /// `--trust` moves the address and nothing else: the agent is still
+    /// announced, on the loopback interface, for agents on this machine.
+    #[test]
+    fn a_trusted_start_listens_on_loopback_and_is_still_discoverable() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, listen_addr, trust_notice) =
+            resolve_startup_config(None, None, Some(8343), true, dir.path()).unwrap();
+
+        assert_eq!(listen_addr, "127.0.0.1:8343".parse().unwrap());
+        assert_eq!(config.listen, "127.0.0.1:8343");
+        assert!(config.mdns_enabled);
+        assert_eq!(trust_notice, None);
+    }
+
+    #[test]
+    fn a_trusted_start_sets_aside_a_network_address_in_the_kit() {
+        let dir = tempfile::tempdir().unwrap();
+        let kit = write_kit_listening_on(dir.path(), "10.0.0.140:8342");
+        let (_, listen_addr, trust_notice) =
+            resolve_startup_config(Some(&kit), None, None, true, dir.path()).unwrap();
+
+        assert_eq!(listen_addr, "127.0.0.1:8342".parse().unwrap());
+        let notice = trust_notice.expect("the kit's address was set aside");
+        assert!(notice.contains("10.0.0.140:8342"), "{notice}");
+    }
+
+    /// The server entry point holds `--trust` to loopback itself, as it does
+    /// for an address that does not parse, so no caller can bind a trusted
+    /// agent to the network.
+    #[tokio::test]
+    #[allow(clippy::disallowed_methods)]
+    async fn start_agent_server_refuses_a_network_address_under_trust() {
+        for listen in ["0.0.0.0:0", "10.0.0.140:8342", "[::]:0"] {
+            let config = AgentConfig {
+                name: "agent".to_string(),
+                listen: listen.to_string(),
+                ..AgentConfig::default()
+            };
+
+            let err = start_agent_server(&config, true)
+                .await
+                .expect_err("a trusted agent must not bind a network address")
+                .to_string();
+
+            assert!(err.contains("--trust"), "{listen}: {err}");
+            assert!(err.contains("loopback"), "{listen}: {err}");
         }
     }
 

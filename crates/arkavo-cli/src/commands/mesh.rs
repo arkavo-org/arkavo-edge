@@ -11,7 +11,7 @@ pub fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Erro
     info!("Discovering mesh agents via mDNS...");
 
     // A plain daemon skips the loopback interfaces, where an agent started
-    // with the default listen address announces itself.
+    // with --trust announces itself.
     let mdns = arkavo_agui::mdns_impl::mdns::browsing_daemon()?;
     let receiver = mdns.browse("_a2a._tcp.local.")?;
 

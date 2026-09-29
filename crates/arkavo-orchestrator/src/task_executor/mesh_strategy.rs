@@ -41,11 +41,11 @@ impl MeshTaskStrategy {
 
     /// An mDNS daemon that also listens on the loopback interfaces.
     ///
-    /// An agent listens on loopback unless its kit says otherwise, and the
-    /// record of such an agent is announced on the loopback interface only.
-    /// mdns-sd leaves that interface out unless asked, which hides every
-    /// agent started with the default address from a browser on the same
-    /// machine.
+    /// An agent started with `--trust`, or whose kit names a loopback
+    /// address, listens on loopback, and the record of such an agent is
+    /// announced on the loopback interface only. mdns-sd leaves that
+    /// interface out unless asked, which hides every such agent from a
+    /// browser on the same machine.
     #[cfg(feature = "mdns")]
     fn browsing_daemon() -> mdns_sd::Result<mdns_sd::ServiceDaemon> {
         use mdns_sd::{IfKind, ServiceDaemon};
