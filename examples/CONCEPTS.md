@@ -51,7 +51,7 @@ Scaffold a starting-point kit with `arkavo kit init my-agent` (writes `.arkavo/m
 ```yaml
 spec_version: "1.0.0"
 kit:
-  id: ""            # computed (BLAKE3) and filled in at publish
+  id: ""            # leave empty while editing; `arkavo kit validate` prints the computed BLAKE3 id to paste here
   name: "hello-agent"
   version: "0.1.0"
 
@@ -94,7 +94,7 @@ runtime:
 
 ### Model Providers
 
-`agent_provisioning.model.family`/`size` name a locally-hosted edge model; omit `model` entirely to let cloud/router hints (set via env, not the kit) decide:
+`agent_provisioning.model` names the model a role runs on, local or cloud. A locally-hosted edge model is a `family`/`size` pair:
 
 ```
 family: ministral, size: 3B / 8B     # Local Ministral (edge-optimized)
@@ -102,7 +102,17 @@ family: gemma,     size: E2B / E4B / 12B   # Local Gemma 4
 family: qwen,      size: 0.8B / 9B / 27B   # Local Qwen 3.5
 ```
 
-Cloud providers (Claude, Gemini, ...) are configured via API keys in the environment, never in the kit — see the per-example READMEs for `code-agent-claude` / `code-agent-gemini`.
+Any other model the router knows, cloud models included, is its router id as the `family` with no `size`:
+
+```
+family: gpt-6-astra
+family: kimi-k2.5
+family: gemini-3.5-flash
+```
+
+Naming a cloud model in the kit counts as consent to use it under the kit's `runtime.cloud_policy`. Omit `model` to accept the router default. `arkavo agent` refuses to start a role whose model the router does not know, and `arkavo kit validate` fails on it.
+
+API keys for cloud providers are read from the environment and never written in the kit; see the READMEs of [code-agent-claude](code-agent-claude/README.md) and [code-agent-gemini](code-agent-gemini/README.md).
 
 ### Validating and Running
 
