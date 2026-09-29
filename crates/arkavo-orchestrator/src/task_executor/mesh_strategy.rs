@@ -39,15 +39,31 @@ impl MeshTaskStrategy {
         }
     }
 
+    /// An mDNS daemon that also listens on the loopback interfaces.
+    ///
+    /// An agent listens on loopback unless its kit says otherwise, and the
+    /// record of such an agent is announced on the loopback interface only.
+    /// mdns-sd leaves that interface out unless asked, which hides every
+    /// agent started with the default address from a browser on the same
+    /// machine.
+    #[cfg(feature = "mdns")]
+    fn browsing_daemon() -> mdns_sd::Result<mdns_sd::ServiceDaemon> {
+        use mdns_sd::{IfKind, ServiceDaemon};
+
+        let daemon = ServiceDaemon::new()?;
+        daemon.enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])?;
+        Ok(daemon)
+    }
+
     /// Discover agents on the mesh network using mDNS
     #[cfg(feature = "mdns")]
     pub fn discover_agents() -> Result<Vec<AgentInfo>> {
-        use mdns_sd::{ServiceDaemon, ServiceEvent};
+        use mdns_sd::ServiceEvent;
         use std::collections::HashMap;
 
         tracing::info!("Discovering mesh agents via mDNS...");
 
-        let mdns = ServiceDaemon::new().map_err(|e| Error::Discovery {
+        let mdns = Self::browsing_daemon().map_err(|e| Error::Discovery {
             operation: "create mDNS daemon".to_string(),
             details: e.to_string(),
         })?;
@@ -836,5 +852,59 @@ mod tests {
             let agents = MeshTaskStrategy::discover_agents().unwrap();
             assert!(agents.is_empty());
         }
+    }
+
+    // Runs on macOS only, the one platform this was verified on. Its loopback
+    // interface carries multicast; on Linux `lo` usually lacks the MULTICAST
+    // flag, and whether mDNS works over it there has not been established.
+    /// Announces an agent bound to 127.0.0.1 on the loopback interfaces and
+    /// on no other, so the record can only reach a browser that listens
+    /// there and nothing the test publishes leaves the machine.
+    #[cfg(all(feature = "mdns", target_os = "macos"))]
+    fn announce_on_loopback(agent_id: &str, port: u16) -> mdns_sd::ServiceDaemon {
+        use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
+        use std::net::{IpAddr, Ipv4Addr};
+
+        let daemon = ServiceDaemon::new().expect("mDNS daemon");
+        daemon
+            .disable_interface(IfKind::All)
+            .expect("leave every interface");
+        daemon
+            .enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])
+            .expect("join the loopback interfaces");
+
+        let mut properties = std::collections::HashMap::new();
+        properties.insert("agent_id".to_string(), agent_id.to_string());
+        properties.insert("purpose".to_string(), "Plans the work".to_string());
+        let service = ServiceInfo::new(
+            "_a2a._tcp.local.",
+            agent_id,
+            &format!("{agent_id}.local."),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port,
+            properties,
+        )
+        .expect("service info");
+        daemon.register(service).expect("register the agent");
+        daemon
+    }
+
+    /// Regression: the mesh strategy browsed with a daemon that skips
+    /// loopback interfaces, so an agent on the same machine, listening on
+    /// the default address, was never found.
+    #[cfg(all(feature = "mdns", target_os = "macos"))]
+    #[test]
+    fn an_agent_listening_on_loopback_is_discovered() {
+        let agent_id = format!("loopback-strategy-{}", std::process::id());
+        let announcer = announce_on_loopback(&agent_id, 48_433);
+
+        let agents = MeshTaskStrategy::discover_agents().expect("discovery runs");
+        announcer.shutdown().ok();
+
+        let found = agents
+            .iter()
+            .find(|agent| agent.agent_id == agent_id)
+            .unwrap_or_else(|| panic!("{agent_id} not among {agents:?}"));
+        assert_eq!(found.address.as_deref(), Some("http://127.0.0.1:48433"));
     }
 }
