@@ -109,7 +109,7 @@ run_task() {
     echo ""
 
     # Build command
-    local cmd=("$BINARY" chat --model glm --repo-context off --prompt "$task_desc")
+    local cmd=("$BINARY" chat --model glm-4.7-flash --prompt "$task_desc")
 
     if $VERBOSE; then
         cmd+=(--debug)
