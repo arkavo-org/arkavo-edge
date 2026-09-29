@@ -131,10 +131,12 @@ scenarios:
       - Existing ancestors are canonicalised, so symlinks are followed before containment is checked
       - A path inside the root resolves, including an absolute one and a new file under new directories
       - A path outside the root, by absolute path, parent components or symlink, is refused with OutsideRoot
-      - A dangling symlink ancestor, an empty path or an unreadable root is refused
+      - A dangling symlink (ancestor or leaf), an empty path or a missing or empty root is refused
       - Parent components are handled per component, so names such as weird..name are accepted
     refs: [crates/arkavo-validation/src/path.rs]
     changed: "2026-09-29"
     edge_cases:
       - condition: Windows drive-relative path (C:foo)
         expected: Refused
+      - condition: Windows UNC, device or other-drive path (\\host\share, \\.\pipe\x, \\?\GLOBALROOT\x)
+        expected: Refused before any filesystem call, so the host is never contacted

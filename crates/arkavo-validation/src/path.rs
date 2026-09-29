@@ -97,10 +97,12 @@ pub fn resolve_within_root(root: &Path, requested: &str) -> Result<PathBuf, Path
         return Err(PathValidationError::InvalidPath("empty path".into()));
     }
     let given = Path::new(requested);
-    reject_drive_relative(given)?;
 
     let canonical_root = std::fs::canonicalize(root)
         .map_err(|e| PathValidationError::InvalidPath(format!("workspace root: {e}")))?;
+    // Before any filesystem access to the request: canonicalising a UNC or
+    // device path would open it, handing a hostile host our credentials.
+    reject_foreign_volume(given, &canonical_root)?;
 
     let candidate = if given.is_absolute() {
         given.to_path_buf()
@@ -108,7 +110,7 @@ pub fn resolve_within_root(root: &Path, requested: &str) -> Result<PathBuf, Path
         canonical_root.join(given)
     };
 
-    let resolved = resolve_existing_prefix(&candidate)
+    let resolved = resolve_through_existing_ancestors(&candidate)
         .map_err(|e| PathValidationError::InvalidPath(e.to_string()))?;
 
     if resolved.starts_with(&canonical_root) {
@@ -133,35 +135,64 @@ pub fn current_workspace_root() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// Only a plain or verbatim drive on the root's own drive may carry a prefix.
+/// `C:foo` resolves against the drive's hidden per-drive working directory,
+/// which no root check sees; UNC, device and `GLOBALROOT` prefixes name
+/// resources other than this volume.
 #[cfg(windows)]
-fn reject_drive_relative(p: &Path) -> Result<(), PathValidationError> {
-    use std::path::Prefix;
+fn reject_foreign_volume(p: &Path, canonical_root: &Path) -> Result<(), PathValidationError> {
     let mut comps = p.components();
-    if let Some(Component::Prefix(prefix)) = comps.next() {
-        // `C:foo` (a disk prefix not followed by a root) resolves against the
-        // drive's hidden per-drive working directory, which no root check sees.
-        if matches!(prefix.kind(), Prefix::Disk(_))
-            && !matches!(comps.next(), Some(Component::RootDir))
-        {
-            return Err(PathValidationError::InvalidPath(
-                "drive-relative path is not allowed".into(),
-            ));
-        }
+    let Some(Component::Prefix(prefix)) = comps.next() else {
+        return Ok(());
+    };
+    let refuse = |why: &str| Err(PathValidationError::InvalidPath(why.into()));
+    if !matches!(comps.next(), Some(Component::RootDir)) {
+        return refuse("drive-relative path is not allowed");
     }
-    Ok(())
+    let drive = disk_letter(prefix.kind());
+    let root_drive = match canonical_root.components().next() {
+        Some(Component::Prefix(root_prefix)) => disk_letter(root_prefix.kind()),
+        _ => None,
+    };
+    match (drive, root_drive) {
+        (Some(d), Some(r)) if d == r => Ok(()),
+        _ => refuse("path is not on the workspace drive"),
+    }
+}
+
+#[cfg(windows)]
+fn disk_letter(kind: std::path::Prefix<'_>) -> Option<u8> {
+    use std::path::Prefix;
+    match kind {
+        Prefix::Disk(d) | Prefix::VerbatimDisk(d) => Some(d.to_ascii_uppercase()),
+        _ => None,
+    }
 }
 
 #[cfg(not(windows))]
-fn reject_drive_relative(_p: &Path) -> Result<(), PathValidationError> {
+fn reject_foreign_volume(_p: &Path, _canonical_root: &Path) -> Result<(), PathValidationError> {
     Ok(())
 }
 
-fn resolve_existing_prefix(path: &Path) -> std::io::Result<PathBuf> {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(path)
-    };
+/// Canonicalise `absolute` component by component, following symlinks in every
+/// existing ancestor and appending the not-yet-existing tail literally, so a
+/// new file or directory can be planned without the symlink games that a
+/// lexical check misses. `..` is applied after the ancestors before it are
+/// resolved, since a symlink changes what its parent is.
+///
+/// Fail-closed: a dangling symlink (its target does not exist) and any
+/// unreadable ancestor are errors, because neither can establish where a write
+/// would land. A relative path is also an error: this function has no
+/// notion of a base directory, and silently using the process working
+/// directory would make containment depend on ambient state. Callers that
+/// want that convention join the working directory themselves.
+pub fn resolve_through_existing_ancestors(absolute: &Path) -> std::io::Result<PathBuf> {
+    if !absolute.is_absolute() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("path {} is not absolute", absolute.display()),
+        ));
+    }
     let mut out = PathBuf::new();
     for component in absolute.components() {
         match component {
@@ -180,7 +211,16 @@ fn resolve_existing_prefix(path: &Path) -> std::io::Result<PathBuf> {
                         // probe the link itself.
                         match std::fs::symlink_metadata(&out) {
                             Err(missing) if missing.kind() == std::io::ErrorKind::NotFound => {}
-                            _ => return Err(e),
+                            Ok(_) => {
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::NotFound,
+                                    format!(
+                                        "{} is a dangling symlink: the symlink target does not exist and was refused",
+                                        out.display()
+                                    ),
+                                ));
+                            }
+                            Err(_) => return Err(e),
                         }
                     }
                     Err(e) => return Err(e),
@@ -328,7 +368,7 @@ mod tests {
 
     #[spec("VAL-008")]
     #[test]
-    fn resolve_within_root_fails_closed_on_empty_path_and_unreadable_root() {
+    fn resolve_within_root_fails_closed_on_empty_path_and_missing_or_empty_root() {
         let tmp = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(tmp.path()).unwrap();
         assert!(matches!(
@@ -377,6 +417,101 @@ mod tests {
         assert_eq!(
             resolve_within_root(&root, "alias/new.txt").unwrap(),
             root.join("real").join("new.txt")
+        );
+    }
+
+    #[cfg(unix)]
+    #[spec("VAL-008")]
+    #[test]
+    fn resolve_within_root_refuses_dangling_leaf_symlink_with_a_dedicated_message() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("ws")).unwrap();
+        let root = std::fs::canonicalize(tmp.path().join("ws")).unwrap();
+        let outside_target = tmp.path().join("outside").join("not-created.txt");
+        std::os::unix::fs::symlink(&outside_target, root.join("dangling")).unwrap();
+        // Writing to the leaf would create the file outside the workspace.
+        let Err(PathValidationError::InvalidPath(message)) = resolve_within_root(&root, "dangling")
+        else {
+            panic!("a dangling leaf symlink must be refused as an invalid path");
+        };
+        assert!(message.contains("dangling"), "names the path: {message}");
+        assert!(
+            message.contains("symlink target does not exist"),
+            "explains the refusal: {message}"
+        );
+        assert!(!message.contains("os error"), "no raw io error: {message}");
+    }
+
+    #[cfg(unix)]
+    #[spec("VAL-008")]
+    #[test]
+    fn resolve_within_root_accepts_a_root_that_is_not_canonical() {
+        // On macOS the temp dir sits behind the `/var` -> `/private/var` link.
+        let tmp = tempfile::tempdir().unwrap();
+        let canonical = std::fs::canonicalize(tmp.path()).unwrap();
+        std::fs::create_dir(canonical.join("src")).unwrap();
+        let via_link = tmp.path().join("src").join("lib.rs");
+        assert_eq!(
+            resolve_within_root(tmp.path(), "src/lib.rs").unwrap(),
+            canonical.join("src").join("lib.rs")
+        );
+        assert_eq!(
+            resolve_within_root(tmp.path(), via_link.to_str().unwrap()).unwrap(),
+            canonical.join("src").join("lib.rs")
+        );
+        assert!(matches!(
+            resolve_within_root(tmp.path(), "../escape.txt"),
+            Err(PathValidationError::OutsideRoot { .. })
+        ));
+    }
+
+    #[spec("VAL-008")]
+    #[test]
+    fn resolve_through_existing_ancestors_never_falls_back_to_the_process_directory() {
+        assert!(resolve_through_existing_ancestors(Path::new("relative/x.txt")).is_err());
+    }
+
+    #[cfg(windows)]
+    #[spec("VAL-008")]
+    #[test]
+    fn resolve_within_root_refuses_network_and_device_paths_before_touching_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        for hostile in [
+            r"\\attacker\share\loot.txt",
+            r"\\?\UNC\attacker\share\loot.txt",
+            r"\\.\pipe\loot",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\loot",
+        ] {
+            assert!(
+                matches!(
+                    resolve_within_root(&root, hostile),
+                    Err(PathValidationError::InvalidPath(_))
+                ),
+                "{hostile}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[spec("VAL-008")]
+    #[test]
+    fn resolve_within_root_refuses_a_different_drive_without_probing_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root_drive =
+            root.to_string_lossy().trim_start_matches(r"\\?\")[..1].to_ascii_uppercase();
+        let other = if root_drive == "Z" { "Y" } else { "Z" };
+        assert!(matches!(
+            resolve_within_root(&root, &format!(r"{other}:\loot.txt")),
+            Err(PathValidationError::InvalidPath(_))
+        ));
+        assert!(
+            resolve_within_root(
+                &root,
+                &format!(r"{}:\ok.txt", root_drive.to_ascii_lowercase())
+            )
+            .is_ok()
         );
     }
 

@@ -10,7 +10,7 @@
 //! negative costs the disclosure the gate exists to prevent.
 
 use std::collections::BTreeSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -271,38 +271,14 @@ fn looks_like_relative_file(s: &str) -> bool {
 
 /// Resolve existing ancestors while permitting a new file or directory suffix.
 /// Unreadable or dangling symlink ancestors cannot establish containment.
+/// A relative path is anchored at the process working directory here, on the
+/// gate's side: the shared walker refuses to guess a base.
 fn resolve_path(path: &Path) -> std::io::Result<PathBuf> {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
+    if path.is_absolute() {
+        arkavo_validation::resolve_through_existing_ancestors(path)
     } else {
-        std::env::current_dir()?.join(path)
-    };
-    let mut out = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            Component::CurDir => {}
-            Component::Prefix(_) | Component::RootDir => out.push(component.as_os_str()),
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => {
-                out.push(other.as_os_str());
-                match std::fs::canonicalize(&out) {
-                    Ok(resolved) => out = resolved,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        // A dangling link exists even though canonicalization
-                        // reports NotFound; treating it as a new file is unsafe.
-                        match std::fs::symlink_metadata(&out) {
-                            Err(missing) if missing.kind() == std::io::ErrorKind::NotFound => {}
-                            _ => return Err(error),
-                        }
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-        }
+        arkavo_validation::resolve_through_existing_ancestors(&std::env::current_dir()?.join(path))
     }
-    Ok(out)
 }
 
 /// Host extraction is the validation crate's, deliberately: the gate must see
