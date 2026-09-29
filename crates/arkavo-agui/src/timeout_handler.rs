@@ -1,4 +1,4 @@
-use crate::command_health_collector::{HealthBatch, TimeoutAnalyzer};
+use crate::command_health_collector::{HealthBatch, TimeoutAnalysis, TimeoutAnalyzer};
 use crate::types::{AgUiEvent, NotificationSeverity};
 use anyhow::Result;
 use std::sync::Arc;
@@ -42,53 +42,51 @@ impl TimeoutHandler {
         event_tx: &mpsc::Sender<AgUiEvent>,
     ) -> Result<()> {
         let analyses = self.analyzer.analyze_batch(batch).await?;
-
-        let total = analyses.len();
-        let mut unhealthy = 0;
-        for analysis in &analyses {
-            if analysis.should_timeout {
-                unhealthy += 1;
-                if let Some(ref msg) = analysis.user_message {
-                    self.send_notification(msg.clone(), &analysis.severity, event_tx)
-                        .await;
-                }
-            }
-        }
-
-        // Emit health summary so the telemetry stream always has health visibility
-        let summary = AgUiEvent::TelemetryEvent {
-            event_type: "health_summary".to_string(),
-            agent_id: "system".to_string(),
-            details: serde_json::json!({
-                "healthy": total - unhealthy,
-                "unhealthy": unhealthy,
-                "total": total,
-            }),
-            timestamp: chrono::Utc::now().to_rfc3339(),
-        };
-        let _ = event_tx.send(summary).await;
-
+        publish_analyses(&analyses, event_tx).await;
         Ok(())
     }
+}
 
-    async fn send_notification(
-        &self,
-        message: String,
-        severity: &str,
-        event_tx: &mpsc::Sender<AgUiEvent>,
-    ) {
-        let event = AgUiEvent::SystemNotification {
-            message,
-            severity: match severity {
-                "critical" => NotificationSeverity::Error,
-                "warning" => NotificationSeverity::Warning,
-                _ => NotificationSeverity::Info,
-            },
-        };
-
-        if let Err(e) = event_tx.send(event).await {
-            eprintln!("Failed to send timeout notification: {e}");
+/// Notifications go out before the summary so consumers see the details that
+/// explain the summary's unhealthy count.
+async fn publish_analyses(analyses: &[TimeoutAnalysis], event_tx: &mpsc::Sender<AgUiEvent>) {
+    let total = analyses.len();
+    let mut unhealthy = 0;
+    for analysis in analyses {
+        if analysis.should_timeout {
+            unhealthy += 1;
+            if let Some(ref msg) = analysis.user_message {
+                send_notification(msg.clone(), &analysis.severity, event_tx).await;
+            }
         }
+    }
+
+    // Emit health summary so the telemetry stream always has health visibility
+    let summary = AgUiEvent::TelemetryEvent {
+        event_type: "health_summary".to_string(),
+        agent_id: "system".to_string(),
+        details: serde_json::json!({
+            "healthy": total - unhealthy,
+            "unhealthy": unhealthy,
+            "total": total,
+        }),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+    let _ = event_tx.send(summary).await;
+}
+
+async fn send_notification(message: String, severity: &str, event_tx: &mpsc::Sender<AgUiEvent>) {
+    let event = AgUiEvent::SystemNotification {
+        message,
+        severity: match severity {
+            "critical" => NotificationSeverity::Error,
+            "warning" => NotificationSeverity::Warning,
+            _ => NotificationSeverity::Info,
+        },
+    };
+
+    if let Err(e) = event_tx.send(event).await {
+        eprintln!("Failed to send timeout notification: {e}");
     }
 }
 
@@ -98,8 +96,124 @@ mod tests {
     use super::*;
     use crate::command_health_collector::CommandHealthData;
 
+    fn analysis(should_timeout: bool, message: Option<&str>, severity: &str) -> TimeoutAnalysis {
+        TimeoutAnalysis {
+            should_timeout,
+            user_message: message.map(str::to_string),
+            severity: severity.to_string(),
+            reasoning: String::new(),
+        }
+    }
+
+    async fn drain(event_rx: &mut mpsc::Receiver<AgUiEvent>) -> Vec<AgUiEvent> {
+        let mut events = Vec::new();
+        while let Ok(Some(event)) =
+            tokio::time::timeout(std::time::Duration::from_millis(200), event_rx.recv()).await
+        {
+            events.push(event);
+        }
+        events
+    }
+
     #[tokio::test]
-    async fn test_timeout_handler_sends_notification() {
+    async fn timed_out_command_notifies_before_health_summary() {
+        let (event_tx, mut event_rx) = mpsc::channel(10);
+
+        publish_analyses(
+            &[analysis(true, Some("Command stuck"), "critical")],
+            &event_tx,
+        )
+        .await;
+        drop(event_tx);
+
+        let events = drain(&mut event_rx).await;
+        assert_eq!(events.len(), 2, "expected notification then summary");
+        match &events[0] {
+            AgUiEvent::SystemNotification { message, severity } => {
+                assert_eq!(message, "Command stuck");
+                assert!(matches!(severity, NotificationSeverity::Error));
+            }
+            other => panic!("Expected SystemNotification first, got {other:?}"),
+        }
+        match &events[1] {
+            AgUiEvent::TelemetryEvent {
+                event_type,
+                details,
+                ..
+            } => {
+                assert_eq!(event_type, "health_summary");
+                assert_eq!(details["total"], 1);
+                assert_eq!(details["unhealthy"], 1);
+                assert_eq!(details["healthy"], 0);
+            }
+            other => panic!("Expected health_summary second, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn healthy_command_emits_only_health_summary() {
+        let (event_tx, mut event_rx) = mpsc::channel(10);
+
+        publish_analyses(
+            &[analysis(false, Some("Running normally"), "info")],
+            &event_tx,
+        )
+        .await;
+        drop(event_tx);
+
+        let events = drain(&mut event_rx).await;
+        assert_eq!(events.len(), 1, "healthy batch must not notify");
+        match &events[0] {
+            AgUiEvent::TelemetryEvent {
+                event_type,
+                details,
+                ..
+            } => {
+                assert_eq!(event_type, "health_summary");
+                assert_eq!(details["healthy"], 1);
+                assert_eq!(details["unhealthy"], 0);
+            }
+            other => panic!("Expected health_summary, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn severity_maps_to_notification_levels() {
+        let (event_tx, mut event_rx) = mpsc::channel(10);
+
+        publish_analyses(
+            &[
+                analysis(true, Some("w"), "warning"),
+                analysis(true, Some("i"), "info"),
+            ],
+            &event_tx,
+        )
+        .await;
+        drop(event_tx);
+
+        let events = drain(&mut event_rx).await;
+        assert!(matches!(
+            events[0],
+            AgUiEvent::SystemNotification {
+                severity: NotificationSeverity::Warning,
+                ..
+            }
+        ));
+        assert!(matches!(
+            events[1],
+            AgUiEvent::SystemNotification {
+                severity: NotificationSeverity::Info,
+                ..
+            }
+        ));
+    }
+
+    // The verdict comes from a live local model, so this asserts what holds for
+    // any verdict: one summary per batch, preceded by no more notifications than
+    // it reports unhealthy commands (an unhealthy verdict may carry no message).
+    // Never receiving the summary fails the test rather than passing silently.
+    #[tokio::test]
+    async fn handler_emits_summary_consistent_with_notifications() {
         // Skip in CI - requires model loading
         if std::env::var("CI").is_ok() {
             return;
@@ -121,26 +235,30 @@ mod tests {
             }],
             timestamp: chrono::Utc::now(),
         };
-
         batch_tx.send(batch).await.unwrap();
 
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            if let Some(event) = event_rx.recv().await {
-                match event {
-                    AgUiEvent::SystemNotification { message, severity } => {
+        let mut notifications = 0;
+        let summary = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                match event_rx.recv().await.expect("handler closed event channel") {
+                    AgUiEvent::SystemNotification { message, .. } => {
                         assert!(!message.is_empty());
-                        assert!(matches!(
-                            severity,
-                            NotificationSeverity::Info
-                                | NotificationSeverity::Warning
-                                | NotificationSeverity::Error
-                        ));
+                        notifications += 1;
                     }
-                    _ => panic!("Expected SystemNotification event"),
+                    AgUiEvent::TelemetryEvent {
+                        event_type,
+                        details,
+                        ..
+                    } if event_type == "health_summary" => break details,
+                    other => panic!("Unexpected event {other:?}"),
                 }
             }
         })
         .await
-        .ok();
+        .expect("health_summary never arrived");
+
+        assert_eq!(summary["total"], 1);
+        let unhealthy = summary["unhealthy"].as_u64().unwrap();
+        assert!(notifications <= unhealthy);
     }
 }
