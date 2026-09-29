@@ -4,6 +4,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::server::tool_memory::ToolMemory;
 
+mod cycle_prompt;
+
 /// Absolute safety limit for agent cycles to prevent runaway loops.
 /// At a 5-second minimum tick interval, this allows ~6 days of continuous operation.
 const MAX_AGENT_CYCLES: u64 = 100_000;
@@ -347,34 +349,23 @@ pub async fn run_agent_loop(
                     _ => String::new(),
                 };
 
-                let msg_section = if message_block.is_empty() {
-                    String::new()
-                } else {
-                    format!("\n\n## Incoming Messages\n{message_block}")
-                };
-                let extra = format!(
-                    "{specialist_context}{dead_man_warning}{msg_section}",
-                );
-                // Toolless agents are advisors — prevent circular thinking
-                let extra = if !config.has_mcp_tools && !extra.trim().is_empty() {
-                    format!("{extra}\n\nRespond in under 200 words. No reasoning preamble. Give actionable advice only.")
-                } else {
-                    extra
-                };
-                let cycle_prompt = if extra.trim().is_empty() {
-                    "Continue.".to_string()
-                } else {
-                    extra.trim().to_string()
-                };
+                let cycle_prompt = cycle_prompt::assemble(&cycle_prompt::CycleInputs {
+                    specialist_context: &specialist_context,
+                    dead_man_warning: &dead_man_warning,
+                    message_block: &message_block,
+                    has_mcp_tools: config.has_mcp_tools,
+                });
 
-                // Skip empty cycles for toolless specialists — "Continue." with no
-                // new information just burns inference. Wait for incoming messages
-                // or state broadcasts from the orchestrator.
-                if !config.has_mcp_tools
-                    && cycle_prompt == "Continue."
-                    && cycle > 1
-                    && cycle_waiters.is_empty()
-                {
+                // Skip empty cycles — "Continue." with no new information just
+                // burns inference. Wait for incoming messages or state
+                // broadcasts from the orchestrator.
+                if cycle_prompt::is_idle(
+                    &config.agent_mode,
+                    config.has_mcp_tools,
+                    cycle,
+                    &cycle_prompt,
+                    !cycle_waiters.is_empty(),
+                ) {
                     info!(
                         "Agent cycle {cycle}: skipping empty specialist cycle (no incoming state)"
                     );
