@@ -2,7 +2,7 @@
 
 Learn to build AI agent systems through hands-on examples.
 
-> 🎯 **New to Arkavo?** Try the [Capability Browser](../CAPABILITIES.md) to find what you need:
+> 🎯 **New to Arkavo?** Try the [Capability Browser](../docs/CAPABILITIES.md) to find what you need. The browser commands run from a source checkout:
 > `cargo xtask capabilities` - Interactive browser
 > `cargo xtask capabilities --matrix` - Quick overview
 
@@ -51,72 +51,74 @@ Each example demonstrates specific Arkavo capabilities. Find by use case:
 | Bridge to external AI | [openclaw-a2a-bridge](openclaw-a2a-bridge/) | A2A Protocol, TDF, Preflight, Budget |
 | Build production system | [software-development-lifecycle](software-development-lifecycle/) | HRM, Orchestrator |
 
-See [CAPABILITIES.md](../CAPABILITIES.md) for the full capability matrix.
+See [CAPABILITIES.md](../docs/CAPABILITIES.md) for the full capability matrix.
 
 ## Learning Path
 
-Progress from simple to complex, building skills incrementally.
+Progress from simple to complex, building skills incrementally. The levels are a suggested order, not directories: `examples/` is flat, and every example is a directory directly under it.
 
 | Level | Examples | What You'll Learn | Time |
 |-------|----------|-------------------|------|
-| **01-hello-world** | Minimal agent | Agent basics, SwarmKit config | 5 min |
-| **02-single-agent** | Claude, Gemini, secure | LLM backends, API keys, policies | 30 min |
-| **03-multi-agent-basics** | Dev team, orchestrator | Agent collaboration, A2A protocol | 1 hr |
-| **04-advanced-patterns** | HRM, fleet, hyperforum | Orchestration, learning, discourse | 2 hr |
-| **05-production** | SDLC, minecraft | Full systems, MCP tools | 2+ hr |
-| **06-specialized** | RLM | Large context handling | 1 hr |
+| **Hello world** | [01-hello-world](01-hello-world/) | Agent basics, SwarmKit config | 5 min |
+| **Single agent** | [code-agent-claude](code-agent-claude/), [code-agent-gemini](code-agent-gemini/), [secure-agent](secure-agent/) | LLM backends, API keys, policies | 30 min |
+| **Multi-agent basics** | [software-development-simple](software-development-simple/), [orchestrator-agent](orchestrator-agent/) | Agent collaboration, A2A protocol | 1 hr |
+| **Advanced patterns** | [family-travel-mesh](family-travel-mesh/), [fleet-immunity](fleet-immunity/), [hyperforum-council](hyperforum-council/) | Orchestration, learning, discourse | 2 hr |
+| **Production** | [software-development-lifecycle](software-development-lifecycle/), [minecraft](minecraft/) | Full systems, MCP tools | 2+ hr |
+| **Specialized** | [rlm-large-context](rlm-large-context/) | Large context handling | 1 hr |
 
 ## All Examples
 
-### 01-hello-world
+### Hello world
 Your first agent. Start here.
-- Single agent responding to a greeting
-- No API keys needed (uses local model)
 
-### 02-single-agent
+| Example | Description | Requirements |
+|---------|-------------|--------------|
+| [01-hello-world](01-hello-world/) | One-shot chat that answers a greeting | None (uses a local model) |
+
+### Single agent
 Individual agent patterns with different backends.
 
 | Example | Description | Requirements |
 |---------|-------------|--------------|
-| `code-agent-claude` | Coding with Claude | `ANTHROPIC_API_KEY` |
-| `code-agent-gemini` | Coding with Gemini | `GEMINI_API_KEY` |
-| `secure-agent` | Preflight policy enforcement | None |
+| [code-agent-claude](code-agent-claude/) | Coding with Claude | `ANTHROPIC_API_KEY` |
+| [code-agent-gemini](code-agent-gemini/) | Coding with Gemini | `GEMINI_API_KEY` |
+| [secure-agent](secure-agent/) | Preflight policy enforcement | None |
 
-### 03-multi-agent-basics
+### Multi-agent basics
 Simple multi-agent collaboration.
 
 | Example | Agents | Description |
 |---------|--------|-------------|
-| `software-development-simple` | 3 | Project manager, coder, tester |
-| `orchestrator-agent` | 1+ | Central task routing |
+| [software-development-simple](software-development-simple/) | 3 | Project manager, coder, tester |
+| [orchestrator-agent](orchestrator-agent/) | 1+ | Central task routing |
 
-### 04-advanced-patterns
+### Advanced patterns
 Advanced orchestration and learning patterns.
 
 | Example | Pattern | Description |
 |---------|---------|-------------|
-| `family-travel-mesh` | HRM | Hierarchical orchestration with Thompson Sampling |
-| `fleet-immunity` | Gossip | Peer-to-peer learning between rovers |
-| `learning-mesh` | Learning | Quality-aware routing with lesson-informed prompting |
-| `hyperforum-council` | Discourse | AI-powered discussion management |
-| `autonomous_refactor` | Ledger | Context tracking for code refactoring |
-| `evofabric` | AST Ops | Typed code evolution with verification |
-| `openclaw-a2a-bridge` | Bridge | A2A protocol bridge with security comparison |
+| [family-travel-mesh](family-travel-mesh/) | HRM | Hierarchical orchestration with Thompson Sampling |
+| [fleet-immunity](fleet-immunity/) | Gossip | Peer-to-peer learning between rovers |
+| [learning-mesh](learning-mesh/) | Learning | Quality-aware routing with lesson-informed prompting |
+| [hyperforum-council](hyperforum-council/) | Discourse | AI-powered discussion management |
+| [autonomous_refactor](autonomous_refactor/) | Ledger | Context tracking for code refactoring |
+| [evofabric](evofabric/) | AST Ops | Typed code evolution with verification |
+| [openclaw-a2a-bridge](openclaw-a2a-bridge/) | Bridge | A2A protocol bridge with security comparison |
 
-### 05-production
+### Production
 Production-ready multi-agent systems.
 
 | Example | Agents | Description |
 |---------|--------|-------------|
-| `software-development-lifecycle` | 12 | Full SDLC with domain specialists |
-| `minecraft` | 5 | Game bot with MCP tools |
+| [software-development-lifecycle](software-development-lifecycle/) | 12 | Full SDLC with domain specialists |
+| [minecraft](minecraft/) | 5 | Game bot with MCP tools |
 
-### 06-specialized
+### Specialized
 Special capabilities.
 
 | Example | Description |
 |---------|-------------|
-| `rlm-large-context` | Handle 100K+ token contexts |
+| [rlm-large-context](rlm-large-context/) | Handle 100K+ token contexts |
 
 ## Core Concepts
 
