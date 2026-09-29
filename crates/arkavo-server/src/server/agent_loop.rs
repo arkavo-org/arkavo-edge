@@ -323,7 +323,9 @@ pub async fn run_agent_loop(
                 }
 
                 // 5. Assemble cycle prompt
+                let pushed_to_act = cycle_prompt::dead_man_switch_applies(&config.agent_mode);
                 let dead_man_warning = match consecutive_no_action_cycles {
+                    _ if !pushed_to_act => String::new(),
                     3..=4 => "\n\nWARNING: You have NOT taken any action for 3 cycles. \
                               You MUST take an action NOW. \
                               Pick the most urgent alert and act on it.\n"
@@ -556,7 +558,7 @@ pub async fn run_agent_loop(
                         }
                         drop(memory_guard);
 
-                        if had_action {
+                        if had_action || !pushed_to_act {
                             consecutive_no_action_cycles = 0;
                             consecutive_duplicate_prompts = 0;
                         } else {
@@ -616,7 +618,9 @@ pub async fn run_agent_loop(
                     }
                     Err(e) => {
                         // User msg already pushed (step 7), no assistant response
-                        consecutive_no_action_cycles += 1;
+                        if pushed_to_act {
+                            consecutive_no_action_cycles += 1;
+                        }
                         consecutive_timeouts += 1;
                         warn!("Agent cycle {cycle} failed: {e}");
                         answer_waiters(cycle_waiters, &outcome_for_cycle(&Err(e)));
