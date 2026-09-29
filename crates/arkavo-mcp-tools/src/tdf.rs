@@ -289,7 +289,7 @@ impl Tool for TdfHelpTool {
                     "description": "Encrypt a file with default policy",
                     "call": {
                         "tool": "tdf_encrypt",
-                        "params": { "input_path": "/path/to/secret.txt" }
+                        "params": { "input_path": "docs/secret.txt" }
                     }
                 },
                 {
@@ -297,7 +297,7 @@ impl Tool for TdfHelpTool {
                     "call": {
                         "tool": "tdf_encrypt",
                         "params": {
-                            "input_path": "/path/to/secret.txt",
+                            "input_path": "docs/secret.txt",
                             "namespace": "https://arkavo.net/attr/classification",
                             "values": ["top-secret", "nato"]
                         }
@@ -307,7 +307,7 @@ impl Tool for TdfHelpTool {
                     "description": "Inspect a TDF file",
                     "call": {
                         "tool": "tdf_info",
-                        "params": { "input_path": "/path/to/secret.txt.tdf.json" }
+                        "params": { "input_path": "docs/secret.txt.tdf.json" }
                     }
                 }
             ]

@@ -633,7 +633,7 @@ mod tests {
             .await;
         // The refusal must not echo the secret's contents.
         let err = out.expect_err("absolute path outside the workspace must be refused");
-        assert!(err.to_string().contains("outside allowed root"), "{err}");
+        assert!(matches!(err, TestError::Mcp(_)), "{err}");
         assert!(!err.to_string().contains("PRIVATE"));
     }
 
@@ -649,6 +649,8 @@ mod tests {
         let out = kit
             .execute(json!({ "action": "read_file", "file_path": "escape/loot.txt" }))
             .await;
-        assert!(out.is_err());
+        let err = out.expect_err("a symlink out of the workspace must be refused");
+        assert!(matches!(err, TestError::Mcp(_)), "{err}");
+        assert!(!err.to_string().contains("SECRET"));
     }
 }

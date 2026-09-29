@@ -252,7 +252,13 @@ mod tests {
             }))
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("outside the workspace"), "{err}");
+        assert!(
+            matches!(
+                err.downcast_ref::<CodeSearchError>(),
+                Some(CodeSearchError::OutsideWorkspace(_))
+            ),
+            "{err}"
+        );
     }
 
     #[spec("CS-006")]

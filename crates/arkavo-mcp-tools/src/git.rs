@@ -9,15 +9,24 @@ use std::path::{Path, PathBuf};
 /// Open the repository at `requested`, which must resolve inside `root`
 /// (MCP-011). An absolute path used to be trusted whenever it existed, which
 /// let a call open, read and commit to any repository on the host.
+///
+/// `open_repo` discovers upward, so a root with no `.git` of its own would
+/// open an enclosing repository (a monorepo parent, a dotfiles repo) and let
+/// add, commit and diff act outside the workspace. The opened repository's
+/// working directory (or git directory, when bare) must therefore also lie
+/// inside `root`; a linked worktree whose working directory is inside still
+/// passes.
 fn safe_open_repo(
     git_manager: &GitManager,
     root: &Path,
     requested: &str,
 ) -> Result<arkavo_git::Repository> {
     let path = crate::confine::within_root(root, requested)?;
-    git_manager
+    let repo = git_manager
         .open_repo(&path)
-        .map_err(|e| ToolError::Mcp(format!("Failed to open repository: {e}")))
+        .map_err(|e| ToolError::Mcp(format!("Failed to open repository: {e}")))?;
+    crate::confine::require_inside_root(root, repo.workdir().unwrap_or_else(|| repo.path()))?;
+    Ok(repo)
 }
 
 pub struct GitStatusKit {
@@ -709,6 +718,65 @@ mod tests {
 
         // No "path" defaults to ".", which must resolve against the kit's root.
         let status = GitStatusKit::with_root(ws.path())
+            .execute(json!({}))
+            .await
+            .unwrap();
+        assert!(status["branch"].is_string());
+    }
+
+    /// `outer` is a repository, `outer/ws` is a plain directory under it.
+    fn nested_workspace() -> (TempDir, PathBuf) {
+        let outer = TempDir::new().unwrap();
+        let repo = git2::Repository::init(outer.path()).unwrap();
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+        let tree = repo
+            .find_tree(repo.index().unwrap().write_tree().unwrap())
+            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        let ws = outer.path().join("ws");
+        fs::create_dir(&ws).unwrap();
+        fs::write(ws.join("note.txt"), "x").unwrap();
+        (outer, ws)
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_refuses_an_enclosing_repository_above_the_workspace() {
+        let (_outer, ws) = nested_workspace();
+        let err = GitStatusKit::with_root(&ws)
+            .execute(json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_commit_cannot_commit_into_an_enclosing_repository() {
+        let (outer, ws) = nested_workspace();
+        let repo = git2::Repository::open(outer.path()).unwrap();
+        let head_before = repo.head().unwrap().target().unwrap();
+        let err = GitCommitKit::with_root(&ws)
+            .execute(json!({ "message": "escape" }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+        assert_eq!(repo.head().unwrap().target().unwrap(), head_before);
+        assert!(repo.index().unwrap().is_empty(), "nothing may be staged");
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_works_in_a_linked_worktree_workspace() {
+        let (outer, _ws) = nested_workspace();
+        let repo = git2::Repository::open(outer.path()).unwrap();
+        let wt_dir = TempDir::new().unwrap();
+        let wt_path = wt_dir.path().join("wt");
+        repo.worktree("wt", &wt_path, None).unwrap();
+        // The worktree's `.git` is a file pointing back into `outer`; only its
+        // working directory has to be inside the root.
+        let status = GitStatusKit::with_root(&wt_path)
             .execute(json!({}))
             .await
             .unwrap();
