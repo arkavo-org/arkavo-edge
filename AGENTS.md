@@ -138,4 +138,8 @@ ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1 cargo run -p arkavo -- chat --prompt "What ti
 - `ARKAVO_DEBUG_CHAT=1`: Chat/Template/Token debug.
 - `ARKAVO_DELEGATION_PUBLIC_KEY_PEM`: Trusted authnz-rs ES256 public key (inline PEM or path to PEM file) used to verify delegation JWTs at registration. Unset → delegation entitlements are never granted (fail-closed).
 - `ARKAVO_ALLOW_UNVERIFIED_DELEGATION=1`: INSECURE dev/test escape hatch — accepts delegation JWTs without signature verification. Never set in production.
+- `ARKAVO_CHAT_TIMEOUT_SECS`: Time budget for a chat inference, whole seconds from 5 to 86400. Unset → a named local model gets 180 seconds.
+- `ARKAVO_DISABLE_SPEC_DECODING`: Any value other than empty, `0` or `false` turns speculative decoding off. For diagnosing corrupted output.
+- `ARKAVO_MAX_CONTEXTS`: Inference contexts kept per local model in one process. Unset → 1; further requests wait.
+- `ARKAVO_CONTEXT_WAIT_SECS`: How long a request waits for a free context before it fails. Unset → 300.
 - ccache must be installed for development builds
