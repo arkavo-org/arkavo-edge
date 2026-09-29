@@ -12,6 +12,25 @@ use std::sync::Arc;
 
 const USAGE: &str = "usage: arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--issuer-key <hex> ...] [--hash sha256|blake3] -- <upstream command> [args...]";
 
+const HELP: &str = "Permit-gated stdio MCP relay
+
+USAGE:
+    arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [OPTIONS] -- <upstream command> [args...]
+
+Relays MCP over stdio to the upstream command, admitting a tools/call only
+with a valid permit and proof-of-possession.
+
+COMMANDS:
+    proxy    Run the relay in front of an upstream MCP server
+
+OPTIONS:
+    --policy-bundle-hash <64 hex>    Hash of the policy bundle permits must cite (required)
+    --issuer-key <hex>               Trusted permit issuer public key; repeatable (at least one)
+    --hash <sha256|blake3>           Hash algorithm (default: sha256)
+    -h, --help                       Show this help
+
+Everything after `--` is the upstream command and its own arguments.";
+
 pub struct ProxyArgs {
     pub policy_bundle_hash: Vec<u8>,
     pub hash: HashAlgorithm,
@@ -20,15 +39,17 @@ pub struct ProxyArgs {
     pub args: Vec<String>,
 }
 
-// `execute` may run from a context that already has a tokio runtime, just
-// like the `"login" | "logout"` arm in `crates/arkavo-cli/src/lib.rs`, so it
-// copies that arm's guard: reuse the ambient runtime via `Handle::block_on`
-// when one exists, and only build a fresh `Runtime` otherwise. Both
-// `Handle::block_on` and `Runtime::block_on` are individually disallowed by
-// `.clippy.toml` (nesting a runtime inside a runtime can panic), so both
-// arms need the allow below.
+// `execute` may run from a context that already has a tokio runtime, so it
+// reuses the ambient runtime via `Handle::block_on` when one exists, and only
+// builds a fresh `Runtime` otherwise. Both `Handle::block_on` and
+// `Runtime::block_on` are individually disallowed by `.clippy.toml` (nesting
+// a runtime inside a runtime can panic), so both arms need the allow below.
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if wants_help(args) {
+        println!("{HELP}");
+        return Ok(());
+    }
     let parsed = match parse(args) {
         Ok(parsed) => parsed,
         Err(message) => {
@@ -43,6 +64,16 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             runtime.block_on(run(parsed))
         }
     }
+}
+
+/// Whether the invocation asks for help rather than a relay.
+///
+/// Only arguments before `--` are the proxy's own: a `--help` after it
+/// belongs to the upstream command and must reach it untouched.
+fn wants_help(args: &[String]) -> bool {
+    args.iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
 }
 
 async fn run(parsed: ProxyArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -148,6 +179,55 @@ mod tests {
                 .public_key()
                 .to_sec1_bytes(),
         )
+    }
+
+    /// Regression: `arkavo mcp --help` and `arkavo mcp proxy --help` printed
+    /// `unknown flag --help` and exited 2.
+    #[test]
+    fn help_flags_are_recognized_at_both_levels() {
+        for invocation in [
+            s(&["--help"]),
+            s(&["-h"]),
+            s(&["proxy", "--help"]),
+            s(&["proxy", "-h"]),
+            s(&["proxy", "--hash", "blake3", "--help"]),
+        ] {
+            assert!(wants_help(&invocation), "{invocation:?}");
+        }
+    }
+
+    #[test]
+    fn help_after_the_separator_belongs_to_the_upstream_command() {
+        let hex = "07".repeat(32);
+        let issuer_key = ed25519_issuer_key_hex();
+        let invocation = s(&[
+            "proxy",
+            "--policy-bundle-hash",
+            &hex,
+            "--issuer-key",
+            &issuer_key,
+            "--",
+            "python3",
+            "srv.py",
+            "--help",
+        ]);
+        assert!(!wants_help(&invocation));
+        let parsed = parse(&invocation).unwrap();
+        assert_eq!(parsed.args, s(&["srv.py", "--help"]));
+    }
+
+    #[test]
+    fn help_is_not_inferred_from_other_arguments() {
+        assert!(!wants_help(&[]));
+        assert!(!wants_help(&s(&["proxy"])));
+        assert!(!wants_help(&s(&["proxy", "--hash", "blake3"])));
+    }
+
+    #[test]
+    fn help_documents_every_flag_the_parser_accepts() {
+        for flag in ["--policy-bundle-hash", "--issuer-key", "--hash", "--help"] {
+            assert!(HELP.contains(flag), "help should document {flag}");
+        }
     }
 
     #[test]
