@@ -249,7 +249,11 @@ impl super::Router {
         let provider = arkavo_llm::LlamaCppProvider::new_with_registry(
             self.model_registry.clone(),
             registry_name.to_string(),
-            sampling_config_for(model, &self.optimal_configs, use_spec_decoding),
+            sampling_config_for(
+                model,
+                &self.optimal_configs,
+                crate::spec_stats::permitted(use_spec_decoding),
+            ),
         )
         .map_err(|e| {
             Error::ModelExecution(format!(
@@ -327,7 +331,7 @@ impl super::Router {
         }
 
         let sampling = arkavo_llm::SamplingConfig {
-            use_spec_decoding,
+            use_spec_decoding: crate::spec_stats::permitted(use_spec_decoding),
             thinking_mode: Some(arkavo_llm::ThinkingMode::Off),
             ..arkavo_llm::SamplingConfig::default()
         };
