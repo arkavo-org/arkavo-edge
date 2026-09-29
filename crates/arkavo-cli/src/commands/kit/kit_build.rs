@@ -120,7 +120,7 @@ pub fn migrate_from_agents_md(
         Some(KitRuntimeConfig {
             local_dev: Some(true),
             mode: Some(to_runtime_mode(&first.mode)),
-            listen: Some(first.listen.clone()),
+            listen: declared_listen(first),
             mdns: Some(first.mdns_enabled),
             mcp_servers,
             preflight: extras.preflight.clone(),
@@ -273,6 +273,20 @@ fn to_runtime_mcp_server(s: &McpServerConfig) -> RuntimeMcpServer {
     }
 }
 
+/// The listen address the AGENTS.md agent asked for, `None` when it asked
+/// for none.
+///
+/// The parser starts every agent at the built-in default, so an address
+/// equal to it is one the file did not choose. Writing it into the kit would
+/// pin the migrated agent to that address: the kit would keep it if the
+/// default changed, and an agent started with `--trust` would report
+/// overriding an address nobody asked for. A file that names the default
+/// explicitly migrates the same way; it listens on the same address either
+/// way.
+fn declared_listen(agent: &AgentConfig) -> Option<String> {
+    (agent.listen != AgentConfig::default().listen).then(|| agent.listen.clone())
+}
+
 /// A kit has exactly one `runtime` block, built from `agents[0]` only. If a
 /// later AGENTS.md section declares a different `listen`, `mode`, or
 /// `mdns`, that setting has nowhere to go and must be reported rather than
@@ -412,6 +426,17 @@ mod tests {
             "unexpected error: {err}"
         );
         assert!(used.is_empty());
+    }
+
+    #[test]
+    fn an_agent_that_names_no_listen_address_declares_none() {
+        assert_eq!(declared_listen(&AgentConfig::default()), None);
+
+        let named = AgentConfig {
+            listen: "127.0.0.1:8342".to_string(),
+            ..AgentConfig::default()
+        };
+        assert_eq!(declared_listen(&named).as_deref(), Some("127.0.0.1:8342"));
     }
 
     #[test]
