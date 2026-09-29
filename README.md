@@ -144,6 +144,20 @@ arkavo kit init my-agent  # Writes .arkavo/my-agent.swarmkit.yaml
 arkavo agent  # Runs with your config
 ```
 
+### Environment Variables
+
+| Variable | Effect |
+|----------|--------|
+| `ARKAVO_DEBUG=1` | General debug logging. |
+| `ARKAVO_DEBUG_CHAT=1` | Chat, template, and token debug output. |
+| `ARKAVO_SWARMKIT_PATH` | Path of the kit to use instead of discovering one in the working directory. It is also the kit the `arkavo ui` gateway loads. |
+| `ARKAVO_SWARMKIT_VERIFY=required` | Enforce skill signature verification when the gateway loads a kit. |
+| `ARKAVO_SKIP_FIRST_RUN=1` | Never prompt for the first-run model download. Commands that need a local model still fail until one is provisioned. |
+| `ARKAVO_CHAT_TIMEOUT_SECS` | Time budget for a chat inference, in whole seconds from 5 to 86400. Without it, a named local model gets 180 seconds. |
+| `ARKAVO_DISABLE_SPEC_DECODING` | Any value other than empty, `0`, or `false` turns speculative decoding off. Use it to diagnose corrupted output. |
+
+API keys for cloud providers are read from the environment (for example `GEMINI_API_KEY`) and are never written in a kit.
+
 ### Security (Optional)
 
 **OpenTDF Integration:** Fine-grained access control for MCP tools via [OpenTDF](https://opentdf.io). Set `OPENTDF_BASE_URL`, `OIDC_ISSUER`, and `AUD` environment variables.
