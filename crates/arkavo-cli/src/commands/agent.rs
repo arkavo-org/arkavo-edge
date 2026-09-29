@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-#[cfg(feature = "mdns")]
 mod advertise;
 pub mod listen;
 
@@ -649,14 +648,18 @@ pub async fn start_agent_server(
         println!("HRM Conductor integrated for A2A task execution");
     }
 
-    let (handle, actual_port) = server.start_with_port().await?;
+    let (handle, bound_addr) = server.start_with_addr().await?;
 
     // Shown even in a quiet run: whoever started the agent has to learn that
     // it is reachable from the network whether or not they asked for output.
-    let bound_addr = std::net::SocketAddr::new(listen_addr.ip(), actual_port);
     if let Some(warning) = listen::exposure_warning(bound_addr) {
         eprintln!("{warning}");
     }
+
+    // One address for everything handed to clients: the agent card, the
+    // authorization URL and, below, the mDNS record.
+    let endpoint = advertise::endpoint_url(advertise::advertised_addr(bound_addr, local_ip));
+    server.set_advertised_endpoint(endpoint.clone()).await;
 
     // Start orchestrator loop for any agent with a purpose
     if !config.purpose.is_empty() {
@@ -685,9 +688,6 @@ pub async fn start_agent_server(
             .to_string();
 
         // Create agent descriptor with DID:key and default entitlements
-        // Use actual local IP and bound port (not 0.0.0.0:0 from config)
-        let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
-        let endpoint = format!("http://{local_ip}:{actual_port}");
         let mdns_service = if config.mdns_enabled {
             Some(format!("{}._a2a._tcp.local.", config.name))
         } else {
@@ -727,7 +727,7 @@ pub async fn start_agent_server(
         let handle = std::thread::spawn(move || {
             if let Err(e) = broadcast_agent_mdns_sync(
                 &config_clone,
-                actual_port,
+                bound_addr,
                 shutdown_flag_clone,
                 Some(tx),
                 peer_tx_clone,
@@ -998,7 +998,7 @@ pub async fn start_agent_server(
     }
 
     if !quiet {
-        // Display the actual bound address (using actual_port from OS if port was 0)
+        // The bound address carries the port the OS assigned when the kit asked for port 0.
         println!("Ready at {bound_addr}");
     }
 
@@ -1061,65 +1061,47 @@ pub async fn start_agent_server(
     std::process::exit(0);
 }
 
-/// Get the local IP address for client connections.
+/// The address of this machine that other machines can reach, for an
+/// endpoint bound to every interface.
 ///
-/// Uses multiple strategies to determine the local IP:
+/// Uses multiple strategies to determine it:
 /// 1. Try connecting to a public DNS server (determines routing interface)
-/// 2. Fallback to interface enumeration
-/// 3. Final fallback to 127.0.0.1
+/// 2. Try connecting to a common private gateway (offline LANs)
+/// 3. Final fallback to 127.0.0.1, which only local clients can use
 ///
 /// This handles offline environments, strict firewalls, and IPv6-only networks.
-fn get_local_ip() -> Option<String> {
-    use std::net::UdpSocket;
+fn local_ip() -> std::net::IpAddr {
+    use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 
-    // Strategy 1: DNS-based detection (works in most online environments)
-    // Try multiple public DNS servers for resilience
-    let dns_servers = [
+    let targets = [
+        // Public DNS servers: work in most online environments.
         ("8.8.8.8", 80),        // Google DNS
         ("1.1.1.1", 80),        // Cloudflare DNS
         ("208.67.222.222", 80), // OpenDNS
-    ];
-
-    for (dns, port) in dns_servers {
-        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0")
-            && socket.connect((dns, port)).is_ok()
-            && let Ok(local_addr) = socket.local_addr()
-        {
-            let ip = local_addr.ip();
-            if !ip.is_loopback() && ip.is_ipv4() {
-                return Some(ip.to_string());
-            }
-        }
-    }
-
-    // Strategy 2: Try connecting to a private network address
-    // This works in offline LAN environments
-    let private_targets = [
+        // Private gateways: work in offline LAN environments.
         ("192.168.1.1", 53), // Common router address
         ("10.0.0.1", 53),    // Common corporate router
         ("172.16.0.1", 53),  // Common large network router
     ];
 
-    for (target, port) in private_targets {
+    for (target, port) in targets {
         if let Ok(socket) = UdpSocket::bind("0.0.0.0:0")
             && socket.connect((target, port)).is_ok()
             && let Ok(local_addr) = socket.local_addr()
         {
             let ip = local_addr.ip();
             if !ip.is_loopback() && ip.is_ipv4() {
-                return Some(ip.to_string());
+                return ip;
             }
         }
     }
 
-    // Strategy 3: Fallback to 127.0.0.1 (always works, but only for local clients)
-    // This is the safest fallback for offline or isolated environments
-    Some("127.0.0.1".to_string())
+    IpAddr::V4(Ipv4Addr::LOCALHOST)
 }
 
 fn broadcast_agent_mdns_sync(
     #[allow(unused_variables)] config: &AgentConfig,
-    #[allow(unused_variables)] actual_port: u16,
+    #[allow(unused_variables)] bound_addr: std::net::SocketAddr,
     #[allow(unused_variables)] shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[allow(unused_variables)] ready_signal: Option<std::sync::mpsc::Sender<()>>,
     #[allow(unused_variables)] peer_tx: tokio::sync::mpsc::Sender<(String, bool, Option<String>)>,
@@ -1127,15 +1109,24 @@ fn broadcast_agent_mdns_sync(
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
-        use mdns_sd::{ServiceDaemon, ServiceInfo};
+        use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
         use std::thread;
         use std::time::Duration;
 
-        let port = actual_port;
-        let service_ip = get_service_ip();
+        let port = bound_addr.port();
+        let service_ip =
+            advertise::advertised_addr(bound_addr, || std::net::IpAddr::V4(get_service_ip())).ip();
 
         // Create mDNS daemon
         let mdns = ServiceDaemon::new()?;
+
+        // mdns-sd leaves loopback interfaces out unless asked, and announces
+        // an address only on the interface whose network holds it. Without
+        // this a loopback address is announced nowhere, not even to this
+        // machine; with it the record still never leaves the machine.
+        if listen::is_loopback(service_ip) {
+            mdns.enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])?;
+        }
 
         // Start browsing for other agents
         let receiver = mdns.browse("_a2a._tcp.local.")?;
@@ -1230,7 +1221,7 @@ fn broadcast_agent_mdns_sync(
             service_type,
             &instance_name,
             &host_name,
-            service_ip.to_string(),
+            service_ip,
             port,
             properties,
         )?;
