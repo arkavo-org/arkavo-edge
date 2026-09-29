@@ -258,7 +258,7 @@ scenarios:
       - User confirmation required before execution
       - Dangerous commands are flagged
       - Execution is sandboxed
-    refs: [crates/arkavo-mcp-tools/src/shell_exec.rs:10-93, crates/arkavo-mcp-tools/src/sandbox.rs:27-85, crates/arkavo-cli/src/commands/security_audit.rs:359-371]
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/sandbox.rs:27-85, crates/arkavo-cli/src/commands/security_audit.rs:359-371]
     edge_cases:
       - condition: LLM suggests "rm -rf /"
         expected: Blocked with warning, requires explicit confirmation

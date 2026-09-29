@@ -128,7 +128,13 @@ scenarios:
       - Timeout enforced
       - Output captured
       - Exit code returned
-    refs: [crates/arkavo-mcp-tools/src/shell_exec.rs]
+      - Every pipeline and chain segment is classified, not only the first word
+      - Exec-wrappers and interpreters are never auto-approved
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs]
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: Safe-listed env or find given another program to run (env curl …, find -exec …)
+        expected: RequiresReview
 
   - id: MCP-009
     name: Web search tool
@@ -206,4 +212,25 @@ scenarios:
       - The call is refused with PolicyDenied before any file is read or written
       - tdf_stage publishes nothing and tdf_fetch fetches nothing for a refused path
     refs: [crates/arkavo-mcp-tools/src/tdf.rs]
+    changed: "2026-09-29"
+
+  - id: MCP-013
+    name: Shell command classification examines every segment
+    criticality: high
+    given:
+      - ShellExecTool enabled
+      - A command with a pipeline, chain, wrapper or background operator
+    when: The command is classified
+    then:
+      - Every pipeline segment must be a read-only command for the call to be auto-approved
+      - Exec wrappers and interpreters (env, xargs, nohup, sh, python, awk) are never auto-approved
+      - find with an action predicate (-exec, -execdir, -ok, -delete, -fprint) is not auto-approved
+      - Safe-listed bases lose approval when given options that run a program or write a file (rg --pre, sort -o, uniq OUTPUT, tree -o, less -o)
+      - Background '&', carriage return and other control characters are blocked as chaining
+      - The version shortcut applies only to --version or -v after a bare tool name that is not an interpreter or wrapper; a bare version operand is not a version flag
+      - On unix, a command containing a backslash is not auto-approved, and option checks see words with quotes removed; a word with a $ or brace expansion is not auto-approved for find, rg, sort, uniq, tree, less or git
+      - Git is auto-approved only for read subcommands without -c or --output
+      - env and printenv are not auto-approved, because they print the inherited environment
+      - A segment naming /proc is not auto-approved, because /proc/<pid>/environ exposes the agent's environment
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/classifier.rs]
     changed: "2026-09-29"
