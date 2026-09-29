@@ -38,14 +38,15 @@ sudo apt update && sudo apt upgrade -y
 Download the ARM64 Linux binary from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases):
 
 ```bash
-# Download latest ARM64 build
-wget https://github.com/arkavo-org/arkavo-edge/releases/latest/download/arkavo-aarch64-linux.tar.gz
+# Release archives carry the version in their name; set the release you want
+VERSION=0.98.0
+wget https://github.com/arkavo-org/arkavo-edge/releases/download/${VERSION}/arkavo-${VERSION}-aarch64-linux.tar.gz
 
-# Extract
-tar -xzf arkavo-aarch64-linux.tar.gz
+# Extract (the archive contains a single file, arkavo)
+tar -xzf arkavo-${VERSION}-aarch64-linux.tar.gz
 
 # Install to system
-sudo cp arkavo-aarch64-linux /usr/local/bin/arkavo
+sudo cp arkavo /usr/local/bin/arkavo
 sudo chmod +x /usr/local/bin/arkavo
 
 # Verify installation
@@ -130,8 +131,8 @@ source ~/.arkavo-env
 # Launch agent with auto-configuration
 arkavo
 
-# Or specify model explicitly
-arkavo --model ~/.cache/arkavo/models/gemma-3-270m-it-Q4_0.gguf
+# Or chat against a specific GGUF file
+arkavo chat --gguf ~/.cache/arkavo/models/gemma-3-270m-it-Q4_0.gguf
 ```
 
 ### Systemd Service (Run on Boot)
@@ -320,12 +321,12 @@ Test your Raspberry Pi 5 performance:
 ```bash
 # Simple benchmark
 source ~/.arkavo-env
-time arkavo chat --prompt "Write a haiku about computing" --max-tokens 50
+time arkavo chat --prompt "Write a haiku about computing"
 
-# Expected: ~3-10 seconds for 50 tokens (5-15 t/s)
+# Expected: 5-15 tokens per second
 
 # Sustained load test
-arkavo chat --prompt "Write a comprehensive guide to Rust programming" --max-tokens 500
+arkavo chat --prompt "Write a comprehensive guide to Rust programming"
 
 # Monitor during test
 watch -n 1 "vcgencmd measure_temp && cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
@@ -360,7 +361,7 @@ passwd
 # Enable firewall
 sudo apt install -y ufw
 sudo ufw allow ssh
-sudo ufw allow 8080/tcp  # Arkavo UI port (adjust as needed)
+sudo ufw allow 7700/tcp  # Arkavo UI default port (adjust as needed)
 sudo ufw enable
 
 # Auto-update security patches
