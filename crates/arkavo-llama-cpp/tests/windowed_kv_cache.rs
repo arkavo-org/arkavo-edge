@@ -16,8 +16,18 @@ use arkavo_llama_cpp::{
     tokenize_with_model, LlamaContext, LlamaModel,
 };
 
-const PROMPT: &str = "The capital of France is Paris. The capital of Italy is Rome. \
-                      The capital of Spain is";
+const PASSAGE: &str = "The capital of France is Paris. The capital of Italy is Rome. \
+                       The capital of Japan is Tokyo. The capital of Egypt is Cairo. ";
+
+const QUESTION: &str = "The capital of Spain is";
+
+/// Tokens sent per decode call, well under the smallest default batch.
+const CHUNK_TOKENS: usize = 256;
+
+/// Prompt tokens beyond the sliding window. A windowed cache holds the
+/// window plus one micro-batch (512 by default), so a prompt this much
+/// longer than the window forces it to recycle cells before generation.
+const TOKENS_PAST_WINDOW: usize = 768;
 
 fn model() -> Option<LlamaModel> {
     let path = std::env::var("ARKAVO_TEST_TEXT_MODEL").ok()?;
@@ -35,10 +45,17 @@ fn model() -> Option<LlamaModel> {
     Some(model)
 }
 
-fn decode(ctx: &LlamaContext, tokens: &[i32], pos: i32) {
-    let mut batch = batch_init_with_tokens(tokens, pos, true);
-    decode_batch(ctx, batch).expect("decode");
-    batch_free(&mut batch);
+/// Decodes `tokens` starting at `pos`, a chunk at a time, and returns the
+/// position after the last one.
+fn decode(ctx: &LlamaContext, tokens: &[i32], pos: i32) -> i32 {
+    let mut next = pos;
+    for chunk in tokens.chunks(CHUNK_TOKENS) {
+        let mut batch = batch_init_with_tokens(chunk, next, true);
+        decode_batch(ctx, batch).expect("decode");
+        batch_free(&mut batch);
+        next += i32::try_from(chunk.len()).expect("chunk length");
+    }
+    next
 }
 
 fn last_logits(ctx: &LlamaContext, model: &LlamaModel) -> Vec<f32> {
@@ -59,8 +76,21 @@ fn argmax(logits: &[f32]) -> i32 {
     i32::try_from(index).expect("token id")
 }
 
+/// A prompt long enough to outgrow the model's windowed cache.
 fn prompt_tokens(model: &LlamaModel) -> Vec<i32> {
-    tokenize_with_model(model.get_vocab(), PROMPT.as_bytes()).expect("tokenize")
+    let target = model.sliding_window() as usize + TOKENS_PAST_WINDOW;
+    // Tokens per repetition vary with the tokenizer, so the passage is
+    // repeated until the prompt is long enough rather than a computed
+    // number of times.
+    let mut repeats = 16;
+    loop {
+        let text = format!("{}{QUESTION}", PASSAGE.repeat(repeats));
+        let tokens = tokenize_with_model(model.get_vocab(), text.as_bytes()).expect("tokenize");
+        if tokens.len() >= target {
+            return tokens;
+        }
+        repeats *= 2;
+    }
 }
 
 #[test]
@@ -75,9 +105,9 @@ fn context_has_the_configured_length_and_generates() {
     assert_eq!(ctx.context_length(), requested.next_multiple_of(256));
 
     let prompt = prompt_tokens(&model);
-    decode(&ctx, &prompt, 0);
+    assert!(prompt.len() < ctx.context_length() as usize);
+    let mut pos = decode(&ctx, &prompt, 0);
 
-    let mut pos = i32::try_from(prompt.len()).expect("prompt length");
     let mut generated = Vec::new();
     for _ in 0..8 {
         let token = argmax(&last_logits(&ctx, &model));
@@ -86,8 +116,7 @@ fn context_has_the_configured_length_and_generates() {
         if model.is_eog(token) {
             break;
         }
-        decode(&ctx, &[token], pos);
-        pos += 1;
+        pos = decode(&ctx, &[token], pos);
     }
     assert!(!generated.is_empty());
     assert_eq!(ctx.get_memory().seq_pos_max(0), pos - 1);
@@ -108,9 +137,8 @@ fn rewinding_the_tail_of_the_last_batch_matches_a_clean_run() {
     }
     let ctx = LlamaContext::new(&model).expect("context");
     let prompt = prompt_tokens(&model);
-    let start = i32::try_from(prompt.len()).expect("prompt length");
 
-    decode(&ctx, &prompt, 0);
+    let start = decode(&ctx, &prompt, 0);
     let accepted = argmax(&last_logits(&ctx, &model));
     decode(&ctx, &[accepted], start);
     let follow_up = argmax(&last_logits(&ctx, &model));
