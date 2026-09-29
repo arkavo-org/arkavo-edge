@@ -25,11 +25,37 @@ Vertical-slice SwarmKit for [arkavo-org/arkavo-edge#573](https://github.com/arka
 ## Validate
 
 ```bash
+arkavo kit validate examples/campaign-kit/campaign-kit.swarmkit.yaml
+```
+
+Loads the manifest, validates cross-block invariants, and checks that the declared `kit.id` matches the BLAKE3 hash of the canonical-form manifest. It fails on an expired kit and on a role that names a model the router does not know.
+
+The cross-block invariants are those of spec §4.6, §5.1, and §10.1. The declared `kit.id` in the YAML is the BLAKE3 hash of the canonical-form manifest, so any edit to the manifest makes it stale. While editing, set `kit.id` to `""`: `arkavo kit validate` then prints the computed id and exits successfully. Paste the printed value into `kit.id` when the manifest is final.
+
+From a source checkout without an installed binary, the equivalent is:
+
+```bash
 cargo run -p arkavo-swarmkit --example validate_kit -- \
   examples/campaign-kit/campaign-kit.swarmkit.yaml
 ```
 
-The example binary parses, validates cross-block invariants (per spec §4.6, §5.1, §10.1), and computes the BLAKE3 `kit.id` from the canonical-form manifest. The declared `kit.id` in the YAML is the result of that computation; any edit to the manifest will require recomputing the id (or temporarily setting it to `""` to skip the §9.1 hash check during authoring).
+## Run
+
+Load the kit into the web UI gateway to see one entry per role in the AG-UI ARP panel:
+
+```bash
+ARKAVO_SWARMKIT_PATH=examples/campaign-kit/campaign-kit.swarmkit.yaml arkavo ui
+```
+
+Loading builds per-role policy, trace, and panel entries. It does not start the roles or run the pipeline between them; see [What a kit launch does today](../../docs/SWARMKIT.md#what-a-kit-launch-does-today).
+
+Start each role as its own agent process:
+
+```bash
+arkavo agent -c examples/campaign-kit/campaign-kit.swarmkit.yaml -n analyst -p 8341
+arkavo agent -c examples/campaign-kit/campaign-kit.swarmkit.yaml -n copy -p 8342
+arkavo agent -c examples/campaign-kit/campaign-kit.swarmkit.yaml -n critic -p 8343
+```
 
 ## Skills
 
@@ -43,15 +69,14 @@ To regenerate signatures when content changes:
 cargo run -p arkavo-swarmkit-runtime --example sign_campaign_skills
 ```
 
-Edit the YAML's `signature` and `signed_by` fields with the output, then
-recompute `kit.id`:
+Edit the YAML's `signature` and `signed_by` fields with the output, set
+`kit.id` to `""`, then recompute it:
 
 ```bash
-cargo run -p arkavo-swarmkit --example validate_kit -- \
-  examples/campaign-kit/campaign-kit.swarmkit.yaml
+arkavo kit validate examples/campaign-kit/campaign-kit.swarmkit.yaml
 ```
 
-Set `kit.id` in the YAML to the computed value.
+Set `kit.id` in the YAML to the printed value.
 
 ## Skill signature verification at gateway boot
 

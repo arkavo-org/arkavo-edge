@@ -49,8 +49,34 @@ TDF policy" (§6.4).
 ## Validate
 
 ```bash
+arkavo kit validate examples/compliance-kit/compliance-kit.swarmkit.yaml
+```
+
+Loads the manifest, validates cross-block invariants, and checks that the declared `kit.id` matches the BLAKE3 hash of the canonical-form manifest. It fails on an expired kit and on a role that names a model the router does not know.
+
+From a source checkout without an installed binary, the equivalent is:
+
+```bash
 cargo run -p arkavo-swarmkit --example validate_kit -- \
   examples/compliance-kit/compliance-kit.swarmkit.yaml
+```
+
+## Run
+
+Load the kit into the web UI gateway to see one entry per role in the AG-UI ARP panel:
+
+```bash
+ARKAVO_SWARMKIT_PATH=examples/compliance-kit/compliance-kit.swarmkit.yaml arkavo ui
+```
+
+Loading builds per-role policy, trace, and panel entries. It does not start the roles or run the pipeline between them; see [What a kit launch does today](../../docs/SWARMKIT.md#what-a-kit-launch-does-today).
+
+Start each role as its own agent process:
+
+```bash
+arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n pii_classifier -p 8341
+arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n policy_enforcer -p 8342
+arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n auditor -p 8343
 ```
 
 ## Skills
@@ -64,14 +90,13 @@ To regenerate signatures:
 cargo run -p arkavo-swarmkit-runtime --example sign_compliance_skills
 ```
 
-Then update the YAML's `signature` fields and recompute `kit.id`:
+Then update the YAML's `signature` fields, set `kit.id` to `""`, and recompute it:
 
 ```bash
-cargo run -p arkavo-swarmkit --example validate_kit -- \
-  examples/compliance-kit/compliance-kit.swarmkit.yaml
+arkavo kit validate examples/compliance-kit/compliance-kit.swarmkit.yaml
 ```
 
-Set `kit.id` in the YAML to the computed value.
+Set `kit.id` in the YAML to the printed value.
 
 ## Skill signature verification at gateway boot
 
