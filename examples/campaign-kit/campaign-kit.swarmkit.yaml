@@ -1,6 +1,6 @@
 spec_version: "1.0.0"
 kit:
-  id: "blake3:1s2sbIzo3ep1LhHYFPK6wC20aNaPD-cG0P7eJWtblP8"
+  id: "blake3:CGzborRmr280Jq_2qctxhFuMJz1YRRTCKOsQymZjRhc"
   name: "Campaign Kit (3-agent MVP)"
   version: "0.1.0"
   description: >-
@@ -11,8 +11,8 @@ kit:
   authors:
     - did: "did:web:arkavo.com"
       name: "Arkavo"
-  created: "2026-04-29T12:00:00Z"
-  expires: "2026-07-28T12:00:00Z"
+  created: "2026-09-29T00:00:00Z"
+  expires: "2027-09-29T00:00:00Z"
   nonce: "APW3Y2vM2k92WNTjI1kLrg"
 
 objective:
@@ -45,8 +45,8 @@ roles:
     description: "Summarize the source asset and extract selling points."
     agent_provisioning:
       model:
-        family: "gemma-4"
-        size: "9B"
+        family: "gemma"
+        size: "12B"
         backend: "llama.cpp"
       inference:
         max_tokens: 1024
@@ -92,8 +92,8 @@ roles:
     description: "Generate platform-specific copy from the analyst's selling points."
     agent_provisioning:
       model:
-        family: "gemma-4"
-        size: "9B"
+        family: "gemma"
+        size: "12B"
         backend: "llama.cpp"
       inference:
         max_tokens: 1024
@@ -139,8 +139,8 @@ roles:
     description: "Score the produced copy against the rubric and flag unsupported claims."
     agent_provisioning:
       model:
-        family: "qwen3"
-        size: "7B"
+        family: "qwen"
+        size: "9B"
         backend: "llama.cpp"
       inference:
         max_tokens: 512

@@ -12,8 +12,8 @@ kit:
   authors:
     - did: "did:web:arkavo.com"
       name: "Arkavo Edge"
-  created: "2026-06-14T00:00:00Z"
-  expires: "2026-09-12T00:00:00Z"
+  created: "2026-09-29T00:00:00Z"
+  expires: "2027-09-29T00:00:00Z"
   nonce: "g7Hk2pQ9rLm4Xc1Vn0 TZ"
 
 objective:
@@ -105,8 +105,8 @@ roles:
     description: "Review the PR diff and post a line-level GitHub review."
     agent_provisioning:
       model:
-        family: "qwen3"
-        size: "7B"
+        family: "qwen"
+        size: "9B"
         backend: "llama.cpp"
       inference:
         max_tokens: 1536
@@ -216,8 +216,8 @@ roles:
     description: "Repo housekeeping: triage issues, label, and open chore PRs."
     agent_provisioning:
       model:
-        family: "qwen3"
-        size: "7B"
+        family: "qwen"
+        size: "9B"
         backend: "llama.cpp"
       inference:
         max_tokens: 1024
