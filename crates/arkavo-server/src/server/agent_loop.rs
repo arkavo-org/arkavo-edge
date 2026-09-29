@@ -5,6 +5,7 @@ use tracing::{debug, error, info, warn};
 use crate::server::tool_memory::ToolMemory;
 
 mod cycle_prompt;
+use cycle_prompt::PROACTIVE_ANALYSIS_MARKER;
 
 /// Absolute safety limit for agent cycles to prevent runaway loops.
 /// At a 5-second minimum tick interval, this allows ~6 days of continuous operation.
@@ -133,6 +134,10 @@ pub async fn run_agent_loop(
         crate::server::conversation_window::ConversationWindow::new(min_context, estimator);
     conversation.set_system_message(arkavo_llm::Message::system(&config.purpose));
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
+    // Whether anything queued for the next cycle is a task someone delegated,
+    // as opposed to a commander's state broadcast. Every tick empties the
+    // queue, by serving it or by refusing it, so every tick takes this flag.
+    let mut delegated_task_queued = false;
 
     // Build initial tool registry (unfiltered). Filtering by grant set is done
     // lazily on first cycle after specialization (design D9).
@@ -164,6 +169,7 @@ pub async fn run_agent_loop(
                 config.inference_active.store(true, std::sync::atomic::Ordering::SeqCst);
                 cycle += 1;
                 config.orchestrator_tick.store(cycle, Relaxed);
+                let serving_delegated_task = std::mem::take(&mut delegated_task_queued);
 
                 if cycle >= MAX_AGENT_CYCLES {
                     error!(
@@ -356,6 +362,7 @@ pub async fn run_agent_loop(
                     dead_man_warning: &dead_man_warning,
                     message_block: &message_block,
                     has_mcp_tools: config.has_mcp_tools,
+                    serving_delegated_task,
                 });
 
                 // Skip empty cycles — "Continue." with no new information just
@@ -654,6 +661,7 @@ pub async fn run_agent_loop(
                         reply,
                         outcome,
                     } => {
+                        delegated_task_queued |= !cycle_prompt::is_proactive_advisory(&content);
                         pending_messages.push(PendingMessage {
                             content: format!(
                                 "[msg correlation_id={} from={}] {}",
@@ -673,6 +681,7 @@ pub async fn run_agent_loop(
                         reply,
                         outcome,
                     } => {
+                        delegated_task_queued = true;
                         pending_messages.insert(
                             0,
                             PendingMessage {
@@ -932,7 +941,7 @@ pub(super) async fn broadcast_state_to_peers(
 
     let task = if let Some(ticket) = iroh_ticket {
         format!(
-            "PROACTIVE ANALYSIS — Full state available via Iroh P2P.\n\
+            "{PROACTIVE_ANALYSIS_MARKER} — Full state available via Iroh P2P.\n\
              Use iroh_fetch with this ticket to get full data: {ticket}\n\n\
              Summary: {compacted}\n\n\
              Respond with urgent action recommendations ONLY if you see \
@@ -941,7 +950,7 @@ pub(super) async fn broadcast_state_to_peers(
         )
     } else {
         format!(
-            "PROACTIVE ANALYSIS — Review this state update and respond \
+            "{PROACTIVE_ANALYSIS_MARKER} — Review this state update and respond \
              with urgent action recommendations ONLY if you see problems \
              in your domain of expertise.\n\
              If everything looks fine, respond with 'No issues detected.'\n\n\

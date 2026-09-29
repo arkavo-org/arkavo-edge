@@ -11,9 +11,22 @@ use arkavo_protocol::agent_config::AgentMode;
 /// Prompt of a cycle that has nothing new to work on.
 pub(super) const IDLE_PROMPT: &str = "Continue.";
 
-/// Keeps a toolless advisor's analysis short enough to act on.
+/// Opening words of the state broadcast a commander sends its specialists.
+///
+/// The broadcast arrives as an ordinary `message/send`, so its text is the
+/// only thing that tells the receiving loop it is advisory rather than a task
+/// someone delegated. Sender and receiver share this constant so the two
+/// cannot drift apart.
+pub(super) const PROACTIVE_ANALYSIS_MARKER: &str = "PROACTIVE ANALYSIS";
+
+/// Keeps an advisor's unsolicited analysis short enough to act on.
 const ADVISORY_BREVITY: &str =
     "Respond in under 200 words. No reasoning preamble. Give actionable advice only.";
+
+/// True when `content` is a commander's state broadcast.
+pub(super) fn is_proactive_advisory(content: &str) -> bool {
+    content.trim_start().starts_with(PROACTIVE_ANALYSIS_MARKER)
+}
 
 /// Everything that can put work in front of a cycle.
 pub(super) struct CycleInputs<'a> {
@@ -21,9 +34,16 @@ pub(super) struct CycleInputs<'a> {
     pub dead_man_warning: &'a str,
     pub message_block: &'a str,
     pub has_mcp_tools: bool,
+    /// A requester delegated a task to this cycle and is waiting on its
+    /// result, as opposed to a broadcast the agent may answer in a line.
+    pub serving_delegated_task: bool,
 }
 
 /// Build the user prompt for a cycle.
+///
+/// The brevity rule is for advice nobody asked for. A delegated task is
+/// governed by the role's own instructions: capping it at 200 words overrode
+/// those instructions and truncated the deliverable the requester asked for.
 pub(super) fn assemble(inputs: &CycleInputs<'_>) -> String {
     let msg_section = if inputs.message_block.is_empty() {
         String::new()
@@ -38,7 +58,7 @@ pub(super) fn assemble(inputs: &CycleInputs<'_>) -> String {
     if body.is_empty() {
         return IDLE_PROMPT.to_string();
     }
-    if !inputs.has_mcp_tools {
+    if !inputs.has_mcp_tools && !inputs.serving_delegated_task {
         return format!("{body}\n\n{ADVISORY_BREVITY}");
     }
     body.to_string()
@@ -77,27 +97,66 @@ pub(super) fn dead_man_switch_applies(mode: &AgentMode) -> bool {
 mod tests {
     use super::*;
 
-    fn inputs(message_block: &str) -> CycleInputs<'_> {
+    fn inputs(message_block: &str, serving_delegated_task: bool) -> CycleInputs<'_> {
         CycleInputs {
             specialist_context: "",
             dead_man_warning: "",
             message_block,
             has_mcp_tools: false,
+            serving_delegated_task,
         }
     }
 
     #[test]
     fn nothing_to_work_on_is_the_idle_prompt() {
-        assert_eq!(assemble(&inputs("")), IDLE_PROMPT);
+        assert_eq!(assemble(&inputs("", false)), IDLE_PROMPT);
+        assert_eq!(assemble(&inputs("", true)), IDLE_PROMPT);
     }
 
     #[test]
     fn incoming_messages_become_the_prompt() {
-        let prompt = assemble(&inputs("[event from=game] raid"));
+        let prompt = assemble(&inputs("[event from=game] raid", false));
         assert!(
             prompt.starts_with("## Incoming Messages\n[event from=game] raid"),
             "got {prompt}"
         );
+    }
+
+    /// Regression: the brevity rule was appended to every toolless cycle, so a
+    /// task a requester delegated was capped at 200 words whatever the role's
+    /// own skill instructions said.
+    #[test]
+    fn a_delegated_task_is_not_capped() {
+        let prompt = assemble(&inputs("[msg from=requester] Write the launch brief", true));
+        assert!(prompt.ends_with("Write the launch brief"), "got {prompt}");
+        assert!(!prompt.contains("200 words"), "got {prompt}");
+    }
+
+    #[test]
+    fn unsolicited_advice_is_still_capped() {
+        let prompt = assemble(&inputs(
+            "[msg from=commander] PROACTIVE ANALYSIS — review",
+            false,
+        ));
+        assert!(prompt.ends_with(ADVISORY_BREVITY), "got {prompt}");
+    }
+
+    #[test]
+    fn an_agent_with_tools_is_never_capped() {
+        let mut with_tools = inputs("[event from=game] raid", false);
+        with_tools.has_mcp_tools = true;
+        assert!(!assemble(&with_tools).contains("200 words"));
+    }
+
+    #[test]
+    fn a_state_broadcast_is_recognised_by_its_opening_words() {
+        assert!(is_proactive_advisory(
+            "PROACTIVE ANALYSIS — Review this state update"
+        ));
+        assert!(is_proactive_advisory("  PROACTIVE ANALYSIS — Full state"));
+        assert!(!is_proactive_advisory(
+            "Summarise the PROACTIVE ANALYSIS we ran last week"
+        ));
     }
 
     /// Regression: a specialist ran a full planner cycle on `Continue.` at

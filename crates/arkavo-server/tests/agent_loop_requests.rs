@@ -104,3 +104,42 @@ async fn a_specialist_that_answers_in_text_is_not_pushed_to_act() {
         );
     }
 }
+
+const BREVITY_RULE: &str = "Respond in under 200 words";
+
+/// Regression: every task sent to a toolless specialist had "Respond in under
+/// 200 words" appended, which overrode the role's own skill instructions and
+/// truncated the deliverable.
+#[tokio::test]
+async fn a_delegated_task_is_not_capped_at_200_words() {
+    let script = Script::new(vec![text("The full brief, at whatever length it needs.")]);
+    let agent = RunningAgent::start(AgentMode::Specialist, false, script).await;
+
+    agent
+        .ask("Write the launch brief for the spring campaign.")
+        .await;
+    let script = agent.stop().await;
+
+    let prompt = script.prompt(0);
+    assert!(
+        prompt.contains("Write the launch brief for the spring campaign."),
+        "got {prompt}"
+    );
+    assert!(!prompt.contains(BREVITY_RULE), "got {prompt}");
+}
+
+/// The rule stays where it is wanted: a commander's state broadcast asks for a
+/// short advisory, not a deliverable.
+#[tokio::test]
+async fn a_state_broadcast_is_still_answered_briefly() {
+    let script = Script::new(vec![text("No issues detected.")]);
+    let agent = RunningAgent::start(AgentMode::Specialist, false, script).await;
+
+    agent
+        .ask("PROACTIVE ANALYSIS — Review this state update and respond.")
+        .await;
+    let script = agent.stop().await;
+
+    let prompt = script.prompt(0);
+    assert!(prompt.contains(BREVITY_RULE), "got {prompt}");
+}
