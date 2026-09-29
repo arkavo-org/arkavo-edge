@@ -185,6 +185,7 @@ mod tests {
             &[
                 analysis(true, Some("w"), "warning"),
                 analysis(true, Some("i"), "info"),
+                analysis(true, Some("b"), "bogus"),
             ],
             &event_tx,
         )
@@ -192,6 +193,7 @@ mod tests {
         drop(event_tx);
 
         let events = drain(&mut event_rx).await;
+        assert_eq!(events.len(), 4, "expected 3 notifications then summary");
         assert!(matches!(
             events[0],
             AgUiEvent::SystemNotification {
@@ -206,6 +208,39 @@ mod tests {
                 ..
             }
         ));
+        assert!(
+            matches!(
+                events[2],
+                AgUiEvent::SystemNotification {
+                    severity: NotificationSeverity::Info,
+                    ..
+                }
+            ),
+            "unknown severity must fall back to Info"
+        );
+    }
+
+    #[tokio::test]
+    async fn timeout_without_message_counts_unhealthy_but_does_not_notify() {
+        let (event_tx, mut event_rx) = mpsc::channel(10);
+
+        publish_analyses(&[analysis(true, None, "critical")], &event_tx).await;
+        drop(event_tx);
+
+        let events = drain(&mut event_rx).await;
+        assert_eq!(events.len(), 1, "no message means no notification");
+        match &events[0] {
+            AgUiEvent::TelemetryEvent {
+                event_type,
+                details,
+                ..
+            } => {
+                assert_eq!(event_type, "health_summary");
+                assert_eq!(details["unhealthy"], 1);
+                assert_eq!(details["healthy"], 0);
+            }
+            other => panic!("Expected health_summary, got {other:?}"),
+        }
     }
 
     // The verdict comes from a live local model, so this asserts what holds for
