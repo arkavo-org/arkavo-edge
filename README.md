@@ -152,7 +152,7 @@ For offensive-security reviewers: here's what is real today and what is still on
 | Capability | Status | Notes |
 |------------|--------|-------|
 | **OpenTDF / KAS encryption** | Shipped | Tool outputs and SwarmKit payloads can be wrapped in TDF; KAS policy enforcement is live. |
-| **ABAC / attribute release policies** | Shipped | Roles declare TDF Attribute Release Policies; the orchestrator constructs role-scoped policies before data reaches the role. |
+| **ABAC / attribute release policies** | Library shipped, not wired into kit launch | Roles declare TDF Attribute Release Policies and kit validation checks them. The runtime library turns each one into a role-scoped OpenTDF policy (`role_policy()`), but the `arkavo ui` and `arkavo agent` launch paths do not call it yet. |
 | **SwarmKit policy isolation** | Shipped for kits loaded into the gateway | A kit loaded through `ARKAVO_SWARMKIT_PATH` gets one Agent Runtime Policy, policy cache, and decision trace per role. On the `arkavo agent -c <kit>` path a role's `isolation`, network egress, budget, and `mcp_tools` grant fields are parsed but not enforced: the process takes the role's id, model, and skill instructions, plus the kit-level `runtime` block. |
 | **DID:key identity** | Shipped | Agents are identified by `did:key` derived from an Ed25519 keypair; identity is stable per device. |
 | **mDNS mesh discovery** | Shipped | Pure-Rust mDNS with no system Avahi/Bonjour dependency; agents auto-discover and form a local mesh. |
