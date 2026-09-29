@@ -17,6 +17,9 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
 
+mod answering;
+pub(super) use answering::for_requester;
+
 /// Batch of tool calls from the planner
 struct PlannedActions {
     tool_calls: Vec<ParsedToolCall>,
@@ -376,9 +379,13 @@ async fn planner_track(
         result.final_text = response.content.clone();
 
         if response.tool_calls.is_empty() {
+            if answering::text_is_final(&response.content) {
+                info!("Planner round {plan_round}: text answer for the requester, done");
+                break;
+            }
             if plan_round == 0 {
-                // Round 0 produced text but no tool calls. Retry on round 1
-                // with an explicit instruction to use tools.
+                // Round 0 called no tool and nobody is waiting on its text.
+                // Retry on round 1 with an explicit instruction to use tools.
                 warn!("Planner round 0: no tool calls, will retry with tool nudge");
                 messages.push(response.as_assistant_message());
                 messages.push(arkavo_llm::Message::user(

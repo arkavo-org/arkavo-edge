@@ -421,7 +421,10 @@ pub async fn run_agent_loop(
                 };
                 let granted_opt: Option<&std::collections::HashSet<String>> =
                     if !specialized { None } else { Some(&granted_set) };
-                match super::conductor::execute_with_conductor_and_learning(
+                // Boxed so the loop's own future stays small enough for its
+                // caller to hold: the conductor's future is large, and each
+                // branch below would otherwise store it inline.
+                let conductor_cycle = Box::pin(super::conductor::execute_with_conductor_and_learning(
                     &config.conductor,
                     &config.router,
                     &config.mcp_registry,
@@ -441,9 +444,15 @@ pub async fn run_agent_loop(
                     granted_opt,
                     #[cfg(feature = "iroh")]
                     config.iroh_node.as_ref(),
-                )
-                .await
-                {
+                ));
+                // A requester's cycle ends on the model's text. Only a cycle
+                // nobody asked for is pushed on toward a tool call.
+                let cycle_result = if cycle_waiters.is_empty() {
+                    conductor_cycle.await
+                } else {
+                    super::conductor_parallel::for_requester(conductor_cycle).await
+                };
+                match cycle_result {
                     Ok(result) => {
                         let elapsed = start.elapsed();
 
