@@ -2,11 +2,24 @@
 
 #[cfg(feature = "mdns")]
 pub mod mdns {
-    use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+    use mdns_sd::{IfKind, ServiceDaemon, ServiceEvent, ServiceInfo};
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::{RwLock, mpsc};
+
+    /// An mDNS daemon that also listens on the loopback interfaces.
+    ///
+    /// An agent listens on loopback unless its kit says otherwise, and the
+    /// record of such an agent is announced on the loopback interface only.
+    /// mdns-sd leaves that interface out unless asked, which hides every
+    /// agent started with the default address from a browser on the same
+    /// machine.
+    pub fn browsing_daemon() -> mdns_sd::Result<ServiceDaemon> {
+        let daemon = ServiceDaemon::new()?;
+        daemon.enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])?;
+        Ok(daemon)
+    }
 
     /// Discovers A2A agents using mDNS
     pub async fn discover_agents(
@@ -21,7 +34,7 @@ pub mod mdns {
     ) -> Result<(), Box<dyn std::error::Error>> {
         println!("AG-UI: mDNS daemon starting...");
 
-        let mdns = ServiceDaemon::new()?;
+        let mdns = browsing_daemon()?;
         let service_type = "_a2a._tcp.local.";
         let receiver = mdns.browse(service_type)?;
         println!("AG-UI: mDNS browsing for {service_type}");
@@ -320,6 +333,79 @@ pub mod mdns {
 
         println!("AG-UI: mDNS service registered successfully");
         Ok(mdns)
+    }
+
+    // Runs on macOS only, the one platform this was verified on. Its loopback
+    // interface carries multicast; on Linux `lo` usually lacks the MULTICAST
+    // flag, and whether mDNS works over it there has not been established.
+    #[cfg(all(test, target_os = "macos"))]
+    mod tests {
+        use super::*;
+
+        /// Announces an agent bound to 127.0.0.1 on the loopback interfaces and
+        /// on no other, so the record can only reach a browser that listens
+        /// there and nothing the test publishes leaves the machine.
+        fn announce_on_loopback(agent_id: &str, port: u16) -> mdns_sd::ServiceDaemon {
+            use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
+            use std::net::{IpAddr, Ipv4Addr};
+
+            let daemon = ServiceDaemon::new().expect("mDNS daemon");
+            daemon
+                .disable_interface(IfKind::All)
+                .expect("leave every interface");
+            daemon
+                .enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])
+                .expect("join the loopback interfaces");
+
+            let mut properties = std::collections::HashMap::new();
+            properties.insert("agent_id".to_string(), agent_id.to_string());
+            properties.insert("purpose".to_string(), "Plans the work".to_string());
+            let service = ServiceInfo::new(
+                "_a2a._tcp.local.",
+                agent_id,
+                &format!("{agent_id}.local."),
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                port,
+                properties,
+            )
+            .expect("service info");
+            daemon.register(service).expect("register the agent");
+            daemon
+        }
+
+        /// Regression: the AG-UI browsed with a daemon that skips loopback
+        /// interfaces, so an agent on the same machine, listening on the
+        /// default address, never appeared in its agent list.
+        #[test]
+        fn the_browsing_daemon_finds_an_agent_on_loopback() {
+            let agent_id = format!("loopback-agui-{}", std::process::id());
+            let announcer = announce_on_loopback(&agent_id, 48_434);
+
+            let browser = browsing_daemon().expect("browsing daemon");
+            let receiver = browser.browse("_a2a._tcp.local.").expect("browse");
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let mut found = None;
+            while found.is_none() && std::time::Instant::now() < deadline {
+                if let Ok(ServiceEvent::ServiceResolved(info)) =
+                    receiver.recv_timeout(Duration::from_millis(100))
+                    && info.get_property_val_str("agent_id") == Some(agent_id.as_str())
+                {
+                    found = Some(info);
+                }
+            }
+            browser.shutdown().ok();
+            announcer.shutdown().ok();
+
+            let info = found.unwrap_or_else(|| panic!("{agent_id} was not resolved"));
+            assert_eq!(info.get_port(), 48_434);
+            assert!(
+                info.get_addresses()
+                    .iter()
+                    .all(std::net::IpAddr::is_loopback),
+                "{:?}",
+                info.get_addresses()
+            );
+        }
     }
 }
 
