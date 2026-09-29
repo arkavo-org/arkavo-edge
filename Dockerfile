@@ -42,12 +42,13 @@ ENV ARKAVO_SKIP_FIRST_RUN=1
 
 # No ARKAVO_AGUI_BIND or EXPOSE here: this image cannot run `arkavo ui` (no
 # local backend to serve inference), so there is no gateway port to publish.
-# The same holds for `arkavo agent`, whose A2A listener binds 127.0.0.1 unless
-# given `--bind 0.0.0.0:<port>` or a kit with `runtime.listen`.
 # A local-enabled image that adds a port mapping should set
 # ARKAVO_AGUI_BIND=0.0.0.0 itself — see the opt-in in
 # docs/deploy/container.md and the compose/Kubernetes examples in
 # docs/deploy/self-host.md.
+# A local-enabled image that runs `arkavo agent` has the same need: its A2A
+# listener binds 127.0.0.1 unless given `--listen 0.0.0.0:<port>` or a kit
+# listen address.
 
 ENTRYPOINT ["arkavo"]
 CMD ["--help"]

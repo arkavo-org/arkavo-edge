@@ -107,7 +107,7 @@ Each example README includes a capability badge linking to specs:
 | hrm | 6 | family-travel-mesh | ✅ |
 | gossip-protocol | 8 | fleet-immunity | ✅ |
 | mcp-tools | 10 | minecraft | ✅ |
-| network-security | 17 | secure-agent | ✅ |
+| network-security | 18 | secure-agent | ✅ |
 | orchestrator | 11 | software-development-lifecycle | ✅ |
 | mcp-claude | 9 | code-agent-claude | ✅ |
 | gemini | 10 | code-agent-gemini | ✅ |
