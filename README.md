@@ -155,6 +155,10 @@ arkavo agent  # Runs with your config
 | `ARKAVO_SKIP_FIRST_RUN=1` | Never prompt for the first-run model download. Commands that need a local model still fail until one is provisioned. |
 | `ARKAVO_CHAT_TIMEOUT_SECS` | Time budget for a chat inference, in whole seconds from 5 to 86400. Without it, a named local model gets 180 seconds. |
 | `ARKAVO_DISABLE_SPEC_DECODING` | Any value other than empty, `0`, or `false` turns speculative decoding off. Use it to diagnose corrupted output. |
+| `ARKAVO_N_CTX` | Context window for local models, in tokens. Without it, a model gets a quarter of its trained context, up to 16384. |
+| `ARKAVO_MAX_CONTEXTS` | Inference contexts kept per local model in one process. The default is 1; further requests wait for it. |
+| `ARKAVO_CONTEXT_WAIT_SECS` | How long a request waits for a free context before it fails. The default is 300. |
+| `GGML_METAL_RESIDENCY_KEEP_ALIVE_S` | On macOS, seconds an agent keeps its model's GPU memory wired after an inference. Unset, an agent releases it at once so other agents on the machine can run; set it (llama.cpp's own default is 180) when one agent has the GPU to itself. |
 
 API keys for cloud providers are read from the environment (for example `GEMINI_API_KEY`) and are never written in a kit.
 
