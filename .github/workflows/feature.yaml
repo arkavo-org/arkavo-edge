@@ -276,6 +276,7 @@ jobs:
             cargo bench --locked -p arkavo-router --no-run --no-default-features --features llm-remote,gemini,openai
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo test --locked -p arkavo-mcp-tools
+            cargo test --locked -p arkavo-mcp-code-search --lib
           elif [ "${{ matrix.group }}" = "routing" ]; then
             cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini,openai
             cargo check --locked -p arkavo-router --no-default-features
@@ -373,6 +374,7 @@ jobs:
             cargo clippy --locked -p arkavo-validation --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-code-search --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "routing" ]; then
             cargo clippy --locked -p arkavo-router --lib --bins --no-default-features --features llm-remote,gemini -- -D warnings
             cargo clippy --locked -p arkavo-dataflow --lib --bins -- -D warnings

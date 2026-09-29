@@ -448,7 +448,7 @@ components:
     module: arkavo_mcp_code_search
     description: Code search and refactoring tools
     criticality: medium
-    scenario_count: 5
+    scenario_count: 6
     invariants:
       - Tools implement MCP Tool trait
       - CodeGrep uses regex patterns
@@ -1013,7 +1013,7 @@ components:
 
 stats:
   total_specs: 86
-  total_scenarios: 829
+  total_scenarios: 830
   critical_scenarios: 258
   coverage_areas:
     - authentication

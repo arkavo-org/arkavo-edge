@@ -2,18 +2,27 @@ use crate::{CodeSearchError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 pub struct CodeGrepTool {
     schema: ToolSchema,
+    root: PathBuf,
 }
 
 impl CodeGrepTool {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    /// Searches only inside `root`; a role that needs a wider root gets it
+    /// here, at construction, rather than through a default.
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self::validate_dependencies();
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "codegrep_search".to_string(),
                 aliases: None,
@@ -84,7 +93,9 @@ impl CodeGrepTool {
             .as_str()
             .ok_or_else(|| CodeSearchError::InvalidPattern("Missing pattern".to_string()))?;
 
-        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let requested = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let path = arkavo_validation::resolve_within_root(&self.root, requested)
+            .map_err(|e| CodeSearchError::OutsideWorkspace(e.to_string()))?;
         let output_mode = params
             .get("output_mode")
             .and_then(|v| v.as_str())
@@ -92,7 +103,10 @@ impl CodeGrepTool {
 
         let mut cmd = Command::new("rg");
 
-        cmd.arg(pattern).arg(path);
+        // The pattern travels as --regexp=VALUE so a leading '-' can never be
+        // read as a flag such as --pre=<command>, which runs a program for
+        // every file searched.
+        cmd.arg(format!("--regexp={pattern}"));
 
         if params.get("case_insensitive").and_then(|v| v.as_bool()) == Some(true) {
             cmd.arg("-i");
@@ -136,6 +150,10 @@ impl CodeGrepTool {
                 }
             }
         }
+
+        // The confined path is absolute, but `--` keeps the argv shape safe
+        // even if a future caller passes something else.
+        cmd.arg("--").arg(&path);
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -248,6 +266,7 @@ impl Tool for CodeGrepTool {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use tempfile::TempDir;
     use tokio::fs;
 
@@ -270,7 +289,7 @@ mod tests {
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "async fn test() {}\n").await.unwrap();
 
-        let tool = CodeGrepTool::new();
+        let tool = CodeGrepTool::with_root(temp_dir.path());
         let params = json!({
             "pattern": "async fn",
             "path": temp_dir.path().to_str().unwrap(),
@@ -298,7 +317,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tool = CodeGrepTool::new();
+        let tool = CodeGrepTool::with_root(temp_dir.path());
         let params = json!({
             "pattern": "use ",
             "path": temp_dir.path().to_str().unwrap(),
@@ -312,5 +331,53 @@ mod tests {
         if let Ok(value) = result {
             assert!(value.get("lines").is_some());
         }
+    }
+
+    #[spec("CS-006")]
+    #[tokio::test]
+    async fn leading_dash_pattern_is_treated_as_a_literal_not_a_flag() {
+        if !is_ripgrep_available() {
+            eprintln!("skip: no rg");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("f.txt"), "value = --pre=oops\n")
+            .await
+            .unwrap();
+        let tool = CodeGrepTool::with_root(dir.path());
+        let result = tool
+            .execute(json!({
+                "pattern": "--pre=oops",
+                "path": dir.path().to_str().unwrap(),
+                "output_mode": "files"
+            }))
+            .await;
+        // Must succeed and find the file, proving the pattern was a search
+        // term and not a consumed --pre flag.
+        let v = result.expect("pattern beginning with '-' must be searched literally");
+        assert_eq!(v["count"], 1);
+    }
+
+    #[spec("CS-006")]
+    #[tokio::test]
+    async fn codegrep_path_outside_workspace_is_refused() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let tool = CodeGrepTool::with_root(ws.path());
+        let err = tool
+            .execute(json!({
+                "pattern": "x",
+                "path": outside.path().to_str().unwrap(),
+                "output_mode": "files"
+            }))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err.downcast_ref::<CodeSearchError>(),
+                Some(CodeSearchError::OutsideWorkspace(_))
+            ),
+            "{err}"
+        );
     }
 }
