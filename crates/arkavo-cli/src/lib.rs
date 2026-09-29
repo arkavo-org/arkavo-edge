@@ -84,24 +84,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "task" => commands::task::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),
         "mcp" => commands::mcp_proxy::execute(&args[1..]),
-        "login" | "logout" => {
-            let is_login = args[0] == "login";
-            let run_async = async {
-                if is_login {
-                    commands::login::execute_login().await
-                } else {
-                    commands::login::execute_logout().await
-                }
-            };
-
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle.block_on(run_async),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(run_async)
-                }
-            }
-        }
+        command @ ("login" | "logout") => commands::login::execute(command, &args[1..]),
         // Hidden commands (still accessible, just not in main help)
         #[cfg(feature = "knowledge-pack")]
         "pack" => commands::pack::execute(&args[1..]).map_err(Into::into),
