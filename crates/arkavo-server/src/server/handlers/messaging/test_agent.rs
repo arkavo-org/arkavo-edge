@@ -1,7 +1,8 @@
 //! An agent as `message/send` and `tasks/get` see it, for tests.
 //!
 //! The model is a script, so what the agent was asked is a fact a test can
-//! read back.
+//! read back. `serve` puts the agent behind a real JSON-RPC server on
+//! loopback, where it is talked to the way any client talks to an agent.
 
 #[path = "../../../../tests/support/model.rs"]
 mod model;
@@ -16,40 +17,47 @@ use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::metrics::MetricsCollector;
 use arkavo_protocol::rate_limit::{RateLimitConfig, RateLimiter};
 use arkavo_protocol::types::{
-    Message, MessagePart, MessageSendRequest, MessageSendResponse, TaskStatus,
+    Message, MessagePart, MessageSendRequest, MessageSendResponse, TaskGetRequest, TaskStatus,
 };
 use arkavo_router::{ModelChoice, ProviderFactory};
 use arkavo_tasks::task_executor::{TaskExecutor, TaskExecutorConfig};
 use arkavo_tasks::task_store::{SqliteTaskStore, TaskStore};
 use arkavo_tasks::types::Task;
+use jsonrpsee::RpcModule;
+use jsonrpsee::server::{Server, ServerHandle};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, mpsc};
 
-use super::handle_message_send;
+use super::super::tasks::handle_tasks_get;
+use super::{PlanSource, handle_message_send_from};
 use crate::server::agent_event::AgentEvent;
 use crate::server::config_helpers::AgentMetadata;
+use crate::server::pipeline::Driving;
 use crate::server::tool_memory::ToolMemory;
 use model::{SCRIPTED_MODEL, scripted_router};
 pub(super) use model::{Script, text};
 
-fn purpose(role: &str) -> String {
+pub(super) fn purpose(role: &str) -> String {
     format!("You are the {role}. Do the {role}'s work.")
 }
 
-/// One agent process, as far as `message/send` sees it.
+/// One agent process, as far as `message/send` and `tasks/get` see it.
 pub(super) struct Agent {
+    plans: PlanSource,
     router: Option<Arc<arkavo_router::Router>>,
     metrics: Arc<MetricsCollector>,
     rate_limiter: RateLimiter,
     executor: Arc<TaskExecutor>,
-    store: Arc<dyn TaskStore>,
-    mesh: Arc<MeshToolsState>,
+    pub(super) store: Arc<dyn TaskStore>,
+    pub(super) mesh: Arc<MeshToolsState>,
     metadata: Arc<RwLock<AgentMetadata>>,
     memory: Arc<RwLock<ToolMemory>>,
     events: Arc<Mutex<Option<mpsc::Sender<AgentEvent>>>>,
 }
 
 impl Agent {
+    /// An agent that answers for itself, as one started without a pipeline
+    /// kit does.
     pub(super) async fn new(
         role: &'static str,
         router: Option<Arc<arkavo_router::Router>>,
@@ -60,6 +68,7 @@ impl Agent {
                 .expect("in-memory task store"),
         );
         Self {
+            plans: PlanSource::Decided(Driving::No),
             router,
             metrics: Arc::new(MetricsCollector::new(false)),
             rate_limiter: RateLimiter::new(RateLimitConfig::default()),
@@ -84,6 +93,12 @@ impl Agent {
         Self::new(role, Some(scripted_router(script).await)).await
     }
 
+    /// The same agent with `driving` as what its kit makes of it.
+    pub(super) fn driving(mut self, driving: Driving) -> Self {
+        self.plans = PlanSource::Decided(driving);
+        self
+    }
+
     /// Give the agent an agent loop to route messages to, and return the
     /// end a loop would read from.
     pub(super) async fn with_agent_loop(&self) -> mpsc::Receiver<AgentEvent> {
@@ -96,7 +111,7 @@ impl Agent {
         &self,
         request: MessageSendRequest,
     ) -> Result<MessageSendResponse, jsonrpsee::types::ErrorObjectOwned> {
-        handle_message_send(
+        handle_message_send_from(
             &self.metrics,
             &self.rate_limiter,
             &self.executor,
@@ -114,6 +129,7 @@ impl Agent {
             self.events.clone(),
             #[cfg(feature = "iroh")]
             None,
+            &self.plans,
             request,
         )
         .await
@@ -150,9 +166,31 @@ impl Agent {
         .await
         .expect("the task finished")
     }
+
+    /// Put the agent behind a JSON-RPC server on loopback.
+    pub(super) async fn serve(self: &Arc<Self>) -> (String, ServerHandle) {
+        let mut module = RpcModule::new(self.clone());
+        module
+            .register_async_method("message/send", |params, agent, _| async move {
+                agent.message_send(params.one()?).await
+            })
+            .expect("message/send registers");
+        module
+            .register_async_method("tasks/get", |params, agent, _| async move {
+                let request: TaskGetRequest = params.one()?;
+                handle_tasks_get(&agent.metrics, &agent.rate_limiter, &agent.store, request).await
+            })
+            .expect("tasks/get registers");
+        let server = Server::builder()
+            .build("127.0.0.1:0")
+            .await
+            .expect("loopback server");
+        let address = format!("http://{}", server.local_addr().expect("bound address"));
+        (address, server.start(module))
+    }
 }
 
-fn message(content: &str, metadata: Option<Value>) -> Message {
+pub(super) fn message(content: &str, metadata: Option<Value>) -> Message {
     Message {
         parts: vec![MessagePart::Text {
             content: content.to_string(),
