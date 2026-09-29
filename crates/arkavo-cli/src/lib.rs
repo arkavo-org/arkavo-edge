@@ -2,6 +2,7 @@ pub mod cloud_consent;
 pub mod commands;
 pub mod first_run;
 pub mod hardware;
+pub mod logging;
 pub mod mcp_client;
 pub mod mcp_integration;
 pub mod mcp_spawner;
@@ -23,23 +24,10 @@ pub mod welcome;
 
 #[allow(clippy::disallowed_methods)]
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing subscriber for Router quality gate logging
-    // Respects RUST_LOG environment variable (e.g., RUST_LOG=debug)
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        use tracing_subscriber::{EnvFilter, fmt};
-        fmt()
-            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
-            .with_env_filter(
-                // Default to error-only for clean CLI output; use RUST_LOG for more
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error")),
-            )
-            .with_target(false)
-            .with_thread_ids(false)
-            .with_file(false)
-            .with_line_number(false)
-            .init();
+        logging::init();
 
         // Initialize security controls
         // SECURITY: Egress filter prevents SSRF attacks
