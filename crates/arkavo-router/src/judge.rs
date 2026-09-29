@@ -40,14 +40,15 @@ pub struct ResponseJudge {
 }
 
 impl ResponseJudge {
-    /// Create a new judge using any available small local model (prefers Qwen3/Ministral)
+    /// Create a new judge using the smallest cached local model. Fails, so
+    /// the caller skips judging, when only role-sized models are cached.
     #[cfg(feature = "llama-cpp")]
     pub async fn new_local() -> crate::Result<Self> {
-        let model_path = crate::model_discovery::find_any_gguf()
+        let model_path = crate::model_discovery::find_small_gguf()
             .await
-            .ok_or_else(|| {
+            .map_err(|reason| {
                 crate::Error::ModelExecution(format!(
-                    "No local GGUF models found. Download with: {}",
+                    "No small local model for judging: {reason}. Download with: {}",
                     crate::decision::ModelChoice::LocalQwen3
                         .download_hint()
                         .unwrap_or_default()

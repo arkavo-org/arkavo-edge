@@ -345,10 +345,16 @@ pub struct TaskClassifier {
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
-        // Use model discovery to find any available model (prefers Qwen3/Ministral)
-        let Some(model_path) = crate::model_discovery::find_any_gguf().await else {
-            return Ok(Self { provider: None });
+        // Classification runs in every agent process on every routed task,
+        // so it only ever loads a small model. Without one, the rules decide.
+        let model_path = match crate::model_discovery::find_small_gguf().await {
+            Ok(path) => path,
+            Err(reason) => {
+                tracing::info!(%reason, "Classifying by rules only: no small local model");
+                return Ok(Self { provider: None });
+            }
         };
+        tracing::info!(model = %model_path.display(), "Classifier model selected");
 
         let model_name = model_path
             .file_stem()

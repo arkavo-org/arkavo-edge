@@ -70,8 +70,8 @@ pub fn download_command(repo_id: &str, filename: &str) -> String {
 /// A caller that names a repo and file gets that model or an error, never
 /// another model that happens to be cached: a substitute runs under the
 /// requested model's name, memory budget and sampling settings, none of which
-/// fit it. Callers that really want "whatever is on disk" use
-/// [`find_any_gguf`] instead.
+/// fit it. Callers that want a small model for their own use, whichever one
+/// is on disk, use [`find_small_gguf`] instead.
 ///
 /// Order: the exact file in the cache, then a download, then another build of
 /// the same repo that is already cached (a different quantization of the
@@ -287,43 +287,86 @@ pub fn find_mmproj_for_model(model_path: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
-/// Scan the HuggingFace cache for any **plaintext** `.gguf`.
+/// Largest model file the classifier and judge will load, exclusive.
 ///
-/// This is the fallback the routing classifier and response judge use. They
-/// construct `LlamaCppProvider` synchronously and cannot rewrap a protected
-/// model, so a `.gguf.tdf` is never a candidate here — a cache holding only
-/// protected models yields `None` and the caller falls back to rule-based
-/// classification instead of failing router init.
-pub async fn find_any_gguf() -> Option<PathBuf> {
-    let cache = get_hf_cache_dir()?;
-    find_any_plain_gguf_in(&cache)
+/// They answer a one-line question on every routed request, in every agent
+/// process, so they get the fast tier only. 5 GB is the boundary the server
+/// already uses between its fast and medium speed tiers
+/// (`ModelChoice::size_bytes`): it admits the edge models an install ships
+/// for this purpose (Qwen3.5 0.8B, Gemma 4 E2B and E4B) and keeps out the
+/// 8B-and-up role models, whose context alone costs hundreds of MB per call.
+pub const SMALL_MODEL_SIZE_CEILING: u64 = 5_000_000_000;
+
+/// Substrings of a GGUF filename that mark a model that cannot answer a
+/// prompt: embedders and rerankers produce vectors and scores, not text.
+const NON_GENERATIVE_MARKERS: [&str; 2] = ["embed", "rerank"];
+
+/// Why no model was picked for classification and judging.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoSmallModel {
+    /// The cache holds no plaintext model at all.
+    NoneCached,
+    /// The cache holds models, and the smallest is still over the ceiling.
+    AllTooLarge { smallest: PathBuf, size_bytes: u64 },
 }
 
-fn find_any_plain_gguf_in(cache: &Path) -> Option<PathBuf> {
-    // Priority order: prefer smallest models first — classifier/judge need speed, not quality.
-    // Loading large models here wastes memory (bypasses per-agent memory budget).
-    use crate::decision::ModelChoice;
-    let preferred_repos: Vec<String> = [
-        ModelChoice::LocalQwen3,
-        ModelChoice::LocalMinistral3B,
-        ModelChoice::LocalMinistral8B,
-        ModelChoice::LocalQwen35_27B,
-    ]
-    .iter()
-    .filter_map(ModelChoice::cache_dir_name)
-    .collect();
-
-    for repo_name in &preferred_repos {
-        let repo_path = cache.join(repo_name.as_str());
-        if repo_path.exists()
-            && let Some(gguf) = find_plain_gguf_in_dir(&repo_path)
-        {
-            return Some(gguf);
+impl std::fmt::Display for NoSmallModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoneCached => write!(f, "no plaintext GGUF model is cached"),
+            Self::AllTooLarge {
+                smallest,
+                size_bytes,
+            } => write!(
+                f,
+                "the smallest cached model, {}, is {:.1} GB; models of {:.0} GB and over are \
+                 not loaded for classification",
+                smallest
+                    .file_name()
+                    .map_or_else(|| smallest.to_string_lossy(), |n| n.to_string_lossy()),
+                gigabytes(*size_bytes),
+                gigabytes(SMALL_MODEL_SIZE_CEILING),
+            ),
         }
     }
+}
 
-    let mut repos: Vec<PathBuf> = std::fs::read_dir(cache)
-        .ok()?
+fn gigabytes(bytes: u64) -> f64 {
+    bytes as f64 / 1e9
+}
+
+/// Pick the model the routing classifier and response judge load: the
+/// smallest **plaintext** `.gguf` in the HuggingFace cache that is under
+/// [`SMALL_MODEL_SIZE_CEILING`].
+///
+/// They construct `LlamaCppProvider` synchronously and cannot rewrap a
+/// protected model, so a `.gguf.tdf` is never a candidate here. When nothing
+/// qualifies the caller falls back to rule-based classification (or skips
+/// judging) instead of loading a role model or failing router init.
+///
+/// # Errors
+/// Says whether the cache is empty or holds only models that are too large.
+pub async fn find_small_gguf() -> Result<PathBuf, NoSmallModel> {
+    let cache = get_hf_cache_dir().ok_or(NoSmallModel::NoneCached)?;
+    find_small_plain_gguf_in(&cache, SMALL_MODEL_SIZE_CEILING)
+}
+
+fn find_small_plain_gguf_in(cache: &Path, ceiling: u64) -> Result<PathBuf, NoSmallModel> {
+    use crate::decision::ModelChoice;
+
+    // Known-good small chat models go first, so an unfamiliar file that
+    // happens to be a little smaller does not displace one that is known to
+    // follow the classification prompt.
+    let preferred = [ModelChoice::LocalQwen3, ModelChoice::LocalMinistral3B]
+        .iter()
+        .filter_map(ModelChoice::cache_dir_name)
+        .find_map(|repo| smallest_in(&plain_models_in(&cache.join(repo)), ceiling));
+    if let Some(found) = preferred {
+        return Ok(found);
+    }
+
+    let repos = std::fs::read_dir(cache)
+        .map_err(|_| NoSmallModel::NoneCached)?
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
@@ -331,16 +374,66 @@ fn find_any_plain_gguf_in(cache: &Path) -> Option<PathBuf> {
                 && p.file_name()
                     .and_then(|n| n.to_str())
                     .is_some_and(|n| n.starts_with("models--"))
+        });
+    let models: Vec<(u64, PathBuf)> = repos.flat_map(|repo| plain_models_in(&repo)).collect();
+
+    smallest_in(&models, ceiling).ok_or_else(|| {
+        smallest_in(&models, u64::MAX).map_or(NoSmallModel::NoneCached, |smallest| {
+            let size_bytes = file_size(&smallest);
+            NoSmallModel::AllTooLarge {
+                smallest,
+                size_bytes,
+            }
         })
-        .collect();
-    repos.sort();
-    repos.iter().find_map(|p| find_plain_gguf_in_dir(p))
+    })
 }
 
-/// Recursively find a plaintext `.gguf`, ignoring `.gguf.tdf`.
-fn find_plain_gguf_in_dir(dir: &Path) -> Option<PathBuf> {
-    let mut ignored = None;
-    find_artifact_in_dir(dir, &mut ignored)
+/// The smallest model under `ceiling`. Equal sizes fall back to path order so
+/// the choice does not depend on directory iteration order.
+fn smallest_in(models: &[(u64, PathBuf)], ceiling: u64) -> Option<PathBuf> {
+    models
+        .iter()
+        .filter(|(size, _)| *size < ceiling)
+        .min()
+        .map(|(_, path)| path.clone())
+}
+
+/// Size of the file a path resolves to. HuggingFace snapshots are symlinks
+/// into `blobs/`, and `metadata` follows them. An unreadable file sorts last.
+fn file_size(path: &Path) -> u64 {
+    std::fs::metadata(path).map_or(u64::MAX, |m| m.len())
+}
+
+/// Every plaintext model under `dir` with its size: no `.gguf.tdf`, no
+/// companion files, no embedders.
+fn plain_models_in(dir: &Path) -> Vec<(u64, PathBuf)> {
+    let mut found = Vec::new();
+    collect_plain_models(dir, &mut found);
+    found
+}
+
+fn collect_plain_models(dir: &Path, found: &mut Vec<(u64, PathBuf)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for path in entries.flatten().map(|e| e.path()) {
+        if path.is_dir() {
+            collect_plain_models(&path, found);
+        } else if path.is_file()
+            && is_plaintext_gguf(&path)
+            && !is_companion_gguf(&path)
+            && !is_non_generative_gguf(&path)
+        {
+            found.push((file_size(&path), path));
+        }
+    }
+}
+
+fn is_non_generative_gguf(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_lowercase)
+        .is_some_and(|n| NON_GENERATIVE_MARKERS.iter().any(|m| n.contains(m)))
 }
 
 #[cfg(test)]
@@ -488,7 +581,10 @@ mod protected_model_tests {
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::write(repo.join("Qwen3.5-0.8B-Q4_K_M.gguf.tdf"), b"PK\x03\x04").unwrap();
 
-        assert_eq!(find_any_plain_gguf_in(cache.path()), None);
+        assert_eq!(
+            find_small_plain_gguf_in(cache.path(), SMALL_MODEL_SIZE_CEILING),
+            Err(NoSmallModel::NoneCached)
+        );
     }
 
     #[test]
@@ -505,7 +601,7 @@ mod protected_model_tests {
         // A protected sibling next to the preferred plaintext changes nothing.
         std::fs::write(qwen.join("Qwen3.5-0.8B-Q4_K_M.gguf.tdf"), b"PK\x03\x04").unwrap();
 
-        let found = find_any_plain_gguf_in(cache.path()).unwrap();
+        let found = find_small_plain_gguf_in(cache.path(), SMALL_MODEL_SIZE_CEILING).unwrap();
         assert_eq!(found.file_name().unwrap(), "Qwen3.5-0.8B-Q4_K_M.gguf");
     }
 
@@ -521,7 +617,7 @@ mod protected_model_tests {
         std::fs::write(other.join("other.gguf"), b"GGUF").unwrap();
         std::fs::write(qwen.join("Qwen3.5-0.8B-Q4_K_M.gguf.tdf"), b"PK\x03\x04").unwrap();
 
-        let found = find_any_plain_gguf_in(cache.path()).unwrap();
+        let found = find_small_plain_gguf_in(cache.path(), SMALL_MODEL_SIZE_CEILING).unwrap();
         assert_eq!(found.file_name().unwrap(), "other.gguf");
     }
 
@@ -716,8 +812,8 @@ mod resolution_tests {
         );
 
         assert_eq!(
-            find_any_plain_gguf_in(cache.path()),
-            Some(snapshot.join("gemma-4-26B-A4B-it-Q4_0.gguf"))
+            find_small_plain_gguf_in(cache.path(), SMALL_MODEL_SIZE_CEILING),
+            Ok(snapshot.join("gemma-4-26B-A4B-it-Q4_0.gguf"))
         );
     }
 
@@ -733,6 +829,202 @@ mod resolution_tests {
             ],
         );
 
-        assert_eq!(find_any_plain_gguf_in(cache.path()), None);
+        assert_eq!(
+            find_small_plain_gguf_in(cache.path(), SMALL_MODEL_SIZE_CEILING),
+            Err(NoSmallModel::NoneCached)
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod small_model_tests {
+    use super::*;
+
+    const E2B_REPO: &str = "unsloth/gemma-4-E2B-it-GGUF";
+    const E2B_FILE: &str = "gemma-4-E2B-it-Q4_K_M.gguf";
+    const ROLE_REPO: &str = "ggml-org/gemma-4-12B-it-GGUF";
+    const ROLE_FILE: &str = "gemma-4-12B-it-Q4_0.gguf";
+
+    /// Sizes are scaled down a million to one, so a 7.2 GB model is a
+    /// 7,200-byte file and the 5 GB ceiling is 5,000 bytes.
+    const CEILING: u64 = 5_000;
+
+    /// Writes a model of `size` bytes into a snapshot of `repo_id`.
+    fn cache_model(cache: &Path, repo_id: &str, file: &str, size: usize) -> PathBuf {
+        let snapshot = repo_snapshots_dir(cache, repo_id).join("abc123");
+        std::fs::create_dir_all(&snapshot).unwrap();
+        let path = snapshot.join(file);
+        std::fs::write(&path, vec![b'G'; size]).unwrap();
+        path
+    }
+
+    /// Regression: on a default install (Gemma 4 E2B and 12B) the scan took
+    /// the alphabetically first repo, `models--ggml-org--gemma-4-12B…`, so
+    /// every agent loaded the 12B role model to classify a task.
+    #[test]
+    fn a_default_install_classifies_with_the_edge_model_not_the_role_model() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_model(cache.path(), ROLE_REPO, ROLE_FILE, 7_200);
+        let edge = cache_model(cache.path(), E2B_REPO, E2B_FILE, 3_100);
+
+        assert_eq!(find_small_plain_gguf_in(cache.path(), CEILING), Ok(edge));
+    }
+
+    #[test]
+    fn a_cache_of_role_models_yields_no_classifier_model() {
+        let cache = tempfile::tempdir().unwrap();
+        let role = cache_model(cache.path(), ROLE_REPO, ROLE_FILE, 7_200);
+        cache_model(
+            cache.path(),
+            "unsloth/Qwen3.8-27B-GGUF",
+            "Qwen3.8-27B-Q4_K_M.gguf",
+            17_100,
+        );
+
+        assert_eq!(
+            find_small_plain_gguf_in(cache.path(), CEILING),
+            Err(NoSmallModel::AllTooLarge {
+                smallest: role,
+                size_bytes: 7_200,
+            })
+        );
+    }
+
+    #[test]
+    fn the_ceiling_itself_is_too_large() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_model(cache.path(), "org/exact", "exact.gguf", 5_000);
+
+        assert!(matches!(
+            find_small_plain_gguf_in(cache.path(), CEILING),
+            Err(NoSmallModel::AllTooLarge {
+                size_bytes: 5_000,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn the_smallest_of_several_unfamiliar_models_is_used() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_model(cache.path(), "org/a-large", "a-large.gguf", 4_000);
+        let small = cache_model(cache.path(), "org/z-small", "z-small.gguf", 900);
+        cache_model(cache.path(), "org/m-medium", "m-medium.gguf", 2_000);
+
+        assert_eq!(find_small_plain_gguf_in(cache.path(), CEILING), Ok(small));
+    }
+
+    #[test]
+    fn the_smallest_build_in_a_repo_is_used() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_model(cache.path(), E2B_REPO, "gemma-4-E2B-it-BF16.gguf", 4_900);
+        let q4 = cache_model(cache.path(), E2B_REPO, E2B_FILE, 3_100);
+
+        assert_eq!(find_small_plain_gguf_in(cache.path(), CEILING), Ok(q4));
+    }
+
+    #[test]
+    fn a_known_small_chat_model_beats_a_smaller_unfamiliar_one() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_model(cache.path(), "org/tiny", "tiny.gguf", 100);
+        let qwen = cache_model(
+            cache.path(),
+            "unsloth/Qwen3.5-0.8B-GGUF",
+            "Qwen3.5-0.8B-Q4_K_M.gguf",
+            530,
+        );
+
+        assert_eq!(find_small_plain_gguf_in(cache.path(), CEILING), Ok(qwen));
+    }
+
+    #[test]
+    fn an_oversized_build_of_a_preferred_model_is_not_used() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_model(
+            cache.path(),
+            "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+            "Ministral-3-3B-Instruct-2512-BF16.gguf",
+            6_900,
+        );
+        let edge = cache_model(cache.path(), E2B_REPO, E2B_FILE, 3_100);
+
+        assert_eq!(find_small_plain_gguf_in(cache.path(), CEILING), Ok(edge));
+    }
+
+    /// An embedder is often the smallest GGUF in a cache and cannot answer a
+    /// classification prompt.
+    #[test]
+    fn embedders_and_rerankers_are_not_classifier_models() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_model(
+            cache.path(),
+            "Qwen/Qwen3-Embedding-0.6B-GGUF",
+            "Qwen3-Embedding-0.6B-Q8_0.gguf",
+            640,
+        );
+        cache_model(
+            cache.path(),
+            "org/reranker",
+            "bge-reranker-v2-m3-Q4_K_M.gguf",
+            400,
+        );
+        let edge = cache_model(cache.path(), E2B_REPO, E2B_FILE, 3_100);
+
+        assert_eq!(find_small_plain_gguf_in(cache.path(), CEILING), Ok(edge));
+    }
+
+    #[test]
+    fn companion_files_are_not_classifier_models() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_model(
+            cache.path(),
+            ROLE_REPO,
+            "mmproj-gemma-4-12B-it-Q8_0.gguf",
+            600,
+        );
+        cache_model(cache.path(), ROLE_REPO, "mtp-gemma-4-12B-it-Q4_0.gguf", 300);
+        cache_model(
+            cache.path(),
+            ROLE_REPO,
+            "dflash-gemma-4-12B-it-Q8_0.gguf",
+            200,
+        );
+        let role = cache_model(cache.path(), ROLE_REPO, ROLE_FILE, 7_200);
+
+        assert_eq!(
+            find_small_plain_gguf_in(cache.path(), CEILING),
+            Err(NoSmallModel::AllTooLarge {
+                smallest: role,
+                size_bytes: 7_200,
+            })
+        );
+    }
+
+    #[test]
+    fn an_empty_or_missing_cache_yields_nothing() {
+        let cache = tempfile::tempdir().unwrap();
+        assert_eq!(
+            find_small_plain_gguf_in(cache.path(), CEILING),
+            Err(NoSmallModel::NoneCached)
+        );
+        assert_eq!(
+            find_small_plain_gguf_in(&cache.path().join("absent"), CEILING),
+            Err(NoSmallModel::NoneCached)
+        );
+    }
+
+    #[test]
+    fn the_reason_names_the_model_and_the_ceiling() {
+        let reason = NoSmallModel::AllTooLarge {
+            smallest: PathBuf::from("/cache/snapshots/x/gemma-4-12B-it-Q4_0.gguf"),
+            size_bytes: 7_219_673_216,
+        }
+        .to_string();
+
+        assert!(reason.contains("gemma-4-12B-it-Q4_0.gguf"), "{reason}");
+        assert!(reason.contains("7.2 GB"), "{reason}");
+        assert!(reason.contains("5 GB"), "{reason}");
+        assert!(!reason.contains("/cache/"), "{reason}");
     }
 }
