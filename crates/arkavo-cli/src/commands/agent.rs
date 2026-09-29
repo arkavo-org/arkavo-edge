@@ -1509,7 +1509,6 @@ kit:
   authors:
     - did: "did:web:example.com"
   created: "2026-04-29T00:00:00Z"
-  expires: "2026-05-29T00:00:00Z"
   nonce: "thz1Cz8aWOUURbyQQfvA0Q"
 objective:
   goal: "say hello"
