@@ -45,6 +45,10 @@ matches its content hash, not be past kit.expires, and name only models the
 router knows. An empty kit.id is accepted while a kit is being authored; the
 computed id is printed so it can be set.
 
+A valid kit may still declare settings that 'arkavo agent -c <path>' does not
+enforce, such as isolation, budgets and network constraints. These are listed
+in a notice after the result and do not affect the exit status.
+
 Every path is checked. The exit status is non-zero if any file fails.
 ";
 

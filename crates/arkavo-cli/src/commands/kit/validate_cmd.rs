@@ -7,8 +7,10 @@
 
 use std::path::Path;
 
+use arkavo_swarmkit::unenforced::AGENT_PATH;
 use arkavo_swarmkit::{
-    AgentRuntimeConfig, DiscoverError, kit_id_for, read_kit_file, validate_not_expired,
+    AgentRuntimeConfig, DiscoverError, UnenforcedControl, kit_id_for, read_kit_file,
+    unenforced_on_agent_path, validate_not_expired,
 };
 use chrono::{DateTime, Utc};
 
@@ -26,6 +28,9 @@ pub struct KitValidateReport {
     /// does not match is an error, not a report.
     pub id_matches: bool,
     pub expires: Option<String>,
+    /// Controls the kit declares that the agent path does not act on. They
+    /// do not make the kit invalid.
+    pub unenforced: Vec<UnenforcedControl>,
 }
 
 impl KitValidateReport {
@@ -47,6 +52,34 @@ impl KitValidateReport {
         match &self.expires {
             Some(expires) => lines.push(format!("expires: {expires}")),
             None => lines.push("expires: never".to_string()),
+        }
+        lines.extend(self.unenforced_notice());
+        lines
+    }
+
+    /// A notice, not an error: the kit runs, but an author who set these
+    /// fields should know they restrict nothing on this path.
+    fn unenforced_notice(&self) -> Vec<String> {
+        if self.unenforced.is_empty() {
+            return Vec::new();
+        }
+        let mut lines = vec![
+            String::new(),
+            format!(
+                "Notice: this kit is valid. It declares settings that '{AGENT_PATH}' does not enforce:"
+            ),
+        ];
+        for control in &self.unenforced {
+            if control.roles.is_empty() {
+                lines.push(format!("  {}", control.field));
+            } else {
+                lines.push(format!(
+                    "  {} (roles: {})",
+                    control.field,
+                    control.roles.join(", ")
+                ));
+            }
+            lines.push(format!("      {}", control.effect));
         }
         lines
     }
@@ -86,6 +119,7 @@ pub fn validate_kit_at(
         id_matches: computed_id == manifest.kit.id,
         computed_id,
         expires: manifest.kit.expires.clone(),
+        unenforced: unenforced_on_agent_path(manifest),
     })
 }
 
@@ -296,6 +330,48 @@ provenance:
             .to_string();
         assert!(err.contains("blake3:not-the-real-hash"), "{err}");
         assert!(err.contains("does not match"), "{err}");
+    }
+
+    /// Regression: `kit validate` said nothing about declared limits that
+    /// the agent path ignores, so a valid kit read as an enforced one.
+    #[test]
+    fn unenforced_controls_are_printed_as_a_notice_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = kit_yaml(
+            "",
+            "{family: gemma, size: 12B}\n      isolation: {sandbox: process, network_egress: false}",
+        );
+        let path = write_kit(&dir, &yaml);
+
+        let report = validate_kit_at(&path, at(VALID_ON)).expect("the notice is not a failure");
+        let lines = report.lines();
+        let notice_at = lines
+            .iter()
+            .position(|l| l.starts_with("Notice: this kit is valid."))
+            .expect("notice heading");
+        assert_eq!(
+            lines[notice_at - 1],
+            "",
+            "notice is set apart by a blank line"
+        );
+        assert!(lines[notice_at].contains("'arkavo agent -c <kit>' does not enforce"));
+
+        let notice = lines[notice_at..].join("\n");
+        assert!(
+            notice.contains(
+                "  roles[].agent_provisioning.isolation (roles: critic)\n      \
+                 sandbox, fs_writable and network_egress are not applied to the agent process"
+            ),
+            "{notice}"
+        );
+        assert!(
+            notice.contains(
+                "  constraints.network\n      \
+                 egress_allowed and egress_allowlist do not restrict network access"
+            ),
+            "{notice}"
+        );
+        assert!(!notice.to_lowercase().contains("error"), "{notice}");
     }
 
     #[test]
