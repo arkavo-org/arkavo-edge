@@ -44,33 +44,43 @@ arkavo
 arkavo ui
 ```
 
-That's it. No configuration files, no setup. Agents on the same machine auto-discover via mDNS and form a mesh.
+That's it. No configuration files, no setup. Agents on the same machine and on other devices on the local network auto-discover via mDNS and form a mesh.
 
-An agent listens on `127.0.0.1` by default, so agents on other devices cannot reach it until its kit sets `runtime.listen`:
+By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS. Its RPC endpoint is not authenticated yet, so run it on networks you trust. The agent says so on stderr each time it starts this way.
+
+To keep an agent on this machine, start it with `--trust`. It then listens on `127.0.0.1` and is not announced on the network; agents on the same machine still discover it.
+
+```bash
+arkavo --trust
+```
+
+A kit can pin an address with `runtime.listen`:
 
 ```yaml
 runtime:
-  listen: "0.0.0.0:8343"   # all interfaces, fixed port
+  listen: "127.0.0.1:8343"   # this machine only, fixed port
 ```
 
-The agent's RPC endpoint does not authenticate callers yet, so bind it to other interfaces only on a trusted network.
+`--trust` keeps the agent on loopback whatever the kit says. `arkavo security audit` reports the address an agent would listen on in the current directory; add `--trust` to audit an agent started with it.
 
 On first run, Arkavo downloads two local models sized to your device — a small model for fast routing (Gemma 4 E2B) and a larger model for inference (Gemma 4 12B on desktop/workstation; Gemma 4 E4B on a Raspberry Pi 5).
 
 ### Trusting an agent
 
-To authorize an agent (e.g. from another device), show its identity QR — the agent's `DID:key` and entitlements:
+To authorize an agent, show its identity QR — the agent's `DID:key` and entitlements:
 
 ```bash
 arkavo agent run --trust   # or simply: arkavo --trust
 ```
+
+`--trust` also keeps the agent on loopback, so the endpoint in the QR code is `127.0.0.1` and other devices cannot connect to it.
 
 ## Coming from OpenClaw?
 
 See the [migration guide](docs/openclaw-migration-guide.md) for a full comparison: what you gain (budget controls, TDF encryption, PII preflight, offline operation), what's different, and step-by-step setup.
 
 ## Why Arkavo?
-- **Zero config:** Just run `arkavo`. Auto-naming, auto-routing, and auto-discovery between agents on the same machine. Reaching agents on other devices takes one kit setting, `runtime.listen` (see [Launch](#launch)).
+- **Zero config:** Just run `arkavo`. Auto-naming, auto-routing, and auto-discovery between agents on the same machine and across devices on the local network. The RPC endpoint is not authenticated yet, so run agents on networks you trust; `--trust` keeps an agent on this machine (see [Launch](#launch)).
 - **Fast:** Low-latency agent-to-agent communication (benchmarkable from source — see [Building from Source](#building-from-source)).
 - **Visual:** See live agent communication flows in real-time.
 
@@ -105,11 +115,11 @@ Four example kits: `campaign-kit`, `code-review-kit`, `vrm-production-kit`, `com
 
 ## Commands
 
-Run `arkavo <command> --help` for the options of `agent`, `chat`, `task`, `ui`, `kit`, and `model`.
+Run `arkavo <command> --help` for the options of `agent`, `chat`, `task`, `ui`, `kit`, `model`, and `security`.
 
 | Command | What it does |
 |---------|--------------|
-| `arkavo`, `arkavo agent` | Run an agent. `-c <kit>` names a SwarmKit manifest (default: discover `.arkavo/*.swarmkit.yaml` or `./*.swarmkit.yaml`), `-n <role-id>` selects a role of a multi-role kit (default: the first role), `-p <port>` sets the listen port (default: a random free port), `-v` prints startup messages, `--trust` shows the authorization QR code. |
+| `arkavo`, `arkavo agent` | Run an agent. `-c <kit>` names a SwarmKit manifest (default: discover `.arkavo/*.swarmkit.yaml` or `./*.swarmkit.yaml`), `-n <role-id>` selects a role of a multi-role kit (default: the first role), `-p <port>` sets the listen port (default: a random free port), `-v` prints startup messages, `--trust` shows the authorization QR code and keeps the agent on loopback. Without `--trust` or a `runtime.listen` in the kit, the agent listens on every interface. |
 | `arkavo chat` | Interactive chat, or a one-shot query with `--prompt`. `--model <name or .gguf path>` picks the model; `--agent-id <id>` talks to a mesh agent. |
 | `arkavo task` | Plan and apply code changes: `arkavo task 'fix all warnings'`. `--local-only` and `--mesh-only` choose where the task runs, `--agent-id <id>` targets one agent. Without a task it commits existing changes (`-y`, `-m <message>`, `--push`, `--no-validate`). |
 | `arkavo ui` | Launch the web UI (default port 7700). |
@@ -118,6 +128,7 @@ Run `arkavo <command> --help` for the options of `agent`, `chat`, `task`, `ui`, 
 | `arkavo kit migrate-from-agents-md --in <path> --out <path>` | Best-effort conversion of an AGENTS.md file into a kit. |
 | `arkavo model` | Manage local models: `list`, `download [name]`, `add <path> --name <name>`, `protect <path>` (wrap a GGUF into a KAS-gated `.gguf.tdf` archive). `switch` is accepted but not implemented. |
 | `arkavo mcp proxy` | Permit-gated stdio MCP relay in front of an upstream MCP server: `arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--hash sha256\|blake3] -- <upstream command> [args...]`. A `tools/call` is admitted only with a valid permit and proof of possession. |
+| `arkavo security audit` | Report on the configuration an agent would run with in the current directory, including the address its RPC endpoint would listen on. `--trust` audits the agent as started with `--trust`, `--json` prints JSON. Exits with status 1 when a check fails. |
 | `arkavo login`, `arkavo logout` | Sign in with Arkavo Creator; clear the stored identity token. Both act immediately and take no options. |
 
 ## Usage Examples
@@ -207,7 +218,7 @@ For offensive-security reviewers: here's what is real today and what is still on
 | **ABAC / attribute release policies** | Library shipped, not wired into kit launch | Roles declare TDF Attribute Release Policies and kit validation checks them. The runtime library turns each one into a role-scoped OpenTDF policy (`role_policy()`), but the `arkavo ui` and `arkavo agent` launch paths do not call it yet. |
 | **SwarmKit policy isolation** | Shipped for kits loaded into the gateway | A kit loaded through `ARKAVO_SWARMKIT_PATH` gets one Agent Runtime Policy, policy cache, and decision trace per role. On the `arkavo agent -c <kit>` path a role's `isolation`, network egress, budget, and `mcp_tools` grant fields are parsed but not enforced: the process takes the role's id, model, and skill instructions, plus the kit-level `runtime` block. |
 | **DID:key identity** | Shipped | Agents are identified by `did:key` derived from an Ed25519 keypair; identity is stable per device. |
-| **mDNS mesh discovery** | Shipped | Pure-Rust mDNS with no system Avahi/Bonjour dependency; agents auto-discover and form a local mesh. |
+| **mDNS mesh discovery** | Shipped | Pure-Rust mDNS with no system Avahi/Bonjour dependency; agents auto-discover and form a local mesh. By default an agent announces itself on the local network and listens on every interface. With `--trust` it listens on `127.0.0.1` and is announced on the loopback interface only. |
 | **Local inference** | Shipped | Gemma 4 and Ministral models run via llama.cpp on the local device; no cloud required for routing or inference. |
 | **DLP / PII preflight** | Shipped, off by default | Preflight policies run before any model inference and refuse a matching request, reporting the policy id and reason. They are active only when the kit declares `runtime.preflight`. Preflight blocks; it does not redact or rewrite the request. |
 | **PII leak regression tests** | Shipped | `tests/e2e_security_test.sh`, `tests/security_cli_test.sh`, `tests/dlp_pii_security_test.sh`. |
@@ -216,6 +227,7 @@ For offensive-security reviewers: here's what is real today and what is still on
 
 | Capability | Status | Notes |
 |------------|--------|-------|
+| **RPC endpoint authentication** | Not yet | The agent's RPC endpoint does not authenticate callers, and it is served without TLS. By default it is reachable from the local network, so run agents on networks you trust. `--trust`, or a loopback `runtime.listen` in the kit, keeps the endpoint on this machine. The methods that read and replace the kit are served only on a loopback endpoint. |
 | **SEP / TPM hardware attestation** | In crate, not crypto-bound | `arkavo-attestation` detects the Secure Enclave on Apple Silicon and reports a security state, but the evidence is platform metadata, not a Secure-Enclave-signed quote. TPM backend is not implemented. |
 | **Hardware-bound key storage** | Not yet | Device identity and agent keypairs are stored on disk with filesystem permissions; they are not yet stored in the Secure Enclave, Keychain (non-extractable), or a TPM. |
 | **Verifiable remote attestation** | Not yet | Trust scoring currently treats identity as verified once a DID:key is known; there is no remote verification of attestation evidence yet. |

@@ -239,7 +239,9 @@ ln -s /mnt/nvme/arkavo/models ~/.cache/arkavo/models
 
 Raspberry Pi 5 can participate in Arkavo mesh networks via mDNS, which is enabled by default.
 
-An agent listens on `127.0.0.1` unless its kit says otherwise, so agents on other devices cannot reach the Pi until the kit sets `runtime.listen`. Create a kit and add the setting:
+By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS, so agents on other devices find the Pi without configuration. The agent's RPC endpoint is not authenticated yet, so run it on networks you trust. `arkavo --trust` keeps the agent on the Pi itself.
+
+To give the agent a fixed port or a name, create a kit. A kit can pin an address with `runtime.listen`:
 
 ```bash
 cd ~
@@ -259,7 +261,7 @@ arkavo kit validate .arkavo/pi5-workshop.swarmkit.yaml   # prints the computed k
 arkavo agent                                              # runs the kit found in .arkavo/
 ```
 
-The agent's name on the mesh is its role `id` (`agent` in a generated kit); change it in the kit to rename the agent. The agent's RPC endpoint does not authenticate callers yet, so bind it to other interfaces only on a trusted network.
+The agent's name on the mesh is its role `id` (`agent` in a generated kit); change it in the kit to rename the agent.
 
 ## Troubleshooting
 

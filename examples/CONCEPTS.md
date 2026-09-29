@@ -88,7 +88,7 @@ runtime:
 | `objective.goal` | Yes | The kit's overall purpose; the primary role's identity skill carries the same purpose in more detail |
 | `roles[].skills[].payload.instructions` | Yes | The role's system prompt / identity — what it does, shown to other agents |
 | `roles[].agent_provisioning.model` | No | LLM family/size/backend to provision (see Model Providers below); omit to accept the router default |
-| `runtime.listen` | No | Bind address (default: `127.0.0.1` on a dynamic port). Set it, for example to `0.0.0.0:8342`, for agents on other devices to reach this one |
+| `runtime.listen` | No | Bind address (default: every interface, `0.0.0.0`, on a dynamic port). Set it, for example to `127.0.0.1:8342`, to pin the agent to an address |
 | `runtime.mdns` | No | Enable mDNS discovery (default: true) |
 | `runtime.mcp_servers` + `roles[].mcp_tools` | No | MCP tool servers to connect, and per-role grants against them |
 
@@ -127,16 +127,16 @@ arkavo agent -c <path/to/kit.swarmkit.yaml> [-n <role-id>] [-p <port>]
 
 ## mDNS Discovery
 
-Agents discover each other automatically using **mDNS** (multicast DNS), also known as Bonjour/Avahi. Between agents on the same machine this needs no configuration.
+Agents discover each other automatically using **mDNS** (multicast DNS), also known as Bonjour/Avahi. This needs no configuration, between agents on the same machine and across devices on the local network.
 
-An agent listens on `127.0.0.1` by default, so agents on other devices cannot reach it. To form a mesh across devices, set `runtime.listen` in the kit of every agent that must be reachable:
+By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS. Its RPC endpoint is not authenticated yet, so run it on networks you trust.
+
+`--trust` keeps an agent on this machine: it listens on `127.0.0.1` and is not announced on the network, and agents on the same machine still discover it. A kit can pin an address with `runtime.listen`:
 
 ```yaml
 runtime:
-  listen: "0.0.0.0:8342"
+  listen: "127.0.0.1:8342"
 ```
-
-The agent's RPC endpoint does not authenticate callers yet, so bind it to other interfaces only on a trusted network.
 
 ### How It Works
 
