@@ -153,11 +153,11 @@ For offensive-security reviewers: here's what is real today and what is still on
 |------------|--------|-------|
 | **OpenTDF / KAS encryption** | Shipped | Tool outputs and SwarmKit payloads can be wrapped in TDF; KAS policy enforcement is live. |
 | **ABAC / attribute release policies** | Shipped | Roles declare TDF Attribute Release Policies; the orchestrator constructs role-scoped policies before data reaches the role. |
-| **SwarmKit policy isolation** | Shipped | Each kit role gets its own policy envelope; no shared blanket entitlements. |
+| **SwarmKit policy isolation** | Shipped for kits loaded into the gateway | A kit loaded through `ARKAVO_SWARMKIT_PATH` gets one Agent Runtime Policy, policy cache, and decision trace per role. On the `arkavo agent -c <kit>` path a role's `isolation`, network egress, budget, and `mcp_tools` grant fields are parsed but not enforced: the process takes the role's id, model, and skill instructions, plus the kit-level `runtime` block. |
 | **DID:key identity** | Shipped | Agents are identified by `did:key` derived from an Ed25519 keypair; identity is stable per device. |
 | **mDNS mesh discovery** | Shipped | Pure-Rust mDNS with no system Avahi/Bonjour dependency; agents auto-discover and form a local mesh. |
 | **Local inference** | Shipped | Gemma 4 and Ministral models run via llama.cpp on the local device; no cloud required for routing or inference. |
-| **DLP / PII scrubbing** | Shipped | Pre-flight redaction of sensitive patterns before LLM context and provider calls. |
+| **DLP / PII preflight** | Shipped, off by default | Preflight policies run before any model inference and refuse a matching request, reporting the policy id and reason. They are active only when the kit declares `runtime.preflight`. Preflight blocks; it does not redact or rewrite the request. |
 | **PII leak regression tests** | Shipped | `tests/e2e_security_test.sh`, `tests/security_cli_test.sh`, `tests/dlp_pii_security_test.sh`. |
 
 ### Roadmap / not yet landed
