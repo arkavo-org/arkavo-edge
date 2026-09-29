@@ -387,8 +387,10 @@ pub async fn handle_message_send(
 
                         // The requester polls this task for the answer, so
                         // the model's text is the result and is not traded for
-                        // a tool call.
-                        let answer = for_requester(execute_with_conductor_and_learning(
+                        // a tool call. Boxed because the conductor's future is
+                        // tens of kilobytes and would otherwise sit inline in
+                        // this handler's own future.
+                        let answer = for_requester(Box::pin(execute_with_conductor_and_learning(
                             &conductor,
                             &router,
                             &mcp_registry,
@@ -412,7 +414,7 @@ pub async fn handle_message_send(
                             granted_opt,
                             #[cfg(feature = "iroh")]
                             iroh_node.as_ref(),
-                        ))
+                        )))
                         .await;
                         match answer {
                             Ok(result_content) => {
