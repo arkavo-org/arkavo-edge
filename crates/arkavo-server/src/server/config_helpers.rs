@@ -70,6 +70,11 @@ pub struct AgentMetadata {
     /// a multi-role kit runs one process per role, and each of them watches
     /// the same file.
     pub role_id: Option<String>,
+    /// Short description of what the agent does, from the kit role's
+    /// `description`. This, never `purpose`, is what the agent card carries:
+    /// the card is served to anyone who can reach the endpoint, and
+    /// `purpose` is the text the model runs under.
+    pub description: Option<String>,
 }
 
 /// Default location for a newly created kit file when the server starts
@@ -273,6 +278,9 @@ pub(super) async fn apply_kit_reload(
         let mut metadata = agent_metadata.write().await;
         let role = reload_role(&runtime_config, metadata.role_id.as_deref())?;
         metadata.purpose = purpose_for_role(&runtime_config.objective_goal, role);
+        if let Some(role) = role {
+            metadata.description.clone_from(&role.description);
+        }
         if let Some(listen) = &runtime_config.runtime.listen {
             metadata.endpoint.clone_from(listen);
         }
@@ -599,6 +607,33 @@ provenance:
         let metadata = agent_metadata.read().await;
         assert_eq!(metadata.purpose, "say hello\n\nYou are the worker role.");
         assert!(!metadata.purpose.contains("planner"));
+    }
+
+    /// The published description follows the kit like the purpose does, and
+    /// never takes the instructions' place.
+    #[tokio::test]
+    async fn apply_kit_reload_updates_the_description_from_the_running_role() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+            name: "worker".to_string(),
+            role_id: Some("worker".to_string()),
+            description: Some("Old description".to_string()),
+            ..Default::default()
+        }));
+        let mcp_registry = McpRegistry::new();
+        let kit = two_role_kit_yaml().replacen(
+            "  - id: worker\n    role_type: operator\n",
+            "  - id: worker\n    role_type: operator\n    description: \"Does the work\"\n",
+            1,
+        );
+        assert!(kit.contains("Does the work"));
+
+        apply_kit_reload(&kit, &agent_metadata, &mcp_registry)
+            .await
+            .expect("valid kit should reload");
+
+        let metadata = agent_metadata.read().await;
+        assert_eq!(metadata.description.as_deref(), Some("Does the work"));
+        assert!(metadata.purpose.contains("You are the worker role."));
     }
 
     #[tokio::test]

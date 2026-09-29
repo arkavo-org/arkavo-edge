@@ -191,6 +191,7 @@ fn role_to_agent_config(
     Ok(AgentConfig {
         name: role.role_id.clone(),
         role_id: Some(role.role_id.clone()),
+        description: role.description.clone(),
         purpose: role.skill_instructions.clone(),
         model,
         mode,
@@ -274,6 +275,7 @@ fn default_agent_config() -> AgentConfig {
     AgentConfig {
         name: default_agent_name(),
         role_id: None,
+        description: Some("A general-purpose AI agent".to_string()),
         purpose: "A general-purpose AI agent".to_string(),
         model: String::new(),
         mode: AgentMode::default(),
@@ -363,6 +365,37 @@ mod tests {
         assert_eq!(configs[0].role_id.as_deref(), Some("agent"));
 
         assert_eq!(default_agent_config().role_id, None);
+    }
+
+    /// The description is what the agent publishes about itself; the skill
+    /// instructions stay in `purpose`, which is never published.
+    #[test]
+    fn a_kit_role_keeps_its_description_apart_from_its_instructions() {
+        let dir = tempdir();
+        let kit = minimal_kit_yaml().replacen(
+            "    role_type: operator\n",
+            "    role_type: operator\n    description: \"Greets people\"\n",
+            1,
+        );
+        let path = dir.path().join("agent.swarmkit.yaml");
+        fs::write(&path, kit).unwrap();
+
+        let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
+        assert_eq!(configs[0].description.as_deref(), Some("Greets people"));
+        assert_ne!(
+            configs[0].description.as_deref(),
+            Some(configs[0].purpose.as_str())
+        );
+    }
+
+    #[test]
+    fn a_kit_role_without_a_description_has_none() {
+        let dir = tempdir();
+        let path = dir.path().join("agent.swarmkit.yaml");
+        fs::write(&path, minimal_kit_yaml()).unwrap();
+
+        let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
+        assert_eq!(configs[0].description, None);
     }
 
     #[test]

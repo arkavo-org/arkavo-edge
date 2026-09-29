@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+#[cfg(feature = "mdns")]
+mod advertise;
 pub mod listen;
 
 #[allow(clippy::disallowed_methods)]
@@ -276,6 +278,10 @@ pub struct AgentConfig {
     /// zero-config default and for AGENTS.md migration input, which have no
     /// kit role behind them.
     pub role_id: Option<String>,
+    /// Short description of what the agent does, from the kit role's
+    /// `description`. This is what the agent publishes about itself (agent
+    /// card, mDNS); `purpose` is never published.
+    pub description: Option<String>,
     pub purpose: String, // Used as system prompt for LLM
     pub model: String,
     pub mode: arkavo_protocol::agent_config::AgentMode,
@@ -296,6 +302,7 @@ impl Default for AgentConfig {
         Self {
             name: String::new(),
             role_id: None,
+            description: None,
             purpose: String::new(),
             model: String::new(),
             mode: arkavo_protocol::agent_config::AgentMode::default(),
@@ -456,6 +463,9 @@ pub async fn start_agent_server(
         .await;
 
     server.set_agent_role(config.role_id.clone()).await;
+    server
+        .set_agent_description(config.description.clone())
+        .await;
 
     // Set API keys in the server
     server.set_api_keys(config.api_keys.clone()).await;
@@ -1118,7 +1128,6 @@ fn broadcast_agent_mdns_sync(
     #[cfg(feature = "mdns")]
     {
         use mdns_sd::{ServiceDaemon, ServiceInfo};
-        use std::collections::HashMap;
         use std::thread;
         use std::time::Duration;
 
@@ -1206,38 +1215,11 @@ fn broadcast_agent_mdns_sync(
             }
         });
 
-        // Prepare properties - minimal mDNS, full capabilities via RPC
-        let mut properties = HashMap::new();
-        properties.insert("agent_id".to_string(), config.name.clone());
-        properties.insert("ip".to_string(), service_ip.to_string());
-        properties.insert("version".to_string(), "1.0".to_string());
-
-        // Add public key for TDF encryption (agents broadcast their ECDSA P-256 public key)
-        if let Some(pk) = &public_key {
-            properties.insert("public_key".to_string(), pk.clone());
-        }
-
-        // Retain purpose and model for backward compatibility with existing orchestrators
-        // Full capability details should be queried via agent.capabilities.get RPC
-        if !config.purpose.is_empty() {
-            properties.insert("purpose".to_string(), config.purpose.clone());
-        }
-        if !config.model.is_empty() {
-            properties.insert("model".to_string(), config.model.clone());
-        }
-
-        // Add capabilities based on agent name/purpose (for backward compatibility)
+        // Capability tags are coarse routing labels; they are derived from
+        // the purpose but do not carry any of its text.
         let capabilities = get_agent_capabilities(&config.name, &config.purpose);
-        if !capabilities.is_empty() {
-            properties.insert("capabilities".to_string(), capabilities.join(","));
-        }
-
-        // Add MCP servers as capabilities (for backward compatibility)
-        if !config.mcp_servers.is_empty() {
-            let mcp_tools: Vec<String> =
-                config.mcp_servers.iter().map(|s| s.name.clone()).collect();
-            properties.insert("mcp_tools".to_string(), mcp_tools.join(","));
-        }
+        let properties =
+            advertise::txt_properties(config, service_ip, public_key.as_deref(), &capabilities);
 
         // Create service info
         let service_type = "_a2a._tcp.local.";
