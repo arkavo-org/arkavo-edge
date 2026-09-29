@@ -58,16 +58,17 @@ fn result(name: &str, category: &str, status: AuditStatus, message: String) -> A
 
 impl AuditReport {
     /// Run all security audit checks against the current directory, the one
-    /// `arkavo agent` would discover its kit from.
-    pub fn run() -> Self {
+    /// `arkavo agent` would discover its kit from. `trust` audits the agent
+    /// as started with `--trust`.
+    pub fn run(trust: bool) -> Self {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        Self::run_at(&cwd)
+        Self::run_at(&cwd, trust)
     }
 
     /// `cwd`-parameterized so tests can audit a directory of their own
     /// without depending on (or mutating) the process's working directory.
-    fn run_at(cwd: &Path) -> Self {
-        let endpoint = network::effective_endpoint(cwd);
+    fn run_at(cwd: &Path, trust: bool) -> Self {
+        let endpoint = network::effective_endpoint(cwd, trust);
         let results = vec![
             check_arkavo_dir_permissions(),
             network::check_bind(&endpoint),
@@ -360,9 +361,10 @@ fn check_shell_command_policy() -> AuditResult {
     )
 }
 
-/// Execute the security audit CLI command.
-pub fn execute(json_output: bool) -> i32 {
-    let report = AuditReport::run();
+/// Execute the security audit CLI command. `trust` audits the agent as
+/// started with `--trust`.
+pub fn execute(json_output: bool, trust: bool) -> i32 {
+    let report = AuditReport::run(trust);
 
     if json_output {
         println!("{}", report.to_json());
@@ -379,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_audit_report_runs() {
-        let report = AuditReport::run();
+        let report = AuditReport::run(false);
         assert!(report.summary.total > 0);
         assert_eq!(
             report.summary.total,
@@ -389,7 +391,7 @@ mod tests {
 
     #[test]
     fn test_text_output() {
-        let report = AuditReport::run();
+        let report = AuditReport::run(false);
         let text = report.to_text();
         assert!(text.contains("Security Audit Report"));
         assert!(text.contains("Summary:"));
@@ -397,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_json_output() {
-        let report = AuditReport::run();
+        let report = AuditReport::run(false);
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.get("results").is_some());
@@ -414,7 +416,7 @@ mod tests {
             minimal_kit_yaml().replacen("kit:", "runtime:\n  listen: \"0.0.0.0:8342\"\nkit:", 1);
         std::fs::write(dir.path().join("agent.swarmkit.yaml"), kit).unwrap();
 
-        let report = AuditReport::run_at(dir.path());
+        let report = AuditReport::run_at(dir.path(), false);
 
         assert!(report.summary.failures >= 3, "{}", report.to_text());
         let bind = report
@@ -426,17 +428,58 @@ mod tests {
         assert!(bind.message.contains("0.0.0.0:8342"), "{}", bind.message);
     }
 
+    fn check<'a>(report: &'a AuditReport, name: &str) -> &'a AuditResult {
+        report
+            .results
+            .iter()
+            .find(|r| r.name == name)
+            .unwrap_or_else(|| panic!("the {name} check always runs"))
+    }
+
+    /// Regression: an audit run with no kit reported a loopback endpoint
+    /// while the agent it describes listens on every interface.
+    #[test]
+    fn an_audit_with_no_kit_reports_the_default_on_every_interface() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = AuditReport::run_at(dir.path(), false);
+
+        assert!(report.summary.failures >= 3, "{}", report.to_text());
+        for name in ["Bind address", "Transport encryption", "Authentication"] {
+            let result = check(&report, name);
+            assert_eq!(result.status, AuditStatus::Fail, "{}", result.message);
+            assert!(result.message.contains("0.0.0.0:0"), "{}", result.message);
+        }
+        assert!(!report.to_text().contains("this machine only"));
+    }
+
+    #[test]
+    fn an_audit_of_a_trusted_start_reports_loopback() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = AuditReport::run_at(dir.path(), true);
+
+        let bind = check(&report, "Bind address");
+        assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
+        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
+        assert!(bind.message.contains("--trust"), "{}", bind.message);
+        assert_eq!(
+            check(&report, "Authentication").status,
+            AuditStatus::Warn,
+            "{}",
+            report.to_text()
+        );
+    }
+
     #[test]
     fn no_check_claims_a_jwt_secret() {
         let dir = tempfile::tempdir().unwrap();
-        let report = AuditReport::run_at(dir.path());
+        let report = AuditReport::run_at(dir.path(), false);
         assert!(!report.to_text().contains("JWT_SECRET"));
     }
 
     #[test]
     fn checks_of_one_category_are_listed_together() {
         let dir = tempfile::tempdir().unwrap();
-        let text = AuditReport::run_at(dir.path()).to_text();
+        let text = AuditReport::run_at(dir.path(), false).to_text();
         assert_eq!(text.matches("[Network]").count(), 1, "{text}");
     }
 

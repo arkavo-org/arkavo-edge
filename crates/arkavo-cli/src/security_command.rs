@@ -19,12 +19,17 @@ directory: file permissions, the RPC endpoint (listen address, transport,
 authentication, rate limiting), preflight moderation, memory encryption, the
 kit and the shell command policy. Nothing is started or changed.
 
+Without --trust the audit describes an agent started without it. By default
+that agent listens on every interface, and its RPC endpoint is
+not authenticated, so the endpoint checks fail.
+
 Exits with status 1 when a check fails.
 
 COMMANDS:
     audit    Run every check and print the report
 
 OPTIONS:
+    --trust       Audit the agent as started with --trust: on loopback
     --json        Print the report as JSON
     -h, --help    Show this help";
 
@@ -32,7 +37,7 @@ OPTIONS:
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
     Help,
-    Audit { json: bool },
+    Audit { json: bool, trust: bool },
 }
 
 fn usage_error(message: &str) -> String {
@@ -62,9 +67,11 @@ fn plan(args: &[String]) -> Result<Action, String> {
     }
 
     let mut json = false;
+    let mut trust = false;
     for option in options {
         match option.as_str() {
             "--json" => json = true,
+            "--trust" => trust = true,
             other => {
                 return Err(usage_error(&format!(
                     "unexpected argument '{other}' for 'arkavo security audit'"
@@ -72,7 +79,7 @@ fn plan(args: &[String]) -> Result<Action, String> {
             }
         }
     }
-    Ok(Action::Audit { json })
+    Ok(Action::Audit { json, trust })
 }
 
 pub(crate) fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -81,7 +88,7 @@ pub(crate) fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>>
             println!("{HELP}");
             Ok(())
         }
-        Action::Audit { json } => match security_audit::execute(json) {
+        Action::Audit { json, trust } => match security_audit::execute(json, trust) {
             0 => Ok(()),
             _ => Err("the security audit found failures".into()),
         },
@@ -98,10 +105,39 @@ mod tests {
 
     #[test]
     fn audit_runs_as_text_unless_json_is_asked_for() {
-        assert_eq!(plan(&args(&["audit"])), Ok(Action::Audit { json: false }));
+        assert_eq!(
+            plan(&args(&["audit"])),
+            Ok(Action::Audit {
+                json: false,
+                trust: false
+            })
+        );
         assert_eq!(
             plan(&args(&["audit", "--json"])),
-            Ok(Action::Audit { json: true })
+            Ok(Action::Audit {
+                json: true,
+                trust: false
+            })
+        );
+    }
+
+    /// An audit describes a start without `--trust` unless it is told
+    /// otherwise: `--trust` is a flag of the run, not part of the kit.
+    #[test]
+    fn audit_describes_a_trusted_start_only_when_asked() {
+        assert_eq!(
+            plan(&args(&["audit", "--trust"])),
+            Ok(Action::Audit {
+                json: false,
+                trust: true
+            })
+        );
+        assert_eq!(
+            plan(&args(&["audit", "--json", "--trust"])),
+            Ok(Action::Audit {
+                json: true,
+                trust: true
+            })
         );
     }
 
@@ -144,7 +180,15 @@ mod tests {
 
     #[test]
     fn help_documents_the_subcommand_and_every_option() {
-        for word in ["audit", "--json", "--help", "status 1"] {
+        for word in [
+            "audit",
+            "--json",
+            "--trust",
+            "--help",
+            "status 1",
+            "every interface",
+            "not authenticated",
+        ] {
             assert!(HELP.contains(word), "help should mention {word}");
         }
     }
