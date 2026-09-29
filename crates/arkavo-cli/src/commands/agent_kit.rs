@@ -13,12 +13,9 @@ use arkavo_protocol::agent_config::AgentMode;
 use arkavo_swarmkit::runtime_config::RoleRuntimeView;
 use arkavo_swarmkit::{AgentRuntimeConfig, DiscoverError, RuntimeMcpServer, RuntimeMode};
 
+use super::agent::listen::DEFAULT_LISTEN;
 use super::agent::{AgentConfig, McpServerConfig, default_agent_name};
 use super::kit::kit_model_to_hint;
-
-/// Zero-config listen address: dynamic port, all interfaces. Matches the
-/// legacy AGENTS.md-era default that used to live inline in `agent.rs`.
-const DEFAULT_LISTEN: &str = "0.0.0.0:0";
 
 /// Resolve the [`AgentConfig`](super::agent::AgentConfig)(s) to run for
 /// `arkavo agent`, per the S6 resolution order: `-c` > discovery > the
@@ -87,7 +84,8 @@ pub fn resolve_agent_configs(
 /// IP literals go through [`std::net::SocketAddr`] so an IPv6 host keeps its
 /// brackets — splitting on the first `:` would reduce `[::]:8080` to `[`.
 /// Hostnames only lose a trailing numeric `:port`, and an address that never
-/// had a port keeps its whole host.
+/// had a port keeps its whole host. An address with no host at all gets the
+/// default's: `-p` picks a port, it does not widen where the agent listens.
 fn listen_with_port(listen: &str, port: u16) -> String {
     use std::net::{IpAddr, SocketAddr};
 
@@ -102,7 +100,9 @@ fn listen_with_port(listen: &str, port: u16) -> String {
         Some((host, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => host,
         _ => listen,
     };
-    let host = if host.is_empty() { "0.0.0.0" } else { host };
+    if host.is_empty() {
+        return listen_with_port(DEFAULT_LISTEN, port);
+    }
     format!("{host}:{port}")
 }
 
@@ -269,7 +269,6 @@ pub fn export_resolved_kit_path(cli_config_path: Option<&Path>, cwd: &Path) {
 }
 
 /// Zero-config default: no kit found anywhere in the resolution order.
-/// Mirrors the construction that used to live inline at `agent.rs:198`.
 fn default_agent_config() -> AgentConfig {
     AgentConfig {
         name: default_agent_name(),
@@ -324,7 +323,42 @@ mod tests {
     fn listen_with_port_handles_hostnames_with_and_without_port() {
         assert_eq!(listen_with_port("localhost", 8080), "localhost:8080");
         assert_eq!(listen_with_port("localhost:3000", 8080), "localhost:8080");
-        assert_eq!(listen_with_port("", 8080), "0.0.0.0:8080");
+    }
+
+    /// Regression: an address with no host was given `0.0.0.0`, so `-p`
+    /// alone could move an agent onto every interface.
+    #[test]
+    fn listen_with_port_gives_a_missing_host_the_loopback_default() {
+        assert_eq!(listen_with_port("", 8080), "127.0.0.1:8080");
+        assert_eq!(listen_with_port(":3000", 8080), "127.0.0.1:8080");
+    }
+
+    /// Regression: a kit with no `runtime.listen`, and the zero-config
+    /// default, listened on all interfaces.
+    #[test]
+    fn a_kit_without_runtime_listen_listens_on_loopback() {
+        let dir = tempdir();
+        let path = dir.path().join("agent.swarmkit.yaml");
+        fs::write(&path, minimal_kit_yaml()).unwrap();
+
+        let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].listen, "127.0.0.1:0");
+
+        let with_port = resolve_agent_configs(Some(&path), None, Some(8343), dir.path()).unwrap();
+        assert_eq!(with_port[0].listen, "127.0.0.1:8343");
+    }
+
+    #[test]
+    fn a_kit_that_names_another_interface_is_honoured() {
+        let dir = tempdir();
+        let kit =
+            minimal_kit_yaml().replacen("kit:", "runtime:\n  listen: \"0.0.0.0:8342\"\nkit:", 1);
+        let path = dir.path().join("agent.swarmkit.yaml");
+        fs::write(&path, kit).unwrap();
+
+        let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
+        assert_eq!(configs[0].listen, "0.0.0.0:8342");
     }
 
     #[test]

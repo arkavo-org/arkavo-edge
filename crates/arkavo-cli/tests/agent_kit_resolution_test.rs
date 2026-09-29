@@ -132,7 +132,7 @@ fn explicit_config_path_resolves_one_agent_config() {
     );
     assert_eq!(configs[0].model, "ministral-3b");
     assert!(configs[0].mdns_enabled);
-    assert_eq!(configs[0].listen, "0.0.0.0:0");
+    assert_eq!(configs[0].listen, "127.0.0.1:0");
 }
 
 #[test]
@@ -235,7 +235,7 @@ fn port_override_replaces_only_the_port_part_of_listen() {
         .expect("resolution should succeed");
 
     assert_eq!(configs.len(), 1);
-    assert_eq!(configs[0].listen, "0.0.0.0:9999");
+    assert_eq!(configs[0].listen, "127.0.0.1:9999");
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn nothing_present_falls_back_to_default_config() {
 
     assert_eq!(configs.len(), 1);
     assert_eq!(configs[0].purpose, "A general-purpose AI agent");
-    assert_eq!(configs[0].listen, "0.0.0.0:0");
+    assert_eq!(configs[0].listen, "127.0.0.1:0");
     assert!(configs[0].mdns_enabled);
 }
 
