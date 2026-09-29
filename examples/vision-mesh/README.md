@@ -11,7 +11,7 @@ hf download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-UD-Q6_K_XL.gguf
 hf download unsloth/Qwen3.5-27B-GGUF mmproj-Qwen2.5-VL-7B-f16.gguf
 ```
 
-Build arkavo:
+`launch.sh` uses `$BINARY` if set, then the source build, then `arkavo` on `PATH`. Build only when running from source:
 
 ```bash
 cargo build

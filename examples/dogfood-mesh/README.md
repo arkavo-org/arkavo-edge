@@ -30,14 +30,14 @@ Every 5 minutes:
 ## Prerequisites
 
 ```bash
-# Build from repo root
+# Only when running from source (from repo root)
 cargo build
 
 # Verify model is available
 ls ~/.cache/huggingface/hub/models--unsloth--GLM-4.7-Flash-GGUF
 
 # If missing:
-cargo run -p arkavo -- model download glm
+arkavo model download glm-4.7-flash
 
 # jq is required for JSON processing
 brew install jq  # macOS
@@ -80,7 +80,7 @@ Environment variables:
 |----------|---------|-------------|
 | `MAX_CYCLES` | 50 | Number of scan/validate cycles |
 | `CYCLE_INTERVAL` | 300 | Seconds between cycles (5 min) |
-| `BINARY` | target/debug/arkavo | Path to arkavo binary |
+| `BINARY` | source build, then `arkavo` on `PATH` | Path to arkavo binary |
 
 Example overnight run:
 ```bash
@@ -109,7 +109,7 @@ tail -f logs/orchestrator.log | grep -E 'Lesson extracted|Injecting.*guidance|qu
 
 Start the AG-UI to see the Connectome panel:
 ```bash
-cargo run -p arkavo -- ui 7700
+arkavo ui 7700
 # Open http://localhost:7700
 ```
 

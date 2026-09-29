@@ -25,7 +25,8 @@ with a zero-spend dry run.
 
 ## Requirements
 
-- `cargo build` from the repo root (debug binary is fine)
+- A source checkout with the Rust toolchain: `run.sh` validates the kit and runs the consolidation step with `cargo run`
+- An `arkavo` binary: `$BINARY` if set, then the source build (`cargo build` from the repo root; a debug binary is fine), then `arkavo` on `PATH`
 - The local model: `hf download ggml-org/gemma-4-E4B-it-GGUF gemma-4-E4B-it-Q4_0.gguf`
   (both workers share it; episode synthesis reuses the loaded model)
 - `jq`, `curl`, `sqlite3`

@@ -31,7 +31,7 @@ The demo implements a software development workflow where:
 
 ## Prerequisites
 
-1. Build the Arkavo binary:
+1. Get an `arkavo` binary. `launch.sh` uses `$BINARY` if set, then the source build, then `arkavo` on `PATH`. Build only when running from source:
 ```bash
 cargo build
 ```
@@ -286,7 +286,7 @@ comment. `coding-agent` ran with no model hint, i.e. router default.)
 ### Agents Won't Start
 - Check if ports 8342-8344 are available
 - Verify Ollama is running: `curl http://127.0.0.1:11434/api/tags`
-- Check binary exists: `ls ../../target/debug/arkavo`
+- Check the binary: `arkavo --version` for an installed one, `ls ../../target/debug/arkavo` for a source build
 
 ### Communication Failures
 - Verify all agents are healthy: `./launch.sh status`

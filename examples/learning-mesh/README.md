@@ -70,7 +70,7 @@ corrective guidance from lessons learned across the fleet.
 ## Quick Start
 
 ```bash
-# Build (from repo root)
+# Only when running from source (from repo root)
 cargo build
 
 # Start the mesh
@@ -78,7 +78,7 @@ cd examples/learning-mesh
 ./launch.sh
 
 # Start the UI
-cargo run -p arkavo -- ui 7700
+arkavo ui 7700
 
 # Watch the learning loop in real time
 tail -f logs/orchestrator.log | grep -E 'Lesson extracted|Injecting.*guidance|quality='

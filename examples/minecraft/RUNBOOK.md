@@ -13,14 +13,15 @@ This example demonstrates:
 ## Prerequisites
 
 ```bash
-# Build Arkavo
+# Only when running from source; an installed arkavo needs no build
 cargo build -p arkavo
 
 # Verify Docker is running
 docker info
 
-# Verify binary exists
-ls -la ../../target/debug/arkavo
+# Verify the binary
+arkavo --version                  # installed binary
+ls -la ../../target/debug/arkavo  # source build
 ```
 
 ## Running the Demo

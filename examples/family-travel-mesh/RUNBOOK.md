@@ -15,7 +15,7 @@ The scenario: Planning a Friday afternoon in Las Vegas for a family with twin to
 ## Prerequisites
 
 ```bash
-# Build the binary
+# Only when running from source; an installed arkavo needs no build
 cargo build
 
 # Verify ports are free

@@ -14,10 +14,10 @@ This example demonstrates multi-agent learning through adversarial conditions:
 ## Prerequisites
 
 ```bash
-# Build Arkavo
+# Only when running from source; an installed arkavo needs no build
 cargo build -p arkavo
 
-# Build the MCP fleet environment tools
+# Build the MCP fleet environment tools (always built from source)
 cd examples/fleet-immunity/mcp-fleet-env
 cargo build
 cd ..
@@ -124,9 +124,10 @@ grep -i "crash\|lesson\|learned" logs/*.log
 
 ### Rovers Not Starting
 
-Check if arkavo binary exists:
+Check the arkavo binary:
 ```bash
-ls -la ../../target/debug/arkavo
+arkavo --version                  # installed binary
+ls -la ../../target/debug/arkavo  # source build
 ```
 
 Check process status:

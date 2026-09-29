@@ -10,7 +10,10 @@ Step-by-step guide to testing preflight policies.
 
 ## Prerequisites
 
+An `arkavo` binary, installed or built from source. `launch.sh` uses `$BINARY` if set, then the source build, then `arkavo` on `PATH`.
+
 ```bash
+# Only when running from source
 cd /path/to/arkavo-edge
 cargo build
 ```

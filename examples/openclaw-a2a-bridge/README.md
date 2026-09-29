@@ -74,7 +74,8 @@ Transport is plaintext HTTP on loopback (127.0.0.1). This is acceptable because:
 
 ## Prerequisites
 
-- Arkavo binary built with KAS feature: `cargo build -p arkavo --features kas`
+- An `arkavo` binary with the KAS feature. The Homebrew build includes it; from source, build with `cargo build -p arkavo --features kas`. `launch.sh` uses `$BINARY` if set, then the source build, then `arkavo` on `PATH`
+- `make demo` and `make test` always build from source first. With an installed binary, run `./launch.sh`, then `./demo.sh` or `./test-bridge.sh`, then `./stop.sh`
 - `curl` and `jq` installed
 - OpenClaw installed (optional; demo uses simulated output if not present)
 

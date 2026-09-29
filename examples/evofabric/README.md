@@ -10,8 +10,10 @@ Autonomous code modification through typed AST operations.
 
 ## Prerequisites
 
+The pipeline edits a file in this repository and verifies it with `cargo`, so it needs a source checkout and the Rust toolchain. The `arkavo` binary itself can be an installed one: `run.sh` uses `$BINARY` if set, then the source build, then `arkavo` on `PATH`.
+
 ```bash
-# Build Arkavo (from repo root)
+# Only when no arkavo is installed (from repo root)
 cargo build
 ```
 

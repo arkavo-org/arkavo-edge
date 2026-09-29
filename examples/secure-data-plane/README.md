@@ -52,7 +52,7 @@ Data Plane (Iroh P2P)
 
 ## Quick Start
 
-Build with KAS and Iroh features:
+The demo needs an `arkavo` binary with the KAS and Iroh features. The Homebrew build includes both. When running from source, enable them:
 
 ```bash
 cargo build --features kas,iroh

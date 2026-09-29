@@ -51,7 +51,7 @@ critic → memory), and discovery runs on the kit's `runtime.mdns: true`.
 
 ## Quick Start
 
-1. Build Arkavo CLI:
+1. Get an `arkavo` binary. The scripts use `$BINARY` if set, then the source build, then `arkavo` on `PATH`. Build only when running from source:
 ```bash
 cargo build
 ```
@@ -156,7 +156,7 @@ The Critic enforces `family_safety.yaml`:
 
 ### Agents not starting
 - Check if ports 8401-8404 and 8410-8412 are available
-- Verify binary exists: `ls ../../target/debug/arkavo`
+- Verify the binary: `arkavo --version` for an installed one, `ls ../../target/debug/arkavo` for a source build
 
 ### Discovery failures
 - Ensure `runtime.mdns: true` is set in `family-travel-mesh.swarmkit.yaml`

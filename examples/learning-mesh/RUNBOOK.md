@@ -4,11 +4,14 @@ Step-by-step guide to running the learning mesh and observing the feedback loop.
 
 ## Prerequisites
 
-```bash
-# Build from repo root
-cargo build
+An `arkavo` binary, installed or built from source. `launch.sh` uses `$BINARY` if set, then the source build, then `arkavo` on `PATH`.
 
-# Verify binary
+```bash
+# Installed binary
+arkavo --version
+
+# Or, when running from source (from repo root)
+cargo build
 ls target/debug/arkavo
 ```
 
@@ -42,7 +45,7 @@ All five agents should show `[OK]`.
 In a separate terminal:
 
 ```bash
-cargo run -p arkavo -- ui 7700
+arkavo ui 7700
 ```
 
 Open http://localhost:7700 in a browser.

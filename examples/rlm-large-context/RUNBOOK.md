@@ -8,18 +8,20 @@
 
 ## Prerequisites
 
-### Build Arkavo
+### Get an Arkavo Binary
+
+`run_analysis.sh` uses `$BINARY` if set, then the source build, then `arkavo` on `PATH`. Build only when running from source:
 
 ```bash
 cd /path/to/arkavo-edge
 cargo build
 ```
 
-### Verify Build
+### Verify
 
 ```bash
-./target/debug/arkavo --version
-# Expected: arkavo 0.52.0
+arkavo --version                  # installed binary
+./target/debug/arkavo --version   # source build
 ```
 
 ## Step-by-Step Execution

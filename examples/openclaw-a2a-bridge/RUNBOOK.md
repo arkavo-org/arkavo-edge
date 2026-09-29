@@ -248,7 +248,7 @@ pkill -f "arkavo agent"
 
 ### KAS tests fail
 
-Ensure the binary was built with KAS feature:
+Ensure the binary has the KAS feature. The Homebrew build includes it. When running from source:
 
 ```bash
 cargo build -p arkavo --features kas

@@ -15,7 +15,7 @@ The scenario: A mesh of specialized agents that collaborate to review, analyze, 
 ## Prerequisites
 
 ```bash
-# Build the binary
+# Only when running from source; an installed arkavo needs no build
 cargo build
 
 # Verify ports are free (agents use 8342-8353)
@@ -87,7 +87,7 @@ lsof -i -P | grep arkavo
 
 ```bash
 # Query a specific agent directly
-timeout 60 ../../target/debug/arkavo chat --prompt "Analyze this code for security issues: def login(user, pass): query = 'SELECT * FROM users WHERE user=' + user"
+timeout 60 arkavo chat --prompt "Analyze this code for security issues: def login(user, pass): query = 'SELECT * FROM users WHERE user=' + user"
 ```
 
 **What to watch for:**

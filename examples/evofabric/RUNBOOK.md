@@ -11,7 +11,9 @@ Step-by-step guide to testing EvoFabric code evolution.
 
 ## Prerequisites
 
-1. Build the binary:
+1. A source checkout with the Rust toolchain. The pipeline edits a file in this repository and runs `cargo check` and `cargo test` on the result.
+
+2. An `arkavo` binary. `run.sh` uses `$BINARY` if set, then the source build, then `arkavo` on `PATH`. Build only when none is installed:
    ```bash
    cd /path/to/arkavo-edge
    cargo build

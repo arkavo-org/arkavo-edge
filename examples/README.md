@@ -6,6 +6,8 @@ Learn to build AI agent systems through hands-on examples.
 > `cargo xtask capabilities` - Interactive browser
 > `cargo xtask capabilities --matrix` - Quick overview
 
+The examples live in this repository and are not part of the Homebrew, package, or archive installs, which contain only the `arkavo` binary. Clone the repository to get them. The scripts run against an installed `arkavo`; a source build is needed only when none is installed (see [Prerequisites](#prerequisites)).
+
 ## Shipped SwarmKits
 
 Four SwarmKits ship as runnable examples. Each is a single YAML manifest with inline-signed skills that exercises the SwarmKit runtime end-to-end (parse + validate + skill resolution + per-role ARP construction).
@@ -26,16 +28,12 @@ Each kit ships with its own `README.md` in `examples/<kit-name>/` plus an integr
 ## Quick Start (5 minutes)
 
 ```bash
-# 1. Build Arkavo (from repo root)
-cargo build
-
-# 2. Browse capabilities interactively
-cargo xtask capabilities
-
-# 3. Or run your first agent directly
+# With arkavo installed, run your first example
 cd examples/01-hello-world
 ./run.sh
 ```
+
+The scripts look for the binary in this order: `$BINARY` if set, the source build (`target/debug/arkavo`, then `target/release/arkavo`), then `arkavo` on `PATH`.
 
 ## Capability Map
 
@@ -138,12 +136,18 @@ Read [CONCEPTS.md](CONCEPTS.md) to understand:
 
 ### Required
 
-```bash
-# Rust toolchain
-rustup --version
+An `arkavo` binary. Install one as described in the [top-level README](../README.md#quick-start), or build one from a source checkout:
 
-# Build the project
+```bash
+# Only when running from source
+rustup --version
 cargo build
+```
+
+To use a specific binary, set `BINARY`:
+
+```bash
+BINARY=/path/to/arkavo ./run.sh
 ```
 
 ### For Cloud LLMs
@@ -159,7 +163,10 @@ export GEMINI_API_KEY="your-key"
 ### Verify Setup
 
 ```bash
-# Check binary exists
+# Check the installed binary
+arkavo --version
+
+# Or, for a source build, check that it exists
 ls target/debug/arkavo
 
 # Check mDNS works (macOS)
