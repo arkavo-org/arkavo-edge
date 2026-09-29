@@ -177,12 +177,16 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         // `arkavo --trust` behaves like `arkavo agent run --trust`. (`-v`/`--version`
         // and `-h`/`--help` are handled above / in main before reaching here.)
         flag if flag.starts_with('-') => commands::agent::execute(args),
-        _ => {
-            eprintln!("Error: Unknown command '{}'", args[0]);
-            print_usage();
-            Err(format!("Unknown command: {}", args[0]).into())
-        }
+        unknown => Err(unknown_command_message(unknown).into()),
     }
+}
+
+/// The whole report for a mistyped command: what was wrong and where to
+/// look. The caller prints a returned error once, so nothing is printed
+/// here; printing the error, the full usage and then the error again buried
+/// the one line the user needed.
+fn unknown_command_message(command: &str) -> String {
+    format!("unknown command '{command}'\nRun 'arkavo --help' for a list of commands")
 }
 
 fn print_usage() {
@@ -328,6 +332,21 @@ mod tests {
         assert_eq!(
             listed_commands().contains(&"pack".to_string()),
             cfg!(feature = "knowledge-pack")
+        );
+    }
+
+    /// Regression: an unknown command printed an error, the full usage and
+    /// then a second, differently worded error.
+    #[test]
+    fn unknown_command_is_reported_once_with_a_pointer_to_help() {
+        let err = run(&["frobnicate".to_string()]).unwrap_err().to_string();
+        let lines: Vec<&str> = err.lines().collect();
+        assert_eq!(
+            lines,
+            [
+                "unknown command 'frobnicate'",
+                "Run 'arkavo --help' for a list of commands"
+            ]
         );
     }
 
