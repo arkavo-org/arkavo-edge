@@ -69,6 +69,10 @@ scenarios:
       - List operations enumerate files
       - Errors handled gracefully
     refs: [crates/arkavo-mcp-tools/src/filesystem.rs]
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: Path outside the workspace root
+        expected: Refused with PolicyDenied (MCP-011)
 
   - id: MCP-005
     name: Git tool operations
@@ -161,3 +165,29 @@ scenarios:
       - condition: Tool not found in registry
         expected: Returns error with available tools list
     changed: "2025-01-31"
+
+  - id: MCP-011
+    name: Filesystem tool path confinement
+    criticality: critical
+    given:
+      - FileSystemKit rooted at the agent's workspace (the process working directory by default)
+      - A read, list, info, write, append or edit request
+    when: The requested path resolves outside the root, directly or through a symlink
+    then:
+      - The call is refused with PolicyDenied and nothing is read or written
+      - Absolute and relative paths inside the root keep working
+      - The arkavo-mcp-macos FileSystemKit and the arkavo-mcp-tools git tools apply the same boundary
+    refs: [crates/arkavo-mcp-tools/src/filesystem.rs, crates/arkavo-mcp-macos/src/mcp/filesystem_tools.rs, crates/arkavo-mcp-tools/src/git.rs]
+    changed: "2026-09-29"
+
+  - id: MCP-012
+    name: TDF tool path confinement
+    criticality: high
+    given:
+      - tdf_encrypt, tdf_info, tdf_stage or tdf_fetch called with a file path
+    when: The path resolves outside the workspace root
+    then:
+      - The call is refused with PolicyDenied before any file is read or written
+      - tdf_stage publishes nothing and tdf_fetch fetches nothing for a refused path
+    refs: [crates/arkavo-mcp-tools/src/tdf.rs]
+    changed: "2026-09-29"

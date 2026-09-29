@@ -1,54 +1,39 @@
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use arkavo_git::attribution::format_commit_message;
-use arkavo_git::safety::sanitize_repo_path;
 use arkavo_git::{DiffOptions, GitManager};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Safely open a repository with path sanitization
+/// Open the repository at `requested`, which must resolve inside `root`
+/// (MCP-011). An absolute path used to be trusted whenever it existed, which
+/// let a call open, read and commit to any repository on the host.
 fn safe_open_repo(
     git_manager: &GitManager,
-    requested_path: &str,
+    root: &Path,
+    requested: &str,
 ) -> Result<arkavo_git::Repository> {
-    let requested = Path::new(requested_path);
-
-    // If the path is absolute and exists, use it directly (for tests)
-    // Otherwise, treat it relative to current directory
-    let base_path = if requested.is_absolute() && requested.exists() {
-        requested.to_path_buf()
-    } else {
-        let current_dir = env::current_dir()
-            .map_err(|e| ToolError::Mcp(format!("Failed to get current directory: {e}")))?;
-        current_dir.join(requested)
-    };
-
-    // For absolute paths that exist (like temp directories in tests),
-    // we trust them. For relative paths, we sanitize.
-    let final_path = if requested.is_absolute() && requested.exists() {
-        base_path
-    } else {
-        let current_dir = env::current_dir()
-            .map_err(|e| ToolError::Mcp(format!("Failed to get current directory: {e}")))?;
-        sanitize_repo_path(&current_dir, &base_path)
-            .map_err(|e| ToolError::Mcp(format!("Path validation failed: {e}")))?
-    };
-
+    let path = crate::confine::within_root(root, requested)?;
     git_manager
-        .open_repo(&final_path)
+        .open_repo(&path)
         .map_err(|e| ToolError::Mcp(format!("Failed to open repository: {e}")))
 }
 
 pub struct GitStatusKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitStatusKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_status".to_string(),
                 aliases: Some(vec!["status".to_string()]),
@@ -78,7 +63,7 @@ impl Default for GitStatusKit {
 impl Tool for GitStatusKit {
     async fn execute(&self, params: Value) -> Result<Value> {
         let path = params["path"].as_str().unwrap_or(".");
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
         let status = self
             .git_manager
             .status(&repo)
@@ -107,11 +92,17 @@ impl Tool for GitStatusKit {
 pub struct GitDiffKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitDiffKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_diff".to_string(),
                 aliases: Some(vec!["diff".to_string()]),
@@ -154,7 +145,7 @@ impl Tool for GitDiffKit {
         let staged = params["staged"].as_bool().unwrap_or(false);
         let cached = params["cached"].as_bool().unwrap_or(false);
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
         let diff_options = DiffOptions {
             staged,
             unstaged: !staged && !cached,
@@ -185,11 +176,17 @@ impl Tool for GitDiffKit {
 pub struct GitCommitKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitCommitKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_commit".to_string(),
                 aliases: Some(vec!["commit".to_string()]),
@@ -228,7 +225,7 @@ impl Tool for GitCommitKit {
             .as_str()
             .ok_or_else(|| ToolError::Mcp("Commit message is required".to_string()))?;
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
 
         // Check if there are any changes before staging
         let status_before = self
@@ -270,11 +267,17 @@ impl Tool for GitCommitKit {
 pub struct GitBranchKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitBranchKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_branch".to_string(),
                 aliases: Some(vec!["branch".to_string()]),
@@ -318,7 +321,7 @@ impl Tool for GitBranchKit {
             .as_str()
             .ok_or_else(|| ToolError::Mcp("Action is required".to_string()))?;
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
 
         match action {
             "list" => {
@@ -373,11 +376,17 @@ impl Tool for GitBranchKit {
 pub struct GitLogKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitLogKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_log".to_string(),
                 aliases: Some(vec!["log".to_string()]),
@@ -414,7 +423,7 @@ impl Tool for GitLogKit {
         let path = params["path"].as_str().unwrap_or(".");
         let limit = params["limit"].as_u64().unwrap_or(10) as usize;
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
 
         let mut revwalk = repo
             .revwalk()
@@ -456,11 +465,17 @@ impl Tool for GitLogKit {
 pub struct GitRemoteKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitRemoteKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_remote".to_string(),
                 aliases: Some(vec!["remote".to_string()]),
@@ -510,7 +525,7 @@ impl Tool for GitRemoteKit {
             .ok_or_else(|| ToolError::Mcp("Action is required".to_string()))?;
         let remote = params["remote"].as_str().unwrap_or("origin");
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
 
         // Get current branch if not specified
         let branch = match params["branch"].as_str() {
@@ -588,6 +603,7 @@ impl Tool for GitRemoteKit {
 #[allow(clippy::disallowed_methods)] // tokio::test needs block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::fs;
     use tempfile::TempDir;
 
@@ -609,7 +625,7 @@ mod tests {
         fs::write(temp_dir.path().join("test.txt"), "Hello world").unwrap();
 
         // Test GitCommitKit
-        let commit_kit = GitCommitKit::new();
+        let commit_kit = GitCommitKit::with_root(temp_dir.path());
         let params = json!({
             "path": temp_dir.path().to_str().unwrap(),
             "message": "Add test file"
@@ -625,5 +641,77 @@ mod tests {
         assert!(message.contains("Add test file"));
         assert!(message.contains("🤖 Generated with [Arkavo Edge]"));
         assert!(message.contains("Co-Authored-By: Arkavo Edge <edge@arkavo.com>"));
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_refuses_a_repository_outside_the_workspace() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        GitManager::new().init_repo(outside.path()).unwrap();
+        let kit = GitStatusKit::with_root(ws.path());
+        let err = kit
+            .execute(json!({ "path": outside.path().to_str().unwrap() }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn every_git_kit_refuses_a_repository_outside_the_workspace() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        GitManager::new().init_repo(outside.path()).unwrap();
+        let path = outside.path().to_str().unwrap();
+        let root = ws.path();
+        let kits: Vec<(Box<dyn Tool>, Value)> = vec![
+            (
+                Box::new(GitDiffKit::with_root(root)),
+                json!({ "path": path }),
+            ),
+            (
+                Box::new(GitCommitKit::with_root(root)),
+                json!({ "path": path, "message": "x" }),
+            ),
+            (
+                Box::new(GitBranchKit::with_root(root)),
+                json!({ "path": path, "action": "list" }),
+            ),
+            (
+                Box::new(GitLogKit::with_root(root)),
+                json!({ "path": path }),
+            ),
+            (
+                Box::new(GitRemoteKit::with_root(root)),
+                json!({ "path": path, "action": "fetch" }),
+            ),
+        ];
+        for (kit, params) in kits {
+            let err = kit.execute(params).await.unwrap_err();
+            assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+        }
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_opens_the_workspace_repository_by_default_path() {
+        let ws = TempDir::new().unwrap();
+        let repo = git2::Repository::init(ws.path()).unwrap();
+        // Status needs a born branch; commit through git2 rather than a kit so
+        // a resolver regression can never make a test commit in a real checkout.
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+        let tree = repo
+            .find_tree(repo.index().unwrap().write_tree().unwrap())
+            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        // No "path" defaults to ".", which must resolve against the kit's root.
+        let status = GitStatusKit::with_root(ws.path())
+            .execute(json!({}))
+            .await
+            .unwrap();
+        assert!(status["branch"].is_string());
     }
 }

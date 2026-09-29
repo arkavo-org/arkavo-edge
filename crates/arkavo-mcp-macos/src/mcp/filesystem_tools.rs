@@ -8,11 +8,19 @@ use crate::{Result, TestError};
 
 pub struct FileSystemKit {
     schema: ToolSchema,
+    root: PathBuf,
 }
 
 impl FileSystemKit {
     pub fn new() -> Self {
+        // Zero-config: an agent process runs with its workspace as its working
+        // directory, so that directory is the root, canonicalised once.
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "filesystem_tools".to_string(),
                 aliases: Some(vec!["filesystem".to_string(), "fs".to_string()]),
@@ -62,9 +70,7 @@ impl FileSystemKit {
     }
 
     fn validate_path(&self, path: &str) -> Result<PathBuf> {
-        let base = std::env::current_dir()
-            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {e}")))?;
-        arkavo_validation::validate_no_traversal(&base, path)
+        arkavo_validation::resolve_within_root(&self.root, path)
             .map_err(|e| TestError::Mcp(e.to_string()))
     }
 }
@@ -379,6 +385,7 @@ impl Tool for FileSystemKit {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use tempfile::TempDir;
     use tokio;
 
@@ -388,7 +395,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.txt");
         fs::write(&file_path, "Hello, World!").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "read_file",
             "file_path": file_path.to_str().unwrap()
@@ -401,10 +408,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_nonexistent_file() {
-        let kit = FileSystemKit::new();
+        let temp_dir = TempDir::new().unwrap();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "read_file",
-            "file_path": "/nonexistent/file.txt"
+            "file_path": "nonexistent/file.txt"
         });
 
         let result = kit.execute(params).await.unwrap();
@@ -419,7 +427,7 @@ mod tests {
         fs::write(temp_dir.path().join("file2.txt"), "content2").unwrap();
         fs::create_dir(temp_dir.path().join("subdir")).unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "list_directory",
             "dir_path": temp_dir.path().to_str().unwrap()
@@ -438,7 +446,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.txt");
         fs::write(&file_path, "Hello").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "file_info",
             "file_path": file_path.to_str().unwrap()
@@ -456,7 +464,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("new_file.txt");
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "write_file",
             "file_path": file_path.to_str().unwrap(),
@@ -478,7 +486,7 @@ mod tests {
         let file_path = temp_dir.path().join("existing.txt");
         fs::write(&file_path, "Original content").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "write_file",
             "file_path": file_path.to_str().unwrap(),
@@ -501,7 +509,7 @@ mod tests {
         let file_path = temp_dir.path().join("append_test.txt");
         fs::write(&file_path, "Line 1\n").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "append_file",
             "file_path": file_path.to_str().unwrap(),
@@ -523,7 +531,7 @@ mod tests {
         let file_path = temp_dir.path().join("edit_test.txt");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "edit_file",
             "file_path": file_path.to_str().unwrap(),
@@ -547,7 +555,7 @@ mod tests {
         let file_path = temp_dir.path().join("insert_test.txt");
         fs::write(&file_path, "Line 1\nLine 3").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "edit_file",
             "file_path": file_path.to_str().unwrap(),
@@ -571,7 +579,7 @@ mod tests {
         let file_path = temp_dir.path().join("delete_test.txt");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "edit_file",
             "file_path": file_path.to_str().unwrap(),
@@ -595,7 +603,7 @@ mod tests {
         let file_path = temp_dir.path().join("range_test.txt");
         fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "edit_file",
             "file_path": file_path.to_str().unwrap(),
@@ -607,5 +615,40 @@ mod tests {
         let result = kit.execute(params).await.unwrap();
         assert_eq!(result["success"], false);
         assert!(result["error"].as_str().unwrap().contains("out of range"));
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn read_outside_workspace_is_denied() {
+        let ws = TempDir::new().unwrap();
+        let secret = TempDir::new().unwrap();
+        let secret_file = secret.path().join("agent_keypair");
+        fs::write(&secret_file, "PRIVATE").unwrap();
+        let kit = FileSystemKit::with_root(ws.path());
+        let out = kit
+            .execute(json!({
+                "action": "read_file",
+                "file_path": secret_file.to_str().unwrap()
+            }))
+            .await;
+        // The refusal must not echo the secret's contents.
+        let err = out.expect_err("absolute path outside the workspace must be refused");
+        assert!(err.to_string().contains("outside allowed root"), "{err}");
+        assert!(!err.to_string().contains("PRIVATE"));
+    }
+
+    #[cfg(unix)]
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn symlink_out_of_workspace_is_refused() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join("loot.txt"), "SECRET").unwrap();
+        std::os::unix::fs::symlink(outside.path(), ws.path().join("escape")).unwrap();
+        let kit = FileSystemKit::with_root(ws.path());
+        let out = kit
+            .execute(json!({ "action": "read_file", "file_path": "escape/loot.txt" }))
+            .await;
+        assert!(out.is_err());
     }
 }

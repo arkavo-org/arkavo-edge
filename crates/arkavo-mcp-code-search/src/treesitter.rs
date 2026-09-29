@@ -2,18 +2,25 @@ use crate::{CodeSearchError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use streaming_iterator::StreamingIteratorMut;
 use tokio::fs;
 use tree_sitter::{Language, Parser, Query, QueryCursor};
 
 pub struct TreeSitterTool {
     schema: ToolSchema,
+    root: PathBuf,
 }
 
 impl TreeSitterTool {
     pub fn new() -> Self {
+        // An agent process runs with its workspace as its working directory.
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "syntax_tree".to_string(),
                 aliases: None,
@@ -82,6 +89,8 @@ impl TreeSitterTool {
         let file_path = params["file_path"]
             .as_str()
             .ok_or_else(|| CodeSearchError::ToolError("Missing file_path".to_string()))?;
+        let resolved = arkavo_validation::resolve_within_root(&self.root, file_path)
+            .map_err(|e| CodeSearchError::OutsideWorkspace(e.to_string()))?;
 
         let lang_str = if let Some(lang) = params.get("language").and_then(|v| v.as_str()) {
             if lang == "auto" {
@@ -94,7 +103,7 @@ impl TreeSitterTool {
         };
 
         let language = Self::get_language(lang_str)?;
-        let source = fs::read_to_string(file_path)
+        let source = fs::read_to_string(&resolved)
             .await
             .map_err(CodeSearchError::IoError)?;
 
@@ -212,6 +221,8 @@ impl Tool for TreeSitterTool {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_parse_rust() {
@@ -224,5 +235,35 @@ mod tests {
 
         let result = tool.execute(params).await;
         assert!(result.is_ok());
+    }
+
+    #[spec("CS-006")]
+    #[tokio::test]
+    async fn syntax_tree_refuses_a_file_outside_the_workspace() {
+        let ws = TempDir::new().unwrap();
+        let elsewhere = TempDir::new().unwrap();
+        let outside = elsewhere.path().join("secret.rs");
+        std::fs::write(&outside, "fn secret() {}").unwrap();
+        let tool = TreeSitterTool::with_root(ws.path());
+        let err = tool
+            .execute(json!({
+                "file_path": outside.to_str().unwrap(),
+                "language": "rust"
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("outside the workspace"), "{err}");
+    }
+
+    #[spec("CS-006")]
+    #[tokio::test]
+    async fn syntax_tree_parses_a_file_inside_the_workspace() {
+        let ws = TempDir::new().unwrap();
+        std::fs::write(ws.path().join("lib.rs"), "fn inside() {}").unwrap();
+        let tool = TreeSitterTool::with_root(ws.path());
+        let result = tool
+            .execute(json!({ "file_path": "lib.rs", "output_format": "tree" }))
+            .await;
+        assert!(result.is_ok(), "{result:?}");
     }
 }

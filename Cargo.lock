@@ -1484,6 +1484,8 @@ name = "arkavo-mcp-code-search"
 version = "0.99.3"
 dependencies = [
  "arkavo-mcp",
+ "arkavo-test-macros",
+ "arkavo-validation",
  "async-trait",
  "serde_json",
  "streaming-iterator",
@@ -1527,6 +1529,7 @@ dependencies = [
  "arkavo-mcp",
  "arkavo-memory",
  "arkavo-repo",
+ "arkavo-test-macros",
  "arkavo-validation",
  "async-trait",
  "base64 0.22.1",

@@ -3,6 +3,7 @@
 pub mod browser;
 pub mod code_analysis;
 pub mod code_review;
+pub mod confine;
 pub mod context_control;
 pub mod context_tools;
 pub mod filesystem;
