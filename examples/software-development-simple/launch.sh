@@ -15,10 +15,9 @@ NC='\033[0m' # No Color
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="${BINARY:-${PROJECT_ROOT}/target/debug/arkavo}"
-if [ ! -f "$BINARY" ]; then
-    BINARY="${PROJECT_ROOT}/target/release/arkavo"
-fi
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_FILE="$SCRIPT_DIR/.agent_pids"
 KIT="$SCRIPT_DIR/software-development-simple.swarmkit.yaml"
@@ -49,8 +48,7 @@ print_status() {
 # Function to check if binary exists
 check_binary() {
     if [ ! -f "$BINARY" ]; then
-        print_status "ERROR" "Binary not found at $BINARY"
-        print_status "INFO" "Please run: cargo build"
+        explain_missing_arkavo_binary
         exit 1
     fi
     print_status "SUCCESS" "Binary found at $BINARY"

@@ -13,8 +13,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="${BINARY:-${PROJECT_ROOT}/target/debug/arkavo}"
-[ -f "$BINARY" ] || BINARY="${PROJECT_ROOT}/target/release/arkavo"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_FILE="$SCRIPT_DIR/.agent_pids"
 RESPONSE_DIR="$SCRIPT_DIR/responses"
@@ -143,7 +144,7 @@ run() {
     local targets=("$@")
     [ ${#targets[@]} -gt 0 ] || targets=("${CRATES[@]}")
 
-    [ -f "$BINARY" ] || die "Binary not found: $BINARY"
+    [ -f "$BINARY" ] || { explain_missing_arkavo_binary; die "arkavo binary not found"; }
     command -v jq &>/dev/null || die "jq not found"
 
     log "=== Dogfood run started: ${targets[*]} ==="

@@ -21,11 +21,11 @@ PID_FILE="$LOGS_DIR/${AGENT_NAME}.pid"
 LOG_FILE="$LOGS_DIR/${AGENT_NAME}.log"
 KIT="$AGENT_DIR/code-agent-gemini.swarmkit.yaml"
 
-# Arkavo binary location
-ARKAVO_BIN="${ARKAVO_BIN:-../../target/debug/arkavo}"
-if [ ! -f "$ARKAVO_BIN" ]; then
-    ARKAVO_BIN="../../target/release/arkavo"
-fi
+# Arkavo binary location, resolved as: $ARKAVO_BIN (or $BINARY) if set, then
+# the source build, then arkavo on PATH.
+source "$AGENT_DIR/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
+ARKAVO_BIN="$BINARY"
 
 # Create necessary directories
 mkdir -p "$WORKSPACE_DIR" "$LOGS_DIR"
@@ -59,9 +59,8 @@ check_prerequisites() {
 
     # Check Arkavo binary with gemini feature
     if [ ! -f "$ARKAVO_BIN" ]; then
-        print_error "Arkavo binary not found at $ARKAVO_BIN"
-        echo "Please build Arkavo with gemini feature:"
-        echo "  cd ../.. && cargo build --features gemini"
+        explain_missing_arkavo_binary
+        echo "A source build for this demo needs the gemini feature: cargo build --features gemini" >&2
         exit 1
     fi
     print_status "Arkavo binary found ✓"
@@ -245,8 +244,13 @@ logs_agent() {
 test_connection() {
     print_status "Testing Gemini API connection..."
 
+    if [ ! -f "$ARKAVO_BIN" ]; then
+        explain_missing_arkavo_binary
+        exit 1
+    fi
+
     # Test via chat command
-    RESPONSE=$(cd ../.. && cargo run --features gemini -p arkavo -- \
+    RESPONSE=$("$ARKAVO_BIN" \
         chat --model "${GEMINI_MODEL:-gemini-3.5-flash}" \
         --prompt "Respond with: API test successful" 2>&1)
 

@@ -18,15 +18,28 @@ echo "  ╚═══════════════════════
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ARKAVO_BIN="${ARKAVO_BIN:-${SCRIPT_DIR}/../../target/debug/arkavo}"
+# Resolved as: $ARKAVO_BIN (or $BINARY) if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
+ARKAVO_BIN="$BINARY"
 FLEET_ENV_BIN="${SCRIPT_DIR}/mcp-fleet-env/target/debug/arkavo-mcp-fleet-env"
 
 cd "$SCRIPT_DIR"
 
 # Check prerequisites
+# Nothing installed and nothing built yet: build from source when this is a
+# source checkout with cargo available.
 if [ ! -f "$ARKAVO_BIN" ]; then
-    echo "[BUILD ] Building Arkavo..."
-    (cd ../.. && cargo build -q -p arkavo)
+    if [ -z "$ARKAVO_BINARY_REQUESTED" ] && [ -f ../../Cargo.toml ] && command -v cargo >/dev/null 2>&1; then
+        echo "[BUILD ] Building Arkavo..."
+        (cd ../.. && cargo build -q -p arkavo)
+        resolve_arkavo_binary || true
+        ARKAVO_BIN="$BINARY"
+    fi
+    if [ ! -f "$ARKAVO_BIN" ]; then
+        explain_missing_arkavo_binary
+        exit 1
+    fi
 fi
 
 # Build the fleet-env server

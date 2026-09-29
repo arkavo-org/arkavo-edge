@@ -7,7 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../common/check_prerequisites.sh"
 source "$SCRIPT_DIR/../common/run_agent.sh"
 
-BINARY="${SCRIPT_DIR}/../../target/debug/arkavo"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "${SCRIPT_DIR}/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 PID_FILE="$SCRIPT_DIR/.agent_pids"
 LOG_DIR="$SCRIPT_DIR/logs"
 PORT=8360
@@ -18,8 +20,8 @@ echo ""
 
 # Check binary
 if [ ! -f "$BINARY" ]; then
-    echo -e "${RED}Error: Arkavo binary not found${NC}"
-    echo "Build with: cargo build -p arkavo --features kas"
+    explain_missing_arkavo_binary
+    echo "A source build for this demo needs the KAS feature: cargo build -p arkavo --features kas" >&2
     exit 1
 fi
 

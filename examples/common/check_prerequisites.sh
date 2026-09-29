@@ -27,26 +27,18 @@ find_project_root() {
     return 1
 }
 
-# Check if arkavo binary exists
+# Check that an arkavo binary can be found: $BINARY if set, then the source
+# build, then arkavo on PATH. Sets BINARY and prints the resolved path.
 check_arkavo_binary() {
-    local script_dir="${1:-$(pwd)}"
-    local project_root
+    source "$(dirname "${BASH_SOURCE[0]}")/resolve_binary.sh"
 
-    project_root=$(find_project_root "$script_dir") || {
-        echo -e "${RED}Error: Could not find project root${NC}"
-        return 1
-    }
-
-    local binary="$project_root/target/debug/arkavo"
-
-    if [[ ! -f "$binary" ]]; then
-        echo -e "${RED}Error: Arkavo binary not found at $binary${NC}"
-        echo -e "${YELLOW}Run: cargo build${NC}"
+    if ! resolve_arkavo_binary; then
+        explain_missing_arkavo_binary
         return 1
     fi
 
     echo -e "${GREEN}✓${NC} Arkavo binary found"
-    echo "$binary"
+    echo "$BINARY"
 }
 
 # Check if a port is available

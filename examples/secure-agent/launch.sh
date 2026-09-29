@@ -4,7 +4,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${SCRIPT_DIR}/../../target/debug/arkavo"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "${SCRIPT_DIR}/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 
 # Colors
 GREEN='\033[0;32m'
@@ -17,8 +19,7 @@ echo ""
 
 # Check prerequisites
 if [ ! -f "$BINARY" ]; then
-    echo -e "${RED}Error: Arkavo binary not found${NC}"
-    echo "Please build first: cargo build"
+    explain_missing_arkavo_binary
     exit 1
 fi
 

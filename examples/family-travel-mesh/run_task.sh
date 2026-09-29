@@ -6,10 +6,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="${PROJECT_ROOT}/target/debug/arkavo"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 
 if [ ! -f "$BINARY" ]; then
-    echo "Binary not found. Run: cargo build"
+    explain_missing_arkavo_binary
     exit 1
 fi
 

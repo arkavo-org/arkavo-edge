@@ -4,7 +4,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${BINARY:-$SCRIPT_DIR/../target/debug/arkavo}"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "$SCRIPT_DIR/common/resolve_binary.sh"
+resolve_arkavo_binary || true
 SCENARIO="$1"
 
 # Colors
@@ -38,6 +40,11 @@ if [ ! -f "$TASKS_FILE" ]; then
     echo -e "${RED}No tasks.json found for $SCENARIO${NC}"
     echo ""
     list_scenarios
+    exit 1
+fi
+
+if [ ! -f "$BINARY" ]; then
+    explain_missing_arkavo_binary
     exit 1
 fi
 

@@ -15,7 +15,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${SCRIPT_DIR}/../../target/debug/arkavo"
+# Resolved as: $BINARY if set, then the source build, then arkavo on PATH.
+source "${SCRIPT_DIR}/../common/resolve_binary.sh"
+resolve_arkavo_binary || true
 
 PORT=7700
 while [[ $# -gt 0 ]]; do
@@ -26,8 +28,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ ! -f "$BINARY" ]; then
-    echo "Error: arkavo binary not found at $BINARY"
-    echo "Build first:  cargo build"
+    explain_missing_arkavo_binary
     exit 1
 fi
 
