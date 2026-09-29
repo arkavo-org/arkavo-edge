@@ -30,6 +30,7 @@ pub mod chat_cloud_gate;
 pub mod chat_commands;
 pub mod chat_history;
 pub mod chat_session;
+pub mod chat_timeout;
 #[cfg(feature = "taint")]
 pub mod classification_evidence;
 pub mod config;

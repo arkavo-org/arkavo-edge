@@ -1155,15 +1155,8 @@ impl ChatSessionManager {
                     let _ = delta_tx.send(metadata_delta);
 
                     let inference_start = std::time::Instant::now();
-                    // First GGUF-path load includes mmap + Metal init, which
-                    // can exceed the 60s named-model budget.
-                    let chat_timeout_secs = if spec.as_gguf_path().is_some() {
-                        180
-                    } else if spec.as_named().is_some_and(|m| !m.is_local()) {
-                        3600
-                    } else {
-                        60
-                    };
+                    let chat_timeout_secs =
+                        crate::chat_timeout::chat_inference_timeout(&spec).as_secs();
                     let mut continuation_context = windowed_context.clone();
                     let mut route_result = match tokio::time::timeout(
                         std::time::Duration::from_secs(chat_timeout_secs),
