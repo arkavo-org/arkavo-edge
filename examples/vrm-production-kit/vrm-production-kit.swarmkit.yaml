@@ -1,6 +1,6 @@
 spec_version: "1.0.0"
 kit:
-  id: "blake3:sB5iYZQngOTJEGXW9iD9g_oH7x-KciuXGQoZI0tlP6E"
+  id: "blake3:vFW9rRLyuqLOVs4qzamAB_j0-PvL-GaXeVquSU_jKoA"
   name: "VRM Production Kit"
   version: "0.1.0"
   description: >-
@@ -12,8 +12,8 @@ kit:
   authors:
     - did: "did:web:arkavo.com"
       name: "Arkavo"
-  created: "2026-05-08T00:00:00Z"
-  expires: "2026-08-06T00:00:00Z"
+  created: "2026-09-29T00:00:00Z"
+  expires: "2027-09-29T00:00:00Z"
   nonce: "fK3vL5mTeR2K1jXcW0QqZ8nF"
 
 objective:
@@ -47,8 +47,8 @@ roles:
     description: "Produce an avatar specification from a creator brief."
     agent_provisioning:
       model:
-        family: "gemma-4"
-        size: "9B"
+        family: "gemma"
+        size: "12B"
         backend: "llama.cpp"
       inference:
         max_tokens: 1024
@@ -94,8 +94,8 @@ roles:
     description: "Emit VRM 1.0 metadata JSON from an avatar specification."
     agent_provisioning:
       model:
-        family: "gemma-4"
-        size: "9B"
+        family: "gemma"
+        size: "12B"
         backend: "llama.cpp"
       inference:
         max_tokens: 1536
@@ -141,8 +141,8 @@ roles:
     description: "Validate VRM 1.0 spec compliance and prompt fidelity."
     agent_provisioning:
       model:
-        family: "qwen3"
-        size: "7B"
+        family: "qwen"
+        size: "9B"
         backend: "llama.cpp"
       inference:
         max_tokens: 512

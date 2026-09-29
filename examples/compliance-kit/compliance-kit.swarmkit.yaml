@@ -1,6 +1,6 @@
 spec_version: "1.0.0"
 kit:
-  id: "blake3:fHKLKTPPZlcdE-dSVOygeCV0e33bp2yQZ5LtIoXAM4E"
+  id: "blake3:XfTE8RxDkM4LvJjzw7JA8spDWFpeyWK5eZzs1nqe58I"
   name: "Compliance Kit"
   version: "0.1.0"
   description: >-
@@ -11,8 +11,8 @@ kit:
   authors:
     - did: "did:web:arkavo.com"
       name: "Arkavo"
-  created: "2026-05-08T00:00:00Z"
-  expires: "2026-08-06T00:00:00Z"
+  created: "2026-09-29T00:00:00Z"
+  expires: "2027-09-29T00:00:00Z"
   nonce: "mTeR2K1jXcW0QqZ8nF3vL5K1"
 
 objective:
@@ -46,8 +46,8 @@ roles:
     description: "Classify documents for PII per jurisdiction."
     agent_provisioning:
       model:
-        family: "qwen3"
-        size: "7B"
+        family: "qwen"
+        size: "9B"
         backend: "llama.cpp"
       inference:
         max_tokens: 1024
@@ -94,8 +94,8 @@ roles:
     description: "Apply jurisdiction-aware redaction or escalation."
     agent_provisioning:
       model:
-        family: "qwen3"
-        size: "7B"
+        family: "qwen"
+        size: "9B"
         backend: "llama.cpp"
       inference:
         max_tokens: 1024
@@ -142,8 +142,8 @@ roles:
     description: "Produce an audit-ready compliance report."
     agent_provisioning:
       model:
-        family: "qwen3"
-        size: "7B"
+        family: "qwen"
+        size: "9B"
         backend: "llama.cpp"
       inference:
         max_tokens: 768

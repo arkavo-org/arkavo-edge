@@ -1,6 +1,6 @@
 spec_version: "1.0.0"
 kit:
-  id: "blake3:fYvTdVeTyZ-zce8pzbtcWBIAf9y26Mqm7OetdYwZ7VY"
+  id: "blake3:2HqhZtbYAojlfXK3qWuAVd_o5iG-6yc3NwLZlkVFWkA"
   name: "ARP Showcase Kit"
   version: "0.1.0"
   description: >-
@@ -12,8 +12,8 @@ kit:
   authors:
     - did: "did:web:arkavo.com"
       name: "Arkavo"
-  created: "2026-05-01T00:00:00Z"
-  expires: "2026-07-30T00:00:00Z"
+  created: "2026-09-29T00:00:00Z"
+  expires: "2027-09-29T00:00:00Z"
   nonce: "PTFVsMS5pBJwnGyWcPq-cA"
 
 objective:
@@ -34,7 +34,7 @@ roles:
     description: "Single specialist surfacing a derived ARP runtime in the panel."
     agent_provisioning:
       model:
-        family: "qwen3"
+        family: "qwen"
         size: "0.8B"
         backend: "llama.cpp"
       inference:
