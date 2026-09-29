@@ -5,8 +5,8 @@
 //!
 //! Architecture:
 //! - Each model is stored as Arc<LlamaModel> for thread-safe shared access
-//! - Models use ContextPool for multiple concurrent contexts per model
-//! - True concurrent inference: different contexts = parallel execution
+//! - Each model has a bounded ContextPool; requests for a busy model queue
+//! - Different models run concurrently, each on its own context
 //! - KV cache isolation: each context has its own cache for conversations
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -24,6 +24,39 @@ use std::sync::RwLock;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use crate::context_pool::{ContextPool, PooledContext};
 use crate::{Error, Result};
+
+/// A pooled context that returns to its pool when dropped.
+///
+/// Returning on drop rather than by an explicit call matters once the pool
+/// is a hard bound: a generation task that panics or is cancelled would
+/// otherwise keep the model's only context forever.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub struct ContextLease {
+    registry: Arc<ModelRegistry>,
+    model_name: String,
+    context: Option<PooledContext>,
+}
+
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+impl ContextLease {
+    /// The leased context, for the duration of one generation.
+    pub fn context(&self) -> Option<Arc<std::sync::Mutex<arkavo_llama_cpp::LlamaContext>>> {
+        self.context.as_ref().map(|pooled| pooled.context.clone())
+    }
+}
+
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+impl Drop for ContextLease {
+    fn drop(&mut self) {
+        if let Some(context) = self.context.take()
+            && let Err(e) = self
+                .registry
+                .release_context(&self.model_name, context, true)
+        {
+            tracing::warn!(model = %self.model_name, error = %e, "Context was not returned to its pool");
+        }
+    }
+}
 
 /// Registry for managing multiple loaded models with pooled contexts
 ///
@@ -45,7 +78,7 @@ impl ModelRegistry {
     /// Create a new empty model registry with default pool settings
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn new() -> Self {
-        Self::with_max_contexts(4)
+        Self::with_max_contexts(crate::context_pool::default_max_contexts())
     }
 
     /// Create a new model registry with custom max contexts per model
@@ -177,6 +210,22 @@ impl ModelRegistry {
     #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     pub fn acquire_fresh_context(&self, name: &str) -> Result<PooledContext> {
         self.context_pool.acquire_fresh(name)
+    }
+
+    /// Lease a fresh context, waiting up to `limit` for one to be released
+    /// when every context for the model is in use.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    pub async fn lease_fresh_context(
+        self: &Arc<Self>,
+        name: &str,
+        limit: std::time::Duration,
+    ) -> Result<ContextLease> {
+        let context = self.context_pool.acquire_fresh_within(name, limit).await?;
+        Ok(ContextLease {
+            registry: Arc::clone(self),
+            model_name: name.to_string(),
+            context: Some(context),
+        })
     }
 
     /// Get a cached vision context for a model, if one has been stored.

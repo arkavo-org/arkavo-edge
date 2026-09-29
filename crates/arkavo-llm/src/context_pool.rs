@@ -1,9 +1,13 @@
-//! Context Pool - Per-Conversation Context Management
+//! Context Pool - bounded, reusable inference contexts per model
 //!
-//! Manages multiple LlamaContext instances per model, enabling:
-//! - True concurrent inference (different contexts = parallel execution)
-//! - KV cache isolation (each conversation has private cache)
-//! - Efficient context reuse (pool returns cleared caches)
+//! Each context owns a KV cache, which is the largest private allocation an
+//! agent process makes, so the number of contexts per model is a hard bound:
+//! - contexts are created lazily, up to the bound, and reused afterwards
+//! - a caller that finds every context busy waits for one to be released
+//! - nothing outside the pool creates a context for a pooled model
+
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+mod slots;
 
 use std::collections::HashMap;
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
@@ -11,8 +15,45 @@ use std::collections::HashSet;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::time::Duration;
 
 use crate::{Error, Result};
+
+/// Contexts per model unless `ARKAVO_MAX_CONTEXTS` says otherwise.
+///
+/// One, because a swarm runs each role as its own process and every extra
+/// context costs another KV cache. The router admits at most one request per
+/// purpose (task, chat, synthesis), so at most two callers queue behind the
+/// one that is generating, and a context is only held while tokens are
+/// produced, never across a call that needs another context.
+pub const DEFAULT_MAX_CONTEXTS: usize = 1;
+
+/// Wait for a busy context unless `ARKAVO_CONTEXT_WAIT_SECS` says otherwise.
+///
+/// Long enough for the two generations that can be queued ahead of a
+/// caller, short enough that a stuck context surfaces as an error instead
+/// of a hung agent.
+pub const DEFAULT_ACQUIRE_TIMEOUT: Duration = Duration::from_mins(5);
+
+/// Contexts each model may have in this process.
+pub fn default_max_contexts() -> usize {
+    parse_positive(std::env::var("ARKAVO_MAX_CONTEXTS").ok().as_deref())
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(DEFAULT_MAX_CONTEXTS)
+}
+
+/// How long a caller waits for a busy context in this process.
+pub fn default_acquire_timeout() -> Duration {
+    parse_positive(std::env::var("ARKAVO_CONTEXT_WAIT_SECS").ok().as_deref())
+        .map_or(DEFAULT_ACQUIRE_TIMEOUT, Duration::from_secs)
+}
+
+/// Zero is rejected: no contexts, or no time to wait for one, would fail
+/// every request.
+fn parse_positive(raw: Option<&str>) -> Option<u64> {
+    raw.and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&n| n > 0)
+}
 
 /// Statistics for a model's context pool
 #[derive(Debug, Clone, Copy)]
@@ -46,7 +87,7 @@ pub struct ContextPool {
 #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 impl ContextPool {
     pub fn new() -> Self {
-        Self::with_max_contexts(4)
+        Self::with_max_contexts(default_max_contexts())
     }
 
     pub fn with_max_contexts(max_contexts: usize) -> Self {
@@ -91,7 +132,7 @@ impl Default for ContextPool {
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{LlamaContext, LlamaModel};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use std::collections::VecDeque;
+use slots::{Claim, Slots};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Mutex;
 
@@ -144,102 +185,100 @@ impl PooledContext {
     fn mark_used(&mut self) {
         self.use_count += 1;
     }
+
+    fn reset(&mut self) {
+        self.clear_kv_cache();
+        self.token_position = 0;
+    }
 }
 
 /// Pool of contexts for a specific model
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 struct ModelContextPool {
+    // Declared before `model` so idle contexts are freed before the model
+    // they were created from.
+    slots: Slots<PooledContext>,
     model: Arc<LlamaModel>,
-    available: VecDeque<PooledContext>,
-    in_use: usize,
-    max_contexts: usize,
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 impl ModelContextPool {
     fn new(model: Arc<LlamaModel>, max_contexts: usize) -> Self {
         Self {
+            slots: Slots::new(max_contexts),
             model,
-            available: VecDeque::new(),
-            in_use: 0,
-            max_contexts,
         }
     }
 
-    /// Acquire a context, preserving KV cache (for multi-turn conversations)
-    fn acquire(&mut self) -> Result<PooledContext> {
-        self.acquire_internal(false)
-    }
-
-    /// Acquire a fresh context with cleared KV cache (for new conversations)
-    fn acquire_fresh(&mut self) -> Result<PooledContext> {
-        self.acquire_internal(true)
-    }
-
-    fn acquire_internal(&mut self, clear_cache: bool) -> Result<PooledContext> {
-        // Try to get an available context
-        if let Some(mut context) = self.available.pop_front() {
-            if clear_cache {
-                context.clear_kv_cache();
-                context.token_position = 0;
+    /// Turn a claimed slot into a context, creating one if the slot is new.
+    fn fill(&self, claim: Claim<PooledContext>, clear_cache: bool) -> Result<PooledContext> {
+        match claim {
+            Claim::Idle(mut context) => {
+                if clear_cache {
+                    context.reset();
+                }
+                context.mark_used();
+                Ok(context)
             }
-            context.mark_used();
-            self.in_use += 1;
-            return Ok(context);
+            Claim::Vacant => self.create(LlamaContext::new(&self.model)),
+            Claim::Exhausted => Err(self.exhausted()),
         }
+    }
 
-        // Check if we can create more
-        let total_contexts = self.in_use + self.available.len();
-        if total_contexts >= self.max_contexts {
-            return Err(Error::Internal(format!(
-                "Max contexts ({}) reached for model. All contexts in use.",
-                self.max_contexts
-            )));
+    /// Wrap a newly created context, or free the slot reserved for it.
+    fn create(&self, created: std::result::Result<LlamaContext, String>) -> Result<PooledContext> {
+        match created {
+            Ok(context) => {
+                let mut pooled = PooledContext::new(context, self.model_name());
+                pooled.mark_used();
+                Ok(pooled)
+            }
+            Err(e) => {
+                self.slots.forfeit();
+                Err(Error::Config(format!("Failed to create context: {e}")))
+            }
         }
+    }
 
-        // Create new context (always starts fresh)
-        let context = LlamaContext::new(&self.model)
-            .map_err(|e| Error::Config(format!("Failed to create context: {e}")))?;
-
-        self.in_use += 1;
-        Ok(PooledContext::new(context, self.model_name()))
+    fn exhausted(&self) -> Error {
+        Error::Internal(format!(
+            "Max contexts ({}) reached for model. All contexts in use.",
+            self.slots.max()
+        ))
     }
 
     /// Acquire a context with multi-sequence support (learning + conversation).
     /// Creates a context via `new_with_sequences(model, 2, true)` and attaches
     /// a `ContextManager` with seq_learning=0, seq_conversation=1.
-    fn acquire_multi_seq(&mut self) -> Result<PooledContext> {
-        let total_contexts = self.in_use + self.available.len();
-        if total_contexts >= self.max_contexts {
-            return Err(Error::Internal(format!(
-                "Max contexts ({}) reached for model. All contexts in use.",
-                self.max_contexts
-            )));
+    fn acquire_multi_seq(&self) -> Result<PooledContext> {
+        if !self.slots.claim_vacant() {
+            return Err(self.exhausted());
         }
-
-        let context = LlamaContext::new_with_sequences(&self.model, 2, true)
-            .map_err(|e| Error::Config(format!("Failed to create multi-seq context: {e}")))?;
-
-        let mut pooled = PooledContext::new(context, self.model_name());
+        let mut pooled = self.create(LlamaContext::new_with_sequences(&self.model, 2, true))?;
         #[cfg(feature = "llama-cpp")]
         {
             pooled.context_manager = Some(arkavo_kv_cache::ContextManager::new(0, 1));
         }
-        pooled.mark_used();
-        self.in_use += 1;
         Ok(pooled)
     }
 
     /// Release a context back to the pool
-    fn release(&mut self, mut context: PooledContext, clear_cache: bool) {
-        if self.in_use > 0 {
-            self.in_use -= 1;
+    fn release(&self, mut context: PooledContext, clear_cache: bool) {
+        // A poisoned lock means generation panicked while holding the
+        // context; its llama.cpp state is unknown, so the slot is freed and
+        // the next caller gets a new context.
+        if context.context.is_poisoned() {
+            tracing::warn!(
+                model = %context.model_name,
+                "Discarding a context whose last user panicked"
+            );
+            self.slots.forfeit();
+            return;
         }
         if clear_cache {
-            context.clear_kv_cache();
-            context.token_position = 0;
+            context.reset();
         }
-        self.available.push_back(context);
+        self.slots.give_back(context);
     }
 
     fn model_name(&self) -> String {
@@ -247,10 +286,11 @@ impl ModelContextPool {
     }
 
     fn stats(&self) -> PoolStats {
+        let (available, in_use) = self.slots.counts();
         PoolStats {
-            available: self.available.len(),
-            in_use: self.in_use,
-            max: self.max_contexts,
+            available,
+            in_use,
+            max: self.slots.max(),
         }
     }
 }
@@ -258,14 +298,14 @@ impl ModelContextPool {
 /// Manages pools of contexts for multiple models
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub struct ContextPool {
-    pools: RwLock<HashMap<String, ModelContextPool>>,
+    pools: RwLock<HashMap<String, Arc<ModelContextPool>>>,
     default_max_contexts: usize,
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 impl ContextPool {
     pub fn new() -> Self {
-        Self::with_max_contexts(4)
+        Self::with_max_contexts(default_max_contexts())
     }
 
     pub fn with_max_contexts(max_contexts: usize) -> Self {
@@ -282,43 +322,58 @@ impl ContextPool {
             .map_err(|_| Error::Internal("Pool lock poisoned".to_string()))?
             .insert(
                 name.to_string(),
-                ModelContextPool::new(model, self.default_max_contexts),
+                Arc::new(ModelContextPool::new(model, self.default_max_contexts)),
             );
         Ok(())
     }
 
-    /// Acquire a context preserving KV cache (for multi-turn conversations)
-    #[allow(clippy::significant_drop_tightening)]
-    pub fn acquire(&self, model_name: &str) -> Result<PooledContext> {
+    /// The model's pool, cloned out so the map lock is not held while a
+    /// context is created or waited for.
+    fn pool_for(&self, model_name: &str) -> Result<Arc<ModelContextPool>> {
         self.pools
-            .write()
+            .read()
             .map_err(|_| Error::Internal("Pool lock poisoned".to_string()))?
-            .get_mut(model_name)
+            .get(model_name)
+            .cloned()
             .ok_or_else(|| Error::Config(format!("Model '{model_name}' not registered in pool")))
-            .and_then(|pool| pool.acquire())
     }
 
-    /// Acquire a fresh context with cleared KV cache (for new conversations)
-    #[allow(clippy::significant_drop_tightening)]
+    /// Acquire a context preserving KV cache (for multi-turn conversations).
+    /// Fails at once when every context is in use.
+    pub fn acquire(&self, model_name: &str) -> Result<PooledContext> {
+        let pool = self.pool_for(model_name)?;
+        pool.fill(pool.slots.claim(), false)
+    }
+
+    /// Acquire a fresh context with cleared KV cache (for new conversations).
+    /// Fails at once when every context is in use.
     pub fn acquire_fresh(&self, model_name: &str) -> Result<PooledContext> {
-        self.pools
-            .write()
-            .map_err(|_| Error::Internal("Pool lock poisoned".to_string()))?
-            .get_mut(model_name)
-            .ok_or_else(|| Error::Config(format!("Model '{model_name}' not registered in pool")))
-            .and_then(|pool| pool.acquire_fresh())
+        let pool = self.pool_for(model_name)?;
+        pool.fill(pool.slots.claim(), true)
+    }
+
+    /// Acquire a fresh context, waiting up to `limit` for one to be released
+    /// when every context is in use.
+    pub async fn acquire_fresh_within(
+        &self,
+        model_name: &str,
+        limit: Duration,
+    ) -> Result<PooledContext> {
+        let pool = self.pool_for(model_name)?;
+        let claim = pool.slots.claim_within(limit).await.ok_or_else(|| {
+            Error::Inference(format!(
+                "Timed out after {}s waiting for a free inference context for model                  '{model_name}' ({} allowed, all in use)",
+                limit.as_secs(),
+                pool.slots.max()
+            ))
+        })?;
+        pool.fill(claim, true)
     }
 
     /// Acquire a context with multi-sequence support for KV cache context slots.
     /// The returned `PooledContext` has a `ContextManager` attached.
-    #[allow(clippy::significant_drop_tightening)]
     pub fn acquire_multi_seq(&self, model_name: &str) -> Result<PooledContext> {
-        self.pools
-            .write()
-            .map_err(|_| Error::Internal("Pool lock poisoned".to_string()))?
-            .get_mut(model_name)
-            .ok_or_else(|| Error::Config(format!("Model '{model_name}' not registered in pool")))
-            .and_then(|pool| pool.acquire_multi_seq())
+        self.pool_for(model_name)?.acquire_multi_seq()
     }
 
     /// Release a context back to the pool
@@ -327,22 +382,21 @@ impl ContextPool {
     /// * `model_name` - Name of the model this context belongs to
     /// * `context` - The context to release
     /// * `clear_cache` - If true, clears KV cache before returning to pool
-    #[allow(clippy::significant_drop_tightening)]
     pub fn release(
         &self,
         model_name: &str,
         context: PooledContext,
         clear_cache: bool,
     ) -> Result<()> {
-        let mut pools = self
+        let pool = self
             .pools
-            .write()
-            .map_err(|_| Error::Internal("Pool lock poisoned".to_string()))?;
-
-        pools
-            .get_mut(model_name)
-            .map(|pool| pool.release(context, clear_cache))
-            .ok_or_else(|| Error::Config(format!("Model '{model_name}' not found")))
+            .read()
+            .map_err(|_| Error::Internal("Pool lock poisoned".to_string()))?
+            .get(model_name)
+            .cloned()
+            .ok_or_else(|| Error::Config(format!("Model '{model_name}' not found")))?;
+        pool.release(context, clear_cache);
+        Ok(())
     }
 
     pub fn stats(&self, model_name: &str) -> Option<PoolStats> {
@@ -402,5 +456,34 @@ mod tests {
     fn test_pool_thread_safety() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<ContextPool>();
+    }
+
+    /// Regression: the default used to be four contexts per model, each
+    /// with its own KV cache.
+    #[test]
+    fn one_context_per_model_by_default() {
+        assert_eq!(DEFAULT_MAX_CONTEXTS, 1);
+    }
+
+    #[test]
+    fn overrides_must_be_positive_numbers() {
+        assert_eq!(parse_positive(Some("2")), Some(2));
+        assert_eq!(parse_positive(Some(" 30 ")), Some(30));
+        assert_eq!(parse_positive(Some("0")), None);
+        assert_eq!(parse_positive(Some("-1")), None);
+        assert_eq!(parse_positive(Some("many")), None);
+        assert_eq!(parse_positive(None), None);
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[tokio::test]
+    async fn waiting_for_an_unregistered_model_fails_at_once() {
+        let pool = ContextPool::with_max_contexts(1);
+        let started = std::time::Instant::now();
+        let result = pool
+            .acquire_fresh_within("missing", Duration::from_secs(30))
+            .await;
+        assert!(matches!(result, Err(Error::Config(_))));
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }
