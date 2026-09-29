@@ -77,7 +77,7 @@ It does not:
 - build the roles' TDF attribute-release policies;
 - enforce skill signatures, unless `ARKAVO_SWARMKIT_VERIFY=required` is set. By default signatures are parsed and not enforced, because the example kits are signed with a local development key.
 
-A launched kit is a set of per-role policy and audit records that you can inspect in the panel. To run the roles, start each one as an agent, as shown below.
+A launched kit is a set of per-role policy and audit records that you can inspect in the panel. To run the roles, start each one as an agent, as shown below. Handoffs are executed there, for kits whose topology is `pipeline`: see [Run a pipeline](#run-a-pipeline).
 
 ### Validate
 
@@ -85,7 +85,7 @@ A launched kit is a set of per-role policy and audit records that you can inspec
 arkavo kit validate examples/compliance-kit/compliance-kit.swarmkit.yaml
 ```
 
-`arkavo kit validate` accepts several paths. It fails on an expired kit, on a `kit.id` that does not match the manifest, and on a role that names a model the router does not know. It also lists the manifest controls that are declared but not enforced on the `arkavo agent -c` path.
+`arkavo kit validate` accepts several paths. For a `pipeline` kit it prints the roles in running order and the role to send requests to. It fails on an expired kit, on a `kit.id` that does not match the manifest, and on a role that names a model the router does not know. It fails on a `pipeline` kit whose handoffs are not lines of roles: a role that hands off to more than one role, a role that receives from more than one, or handoffs that form a cycle. It also lists the manifest controls that are declared but not enforced on the `arkavo agent -c` path; for a `pipeline` kit the list leaves out what a pipeline run carries out.
 
 ### Load a kit into the gateway
 
@@ -107,7 +107,7 @@ arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n policy_e
 arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n auditor -p 8343
 ```
 
-`-n` takes a role `id` from the manifest; without it the first role runs. Each process takes the role's id, model, and skill instructions, and the kit-level `runtime` block (`listen`, `mdns`, `mode`, `mcp_servers`, `preflight`, `cloud_policy`). The role's `isolation`, network egress, budget, and `mcp_tools` grant fields are not enforced on this path.
+`-n` takes a role `id` from the manifest; without it the first role runs. Each process takes the role's id, model, and skill instructions, and the kit-level `runtime` block (`listen`, `mdns`, `mode`, `mcp_servers`, `preflight`, `cloud_policy`). The role's `isolation`, network egress, budget, `inference`, `context`, and `mcp_tools` grant fields are not enforced on this path.
 
 Send a running role work with `arkavo chat --agent-id <role-id>` or `arkavo task --agent-id <role-id> '<task>'`.
 
@@ -119,6 +119,176 @@ runtime:
 ```
 
 The agent's RPC endpoint does not authenticate callers yet, so bind it to other interfaces only on a trusted network.
+
+### Run a pipeline
+
+A kit with `coordination.topology: pipeline` runs its roles in order. The order comes from `handoffs`: each role hands off to at most one role and receives from at most one. The role that no role hands off to is the entry role.
+
+Start every role of the kit, each as its own agent, in any order:
+
+```bash
+arkavo agent -c examples/campaign-kit/campaign-kit.swarmkit.yaml -n analyst -p 8341
+arkavo agent -c examples/campaign-kit/campaign-kit.swarmkit.yaml -n copy -p 8342
+arkavo agent -c examples/campaign-kit/campaign-kit.swarmkit.yaml -n critic -p 8343
+```
+
+Then send the request to the entry role:
+
+```bash
+arkavo task --agent-id analyst 'Write launch copy for the spring campaign.'
+```
+
+A message to the entry role runs the whole pipeline. The entry role's agent answers the request as its own role, sends each next role its input, waits for the answer, and completes the caller's task with the last role's answer. A message to any other role is answered by that role alone, as it is for a kit of any other topology. The agents find each other by role id over mDNS, so the kit must not set `runtime.mdns: false`.
+
+#### What each role is sent
+
+The entry role works from the caller's message as it arrived. Every other role is sent one text part:
+
+- a heading that names the step, `## Pipeline step 2 of 3: copy`;
+- the original request, under `## Original request`;
+- the output of each earlier role it may read, under `## Output from role: <role id>`, in pipeline order.
+
+A role may read the earlier roles named in its `context_scope.can_read`. `self` and names that are not earlier roles of the pipeline grant nothing. A role with no `context_scope` is shown the output of the role that handed off to it. `can_write` is not applied: the roles share no context store.
+
+The message metadata marks it as a step of a run:
+
+```json
+{
+  "source": "pipeline",
+  "task_type": "delegated",
+  "pipeline": {
+    "run_id": "0c0f4f0e-6d0b-4a53-8a07-0d2f6c1e5b9a",
+    "step": 2,
+    "steps": 3,
+    "role": "copy",
+    "entry_role": "analyst",
+    "attempt": 1,
+    "timeout_ms": 281000
+  }
+}
+```
+
+`step` and `attempt` count from 1. An agent that receives a message with a `pipeline` key in its metadata answers it on its own: outside its agent loop, with no conversation from earlier messages, and never as the start of a pipeline. If `timeout_ms` is set, the agent stops working on the step after that long and fails its task.
+
+The RPC endpoint does not authenticate callers, so the marker is not a credential. Any caller that can reach an agent can set it, and can send a role whatever text it likes as the output of an earlier role. This is why agents listen on loopback unless the kit sets `runtime.listen`.
+
+#### The critic's verdict
+
+When `evaluation.critic_role` names a role of the pipeline other than the entry role, that role's answer decides whether the run goes on. The critic's input ends with an instruction to give a verdict, and its answer is read for a verdict line:
+
+- a verdict line is a line that is exactly `VERDICT: PASS` or `VERDICT: FAIL`;
+- the match is case-sensitive, and whitespace around the line is allowed;
+- nothing else may share the line, so `**VERDICT: PASS**` and `VERDICT: PASS.` are not verdict lines;
+- when several lines qualify, the last one wins;
+- an answer with no verdict line counts as `VERDICT: FAIL`.
+
+On `VERDICT: PASS` the run goes on to the next role, or ends if the critic is the last one. On a failing verdict with retries left, the role immediately before the critic is sent its previous draft and the critic's full answer, and the critic then reviews the revision. `completion.max_retries` is the number of revisions allowed in a run.
+
+When the retries are used up the caller's task fails. The error names the verdict and carries the last draft and the last review. `completion.on_failure: abort` is the only value carried out. `retry`, `escalate` and `partial` end a failed run the same way as `abort`, and the error says which value the kit declared.
+
+The rubric is not scored. `evaluation.rubric` reaches the critic only through that role's own skill instructions. A critic that is the entry role, or is not a role of the pipeline, is not consulted: there is no earlier role for it to send back.
+
+Of the example kits, campaign-kit, vrm-production-kit and compliance-kit end with their critic, so their runs are gated by its verdict. code-review-kit names its entry role, `reviewer`, as the critic, so its runs have no verdict gate, and `arkavo kit validate` lists its `evaluation` and `completion` blocks as not enforced.
+
+#### Time
+
+A run, revisions included, has `constraints.global_budget.max_wallclock_seconds` to finish. Each role is given what is left of that budget when its step starts. A run that uses it up fails, naming the role it was in.
+
+`arkavo task` and `arkavo chat` stop polling after five minutes. A kit with a larger budget can outlast them; the run goes on, and `tasks/get` with the task id returns its result.
+
+A caller that cancels its task with `tasks/cancel` stops the run before the next role starts. The task stays canceled.
+
+#### What the caller gets back
+
+`message/send` returns a task id at once. While the run is going, `tasks/get` reports progress on that task, for example `pipeline run <run id>: copy finished (step 2 of 3)`.
+
+A finished run completes the task with two parts. The text part has the final answer first, then every other role's output, each under a heading that names the role:
+
+```text
+## Final answer (role: critic, step 3 of 3)
+
+<the critic's answer>
+
+## Output from role: analyst (step 1 of 3)
+
+<the analyst's answer>
+
+## Output from role: copy (step 2 of 3, revision 1)
+
+<the copy role's revised answer>
+
+Pipeline run <run id>
+```
+
+The data part has the schema `urn:arkavo:pipeline:result:v1` and holds the same run as data, for a client that takes the result apart. A heading in the text cannot be told from a heading a role wrote in its own answer; the data can.
+
+```json
+{
+  "run_id": "0c0f4f0e-6d0b-4a53-8a07-0d2f6c1e5b9a",
+  "status": "completed",
+  "roles": ["analyst", "copy", "critic"],
+  "final_role": "critic",
+  "final": "<the critic's answer>",
+  "verdict": "PASS",
+  "retries_used": 1,
+  "steps": [
+    {"step": 1, "role": "analyst", "attempt": 1, "superseded": false, "output": "..."},
+    {"step": 2, "role": "copy", "attempt": 1, "superseded": true, "output": "..."},
+    {"step": 3, "role": "critic", "attempt": 1, "superseded": true, "output": "..."},
+    {"step": 2, "role": "copy", "attempt": 2, "superseded": false, "output": "..."},
+    {"step": 3, "role": "critic", "attempt": 2, "superseded": false, "output": "..."}
+  ]
+}
+```
+
+`steps` lists every answer in the order it was given. A draft that was sent back, and the review that sent it back, are marked `superseded`. `verdict` is `null` for a run without a critic.
+
+A run that fails, fails the task. It never completes the task with the outputs it had collected. The error has the code `PIPELINE_FAILED`, a message that names the role and the reason, and `details` with the schema `urn:arkavo:pipeline:failure:v1`:
+
+```json
+{
+  "schema": "urn:arkavo:pipeline:failure:v1",
+  "run_id": "0c0f4f0e-6d0b-4a53-8a07-0d2f6c1e5b9a",
+  "status": "failed",
+  "reason": "agent_not_found",
+  "role": "copy",
+  "step": 2,
+  "roles": ["analyst", "copy", "critic"],
+  "verdict": null,
+  "retries_used": 0,
+  "max_retries": 1,
+  "on_failure": "abort",
+  "steps": [
+    {"step": 1, "role": "analyst", "attempt": 1, "superseded": false, "output": "..."}
+  ]
+}
+```
+
+| `reason` | What happened |
+|---|---|
+| `agent_not_found` | No agent with exactly that role id was found. A similar id is not a match. |
+| `unreachable` | The role's agent did not answer at its address, or stopped answering during the step. |
+| `refused` | The role's agent refused the message, for example by a preflight policy or a spent budget. |
+| `step_failed`, `step_canceled`, `step_rejected`, `step_stalled` | The role's agent ended the step's task in that state. |
+| `timed_out` | The role did not answer in the time it was given. |
+| `no_output` | The role finished and had written nothing. |
+| `entry_failed` | The entry role could not produce its own answer. |
+| `budget_exhausted` | The run used up `max_wallclock_seconds`. |
+| `verdict_fail`, `verdict_missing` | The critic did not pass the work and no retries were left. |
+
+#### What a pipeline run does not enforce
+
+`arkavo kit validate` prints this list for the kit it is given. For a `pipeline` kit it is:
+
+- `agent_provisioning.isolation`, `budget`, `tool_use`, `inference` and `context`;
+- `mcp_tools` grants;
+- `context_scope.can_write`, and the whole `context_scope` of a role that is not part of a pipeline;
+- TDF attribute-release policies, skill signatures and manifest signatures;
+- `constraints.global_budget.max_total_tokens` and `max_cost_usd`, `constraints.network`, `data_classifications` and `jurisdiction`;
+- `evaluation.rubric` scoring and `sample_size`;
+- `completion.rules`, and any `completion.on_failure` other than `abort`.
+
+`coordination.routing` and `coordination.context_sharing` have no effect on a pipeline run either: the order is the handoffs, and each role is sent its input in the message. In a kit of any other topology `handoffs`, `evaluation` and `completion` are not executed.
 
 ### Author your own kit
 
@@ -180,7 +350,10 @@ This isn't a label system. Domain-specific role types travel through the manifes
 | Operator stop control (`requestStopFlight`) | wired (SK-040) |
 | A2A JSON-RPC delegation envelope (§7.2) | aspirational |
 | Specialist process spawning + inference | aspirational; start each role with `arkavo agent -c <kit> -n <role-id>` |
-| `handoffs`, evaluation rubric, completion rules, `inputs`, `deliverables` | parsed and validated; not executed |
+| `handoffs` and `context_scope.can_read` in a `pipeline` kit | wired on the `arkavo agent -c` path: a message to the entry role runs the roles in order |
+| Critic verdict, `completion.max_retries`, `completion.on_failure: abort`, `max_wallclock_seconds` in a `pipeline` kit | wired on the `arkavo agent -c` path |
+| `handoffs` in kits of other topologies, rubric scoring, `completion.rules`, `on_failure` other than `abort`, `context_scope.can_write`, `inputs`, `deliverables` | parsed and validated; not executed |
+| `agent_provisioning.inference` and `agent_provisioning.context` | parsed and validated; read by nothing |
 | Manifest-level signing helper (TDF assertions) | aspirational |
 | `source: tdf-ref` skills | roadmap |
 | `did:key` / `did:plc` resolution | roadmap |
