@@ -527,7 +527,7 @@ impl ModelChoice {
     /// Download instruction for error messages
     pub fn download_hint(&self) -> Option<String> {
         match (self.repo_id(), self.gguf_filename()) {
-            (Some(repo), Some(file)) => Some(format!("huggingface-cli download {repo} {file}")),
+            (Some(repo), Some(file)) => Some(crate::model_discovery::download_command(repo, file)),
             _ => None,
         }
     }
@@ -1102,6 +1102,26 @@ mod tests {
             );
             assert_eq!(model.gguf_filename(), Some(file), "{model:?}");
         }
+    }
+
+    /// `huggingface-cli` is the retired name of the `hf` command, and the
+    /// loader's own error already said `hf download`; the two must agree so a
+    /// user is never handed a command that is not installed.
+    #[test]
+    fn download_hint_is_the_command_the_loader_reports() {
+        assert_eq!(
+            ModelChoice::LocalGemma4_12B.download_hint().as_deref(),
+            Some("hf download ggml-org/gemma-4-12B-it-GGUF gemma-4-12B-it-Q4_0.gguf")
+        );
+        for model in ModelChoice::ALL_LOCAL {
+            let (repo, file) = (model.repo_id().unwrap(), model.gguf_filename().unwrap());
+            assert_eq!(
+                model.download_hint(),
+                Some(crate::model_discovery::download_command(repo, file)),
+                "{model:?}"
+            );
+        }
+        assert_eq!(ModelChoice::ClaudeSonnet.download_hint(), None);
     }
 
     /// Every local arm must be downloadable: a repo, a `.gguf` weights file
