@@ -119,10 +119,14 @@ pub struct ServerConfig {
 }
 
 impl Default for ServerConfig {
+    /// Listens on loopback. The RPC endpoint does not authenticate callers,
+    /// so a server built from the default must not answer the network;
+    /// reaching it from another machine is a choice the caller makes by
+    /// setting `bind_address`.
     fn default() -> Self {
         Self {
             enabled: false,
-            bind_address: "0.0.0.0".to_string(),
+            bind_address: "127.0.0.1".to_string(),
             port: 8765,
             max_connections: 100,
             idle_timeout_seconds: 300,
@@ -435,6 +439,20 @@ mod tests {
         assert!(!config.agent_id.is_empty());
         assert!(!config.server.enabled);
         assert_eq!(config.server.port, 8765);
+    }
+
+    /// Regression: the default bound every interface, so a server started
+    /// from `ServerConfig::default()` answered the whole network.
+    #[test]
+    fn the_default_server_listens_on_loopback() {
+        for bind_address in [
+            ServerConfig::default().bind_address,
+            A2aConfig::default().server.bind_address,
+            A2aConfig::builder().build().unwrap().server.bind_address,
+        ] {
+            let ip: std::net::IpAddr = bind_address.parse().expect("an IP address");
+            assert!(ip.is_loopback(), "{bind_address}");
+        }
     }
 
     #[test]
