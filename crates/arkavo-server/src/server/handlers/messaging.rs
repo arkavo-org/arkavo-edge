@@ -19,7 +19,7 @@ use super::super::agent_cycle_reply::{
 };
 use super::super::agent_event::CycleOutcome;
 use super::super::config_helpers::AgentMetadata;
-use super::super::pipeline;
+use super::super::pipeline::{self, Driving};
 use super::super::tool_memory::ToolMemory;
 
 #[cfg(test)]
@@ -33,6 +33,10 @@ mod answer_tests;
 mod budget_tests;
 mod caller_budget;
 pub(in crate::server) mod direct;
+#[cfg(test)]
+// Same waiver as above.
+#[allow(clippy::disallowed_methods)]
+mod pipeline_tests;
 mod specialist;
 #[cfg(test)]
 // Same waiver as above.
@@ -44,6 +48,29 @@ mod step_tests;
 mod test_agent;
 
 use direct::DirectExecution;
+
+/// Where the handler learns whether a message starts a pipeline run.
+pub(in crate::server) enum PlanSource {
+    /// The kit this process was started from, read when the message arrives
+    /// so a kit that was edited since is followed as it stands.
+    Kit,
+    /// Decided by the caller, for a handler run without a kit on disk.
+    #[cfg(test)]
+    Decided(Driving),
+}
+
+impl PlanSource {
+    async fn driving(&self, agent_metadata: &tokio::sync::RwLock<AgentMetadata>) -> Driving {
+        match self {
+            Self::Kit => {
+                let role_id = agent_metadata.read().await.role_id.clone();
+                pipeline::driving_from_kit(role_id.as_deref()).await
+            }
+            #[cfg(test)]
+            Self::Decided(driving) => driving.clone(),
+        }
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_message_send(
@@ -67,6 +94,56 @@ pub async fn handle_message_send(
         >,
     >,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
+    request: MessageSendRequest,
+) -> Result<MessageSendResponse, ErrorObjectOwned> {
+    handle_message_send_from(
+        metrics,
+        rate_limiter,
+        task_executor,
+        task_store,
+        mcp_registry,
+        conductor,
+        router,
+        learning_bus,
+        budget_manager,
+        model_hint,
+        compute_budget,
+        mesh_state,
+        agent_metadata,
+        agent_memory,
+        agent_event_tx,
+        #[cfg(feature = "iroh")]
+        iroh_node,
+        &PlanSource::Kit,
+        request,
+    )
+    .await
+}
+
+/// [`handle_message_send`] with the pipeline decision taken from `plans`.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::server) async fn handle_message_send_from(
+    metrics: &Arc<MetricsCollector>,
+    rate_limiter: &RateLimiter,
+    task_executor: &Arc<TaskExecutor>,
+    task_store: &Arc<dyn TaskStore>,
+    mcp_registry: &Arc<McpRegistry>,
+    conductor: &Arc<Conductor<InMemoryTaskStore>>,
+    router: Option<&Arc<arkavo_router::Router>>,
+    learning_bus: Option<&Arc<LearningBus>>,
+    budget_manager: Option<&Arc<arkavo_budget::BudgetManager>>,
+    model_hint: Option<arkavo_router::ModelChoice>,
+    compute_budget: &arkavo_budget::SharedComputeBudget,
+    mesh_state: Option<&Arc<arkavo_mcp_mesh::MeshToolsState>>,
+    agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
+    agent_memory: &Arc<tokio::sync::RwLock<ToolMemory>>,
+    agent_event_tx: Arc<
+        tokio::sync::Mutex<
+            Option<tokio::sync::mpsc::Sender<super::super::agent_event::AgentEvent>>,
+        >,
+    >,
+    #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
+    plans: &PlanSource,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     let timer = RpcTimer::new("message/send".to_string(), metrics.clone());
@@ -286,29 +363,57 @@ pub async fn handle_message_send(
                     iroh_node: iroh_node.cloned(),
                 };
 
-                // A step of a pipeline run is answered on its own, outside the
-                // agent loop, so no earlier message is in front of the model
-                // and no other message shares its cycle.
-                if pipeline::is_marked(request_metadata_ref.as_ref()) {
-                    let allowed = pipeline::step_timeout(request_metadata_ref.as_ref());
-                    tokio::spawn(pipeline::answer_step(
-                        direct,
-                        task_id,
-                        task_content,
-                        allowed,
-                    ));
+                // A step of someone else's run is answered and nothing more:
+                // whatever this agent's kit says, a step never starts a run.
+                let driving = if pipeline::is_marked(request_metadata_ref.as_ref()) {
+                    None
                 } else {
-                    hand_to_agent(
-                        direct,
-                        task_store,
-                        agent_memory,
-                        &agent_event_tx,
-                        request_metadata_ref.as_ref(),
-                        task_id,
-                        task_content,
-                        images,
-                    )
-                    .await;
+                    Some(plans.driving(agent_metadata).await)
+                };
+                match driving {
+                    None => {
+                        let allowed = pipeline::step_timeout(request_metadata_ref.as_ref());
+                        tokio::spawn(pipeline::answer_step(
+                            direct,
+                            task_id,
+                            task_content,
+                            allowed,
+                        ));
+                    }
+                    Some(Driving::Plan(plan)) => {
+                        // The run owns this task from here to its end. No
+                        // reply budget is set against it: a pipeline is
+                        // bounded by the kit's own time budget, which the
+                        // run enforces.
+                        tokio::spawn(pipeline::drive_task(
+                            direct,
+                            *plan,
+                            task_id,
+                            task_content,
+                            images,
+                        ));
+                    }
+                    Some(Driving::Unknown(reason)) => {
+                        apply_outcome(
+                            task_executor,
+                            &task_id,
+                            &CycleOutcome::Failed { error: reason },
+                        )
+                        .await;
+                    }
+                    Some(Driving::No) => {
+                        hand_to_agent(
+                            direct,
+                            task_store,
+                            agent_memory,
+                            &agent_event_tx,
+                            request_metadata_ref.as_ref(),
+                            task_id,
+                            task_content,
+                            images,
+                        )
+                        .await;
+                    }
                 }
             } else {
                 // No router means no way to execute this task, ever. Submitting
