@@ -31,6 +31,10 @@ pub use stubs::*;
 #[cfg(not(target_env = "musl"))]
 pub use memory::LlamaMemory;
 
+// Context window sizing shared by the loader, the generation clamp and planners
+pub mod context_params;
+pub use context_params::{configured_context_length, context_length_override};
+
 // Multimodal support module
 #[cfg(not(target_env = "musl"))]
 pub mod multimodal;
@@ -458,6 +462,16 @@ impl LlamaModel {
         ctx as u32
     }
 
+    /// Width in tokens of the model's sliding attention window, or 0 when
+    /// no layer uses one. Only models with a window benefit from a windowed
+    /// KV cache.
+    pub fn sliding_window(&self) -> u32 {
+        // SAFETY: self.ptr is non-null for any constructed model; this reads
+        // a hyperparameter.
+        let n_swa = unsafe { ffi::llama_model_n_swa(self.ptr) };
+        u32::try_from(n_swa).unwrap_or(0)
+    }
+
     pub fn model_name(&self) -> &str {
         self.path.split('/').next_back().unwrap_or(&self.path)
     }
@@ -543,26 +557,16 @@ unsafe impl Send for LlamaContext {}
 #[cfg(not(target_env = "musl"))]
 impl LlamaContext {
     pub fn new(model: &LlamaModel) -> Result<Self, String> {
+        use context_params::{resolve_context_shape, single_sequence_params, Backend};
+
         // Auto-detect CPU cores for optimal thread count
         let num_cores = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(8); // Fallback to 8 if detection fails
         let thread_count = num_cores.min(16) as i32; // Cap at 16 for diminishing returns
 
-        // Detect if running on resource-constrained device (e.g., Raspberry Pi)
-        let is_low_power = std::env::var("ARKAVO_RASPBERRY_PI")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or_else(|_| num_cores <= 4);
-
-        // Detect Qualcomm Adreno GPU (Android devices only, not Apple Silicon)
-        let is_apple_silicon = cfg!(all(target_arch = "aarch64", target_os = "macos"));
-        let is_adreno = std::env::var("GGML_VK_MAX_BATCH").is_ok()
-            || (cfg!(target_arch = "aarch64") && !is_apple_silicon);
-
-        // Allow manual context size override
-        let manual_ctx = std::env::var("ARKAVO_N_CTX")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok());
+        let device = context_params::device_class();
+        let manual_ctx = context_length_override();
 
         // Try to create context, catch Vulkan crashes
         let gpu_status = GPU_STATUS.load(Ordering::Relaxed);
@@ -571,62 +575,25 @@ impl LlamaContext {
         let trained_ctx = model.get_trained_context_size();
         let model_name = model.model_name();
 
-        // Scale context based on trained size to prevent memory exhaustion
-        // KV cache memory usage: ~460KB per token for typical small models
-        // On 16GB systems, safe limit is ~16K tokens (~7.5GB KV cache + model + system)
-        let safe_ctx = if !(512..=1048576).contains(&trained_ctx) {
+        if !(512..=1048576).contains(&trained_ctx) {
             eprintln!(
-                "⚠ Model '{}' reported unusual trained context size: {}, using 8192",
-                model_name, trained_ctx
-            );
-            8192
-        } else if trained_ctx <= 8192 {
-            // Small models: use full trained context
-            trained_ctx
-        } else if trained_ctx <= 32768 {
-            // Medium models: use 50% to save memory
-            trained_ctx / 2
-        } else {
-            // Large models: use 25%, capped at 16K to prevent OOM
-            (trained_ctx / 4).min(16384)
-        };
-
-        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-            eprintln!(
-                "Model '{}': trained_ctx={}, using n_ctx={}",
-                model_name, trained_ctx, safe_ctx
+                "⚠ Model '{}' reported unusual trained context size: {}, using {}",
+                model_name,
+                trained_ctx,
+                context_params::scaled_context_length(trained_ctx)
             );
         }
 
         // Try GPU if it hasn't failed before
         if gpu_status != 2 {
-            // SAFETY: Null return is checked immediately after this call
-            let mut gpu_params = unsafe { ffi::llama_context_default_params() };
-
-            if let Some(ctx) = manual_ctx {
-                // Use manual override
-                gpu_params.n_ctx = ctx;
-                gpu_params.n_batch = (ctx / 16).clamp(16, 2048);
-                gpu_params.n_ubatch = (ctx / 32).clamp(16, 512);
-            } else if is_adreno {
-                gpu_params.n_ctx = 2048;
-                gpu_params.n_batch = 16;
-                gpu_params.n_ubatch = 16;
-            } else if is_low_power {
-                gpu_params.n_ctx = 2048;
-                gpu_params.n_batch = 512;
-                gpu_params.n_ubatch = 256;
-            } else {
-                // Use validated model context size
-                gpu_params.n_ctx = safe_ctx;
-                gpu_params.n_batch = 2048;
-                gpu_params.n_ubatch = 512;
+            let shape = resolve_context_shape(trained_ctx, manual_ctx, device, Backend::Gpu);
+            if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+                eprintln!(
+                    "Model '{}': trained_ctx={}, using n_ctx={}",
+                    model_name, trained_ctx, shape.n_ctx
+                );
             }
-            gpu_params.n_seq_max = 1;
-            gpu_params.n_threads = thread_count;
-            gpu_params.n_threads_batch = thread_count;
-            gpu_params.offload_kqv = true;
-            gpu_params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_AUTO;
+            let gpu_params = single_sequence_params(shape, Backend::Gpu, thread_count);
 
             // SAFETY: Null return is checked immediately after this call.
             // Note: catch_unwind is NOT used here because llama.cpp (C++) can throw
@@ -646,29 +613,8 @@ impl LlamaContext {
         }
 
         // CPU fallback
-        // SAFETY: Null return is checked immediately after this call
-        let mut cpu_params = unsafe { ffi::llama_context_default_params() };
-
-        if let Some(ctx) = manual_ctx {
-            // Use manual override
-            cpu_params.n_ctx = ctx;
-            cpu_params.n_batch = (ctx / 16).clamp(16, 2048);
-            cpu_params.n_ubatch = (ctx / 32).clamp(16, 512);
-        } else if is_adreno || is_low_power {
-            cpu_params.n_ctx = 2048;
-            cpu_params.n_batch = 512;
-            cpu_params.n_ubatch = 256;
-        } else {
-            // Use validated model context size
-            cpu_params.n_ctx = safe_ctx;
-            cpu_params.n_batch = 2048;
-            cpu_params.n_ubatch = 512;
-        }
-        cpu_params.n_seq_max = 1;
-        cpu_params.n_threads = thread_count;
-        cpu_params.n_threads_batch = thread_count;
-        cpu_params.offload_kqv = false; // CPU only
-        cpu_params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_DISABLED;
+        let shape = resolve_context_shape(trained_ctx, manual_ctx, device, Backend::Cpu);
+        let cpu_params = single_sequence_params(shape, Backend::Cpu, thread_count);
 
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!(
@@ -685,6 +631,13 @@ impl LlamaContext {
             eprintln!("✓ CPU-only context created successfully");
             Ok(Self { ptr: context })
         }
+    }
+
+    /// Tokens one sequence can hold in this context, as llama.cpp allocated
+    /// it. This is the requested window rounded up to a multiple of 256.
+    pub fn context_length(&self) -> u32 {
+        // SAFETY: self.ptr is non-null for any constructed context
+        unsafe { ffi::llama_n_ctx_seq(self.ptr) }
     }
 
     pub fn get_logits_ith(&self, i: i32) -> *mut f32 {
@@ -711,8 +664,8 @@ impl LlamaContext {
     ///
     /// `n_seq_max` controls how many independent sequences can share the KV cache.
     /// When `kv_unified` is true, sequences share a common prefix (recommended for
-    /// composed context slots). `swa_full` is forced true when `n_seq_max > 1` per
-    /// llama.cpp requirements.
+    /// composed context slots). `swa_full` stays true when `n_seq_max > 1`, so
+    /// these contexts pay for a full-size sliding-window cache.
     pub fn new_with_sequences(
         model: &LlamaModel,
         n_seq_max: u32,
@@ -724,17 +677,10 @@ impl LlamaContext {
         let thread_count = num_cores.min(16) as i32;
 
         let trained_ctx = model.get_trained_context_size();
-        let safe_ctx = if trained_ctx <= 8192 {
-            trained_ctx
-        } else if trained_ctx <= 32768 {
-            trained_ctx / 2
-        } else {
-            (trained_ctx / 4).min(16384)
-        };
 
         // SAFETY: Returns a default-initialized struct
         let mut params = unsafe { ffi::llama_context_default_params() };
-        params.n_ctx = safe_ctx;
+        params.n_ctx = configured_context_length(trained_ctx);
         params.n_batch = 2048;
         params.n_ubatch = 512;
         params.n_seq_max = n_seq_max;
@@ -747,7 +693,10 @@ impl LlamaContext {
             ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_DISABLED
         };
         params.kv_unified = kv_unified;
-        // swa_full required when n_seq_max > 1 per llama.h
+        // Multi-sequence callers shift and copy ranges between sequences
+        // (`seq_add`, `seq_cp`), which needs the sliding-window state of
+        // every position, not just the last window. llama.h also warns that
+        // a windowed cache performs badly when n_seq_max > 1.
         params.swa_full = n_seq_max > 1;
 
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
