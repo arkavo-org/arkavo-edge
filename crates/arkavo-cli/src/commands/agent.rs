@@ -1123,10 +1123,10 @@ fn broadcast_agent_mdns_sync(
         // mdns-sd leaves loopback interfaces out unless asked, and announces
         // an address only on the interface whose network holds it. Without
         // this a loopback address is announced nowhere, not even to this
-        // machine; with it the record still never leaves the machine.
-        if listen::is_loopback(service_ip) {
-            mdns.enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])?;
-        }
+        // machine; with it the record still never leaves the machine. An
+        // agent on a network address needs it too: this daemon also browses,
+        // and agents on this machine listen on loopback by default.
+        mdns.enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])?;
 
         // Start browsing for other agents
         let receiver = mdns.browse("_a2a._tcp.local.")?;
