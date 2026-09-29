@@ -12,6 +12,7 @@ pub mod mock_llm_server;
 pub mod mock_provider;
 pub mod prompt_loader;
 pub mod secure_http;
+pub mod security_command;
 #[cfg(feature = "sentinel")]
 pub mod sentinel_embedder;
 #[cfg(feature = "sentinel")]
@@ -79,6 +80,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "ui" => commands::ui::execute(&args[1..]),
         "mcp" => commands::mcp_proxy::execute(&args[1..]),
         command @ ("login" | "logout") => commands::login::execute(command, &args[1..]),
+        "security" => security_command::execute(&args[1..]),
         #[cfg(feature = "knowledge-pack")]
         "pack" => commands::pack::execute(&args[1..]).map_err(Into::into),
         #[cfg(not(feature = "knowledge-pack"))]
@@ -203,6 +205,7 @@ fn usage_text() -> String {
         commands.push("    pack           Build sealed knowledge-pack components");
     }
     commands.push("    mcp proxy      Permit-gated stdio MCP relay");
+    commands.push(security_command::help_line());
     commands.push(commands::login::login_help());
 
     format!(
@@ -341,6 +344,30 @@ mod tests {
                 "unknown command 'frobnicate'",
                 "Run 'arkavo --help' for a list of commands"
             ]
+        );
+    }
+
+    /// Regression: `arkavo security audit` had no dispatch arm and ended in
+    /// "unknown command", so the audit could not be run at all.
+    #[test]
+    fn security_is_dispatched_and_listed() {
+        assert!(listed_commands().contains(&"security".to_string()));
+
+        run(&["security".to_string(), "--help".to_string()])
+            .expect("security --help is a known command");
+        run(&[
+            "security".to_string(),
+            "audit".to_string(),
+            "--help".to_string(),
+        ])
+        .expect("security audit --help is a known command");
+
+        let err = run(&["security".to_string(), "scan".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            err.lines().next(),
+            Some("unknown security subcommand 'scan'")
         );
     }
 
