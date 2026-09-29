@@ -15,6 +15,10 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::time::{Duration, sleep};
 
+mod kit_config;
+
+pub use kit_config::KitConfigNotServed;
+
 /// Represents a persistent connection to an AI agent
 #[derive(Clone)]
 pub struct AgentConnection {
@@ -1207,12 +1211,11 @@ impl AgentConnection {
             include_backups,
         };
 
+        let method = "agent.config.get";
         let response = client
-            .request::<AgentConfigGetResponse, _>(
-                "agent.config.get",
-                vec![serde_json::to_value(request)?],
-            )
-            .await?;
+            .request::<AgentConfigGetResponse, _>(method, vec![serde_json::to_value(request)?])
+            .await
+            .map_err(|e| kit_config::call_error(&self.agent_id, &self.endpoint, method, e))?;
 
         Ok(response)
     }
@@ -1234,12 +1237,11 @@ impl AgentConnection {
             create_backup,
         };
 
+        let method = "agent.config.update";
         let response = client
-            .request::<AgentConfigUpdateResponse, _>(
-                "agent.config.update",
-                vec![serde_json::to_value(request)?],
-            )
-            .await?;
+            .request::<AgentConfigUpdateResponse, _>(method, vec![serde_json::to_value(request)?])
+            .await
+            .map_err(|e| kit_config::call_error(&self.agent_id, &self.endpoint, method, e))?;
 
         Ok(response)
     }
@@ -1280,12 +1282,11 @@ impl AgentConnection {
             backup_filename,
         };
 
+        let method = "agent.config.restore";
         let response = client
-            .request::<AgentConfigRestoreResponse, _>(
-                "agent.config.restore",
-                vec![serde_json::to_value(request)?],
-            )
-            .await?;
+            .request::<AgentConfigRestoreResponse, _>(method, vec![serde_json::to_value(request)?])
+            .await
+            .map_err(|e| kit_config::call_error(&self.agent_id, &self.endpoint, method, e))?;
 
         Ok(response)
     }
