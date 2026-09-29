@@ -1044,6 +1044,7 @@ pub(crate) async fn generate_tokens_with_vision(
     messages: Vec<Message>,
     config: StreamingConfig,
     tx: UnboundedSender<Result<StreamResponse>>,
+    pooled_ctx: Option<std::sync::Arc<std::sync::Mutex<LlamaContext>>>,
 ) {
     let result: Result<()> = async {
         let first_msg_with_image = messages
@@ -1096,8 +1097,11 @@ pub(crate) async fn generate_tokens_with_vision(
             eprintln!("🚀 Starting text generation after vision processing");
         }
 
-        let dummy_prompt = format!("{}\n", first_msg_with_image.content);
-        generate_tokens(model, dummy_prompt.into_bytes(), config, tx.clone()).await;
+        let dummy_prompt = format!("{}\n", first_msg_with_image.content).into_bytes();
+        match pooled_ctx {
+            Some(ctx) => generate_tokens_pooled(ctx, model, dummy_prompt, config, tx.clone()).await,
+            None => generate_tokens(model, dummy_prompt, config, tx.clone()).await,
+        }
 
         Ok(())
     }

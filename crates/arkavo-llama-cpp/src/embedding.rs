@@ -117,7 +117,7 @@ impl EmbeddingContext {
         if ptr.is_null() {
             return Err("failed to create embedding context".to_string());
         }
-        let ctx = LlamaContext { ptr };
+        let ctx = LlamaContext::from_raw(ptr);
 
         // SAFETY: model.ptr is valid; this reads a model hyperparameter. The
         // pooled vector is sized by the output width, which differs from
@@ -330,7 +330,7 @@ mod tests {
             ffi::llama_new_context_with_model(model.ptr, params)
         };
         assert!(!ptr.is_null());
-        let ctx = LlamaContext { ptr };
+        let ctx = LlamaContext::from_raw(ptr);
         // SAFETY: ctx.ptr is non-null and owned by `ctx`.
         let resolved = unsafe { ffi::llama_pooling_type(ctx.ptr) };
         assert_eq!(

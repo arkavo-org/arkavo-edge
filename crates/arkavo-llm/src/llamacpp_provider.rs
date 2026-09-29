@@ -114,6 +114,8 @@ pub struct LlamaCppProvider {
     mtmd_ctx: Option<Arc<MtmdContext>>,
     /// Optional conversation ID for context reuse
     conversation_id: Option<ConversationId>,
+    /// How long a request queues for a busy pooled context before failing
+    context_wait: std::time::Duration,
     /// GPU fault circuit breaker for retry/fallback logic
     gpu_breaker: std::sync::Mutex<GpuCircuitBreaker>,
     /// Template-generated format and PEG parser string, stored after generate_streaming
@@ -178,6 +180,7 @@ impl LlamaCppProvider {
             // A protected model has no callback-capable mmproj path yet.
             mtmd_ctx: None,
             conversation_id: None,
+            context_wait: crate::context_pool::default_acquire_timeout(),
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
             template_parse_info: std::sync::Mutex::new(None),
         })
@@ -235,6 +238,7 @@ impl LlamaCppProvider {
             config,
             mtmd_ctx,
             conversation_id: None,
+            context_wait: crate::context_pool::default_acquire_timeout(),
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
             template_parse_info: std::sync::Mutex::new(None),
         })
@@ -265,6 +269,7 @@ impl LlamaCppProvider {
             config,
             mtmd_ctx: None,
             conversation_id: None,
+            context_wait: crate::context_pool::default_acquire_timeout(),
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
             template_parse_info: std::sync::Mutex::new(None),
         })
@@ -293,6 +298,7 @@ impl LlamaCppProvider {
             config,
             mtmd_ctx: None,
             conversation_id: Some(conversation_id),
+            context_wait: crate::context_pool::default_acquire_timeout(),
             gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
             template_parse_info: std::sync::Mutex::new(None),
         })
@@ -307,6 +313,13 @@ impl LlamaCppProvider {
     /// Get the current conversation ID
     pub fn conversation_id(&self) -> Option<&str> {
         self.conversation_id.as_deref()
+    }
+
+    /// Set how long a request queues for a busy pooled context before it
+    /// fails with a timeout.
+    pub fn with_context_wait(mut self, limit: std::time::Duration) -> Self {
+        self.context_wait = limit;
+        self
     }
 
     /// Enable vision support by loading a multimodal projector file.
@@ -398,6 +411,34 @@ impl LlamaCppProvider {
     pub fn enable_vision(self, _mmproj_path: &str) -> Result<Self> {
         Ok(self)
     }
+}
+
+/// Queue for the model's pooled context. On failure the error goes to the
+/// stream and `None` is returned; `None` is also returned when the caller
+/// stopped listening while queued, so the context is not tied up decoding a
+/// prompt nobody will read.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+async fn lease_context(
+    registry: &Arc<ModelRegistry>,
+    model_name: &str,
+    limit: std::time::Duration,
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<StreamResponse>>,
+) -> Option<(
+    crate::model_registry::ContextLease,
+    Arc<std::sync::Mutex<arkavo_llama_cpp::LlamaContext>>,
+)> {
+    let lease = match registry.lease_fresh_context(model_name, limit).await {
+        Ok(lease) => lease,
+        Err(e) => {
+            let _ = tx.send(Err(e));
+            return None;
+        }
+    };
+    if tx.is_closed() {
+        return None;
+    }
+    let context = lease.context()?;
+    Some((lease, context))
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -659,31 +700,36 @@ impl LlamaCppProvider {
             use_spec_decoding: self.config.use_spec_decoding,
         };
 
-        // Try pooled context first (avoids context allocation contention).
-        // Falls back to fresh context if pool unavailable or exhausted.
+        // A registry model generates on a pooled context and queues for it
+        // when it is busy. Building a context outside the pool here would
+        // add a KV cache the pool's bound exists to prevent.
         if let Some(ref registry) = self.registry {
+            let registry = Arc::clone(registry);
             let model_name = self.name.clone();
-            if let Ok(pooled) = registry.acquire_fresh_context(&model_name) {
-                let pooled_ctx = pooled.context.clone();
-                let registry_clone = registry.clone();
-                let agent_name = self.name.clone();
-                tokio::spawn(async move {
-                    // GPU guard held for entire inference — serializes Metal access
-                    let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
-                        .acquire(&agent_name)
-                        .await;
-                    crate::llamacpp_streaming::generate_tokens_pooled(
-                        pooled_ctx,
-                        model,
-                        prompt_bytes,
-                        streaming_config,
-                        tx,
-                    )
+            let context_wait = self.context_wait;
+            tokio::spawn(async move {
+                let Some((lease, pooled_ctx)) =
+                    lease_context(&registry, &model_name, context_wait, &tx).await
+                else {
+                    return;
+                };
+                // Taken after the context, never before: a task that held the
+                // GPU slot while queueing for a context could block the task
+                // that holds the context and is queueing for the GPU slot.
+                let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
+                    .acquire(&model_name)
                     .await;
-                    let _ = registry_clone.release_context(&model_name, pooled, true);
-                });
-                return Ok(UnboundedReceiverStream::new(rx));
-            }
+                crate::llamacpp_streaming::generate_tokens_pooled(
+                    pooled_ctx,
+                    model,
+                    prompt_bytes,
+                    streaming_config,
+                    tx,
+                )
+                .await;
+                drop(lease);
+            });
+            return Ok(UnboundedReceiverStream::new(rx));
         }
 
         let agent_name = self.name.clone();
@@ -732,12 +778,35 @@ impl LlamaCppProvider {
         };
 
         let agent_name = self.name.clone();
+        let registry = self.registry.clone();
+        let context_wait = self.context_wait;
         tokio::spawn(async move {
+            // A registry model has a pooled context; generating the text on
+            // a second one would double its KV cache for the request.
+            let lease = match registry {
+                Some(ref registry) => {
+                    match lease_context(registry, &agent_name, context_wait, &tx).await {
+                        Some(lease) => Some(lease),
+                        None => return,
+                    }
+                }
+                None => None,
+            };
             // GPU guard held for entire inference — serializes Metal access
             let _gpu_guard = arkavo_observability::gpu_scheduler::global_gpu()
                 .acquire(&agent_name)
                 .await;
-            generate_tokens_with_vision(model, mtmd_ctx, messages, streaming_config, tx).await;
+            let pooled_ctx = lease.as_ref().map(|(_, context)| Arc::clone(context));
+            generate_tokens_with_vision(
+                model,
+                mtmd_ctx,
+                messages,
+                streaming_config,
+                tx,
+                pooled_ctx,
+            )
+            .await;
+            drop(lease);
         });
 
         Ok(UnboundedReceiverStream::new(rx))
@@ -759,6 +828,7 @@ impl LlamaCppProvider {
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
+                context_wait: self.context_wait,
                 gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
                 template_parse_info: std::sync::Mutex::new(None),
             };
@@ -931,6 +1001,7 @@ impl Provider for LlamaCppProvider {
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
+                context_wait: self.context_wait,
                 gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
                 template_parse_info: std::sync::Mutex::new(None),
             };
@@ -1162,6 +1233,7 @@ impl Provider for LlamaCppProvider {
                 config,
                 mtmd_ctx: self.mtmd_ctx.clone(),
                 conversation_id: self.conversation_id.clone(),
+                context_wait: self.context_wait,
                 gpu_breaker: std::sync::Mutex::new(GpuCircuitBreaker::default()),
                 template_parse_info: std::sync::Mutex::new(None),
             };

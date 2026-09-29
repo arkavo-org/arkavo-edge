@@ -545,6 +545,17 @@ impl Drop for LlamaModel {
     }
 }
 
+/// Contexts alive in this process. Each one owns a KV cache, so this is the
+/// figure to watch when private memory is higher than expected.
+#[cfg(not(target_env = "musl"))]
+static LIVE_CONTEXTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Number of llama.cpp contexts currently alive in this process.
+#[cfg(not(target_env = "musl"))]
+pub fn live_context_count() -> usize {
+    LIVE_CONTEXTS.load(Ordering::Relaxed)
+}
+
 #[cfg(not(target_env = "musl"))]
 pub struct LlamaContext {
     pub(crate) ptr: *mut ffi::llama_context,
@@ -556,6 +567,12 @@ unsafe impl Send for LlamaContext {}
 
 #[cfg(not(target_env = "musl"))]
 impl LlamaContext {
+    /// Take ownership of a context llama.cpp just created.
+    pub(crate) fn from_raw(ptr: *mut ffi::llama_context) -> Self {
+        LIVE_CONTEXTS.fetch_add(1, Ordering::Relaxed);
+        Self { ptr }
+    }
+
     pub fn new(model: &LlamaModel) -> Result<Self, String> {
         use context_params::{resolve_context_shape, single_sequence_params, Backend};
 
@@ -605,7 +622,7 @@ impl LlamaContext {
                 if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
                     eprintln!("✓ GPU context created successfully");
                 }
-                return Ok(Self { ptr: context });
+                return Ok(Self::from_raw(context));
             }
 
             GPU_STATUS.store(2, Ordering::Relaxed);
@@ -629,7 +646,7 @@ impl LlamaContext {
             Err("Failed to create context (CPU attempt failed)".to_string())
         } else {
             eprintln!("✓ CPU-only context created successfully");
-            Ok(Self { ptr: context })
+            Ok(Self::from_raw(context))
         }
     }
 
@@ -714,7 +731,7 @@ impl LlamaContext {
                 n_seq_max
             ))
         } else {
-            Ok(Self { ptr: context })
+            Ok(Self::from_raw(context))
         }
     }
 
@@ -793,6 +810,7 @@ impl Drop for LlamaContext {
         unsafe {
             ffi::llama_free(self.ptr);
         }
+        LIVE_CONTEXTS.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
