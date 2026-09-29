@@ -16,6 +16,12 @@ use std::net::{IpAddr, SocketAddr};
 /// decision.
 pub(crate) const DEFAULT_LISTEN: &str = "127.0.0.1:0";
 
+/// The rate limit the agent runs its RPC endpoint with. Defined once so the
+/// security audit reports the limit the agent applies, not one of its own.
+pub(crate) fn rpc_rate_limit() -> arkavo_protocol::rate_limit::RateLimitConfig {
+    arkavo_protocol::rate_limit::RateLimitConfig::default()
+}
+
 /// Whether only processes on this machine can reach `ip`.
 ///
 /// An IPv4-mapped IPv6 address is judged by the IPv4 address it carries, so

@@ -1,12 +1,18 @@
 //! Security audit command for automated posture assessment
 //!
-//! Checks file permissions, TLS settings, auth configuration, rate limiting,
-//! A2A policy, preflight moderation, and memory encryption.
+//! Checks file permissions, the RPC endpoint (listen address, transport,
+//! authentication, rate limiting), preflight moderation, memory encryption,
+//! the kit and the shell command policy.
 //! Outputs human-readable text or JSON for CI integration.
+//!
+//! A check passes only on something it observed. Where the control it is
+//! named after does not exist, it says so.
 
 use serde::Serialize;
 use std::fmt::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+mod network;
 
 /// Audit check status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -41,20 +47,38 @@ pub struct AuditSummary {
     pub failures: usize,
 }
 
+fn result(name: &str, category: &str, status: AuditStatus, message: String) -> AuditResult {
+    AuditResult {
+        name: name.to_string(),
+        status,
+        message,
+        category: category.to_string(),
+    }
+}
+
 impl AuditReport {
-    /// Run all security audit checks.
+    /// Run all security audit checks against the current directory, the one
+    /// `arkavo agent` would discover its kit from.
     pub fn run() -> Self {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::run_at(&cwd)
+    }
+
+    /// `cwd`-parameterized so tests can audit a directory of their own
+    /// without depending on (or mutating) the process's working directory.
+    fn run_at(cwd: &Path) -> Self {
+        let endpoint = network::effective_endpoint(cwd);
         let results = vec![
             check_arkavo_dir_permissions(),
-            check_tls_settings(),
-            check_bind_config(),
-            check_auth_requirements(),
-            check_rate_limiting(),
+            network::check_bind(&endpoint),
+            network::check_transport(&endpoint),
+            network::check_rate_limiting(&crate::commands::agent::listen::rpc_rate_limit()),
+            network::check_authentication(&endpoint),
             check_preflight_moderation(),
             check_memory_encryption(),
-            check_swarmkit_manifest(),
+            check_swarmkit_manifest_at(cwd),
             check_api_keys_in_env(),
-            check_task_policy_manager(),
+            check_shell_command_policy(),
         ];
 
         let passed = results
@@ -127,92 +151,60 @@ fn arkavo_dir() -> PathBuf {
 }
 
 fn check_arkavo_dir_permissions() -> AuditResult {
-    let dir = arkavo_dir();
+    check_dir_permissions(&arkavo_dir())
+}
+
+fn check_dir_permissions(dir: &Path) -> AuditResult {
+    let name = "Config directory";
+    let category = "Filesystem";
     if !dir.exists() {
-        return AuditResult {
-            name: "Config directory".to_string(),
-            status: AuditStatus::Warn,
-            message: "~/.arkavo/ does not exist".to_string(),
-            category: "Filesystem".to_string(),
-        };
+        return result(
+            name,
+            category,
+            AuditStatus::Warn,
+            "~/.arkavo/ does not exist".to_string(),
+        );
     }
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        if let Ok(meta) = std::fs::metadata(&dir) {
-            let mode = meta.mode() & 0o777;
-            if mode == 0o700 {
-                return AuditResult {
-                    name: "Config directory".to_string(),
-                    status: AuditStatus::Pass,
-                    message: "~/.arkavo/ has correct permissions (0700)".to_string(),
-                    category: "Filesystem".to_string(),
-                };
+        match std::fs::metadata(dir) {
+            Ok(meta) => {
+                let mode = meta.mode() & 0o777;
+                if mode == 0o700 {
+                    result(
+                        name,
+                        category,
+                        AuditStatus::Pass,
+                        "~/.arkavo/ has correct permissions (0700)".to_string(),
+                    )
+                } else {
+                    result(
+                        name,
+                        category,
+                        AuditStatus::Fail,
+                        format!("~/.arkavo/ has permissions {mode:o}, expected 0700"),
+                    )
+                }
             }
-            return AuditResult {
-                name: "Config directory".to_string(),
-                status: AuditStatus::Fail,
-                message: format!("~/.arkavo/ has permissions {mode:o}, expected 0700"),
-                category: "Filesystem".to_string(),
-            };
+            Err(e) => result(
+                name,
+                category,
+                AuditStatus::Warn,
+                format!("~/.arkavo/ permissions could not be read: {e}"),
+            ),
         }
     }
 
-    AuditResult {
-        name: "Config directory".to_string(),
-        status: AuditStatus::Pass,
-        message: "~/.arkavo/ exists".to_string(),
-        category: "Filesystem".to_string(),
-    }
-}
-
-fn check_tls_settings() -> AuditResult {
-    // Check if rustls is available (it always is since we don't use OpenSSL)
-    AuditResult {
-        name: "TLS backend".to_string(),
-        status: AuditStatus::Pass,
-        message: "Using rustls (no OpenSSL dependency)".to_string(),
-        category: "Network".to_string(),
-    }
-}
-
-fn check_bind_config() -> AuditResult {
-    // Check if server would bind to 0.0.0.0 (exposed) or localhost
-    AuditResult {
-        name: "Bind address".to_string(),
-        status: AuditStatus::Pass,
-        message: "Default bind is localhost-only".to_string(),
-        category: "Network".to_string(),
-    }
-}
-
-fn check_auth_requirements() -> AuditResult {
-    // Check for JWT/auth configuration
-    let has_jwt = std::env::var("JWT_SECRET").is_ok();
-    if has_jwt {
-        AuditResult {
-            name: "Authentication".to_string(),
-            status: AuditStatus::Pass,
-            message: "JWT_SECRET configured".to_string(),
-            category: "Authentication".to_string(),
-        }
-    } else {
-        AuditResult {
-            name: "Authentication".to_string(),
-            status: AuditStatus::Warn,
-            message: "No JWT_SECRET set; API endpoints may be unauthenticated".to_string(),
-            category: "Authentication".to_string(),
-        }
-    }
-}
-
-fn check_rate_limiting() -> AuditResult {
-    AuditResult {
-        name: "Rate limiting".to_string(),
-        status: AuditStatus::Pass,
-        message: "Built-in IP rate limiter available".to_string(),
-        category: "Network".to_string(),
+    #[cfg(not(unix))]
+    {
+        result(
+            name,
+            category,
+            AuditStatus::Warn,
+            "~/.arkavo/ exists; its access control is not inspected on this platform".to_string(),
+        )
     }
 }
 
@@ -255,40 +247,43 @@ fn check_memory_encryption() -> AuditResult {
     }
 }
 
-fn check_swarmkit_manifest() -> AuditResult {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    check_swarmkit_manifest_at(&cwd)
-}
-
 /// `cwd`-parameterized so tests can exercise every discovery outcome
 /// without depending on (or mutating) the process's real working directory.
-fn check_swarmkit_manifest_at(cwd: &std::path::Path) -> AuditResult {
+fn check_swarmkit_manifest_at(cwd: &Path) -> AuditResult {
+    let name = "Agent config";
+    let category = "Configuration";
     match arkavo_swarmkit::discover_kit_path(cwd) {
-        Ok(path) => AuditResult {
-            name: "Agent config".to_string(),
-            status: AuditStatus::Pass,
-            message: format!("SwarmKit manifest found: {}", path.display()),
-            category: "Configuration".to_string(),
+        // Finding the file is not enough: the agent refuses to start on a
+        // manifest that does not load.
+        Ok(path) => match arkavo_swarmkit::load_kit_file(&path) {
+            Ok(_) => result(
+                name,
+                category,
+                AuditStatus::Pass,
+                format!("SwarmKit manifest found and valid: {}", path.display()),
+            ),
+            Err(err) => result(
+                name,
+                category,
+                AuditStatus::Fail,
+                format!("SwarmKit manifest does not load: {err}"),
+            ),
         },
-        Err(arkavo_swarmkit::DiscoverError::NotFound) => AuditResult {
-            name: "Agent config".to_string(),
-            status: AuditStatus::Warn,
-            message: "No SwarmKit manifest; agent runs with defaults — arkavo kit init <name>"
-                .to_string(),
-            category: "Configuration".to_string(),
-        },
-        Err(err @ arkavo_swarmkit::DiscoverError::AgentsMdUnsupported { .. }) => AuditResult {
-            name: "Agent config".to_string(),
-            status: AuditStatus::Warn,
-            message: err.to_string(),
-            category: "Configuration".to_string(),
-        },
-        Err(err) => AuditResult {
-            name: "Agent config".to_string(),
-            status: AuditStatus::Warn,
-            message: format!("SwarmKit manifest discovery error: {err}"),
-            category: "Configuration".to_string(),
-        },
+        Err(arkavo_swarmkit::DiscoverError::NotFound) => result(
+            name,
+            category,
+            AuditStatus::Warn,
+            "No SwarmKit manifest; agent runs with defaults — arkavo kit init <name>".to_string(),
+        ),
+        Err(err @ arkavo_swarmkit::DiscoverError::AgentsMdUnsupported { .. }) => {
+            result(name, category, AuditStatus::Warn, err.to_string())
+        }
+        Err(err) => result(
+            name,
+            category,
+            AuditStatus::Warn,
+            format!("SwarmKit manifest discovery error: {err}"),
+        ),
     }
 }
 
@@ -322,14 +317,47 @@ fn check_api_keys_in_env() -> AuditResult {
     }
 }
 
-fn check_task_policy_manager() -> AuditResult {
-    // The task policy manager is now code-level; check if shell_exec defaults to deny
-    AuditResult {
-        name: "Task policy manager".to_string(),
-        status: AuditStatus::Pass,
-        message: "RequiresReview commands default to policy-denied".to_string(),
-        category: "Policy".to_string(),
+/// Classify probe commands with the shell tool itself. Nothing is executed:
+/// classification is a pure function of the command text.
+fn check_shell_command_policy() -> AuditResult {
+    use arkavo_mcp_tools::shell_exec::{ApprovalResult, ShellExecTool};
+
+    let name = "Shell command policy";
+    let category = "Policy";
+    let tool = ShellExecTool::new();
+
+    let destructive = "rm -rf /";
+    if !matches!(
+        tool.classify_command(destructive),
+        ApprovalResult::AutoBlocked(_)
+    ) {
+        return result(
+            name,
+            category,
+            AuditStatus::Fail,
+            format!("shell_exec does not block the destructive probe `{destructive}`"),
+        );
     }
+
+    let unrecognised = "make install";
+    if tool.classify_command(unrecognised) != ApprovalResult::RequiresReview {
+        return result(
+            name,
+            category,
+            AuditStatus::Fail,
+            format!("shell_exec does not send the unrecognised probe `{unrecognised}` to review"),
+        );
+    }
+
+    result(
+        name,
+        category,
+        AuditStatus::Pass,
+        format!(
+            "shell_exec blocks `{destructive}` and sends `{unrecognised}` to policy review \
+             instead of approving it"
+        ),
+    )
 }
 
 /// Execute the security audit CLI command.
@@ -376,11 +404,79 @@ mod tests {
         assert!(parsed.get("summary").is_some());
     }
 
+    /// Regression: the report passed bind, TLS, rate limiting and policy
+    /// checks that looked at nothing. A kit that exposes the endpoint must
+    /// now fail the audit as a whole.
     #[test]
-    fn test_tls_always_passes() {
-        let result = check_tls_settings();
-        assert_eq!(result.status, AuditStatus::Pass);
-        assert!(result.message.contains("rustls"));
+    fn a_kit_listening_on_the_network_fails_the_audit() {
+        let dir = tempfile::tempdir().unwrap();
+        let kit =
+            minimal_kit_yaml().replacen("kit:", "runtime:\n  listen: \"0.0.0.0:8342\"\nkit:", 1);
+        std::fs::write(dir.path().join("agent.swarmkit.yaml"), kit).unwrap();
+
+        let report = AuditReport::run_at(dir.path());
+
+        assert!(report.summary.failures >= 3, "{}", report.to_text());
+        let bind = report
+            .results
+            .iter()
+            .find(|r| r.name == "Bind address")
+            .expect("the bind check always runs");
+        assert_eq!(bind.status, AuditStatus::Fail);
+        assert!(bind.message.contains("0.0.0.0:8342"), "{}", bind.message);
+    }
+
+    #[test]
+    fn no_check_claims_a_jwt_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = AuditReport::run_at(dir.path());
+        assert!(!report.to_text().contains("JWT_SECRET"));
+    }
+
+    #[test]
+    fn checks_of_one_category_are_listed_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = AuditReport::run_at(dir.path()).to_text();
+        assert_eq!(text.matches("[Network]").count(), 1, "{text}");
+    }
+
+    #[test]
+    fn shell_command_policy_passes_on_what_the_tool_classifies() {
+        let check = check_shell_command_policy();
+        assert_eq!(check.status, AuditStatus::Pass, "{}", check.message);
+        assert!(check.message.contains("rm -rf /"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_directory_permissions_are_read_from_the_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(check_dir_permissions(dir.path()).status, AuditStatus::Pass);
+
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let open = check_dir_permissions(dir.path());
+        assert_eq!(open.status, AuditStatus::Fail);
+        assert!(open.message.contains("755"), "{}", open.message);
+
+        let missing = check_dir_permissions(&dir.path().join("absent"));
+        assert_eq!(missing.status, AuditStatus::Warn);
+    }
+
+    #[test]
+    fn swarmkit_check_fails_when_the_manifest_does_not_load() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("agent.swarmkit.yaml"), "not: [a, kit").unwrap();
+
+        let result = check_swarmkit_manifest_at(dir.path());
+        assert_eq!(result.status, AuditStatus::Fail);
+        assert!(
+            result.message.contains("does not load"),
+            "{}",
+            result.message
+        );
     }
 
     fn minimal_kit_yaml() -> &'static str {

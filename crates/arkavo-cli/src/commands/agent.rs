@@ -344,7 +344,7 @@ pub async fn start_agent_server(
     use crate::mcp_spawner::McpProcessManager;
     use arkavo_crypto::AgentKeypair;
     use arkavo_gossip::GossipConfig;
-    use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig};
+    use arkavo_protocol::config::ServerConfig;
     use arkavo_server::A2aServer;
     use arkavo_server::{
         LearningBus, start_advisor_broadcast_loop, start_anti_entropy_loop,
@@ -412,7 +412,7 @@ pub async fn start_agent_server(
         port: listen_addr.port(),
         max_connections: 100,
         idle_timeout_seconds: 300,
-        rate_limit: RateLimitConfig::default(),
+        rate_limit: listen::rpc_rate_limit(),
         task_store_path: Some(task_store_path.to_string_lossy().to_string()),
         metrics_enabled: true,
     };
