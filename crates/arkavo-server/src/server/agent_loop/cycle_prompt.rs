@@ -1,9 +1,10 @@
 //! What one agent cycle is asked to do, and whether it should run at all.
 //!
 //! The loop serves two kinds of agent with one tick. An orchestrator acts on
-//! its own, so an idle tick still runs. A specialist is passive: it spends
-//! inference only on work someone sent it. Keeping those rules here lets them
-//! be tested without a model.
+//! its own: an idle tick still runs, and a run of ticks without action earns a
+//! push to act. A specialist is passive: it spends inference only on work
+//! someone sent it, and answering in text is that work done, not inaction.
+//! Keeping those rules here lets them be tested without a model.
 
 use arkavo_protocol::agent_config::AgentMode;
 
@@ -60,6 +61,16 @@ pub(super) fn is_idle(
         return false;
     }
     *mode == AgentMode::Specialist || (!has_mcp_tools && cycle > 1)
+}
+
+/// True when a run of cycles without a tool action means the agent is stuck.
+///
+/// That holds for an orchestrator, whose job is to act. A specialist that
+/// answered in text did its job, and one with nothing delegated has nothing
+/// to act on: pushing either to "take an action NOW" starts inference nobody
+/// asked for and steers a requester's task toward an unwanted tool call.
+pub(super) fn dead_man_switch_applies(mode: &AgentMode) -> bool {
+    *mode != AgentMode::Specialist
 }
 
 #[cfg(test)]
@@ -154,5 +165,13 @@ mod tests {
             IDLE_PROMPT,
             true
         ));
+    }
+
+    /// Regression: three text answers in a row tripped the dead-man switch,
+    /// which then ran cycles of its own on a specialist with nothing to do.
+    #[test]
+    fn only_an_orchestrator_is_pushed_to_act() {
+        assert!(dead_man_switch_applies(&AgentMode::Orchestrator));
+        assert!(!dead_man_switch_applies(&AgentMode::Specialist));
     }
 }

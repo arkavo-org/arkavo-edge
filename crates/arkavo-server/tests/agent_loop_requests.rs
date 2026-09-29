@@ -70,3 +70,37 @@ async fn an_autonomous_cycle_is_still_nudged_toward_a_tool() {
         script.prompt(1)
     );
 }
+
+/// Regression: a specialist's text answers counted as "no action", so after
+/// three of them the dead-man switch ran cycles of its own and told the model
+/// to act NOW with nothing delegated.
+#[tokio::test]
+async fn a_specialist_that_answers_in_text_is_not_pushed_to_act() {
+    let script = Script::new(vec![
+        text("first answer"),
+        text("second answer"),
+        text("third answer"),
+    ]);
+    let agent = RunningAgent::start(AgentMode::Specialist, false, script).await;
+
+    for expected in ["first answer", "second answer", "third answer"] {
+        assert_eq!(
+            agent.ask("What should we measure?").await,
+            CycleOutcome::Completed {
+                text: expected.to_string()
+            }
+        );
+    }
+    // One more tick with nothing delegated: this is where the switch fired.
+    agent.ticked(agent.ticks() + 1).await;
+    let script = agent.stop().await;
+
+    assert_eq!(script.dispatches(), 3, "one dispatch per delegated task");
+    for index in 0..script.dispatches() {
+        let prompt = script.prompt(index);
+        assert!(
+            !prompt.contains("You MUST take an action NOW"),
+            "dispatch {index} was pushed to act: {prompt}"
+        );
+    }
+}
