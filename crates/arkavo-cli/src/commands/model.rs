@@ -18,15 +18,18 @@ enum ModelSubcommand {
     /// List available models
     List,
 
-    /// Switch to a different model
+    /// Accepted only so an old invocation gets an explanation instead of a
+    /// generic parse error; there is no persistent model selection to switch.
+    #[command(hide = true)]
     Switch {
-        /// Name of the model to switch to
-        name: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        args: Vec<String>,
     },
 
     /// Download a model from the registry
     Download {
-        /// Name of the model to download (defaults to gemma3-1b-it-qat)
+        /// Name of the model to download (defaults to the model recommended
+        /// for this device)
         name: Option<String>,
     },
 
@@ -62,15 +65,56 @@ enum ModelSubcommand {
         delete_source: bool,
     },
 
-    /// Add a local model file
+    /// Accepted only so an old invocation gets an explanation instead of a
+    /// generic parse error; models are not registered by hand.
+    #[command(hide = true)]
     Add {
-        /// Path to the model file
-        path: PathBuf,
-
-        /// Name to give the model
-        #[arg(long)]
-        name: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        args: Vec<String>,
     },
+}
+
+/// Shown when no kit declares preferred models. `kit init` refuses to run
+/// without a name, so the hint has to carry the placeholder.
+const KIT_INIT_HINT: &str = "Configure preferred models with: arkavo kit init <name>";
+
+const SWITCH_UNSUPPORTED: &str = "'arkavo model switch' is not supported: there is no persistent model selection. Choose a model per run with --model, e.g. 'arkavo chat --model ministral-3b'";
+
+const ADD_UNSUPPORTED: &str = "'arkavo model add' is not supported: models are not registered by hand. Use a local file directly with 'arkavo chat --gguf <path>', or fetch a catalog model with 'arkavo model download <name>'";
+
+const DOWNLOADABLE_MODELS: &str = "Available models:
+  gemma-4-e2b   - Gemma 4 E2B (~2.9 GB) - Default small, fast routing
+  gemma-4-12b   - Gemma 4 12B (~6.9 GB) - Default medium, most capable
+  gemma-4-e4b   - Gemma 4 E4B (~5 GB) - Edge medium
+  qwen3.5-0.8b  - Qwen3.5 0.8B (~550 MB) - Best for embedded
+  ministral-3b  - Ministral 3B (~2.5 GB)
+  ministral-8b  - Ministral 8B (~5.5 GB)
+  glm-4.7-flash - GLM-4.7-Flash (~18 GB) - 30B MoE, requires 32GB+ RAM";
+
+/// Map a `model download` name to the model it fetches; no name means the
+/// device's recommended model.
+///
+/// An unrecognized name is an error, not a listing: a script that misspells
+/// a model must not see exit 0 and carry on without the weights.
+fn resolve_download_model(
+    name: Option<&str>,
+    recommended: crate::first_run::RecommendedModel,
+) -> Result<crate::first_run::RecommendedModel> {
+    use crate::first_run::RecommendedModel;
+
+    Ok(match name {
+        None => recommended,
+        Some("gemma-4-e2b" | "gemma4-e2b" | "gemma-e2b") => RecommendedModel::Gemma4E2B,
+        Some("gemma-4-e4b" | "gemma4-e4b" | "gemma-e4b") => RecommendedModel::Gemma4E4B,
+        Some("gemma-4-12b" | "gemma4-12b" | "gemma-12b" | "gemma") => RecommendedModel::Gemma4_12B,
+        Some("qwen3.5-0.8b" | "qwen3-0.6b" | "qwen" | "qwen3") => RecommendedModel::Qwen35_0_8B,
+        Some("ministral-3b" | "ministral3b" | "ministral") => RecommendedModel::Ministral3B,
+        Some("ministral-8b" | "ministral8b") => RecommendedModel::Ministral8B,
+        Some("glm-4.7-flash" | "glm" | "glm4") => RecommendedModel::Glm47Flash,
+        Some(other) => {
+            anyhow::bail!("unknown model '{other}'\n\n{DOWNLOADABLE_MODELS}")
+        }
+    })
 }
 
 /// Preferred models declared by the discovered SwarmKit kit: one `(role id,
@@ -124,7 +168,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                         println!("  ✗ No API keys configured");
                         println!("  Set GEMINI_API_KEY to use Gemini models");
                     }
-                    println!("\n  Configure preferred models with: arkavo kit init");
+                    println!("\n  {KIT_INIT_HINT}");
                     println!();
                 }
             }
@@ -157,58 +201,20 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             }
         }
 
-        ModelSubcommand::Switch { name } => {
-            // For future multi-model support
-            println!(
-                "Model switching is not yet implemented. The default model (gemma3-1b-it-qat) will be used if available."
-            );
-            let _ = name; // Suppress unused warning
-        }
+        ModelSubcommand::Switch { .. } => anyhow::bail!(SWITCH_UNSUPPORTED),
 
         ModelSubcommand::Download { name } => {
             use crate::first_run::{RecommendedModel, detect_capabilities, download_model};
 
             let caps = detect_capabilities();
 
-            let model = match name.as_deref() {
-                Some("gemma-4-e2b" | "gemma4-e2b" | "gemma-e2b") => RecommendedModel::Gemma4E2B,
-                Some("gemma-4-e4b" | "gemma4-e4b" | "gemma-e4b") => RecommendedModel::Gemma4E4B,
-                Some("gemma-4-12b" | "gemma4-12b" | "gemma-12b" | "gemma") => {
-                    RecommendedModel::Gemma4_12B
-                }
-                Some("qwen3.5-0.8b" | "qwen3-0.6b" | "qwen" | "qwen3") => {
-                    RecommendedModel::Qwen35_0_8B
-                }
-                Some("ministral-3b" | "ministral3b" | "ministral") => RecommendedModel::Ministral3B,
-                Some("ministral-8b" | "ministral8b") => RecommendedModel::Ministral8B,
-                Some("glm-4.7-flash" | "glm" | "glm4") => RecommendedModel::Glm47Flash,
-                Some(other) => {
-                    println!("Unknown model: {other}");
-                    println!();
-                    println!("Available models:");
-                    println!(
-                        "  gemma-4-e2b   - Gemma 4 E2B (~2.9 GB) - Default small, fast routing"
-                    );
-                    println!(
-                        "  gemma-4-12b   - Gemma 4 12B (~6.9 GB) - Default medium, most capable"
-                    );
-                    println!("  gemma-4-e4b   - Gemma 4 E4B (~5 GB) - Edge medium");
-                    println!("  qwen3.5-0.8b  - Qwen3.5 0.8B (~550 MB) - Best for embedded");
-                    println!("  ministral-3b  - Ministral 3B (~2.5 GB)");
-                    println!("  ministral-8b  - Ministral 8B (~5.5 GB)");
-                    println!(
-                        "  glm-4.7-flash - GLM-4.7-Flash (~18 GB) - 30B MoE, requires 32GB+ RAM"
-                    );
-                    return Ok(());
-                }
-                None => {
-                    println!(
-                        "No model specified, using recommended: {}",
-                        caps.recommended_model.display_name()
-                    );
-                    caps.recommended_model
-                }
-            };
+            let model = resolve_download_model(name.as_deref(), caps.recommended_model)?;
+            if name.is_none() {
+                println!(
+                    "No model specified, using recommended: {}",
+                    model.display_name()
+                );
+            }
 
             // Check system capabilities for GLM-4.7-Flash
             if matches!(model, RecommendedModel::Glm47Flash) {
@@ -285,13 +291,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             .await?;
         }
 
-        ModelSubcommand::Add { path, name } => {
-            // For future extensibility
-            println!(
-                "Manual model addition is not yet implemented. Please download models using 'arkavo model download'."
-            );
-            let _ = (path, name); // Suppress unused warnings
-        }
+        ModelSubcommand::Add { .. } => anyhow::bail!(ADD_UNSUPPORTED),
     }
 
     Ok(())
@@ -399,6 +399,141 @@ provenance:
     struct Cli {
         #[command(flatten)]
         command: ModelCommand,
+    }
+
+    fn help_for(subcommand: &str) -> String {
+        let mut top = Cli::command();
+        top.find_subcommand_mut(subcommand)
+            .unwrap_or_else(|| panic!("{subcommand} subcommand exists"))
+            .render_long_help()
+            .to_string()
+    }
+
+    fn advertised_subcommands() -> Vec<String> {
+        Cli::command()
+            .get_subcommands()
+            .filter(|sub| !sub.is_hide_set())
+            .map(|sub| sub.get_name().to_string())
+            .collect()
+    }
+
+    fn parse(args: &[&str]) -> ModelCommand {
+        Cli::try_parse_from(std::iter::once("model").chain(args.iter().copied()))
+            .unwrap_or_else(|e| panic!("{args:?} should parse: {e}"))
+            .command
+    }
+
+    /// Regression: the help named `gemma3-1b-it-qat` as the default while
+    /// the code downloads the device-recommended Gemma 4 model.
+    #[test]
+    fn download_help_describes_the_default_the_code_uses() {
+        let help = help_for("download");
+        assert!(!help.contains("gemma3"), "stale default in:\n{help}");
+        assert!(
+            help.contains("recommended"),
+            "help should name the device-recommended default, got:\n{help}"
+        );
+    }
+
+    #[test]
+    fn download_without_a_name_uses_the_recommended_model() {
+        use crate::first_run::RecommendedModel;
+        for recommended in [RecommendedModel::Gemma4_12B, RecommendedModel::Gemma4E4B] {
+            assert_eq!(
+                resolve_download_model(None, recommended).unwrap(),
+                recommended
+            );
+        }
+    }
+
+    #[test]
+    fn download_resolves_catalog_names_regardless_of_the_recommendation() {
+        use crate::first_run::RecommendedModel;
+        assert_eq!(
+            resolve_download_model(Some("ministral-3b"), RecommendedModel::Gemma4_12B).unwrap(),
+            RecommendedModel::Ministral3B
+        );
+        assert_eq!(
+            resolve_download_model(Some("gemma-4-e2b"), RecommendedModel::Gemma4_12B).unwrap(),
+            RecommendedModel::Gemma4E2B
+        );
+    }
+
+    /// Every name the error offers must itself resolve, or the listing
+    /// sends the user to another failure.
+    #[test]
+    fn every_listed_model_name_resolves() {
+        use crate::first_run::RecommendedModel;
+        let names: Vec<&str> = DOWNLOADABLE_MODELS
+            .lines()
+            .skip(1)
+            .filter_map(|line| line.split_whitespace().next())
+            .collect();
+        assert_eq!(names.len(), 7, "{names:?}");
+        for name in names {
+            assert!(
+                resolve_download_model(Some(name), RecommendedModel::Gemma4E2B).is_ok(),
+                "{name} is listed but does not resolve"
+            );
+        }
+    }
+
+    /// Regression: an unknown model name printed the catalog and exited 0.
+    #[tokio::test]
+    async fn download_of_an_unknown_model_is_an_error() {
+        let err = run(&parse(&["download", "no-such-model"]))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown model 'no-such-model'"), "{err}");
+        assert!(
+            err.contains("gemma-4-12b"),
+            "error should list names: {err}"
+        );
+    }
+
+    /// Regression: `model switch` was advertised, printed "not yet
+    /// implemented" and exited 0.
+    #[tokio::test]
+    async fn switch_is_not_advertised_and_fails_when_invoked() {
+        let advertised = advertised_subcommands();
+        assert!(
+            !advertised.contains(&"switch".to_string()),
+            "{advertised:?}"
+        );
+        assert!(
+            advertised.contains(&"download".to_string()),
+            "{advertised:?}"
+        );
+
+        let err = run(&parse(&["switch", "ministral-3b"]))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not supported"), "{err}");
+        assert!(
+            err.contains("--model"),
+            "error should say what to do: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn add_is_not_advertised_and_fails_when_invoked() {
+        let advertised = advertised_subcommands();
+        assert!(!advertised.contains(&"add".to_string()), "{advertised:?}");
+
+        let err = run(&parse(&["add", "./model.gguf", "--name", "mine"]))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not supported"), "{err}");
+    }
+
+    /// Regression: the hint read `arkavo kit init`, which fails for want of
+    /// the name it requires.
+    #[test]
+    fn kit_init_hint_includes_the_required_name() {
+        assert!(KIT_INIT_HINT.contains("arkavo kit init <name>"));
     }
 
     #[test]
