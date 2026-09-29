@@ -315,6 +315,11 @@ impl ContextPool {
         }
     }
 
+    /// Contexts each registered model may have.
+    pub const fn max_contexts(&self) -> usize {
+        self.default_max_contexts
+    }
+
     #[allow(clippy::significant_drop_tightening)]
     pub fn register_model(&self, name: &str, model: Arc<LlamaModel>) -> Result<()> {
         self.pools

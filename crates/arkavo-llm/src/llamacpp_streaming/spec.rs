@@ -28,7 +28,7 @@ use tokio::sync::mpsc::UnboundedSender;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use super::{
     ContextReuseOptions, StreamingConfig, classify_decode_error, detect_self_prompting,
-    extract_valid_utf8, process_input_tokens, send_metrics, validate_logits,
+    extract_valid_utf8, generation_budget, process_input_tokens, send_metrics, validate_logits,
 };
 
 /// Outcome of emitting a single token through the shared stream/stop pipeline.
@@ -172,19 +172,11 @@ pub(super) async fn generate_tokens_pooled_with_spec(
         // seq_id option (unlike the non-pooled context-reuse variant).
         let seq_id: i32 = 0;
 
+        let safe_ctx = ctx.context_length();
+        let max_generation =
+            generation_budget(safe_ctx, input_tokens.len() as u32, config.max_tokens)?;
         process_input_tokens(&ctx, &input_tokens)?;
         let start_pos = i32::try_from(input_tokens.len()).unwrap_or(0);
-
-        let trained_ctx = model.get_trained_context_size();
-        let safe_ctx = if trained_ctx <= 8192 {
-            trained_ctx
-        } else if trained_ctx <= 32768 {
-            trained_ctx / 2
-        } else {
-            (trained_ctx / 4).min(16384)
-        };
-        let available = safe_ctx.saturating_sub(input_tokens.len() as u32);
-        let max_generation = config.max_tokens.min(30000).min(available);
 
         let mut spec_ctx = SpeculativeContext::new_ngram(1)
             .map_err(|e| Error::Config(format!("Failed to init speculative context: {e}")))?;
@@ -495,24 +487,16 @@ pub(super) async fn generate_tokens_with_spec(
 
         let seq_id = context_options.seq_id.unwrap_or(0);
 
-        let initial_pos = if let Some(start_pos) = context_options.start_position {
-            start_pos
-        } else {
-            process_input_tokens(&ctx, &input_tokens)?;
-            i32::try_from(input_tokens.len()).unwrap_or(0)
-        };
+        let resumed_at = context_options.start_position;
+        let initial_pos =
+            resumed_at.unwrap_or_else(|| i32::try_from(input_tokens.len()).unwrap_or(0));
 
-        let trained_ctx = model.get_trained_context_size();
-        let safe_ctx = if trained_ctx <= 8192 {
-            trained_ctx
-        } else if trained_ctx <= 32768 {
-            trained_ctx / 2
-        } else {
-            (trained_ctx / 4).min(16384)
-        };
-        let occupied = initial_pos as u32;
-        let available = safe_ctx.saturating_sub(occupied);
-        let max_generation = config.max_tokens.min(30000).min(available);
+        let safe_ctx = ctx.context_length();
+        let max_generation =
+            generation_budget(safe_ctx, initial_pos.max(0) as u32, config.max_tokens)?;
+        if resumed_at.is_none() {
+            process_input_tokens(&ctx, &input_tokens)?;
+        }
         let mut pos = initial_pos;
 
         // Build the spec ngram cache with prior-turn context when resuming,
