@@ -8,6 +8,18 @@ the human-visible surfaces those tests cannot exercise.
 Run from a clean checkout of `feature/swarmkit-orchestrator-apply` (or
 `main` once merged). Set `ARKAVO_DEBUG=1` for richer logs.
 
+> **`arkavo orchestrator apply-kit` is not a command in the CLI.** The
+> dispatcher in `crates/arkavo-cli/src/lib.rs` has no `orchestrator`
+> subcommand, so the binary answers `Unknown command 'orchestrator'`.
+> The apply pipeline is reachable as the `apply_swarmkit` agent tool
+> (`crates/arkavo-server/src/server/swarm_apply_tool.rs`), which an
+> orchestrator agent calls while handling a task. It takes
+> `manifest_path` and `org` (both required) and an optional `repo`, and
+> is registered only in builds with the `kas` and `iroh` features, on an
+> agent that has an Iroh node. M1 and M2 run as written. M3 cannot be
+> run. M4 needs the tool in place of the CLI step. The results table
+> records the run on the feature branch, where the subcommand existed.
+
 ## Prerequisites
 
 - `cargo build -q` completes in the workspace root.
@@ -89,6 +101,10 @@ Panel shows the three role pills AND no launch-error section.
 
 ## M3 — CLI subcommand smoke test
 
+> **Not runnable against the current CLI.** Every command in this
+> section exits with `Unknown command 'orchestrator'`. The steps are
+> kept as the record of what was tested on the feature branch.
+
 **Goal:** Confirm `arkavo orchestrator apply-kit` is wired up, surfaces
 useful errors when the orchestrator is unreachable, and does not panic
 on bad input.
@@ -136,25 +152,33 @@ and what's blocked.
 
 ### Setup (4 terminals)
 
+The three identity-only agents are roles of one kit,
+`examples/identity-only/identity-only.swarmkit.yaml`; there are no
+per-agent directories.
+
 ```bash
 # T1 — agent-0 (advertises summarize, asset-store)
-cd $(pwd)/examples/identity-only/agent-0 \
-  && ARKAVO_DEBUG=1 cargo run -p arkavo --bin arkavo -- agent --verbose
+ARKAVO_DEBUG=1 cargo run -p arkavo --bin arkavo -- agent --verbose \
+  -c examples/identity-only/identity-only.swarmkit.yaml -n agent-0 -p 8341
 
 # T2 — agent-1 (write, social-publisher)
-cd $(pwd)/examples/identity-only/agent-1 \
-  && ARKAVO_DEBUG=1 cargo run -p arkavo --bin arkavo -- agent --verbose
+ARKAVO_DEBUG=1 cargo run -p arkavo --bin arkavo -- agent --verbose \
+  -c examples/identity-only/identity-only.swarmkit.yaml -n agent-1 -p 8342
 
 # T3 — agent-2 (critique, scoring)
-cd $(pwd)/examples/identity-only/agent-2 \
-  && ARKAVO_DEBUG=1 cargo run -p arkavo --bin arkavo -- agent --verbose
+ARKAVO_DEBUG=1 cargo run -p arkavo --bin arkavo -- agent --verbose \
+  -c examples/identity-only/identity-only.swarmkit.yaml -n agent-2 -p 8343
 
 # T4 — orchestrator agent
-cd $(pwd)/examples/orchestrator-agent \
-  && ARKAVO_DEBUG=1 cargo run -p arkavo --bin arkavo -- agent --verbose
+ARKAVO_DEBUG=1 cargo run -p arkavo --bin arkavo -- agent --verbose \
+  -c examples/orchestrator-agent/orchestrator-agent.swarmkit.yaml -n orchestrator -p 8340
 ```
 
 ### Action
+
+> **The CLI step below is not runnable**; the binary has no
+> `orchestrator` subcommand. The pipeline it was meant to drive is the
+> `apply_swarmkit` agent tool described at the top of this plan.
 
 ```bash
 # T5

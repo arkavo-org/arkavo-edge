@@ -94,6 +94,23 @@ Four example kits: `campaign-kit`, `code-review-kit`, `vrm-production-kit`, `com
 - iOS simulator automation (macOS only)
 - Security scanning (Semgrep, OSV, SBOM)
 
+## Commands
+
+Run `arkavo <command> --help` for the options of `agent`, `chat`, `task`, `ui`, `kit`, and `model`.
+
+| Command | What it does |
+|---------|--------------|
+| `arkavo`, `arkavo agent` | Run an agent. `-c <kit>` names a SwarmKit manifest (default: discover `.arkavo/*.swarmkit.yaml` or `./*.swarmkit.yaml`), `-n <role-id>` selects a role of a multi-role kit (default: the first role), `-p <port>` sets the listen port (default: a random free port), `-v` prints startup messages, `--trust` shows the authorization QR code. |
+| `arkavo chat` | Interactive chat, or a one-shot query with `--prompt`. `--model <name or .gguf path>` picks the model; `--agent-id <id>` talks to a mesh agent. |
+| `arkavo task` | Plan and apply code changes: `arkavo task 'fix all warnings'`. `--local-only` and `--mesh-only` choose where the task runs, `--agent-id <id>` targets one agent. Without a task it commits existing changes (`-y`, `-m <message>`, `--push`, `--no-validate`). |
+| `arkavo ui` | Launch the web UI (default port 7700). |
+| `arkavo kit init <name>` | Write a minimal single-role kit to `.arkavo/<name>.swarmkit.yaml`. |
+| `arkavo kit validate <path>...` | Load and validate one or more kit files. |
+| `arkavo kit migrate-from-agents-md --in <path> --out <path>` | Best-effort conversion of an AGENTS.md file into a kit. |
+| `arkavo model` | Manage local models: `list`, `download [name]`, `add <path> --name <name>`, `protect <path>` (wrap a GGUF into a KAS-gated `.gguf.tdf` archive). `switch` is accepted but not implemented. |
+| `arkavo mcp proxy` | Permit-gated stdio MCP relay in front of an upstream MCP server: `arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--hash sha256\|blake3] -- <upstream command> [args...]`. A `tools/call` is admitted only with a valid permit and proof of possession. |
+| `arkavo login`, `arkavo logout` | Sign in with Arkavo Creator; clear the stored identity token. Both act immediately and take no options. |
+
 ## Usage Examples
 
 ### Chat
