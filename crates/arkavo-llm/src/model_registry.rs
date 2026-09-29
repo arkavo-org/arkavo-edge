@@ -25,6 +25,30 @@ use std::sync::RwLock;
 use crate::context_pool::{ContextPool, PooledContext};
 use crate::{Error, Result};
 
+/// Context window of every model loaded in this process, by registry name.
+///
+/// Process-wide rather than per registry because the planner that needs the
+/// figure is handed a model name, not the registry that loaded it.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+static CONTEXT_LENGTHS: std::sync::LazyLock<RwLock<HashMap<String, u32>>> =
+    std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// The context window a loaded model's contexts are created with, or `None`
+/// when no registry in this process has loaded a model under `name`.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub fn loaded_context_length(name: &str) -> Option<u32> {
+    CONTEXT_LENGTHS
+        .read()
+        .ok()
+        .and_then(|lengths| lengths.get(name).copied())
+}
+
+/// No model is ever loaded in a build without the local engine.
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+pub fn loaded_context_length(_name: &str) -> Option<u32> {
+    None
+}
+
 /// A pooled context that returns to its pool when dropped.
 ///
 /// Returning on drop rather than by an explicit call matters once the pool
@@ -158,6 +182,17 @@ impl ModelRegistry {
             }
             // Register with context pool for concurrent context management
             self.context_pool.register_model(name, model_arc.clone())?;
+            let n_ctx =
+                arkavo_llama_cpp::configured_context_length(model_arc.get_trained_context_size());
+            if let Ok(mut lengths) = CONTEXT_LENGTHS.write() {
+                lengths.insert(name.to_string(), n_ctx);
+            }
+            tracing::info!(
+                model = name,
+                n_ctx,
+                max_contexts = self.context_pool.max_contexts(),
+                "Model registered"
+            );
             models.insert(name.to_string(), model_arc);
         }
 
@@ -282,11 +317,16 @@ impl ModelRegistry {
         #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         {
             // Remove from models map (contexts will be cleaned up when pool is dropped)
-            self.models
+            let removed = self
+                .models
                 .write()
                 .ok()
                 .and_then(|mut models| models.remove(name))
-                .is_some()
+                .is_some();
+            if removed && let Ok(mut lengths) = CONTEXT_LENGTHS.write() {
+                lengths.remove(name);
+            }
+            removed
         }
         #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
         {

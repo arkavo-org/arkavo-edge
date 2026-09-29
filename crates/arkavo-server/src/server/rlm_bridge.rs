@@ -131,30 +131,41 @@ pub fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
 }
 
+/// Context a cloud model is planned against.
+const CLOUD_CONTEXT_TOKENS: usize = 131_072;
+
 /// Get the effective model context size based on model hint.
 ///
-/// Returns the *allocated* n_ctx, not the trained context size.
-/// Must match the safety scaling in arkavo-llama-cpp's context allocation:
-///   trained <= 8K  -> full
-///   trained <= 32K -> 50%
-///   trained > 32K  -> min(trained/4, 16384)
+/// For a local model this is the planning budget for its size, bounded by
+/// the window the local engine actually allocates in this process, so a
+/// prompt the planner accepts is a prompt the model can decode. The window
+/// follows the `ARKAVO_N_CTX` override and the device defaults because it
+/// comes from the loader's own sizing, not from a copy of it.
 ///
 /// Resolves full model names (e.g. "qwen3.5-27b") via `ModelChoice::from_name`
 /// before falling back to bare suffix matching (e.g. "7B").
 pub fn model_context_size(model_hint: Option<&str>, is_cloud: bool) -> usize {
     if is_cloud {
-        return 131_072; // 128K for cloud models
+        return CLOUD_CONTEXT_TOKENS;
     }
+    within_window(planning_budget(model_hint), local_window(model_hint))
+}
+
+/// A budget can be smaller than the window, never larger.
+fn within_window(budget: usize, window: Option<usize>) -> usize {
+    window.map_or(budget, |window| budget.min(window))
+}
+
+/// Tokens a local model of this size is planned against, before the
+/// engine's window is taken into account.
+fn planning_budget(model_hint: Option<&str>) -> usize {
     if let Some(hint) = model_hint
         && let Some(choice) = arkavo_router::ModelChoice::from_name(hint)
     {
-        // Match llama.cpp KV cache allocation: large trained contexts get
-        // capped to prevent OOM. These values must stay in sync with the
-        // safe_ctx logic in arkavo-llama-cpp/src/lib.rs.
         return match choice {
-            arkavo_router::ModelChoice::LocalGemma4_26B => 16_384, // trained 256K, capped
-            arkavo_router::ModelChoice::LocalGemma4E2B
-            | arkavo_router::ModelChoice::LocalGemma4E4B => 16_384, // trained 128K, capped
+            arkavo_router::ModelChoice::LocalGemma4_26B
+            | arkavo_router::ModelChoice::LocalGemma4E2B
+            | arkavo_router::ModelChoice::LocalGemma4E4B => 16_384,
             _ => match choice.capability() {
                 arkavo_router::PlannerTier::Small => 2_048,
                 arkavo_router::PlannerTier::Medium => 8_192,
@@ -173,6 +184,24 @@ pub fn model_context_size(model_hint: Option<&str>, is_cloud: bool) -> usize {
     }
 }
 
+/// The window the local engine gives this model in this process: the one
+/// its contexts were created with when it is loaded, otherwise the most the
+/// loader gives any model.
+#[cfg(feature = "llama-cpp")]
+fn local_window(model_hint: Option<&str>) -> Option<usize> {
+    let loaded = model_hint
+        .and_then(arkavo_router::ModelChoice::from_name)
+        .and_then(|choice| arkavo_llm::model_registry::loaded_context_length(choice.name()));
+    Some(loaded.unwrap_or_else(arkavo_llama_cpp::largest_configured_context_length) as usize)
+}
+
+/// A build without the local engine allocates no window, so the budget
+/// stands as it is.
+#[cfg(not(feature = "llama-cpp"))]
+fn local_window(_model_hint: Option<&str>) -> Option<usize> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,22 +214,73 @@ mod tests {
     }
 
     #[test]
-    fn test_model_context_size() {
-        assert_eq!(model_context_size(Some("270M"), false), 2_048);
-        assert_eq!(model_context_size(Some("7B"), false), 32_768);
+    fn test_planning_budget() {
+        assert_eq!(planning_budget(Some("270M")), 2_048);
+        assert_eq!(planning_budget(Some("7B")), 32_768);
+        assert_eq!(planning_budget(None), 8_192);
         assert_eq!(model_context_size(None, true), 131_072);
     }
 
     #[test]
-    fn test_model_context_size_full_names() {
+    fn test_planning_budget_full_names() {
+        assert_eq!(planning_budget(Some("qwen3.5-27b")), 32_768);
+        assert_eq!(planning_budget(Some("glm-4.7-flash")), 32_768);
+        assert_eq!(planning_budget(Some("ministral-8b")), 32_768);
+        assert_eq!(planning_budget(Some("ministral-3b")), 8_192);
+        assert_eq!(planning_budget(Some("qwen3.5-0.8b")), 2_048);
+        assert_eq!(planning_budget(Some("gemma-4-26b-a4b")), 16_384);
+        assert_eq!(planning_budget(Some("gemma-4-e2b")), 16_384);
+        assert_eq!(planning_budget(Some("gemma-4-e4b")), 16_384);
+    }
+
+    /// Regression: the large tier was planned at 32,768 tokens while the
+    /// loader allocates 16,384, so a prompt between the two was accepted by
+    /// the planner and then failed at decode.
+    #[test]
+    fn a_budget_never_exceeds_the_window() {
+        let large = planning_budget(Some("gemma-4-12b"));
+        assert_eq!(large, 32_768);
+        assert_eq!(within_window(large, Some(16_384)), 16_384);
+        assert_eq!(within_window(large, Some(4_096)), 4_096);
+    }
+
+    #[test]
+    fn a_window_larger_than_the_budget_does_not_raise_it() {
+        assert_eq!(within_window(2_048, Some(16_384)), 2_048);
+        assert_eq!(within_window(32_768, Some(65_536)), 32_768);
+    }
+
+    #[test]
+    fn without_a_local_engine_the_budget_stands() {
+        assert_eq!(within_window(32_768, None), 32_768);
+    }
+
+    /// The planner and the loader read the same sizing, whatever
+    /// `ARKAVO_N_CTX` and the device say in the environment the test runs in.
+    #[cfg(feature = "llama-cpp")]
+    #[test]
+    fn local_models_are_planned_within_the_loaders_window() {
+        let window = arkavo_llama_cpp::largest_configured_context_length() as usize;
+        for hint in [
+            "gemma-4-12b",
+            "qwen3.5-27b",
+            "ministral-8b",
+            "gemma-4-e2b",
+            "7B",
+        ] {
+            assert_eq!(
+                model_context_size(Some(hint), false),
+                planning_budget(Some(hint)).min(window),
+                "{hint}"
+            );
+        }
+    }
+
+    #[cfg(not(feature = "llama-cpp"))]
+    #[test]
+    fn a_build_without_the_engine_plans_by_budget() {
         assert_eq!(model_context_size(Some("qwen3.5-27b"), false), 32_768);
-        assert_eq!(model_context_size(Some("glm-4.7-flash"), false), 32_768);
-        assert_eq!(model_context_size(Some("ministral-8b"), false), 32_768);
-        assert_eq!(model_context_size(Some("ministral-3b"), false), 8_192);
-        assert_eq!(model_context_size(Some("qwen3.5-0.8b"), false), 2_048);
-        assert_eq!(model_context_size(Some("gemma-4-26b-a4b"), false), 16_384);
-        assert_eq!(model_context_size(Some("gemma-4-e2b"), false), 16_384);
-        assert_eq!(model_context_size(Some("gemma-4-e4b"), false), 16_384);
+        assert_eq!(model_context_size(Some("270M"), false), 2_048);
     }
 
     #[tokio::test]

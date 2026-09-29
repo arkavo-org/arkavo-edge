@@ -33,7 +33,9 @@ pub use memory::LlamaMemory;
 
 // Context window sizing shared by the loader, the generation clamp and planners
 pub mod context_params;
-pub use context_params::{configured_context_length, context_length_override};
+pub use context_params::{
+    configured_context_length, context_length_override, largest_configured_context_length,
+};
 
 // Multimodal support module
 #[cfg(not(target_env = "musl"))]
@@ -655,6 +657,13 @@ impl LlamaContext {
     pub fn context_length(&self) -> u32 {
         // SAFETY: self.ptr is non-null for any constructed context
         unsafe { ffi::llama_n_ctx_seq(self.ptr) }
+    }
+
+    /// Most tokens one decode call accepts. llama.cpp aborts the process on
+    /// a larger batch, so callers split their input by this.
+    pub fn batch_size(&self) -> u32 {
+        // SAFETY: self.ptr is non-null for any constructed context
+        unsafe { ffi::llama_n_batch(self.ptr) }
     }
 
     pub fn get_logits_ith(&self, i: i32) -> *mut f32 {

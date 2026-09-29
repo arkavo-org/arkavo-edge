@@ -82,7 +82,7 @@ fn parse_context_length_override(raw: Option<&str>) -> Option<u32> {
 /// Small models keep their full window; larger ones are scaled down because
 /// KV cache memory grows linearly with the window.
 pub fn scaled_context_length(trained_ctx: u32) -> u32 {
-    if !(512..=1_048_576).contains(&trained_ctx) {
+    if !(512..=LARGEST_TRAINED_CONTEXT).contains(&trained_ctx) {
         UNTRUSTED_METADATA_CONTEXT_LENGTH
     } else if trained_ctx <= 8_192 {
         trained_ctx
@@ -113,6 +113,18 @@ pub fn resolve_context_length(
 /// may report slightly more; it never reports less.
 pub fn configured_context_length(trained_ctx: u32) -> u32 {
     resolve_context_length(trained_ctx, context_length_override(), device_class())
+}
+
+/// Largest trained context the scaling accepts as genuine metadata.
+const LARGEST_TRAINED_CONTEXT: u32 = 1_048_576;
+
+/// Largest window the loader gives any model in this process.
+///
+/// A planner that only knows a model's name, and whose model is not loaded
+/// yet, bounds its estimate with this so it never plans for more context
+/// than the loader will allocate.
+pub fn largest_configured_context_length() -> u32 {
+    configured_context_length(LARGEST_TRAINED_CONTEXT)
 }
 
 /// Window and batch sizes for a context on `backend`.
@@ -207,6 +219,18 @@ mod tests {
         ] {
             assert!(scaled_context_length(trained) <= DEFAULT_CONTEXT_LENGTH_CEILING);
         }
+    }
+
+    #[test]
+    fn the_largest_window_is_the_ceiling_or_the_override() {
+        assert_eq!(
+            resolve_context_length(LARGEST_TRAINED_CONTEXT, None, DeviceClass::Standard),
+            DEFAULT_CONTEXT_LENGTH_CEILING
+        );
+        assert_eq!(
+            resolve_context_length(LARGEST_TRAINED_CONTEXT, Some(32_768), DeviceClass::Standard),
+            32_768
+        );
     }
 
     #[test]

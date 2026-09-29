@@ -351,21 +351,16 @@ async fn generate_tokens_pooled_baseline(
             }
         }
 
+        // Clamp generation to the window this context was allocated with,
+        // which may be much smaller than max_tokens. Without this, generation
+        // crashes with DecodeFailure when pos exceeds the KV cache boundary.
+        let max_generation = generation_budget(
+            ctx.context_length(),
+            input_tokens.len() as u32,
+            config.max_tokens,
+        )?;
         process_input_tokens(&ctx, &input_tokens)?;
         let start_pos = i32::try_from(input_tokens.len()).unwrap_or(0);
-        // Clamp generation to KV cache capacity: the allocated n_ctx (safe_ctx)
-        // may be much smaller than max_tokens. Without this, generation crashes
-        // with DecodeFailure when pos exceeds the KV cache boundary.
-        let trained_ctx = model.get_trained_context_size();
-        let safe_ctx = if trained_ctx <= 8192 {
-            trained_ctx
-        } else if trained_ctx <= 32768 {
-            trained_ctx / 2
-        } else {
-            (trained_ctx / 4).min(16384)
-        };
-        let available = safe_ctx.saturating_sub(input_tokens.len() as u32);
-        let max_generation = config.max_tokens.min(30000).min(available);
         let mut utf8_buffer: Vec<u8> = Vec::new();
         let mut detection_buffer = String::new();
 
@@ -675,25 +670,19 @@ async fn generate_tokens_baseline(
         }
 
         // If we have a start position, we're resuming - skip input processing
-        let initial_pos = if let Some(start_pos) = context_options.start_position {
-            start_pos
-        } else {
-            process_input_tokens(&ctx, &input_tokens)?;
-            i32::try_from(input_tokens.len()).unwrap_or(0)
-        };
+        let resumed_at = context_options.start_position;
+        let initial_pos =
+            resumed_at.unwrap_or_else(|| i32::try_from(input_tokens.len()).unwrap_or(0));
 
-        // Clamp generation to KV cache capacity (same logic as pooled path)
-        let trained_ctx = model.get_trained_context_size();
-        let safe_ctx = if trained_ctx <= 8192 {
-            trained_ctx
-        } else if trained_ctx <= 32768 {
-            trained_ctx / 2
-        } else {
-            (trained_ctx / 4).min(16384)
-        };
-        let occupied = initial_pos as u32;
-        let available = safe_ctx.saturating_sub(occupied);
-        let max_generation = config.max_tokens.min(30000).min(available);
+        // Clamp generation to the allocated window (same logic as pooled path)
+        let max_generation = generation_budget(
+            ctx.context_length(),
+            initial_pos.max(0) as u32,
+            config.max_tokens,
+        )?;
+        if resumed_at.is_none() {
+            process_input_tokens(&ctx, &input_tokens)?;
+        }
         let mut pos = initial_pos;
 
         if is_debug() {
@@ -900,6 +889,41 @@ fn classify_decode_error(context: &str, raw: &str) -> Error {
     }
 }
 
+/// Most tokens sent to one prompt decode call.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+const PROMPT_CHUNK_TOKENS: usize = 64;
+
+/// Output tokens never generated in one request, whatever the window.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+const MAX_GENERATED_TOKENS: u32 = 30_000;
+
+/// Tokens that may be generated after `occupied` tokens of prompt, in a
+/// context that holds `n_ctx`.
+///
+/// `n_ctx` comes from the live context rather than from the model's trained
+/// size, so an `ARKAVO_N_CTX` override and the device defaults are honoured.
+/// A prompt that leaves no room is refused here, before it is decoded:
+/// decoding it would fail with a bare llama.cpp status code that reads like
+/// a GPU fault.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn generation_budget(n_ctx: u32, occupied: u32, max_tokens: u32) -> Result<u32> {
+    if occupied >= n_ctx {
+        return Err(Error::Inference(format!(
+            "Prompt too long for the context window: {occupied} tokens do not fit in \
+             {n_ctx}. Shorten the prompt or raise ARKAVO_N_CTX."
+        )));
+    }
+    Ok(max_tokens.min(MAX_GENERATED_TOKENS).min(n_ctx - occupied))
+}
+
+/// Size of each prompt chunk for a context that accepts `batch_size` tokens
+/// per decode call. llama.cpp aborts on a larger batch, and a small
+/// `ARKAVO_N_CTX` or a constrained device gives a small batch.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn prompt_chunk_tokens(batch_size: u32) -> usize {
+    PROMPT_CHUNK_TOKENS.min(batch_size as usize).max(1)
+}
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> {
     if is_debug() {
@@ -909,8 +933,8 @@ fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> 
         );
     }
 
-    if input_tokens.len() > 64 {
-        let chunk_size = 64;
+    let chunk_size = prompt_chunk_tokens(ctx.batch_size());
+    if input_tokens.len() > chunk_size {
         let mut pos_offset = 0i32;
         for (i, chunk) in input_tokens.chunks(chunk_size).enumerate() {
             if is_debug() {
@@ -1115,6 +1139,49 @@ pub(crate) async fn generate_tokens_with_vision(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: the clamp recomputed 16384 from the trained context, so
+    /// with `ARKAVO_N_CTX=4096` generation ran past the allocated window and
+    /// failed at decode.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn generation_stops_at_the_allocated_window() {
+        assert_eq!(generation_budget(4_096, 3_000, 16_384).unwrap(), 1_096);
+        assert_eq!(generation_budget(16_384, 3_000, 16_384).unwrap(), 13_384);
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn generation_is_bounded_by_the_request_and_the_hard_limit() {
+        assert_eq!(generation_budget(16_384, 100, 256).unwrap(), 256);
+        assert_eq!(generation_budget(131_072, 100, 100_000).unwrap(), 30_000);
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn a_prompt_that_fills_the_window_is_refused_before_decode() {
+        for occupied in [4_096, 9_000] {
+            let err = generation_budget(4_096, occupied, 512).unwrap_err();
+            assert!(matches!(err, Error::Inference(_)), "got {err:?}");
+            let text = err.to_string();
+            assert!(text.contains("too long"), "{text}");
+            assert!(text.contains(&occupied.to_string()), "{text}");
+            assert!(text.contains("4096"), "{text}");
+        }
+        assert_eq!(generation_budget(4_096, 4_095, 512).unwrap(), 1);
+    }
+
+    /// Regression: prompts were always sent 64 tokens at a time, which
+    /// aborts the process when the context accepts fewer per call.
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[test]
+    fn prompt_chunks_fit_the_batch_the_context_accepts() {
+        assert_eq!(prompt_chunk_tokens(2_048), 64);
+        assert_eq!(prompt_chunk_tokens(64), 64);
+        assert_eq!(prompt_chunk_tokens(32), 32);
+        assert_eq!(prompt_chunk_tokens(16), 16);
+        assert_eq!(prompt_chunk_tokens(0), 1);
+    }
 
     #[test]
     fn test_stop_sequences_qwen3() {
