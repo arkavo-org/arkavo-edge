@@ -43,7 +43,7 @@ print_help() {
     echo ""
     echo "Options:"
     echo "  --list, -l         List available scenarios"
-    echo "  --model <name>     Force specific model (e.g., glm, qwen3, ministral)"
+    echo "  --model <name>     Force specific model for chat scenarios (e.g., glm-4.7-flash, qwen3.5-9b, ministral-3b)"
     echo "  --help, -h         Show this help"
     echo "  all                Run all scenarios"
     echo "  <scenario>         Run specific scenario"
@@ -54,7 +54,7 @@ print_help() {
     echo "  $0                            # Interactive mode"
     echo "  $0 --list                     # List scenarios"
     echo "  $0 01-hello-world             # Run hello-world"
-    echo "  $0 --model glm 01-hello-world # Run with GLM-4.7-Flash"
+    echo "  $0 --model glm-4.7-flash 01-hello-world # Run with GLM-4.7-Flash"
     echo "  $0 all                        # Run all scenarios"
 }
 
@@ -201,8 +201,8 @@ run_scenario() {
             # shellcheck disable=SC2086
             "$BINARY" chat $model_flag --prompt "$task_desc" 2>&1 || true
         else
-            # shellcheck disable=SC2086
-            "$BINARY" task $model_flag --yes "$task_desc" 2>&1 || true
+            # `arkavo task` has no --model option and rejects unknown flags.
+            "$BINARY" task --yes "$task_desc" 2>&1 || true
         fi
 
         echo ""
