@@ -1,3 +1,5 @@
+mod progress;
+
 use super::learning_bus::LearningBus;
 use super::mcp_bridge::McpBridgeTool;
 use super::rlm_bridge::{RlmBridge, estimate_tokens, model_context_size};
@@ -7,8 +9,8 @@ use arkavo_hrm::{
 };
 use arkavo_mcp_tools::context_tools::{SharedRlmOps, create_context_tools};
 use arkavo_protocol::mcp_registry::McpRegistry;
-use arkavo_protocol::types::TaskProgress;
 use arkavo_tasks::task_executor::TaskExecutor;
+use progress::Progress;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -89,22 +91,8 @@ pub async fn execute_with_conductor_and_learning(
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
-    // Helper to update UI progress (no-op if task tracking not available)
-    let update_ui_progress = |msg: &str, pct: u8| {
-        if let (Some(id), Some(executor)) = (task_id, task_executor) {
-            let progress = TaskProgress {
-                message: Some(msg.to_string()),
-                percentage: Some(pct),
-                eta_seconds: None,
-            };
-            let executor = executor.clone();
-            tokio::spawn(async move {
-                let _ = executor.update_task_progress(&id, progress).await;
-            });
-        }
-    };
-
-    update_ui_progress("Creating task structure", 10);
+    let mut progress = Progress::new(conductor, task_id, task_executor);
+    progress.report("Creating task structure", 10).await;
 
     // 1. Create HRM task with default budget
     let budget = TaskBudget::default();
@@ -134,17 +122,7 @@ pub async fn execute_with_conductor_and_learning(
         std::sync::Arc::new(guard)
     };
 
-    // Helper to update both HRM intra-progress and UI progress
-    let hrm_task_id = hrm_task.id;
-    let update_progress = |msg: &str, pct: u8| {
-        let cond = conductor.clone();
-        tokio::spawn(async move {
-            let _ = cond
-                .update_intra_progress(hrm_task_id, pct as f64 / 100.0)
-                .await;
-        });
-        update_ui_progress(msg, pct);
-    };
+    progress.track(hrm_task.id);
 
     // 2a-pre. Check for autoresearch mode (parameter sweep instead of normal execution)
     if super::conductor_autoresearch::is_autoresearch_task(&task_content) {
@@ -223,7 +201,7 @@ pub async fn execute_with_conductor_and_learning(
 
     info!("Created contract {} for subtask", contract.id);
 
-    update_progress("Setting up tools", 25);
+    progress.report("Setting up tools", 25).await;
 
     // 4. Build ToolRegistry — use cached if available (same tools every cycle)
     let mut registry_arc = if let Some(cached) = cached_registry {
@@ -327,7 +305,9 @@ pub async fn execute_with_conductor_and_learning(
 
     let (rlm_system_prompt, rlm_manifest_id) =
         if rlm_bridge.should_activate(input_tokens, context_size) {
-            update_progress("Decomposing large context for RLM mode", 35);
+            progress
+                .report("Decomposing large context for RLM mode", 35)
+                .await;
             info!(
                 "RLM mode activated: {} tokens > {}% of {} context",
                 input_tokens, 70, context_size
@@ -373,7 +353,7 @@ pub async fn execute_with_conductor_and_learning(
         debug!("RLM manifest {} ready for context queries", manifest_id);
     }
 
-    update_progress("Generating LLM response", 40);
+    progress.report("Generating LLM response", 40).await;
 
     // 5. Execute via Router (using route_with_tools to bypass architect mode)
 
@@ -480,7 +460,7 @@ pub async fn execute_with_conductor_and_learning(
     let _ = conductor.start_task(hrm_task.id).await;
 
     // 6. Agentic tool loop: LLM calls tools → results fed back → LLM continues
-    update_progress("Generating LLM response", 50);
+    progress.report("Generating LLM response", 50).await;
 
     // Prepend agent purpose to task_content so the classifier sees domain
     // keywords (e.g. "code quality" → CodeReview) instead of generic cycle prompts.
@@ -696,7 +676,7 @@ pub async fn execute_with_conductor_and_learning(
         }
     }
 
-    update_progress("Finalizing", 95);
+    progress.report("Finalizing", 95).await;
 
     Ok(final_result)
 }
