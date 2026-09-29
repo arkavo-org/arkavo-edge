@@ -88,7 +88,7 @@ Expect: with weights present it proceeds on the local model with no prompt. With
 ### S-05 Default chat stays local with a key present (local)
 
 ```bash
-ARKAVO_DEBUG=1 arkavo chat --repo-context off --prompt "Name three primary colours." </dev/null
+ARKAVO_DEBUG=1 arkavo chat --prompt "Name three primary colours." </dev/null
 ```
 
 Expect: the `[Model]` line names a local model (Gemma 4 or Qwen). No cloud request and no consent prompt. Repeat with `OPENAI_API_KEY` unset: same result.
@@ -100,7 +100,7 @@ The OpenAI Responses provider: text, native tools with call-id continuity, stric
 ### A-01 One-shot text reply (cloud)
 
 ```bash
-ARKAVO_DEBUG=1 arkavo chat --model gpt-6-astra --repo-context off --prompt "Reply with the single word ready." </dev/null
+ARKAVO_DEBUG=1 arkavo chat --model gpt-6-astra --prompt "Reply with the single word ready." </dev/null
 ```
 
 Expect: the local model loads first (local-first), then `[Model] gpt-6-astra (--model override)`, a sensible reply, and a `[Perf]` line with prompt and generation token counts above zero. Known: the millisecond figures read 0 and throughput shows "? tok/s" until Task 7 lands.
@@ -116,7 +116,7 @@ Expect: an introduction reply within about ten seconds of the model line. Passed
 ### A-03 Native tool call is executed and paired by call id (cloud)
 
 ```bash
-ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1 arkavo chat --model gpt-6-astra --repo-context off \
+ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1 arkavo chat --model gpt-6-astra \
   --prompt "Use the get_agent_time tool, then tell me the current time." </dev/null
 ```
 
@@ -124,7 +124,7 @@ Expect: debug shows a tool call with an id of the form `call_…`, the tool exec
 
 ### A-04 Multi-turn continuity keeps reasoning state and tool history (cloud)
 
-1. `ARKAVO_DEBUG_CHAT=1 arkavo chat --model gpt-6-astra --repo-context off`
+1. `ARKAVO_DEBUG_CHAT=1 arkavo chat --model gpt-6-astra`
 2. Turn 1: "Use get_agent_time and tell me the time."
 3. Turn 2: "What exactly did that tool return, verbatim?"
 4. Turn 3: "Now list the models available with list_models."
@@ -134,7 +134,7 @@ Expect: turn 2 quotes turn 1's tool output. Every turn succeeds with HTTP 200. A
 
 ### A-05 Streaming shows tokens incrementally and cancels cleanly (cloud)
 
-1. Interactive `arkavo chat --model gpt-6-astra --repo-context off`.
+1. Interactive `arkavo chat --model gpt-6-astra`.
 2. Ask for a 400-word story and watch the output.
 3. Ask again and press Ctrl-C mid-stream.
 
@@ -152,7 +152,7 @@ Expect: nine deterministic fixture tests pass; the live test passes (text, tool 
 ### A-07 Invalid key fails fast and legibly (cloud, after fix: Task 7)
 
 ```bash
-OPENAI_API_KEY=sk-invalid arkavo chat --model gpt-6-astra --repo-context off --prompt "hi" </dev/null
+OPENAI_API_KEY=sk-invalid arkavo chat --model gpt-6-astra --prompt "hi" </dev/null
 ```
 
 Expect: one error naming HTTP 401, no panic, no retry storm, no key text in the output. After Task 7 the error also carries the API's `error.code` (for example `invalid_api_key`).
@@ -160,7 +160,7 @@ Expect: one error naming HTTP 401, no panic, no retry storm, no key text in the 
 ### A-08 Oversized tool output is bounded without a crash (cloud)
 
 ```bash
-ARKAVO_DEBUG_CHAT=1 arkavo chat --model gpt-6-astra --repo-context off \
+ARKAVO_DEBUG_CHAT=1 arkavo chat --model gpt-6-astra \
   --prompt "Run shell_exec with: python3 -c \"print('日本語😀' * 60000)\" and then say how long the output was." </dev/null
 ```
 
@@ -175,7 +175,7 @@ Policy is enforced before any provider is built. Consent comes from an explicit 
 Setup: scratch dir with a kit whose `runtime` sets `cloud_policy: local_only`; export `OPENAI_API_KEY=sk-invalid`.
 
 ```bash
-ARKAVO_DEBUG=1 arkavo chat --model gpt-6-astra --repo-context off --prompt "hi" </dev/null
+ARKAVO_DEBUG=1 arkavo chat --model gpt-6-astra --prompt "hi" </dev/null
 ```
 
 Expect: a policy error naming LocalOnly. No 401 appears, proving the refusal happened before the network. The same command with `--model ministral-3b` works.
@@ -220,7 +220,7 @@ Expect: A asks once and not again. B is asked independently. C refuses and does 
 Setup: a kit whose `runtime` sets `cloud_policy: cloud_within_cap` and `max_cost_per_session: 0.0001`; `OPENAI_API_KEY=sk-invalid`.
 
 ```bash
-ARKAVO_DEBUG=1 arkavo chat --model gpt-6-astra --repo-context off --prompt "Write 300 words." </dev/null
+ARKAVO_DEBUG=1 arkavo chat --model gpt-6-astra --prompt "Write 300 words." </dev/null
 ```
 
 Expect: a budget-exceeded error before dispatch; no 401 in the log.
@@ -260,7 +260,7 @@ Expect: exactly one dispatches, the other gets budget-exceeded. Today both can p
 ### T-01 Local model tool loop unchanged (local)
 
 ```bash
-ARKAVO_DEBUG_CHAT=1 arkavo chat --repo-context off --prompt "Use get_agent_time and tell me the time." </dev/null
+ARKAVO_DEBUG_CHAT=1 arkavo chat --prompt "Use get_agent_time and tell me the time." </dev/null
 ```
 
 Repeat with `--model ministral-3b` and with a Gemma 4 model.
@@ -372,7 +372,7 @@ Changes that touched shared code: tool-role rendering for every provider, provid
 
 Setup: keys for whichever of Anthropic, Gemini, DeepSeek, Kimi, xAI are available; model names from `arkavo model list`.
 
-For each: `ARKAVO_DEBUG_CHAT=1 arkavo chat --model <name> --repo-context off --prompt "Use get_agent_time and tell me the time."`
+For each: `ARKAVO_DEBUG_CHAT=1 arkavo chat --model <name> --prompt "Use get_agent_time and tell me the time."`
 
 Expect: each completes; the tool result is rendered as user text for Anthropic, DeepSeek, Kimi and Gemini, never as an assistant prefill. Anthropic currently loses the assistant's tool_calls in the replayed turn; Task 8 renders proper tool_use blocks.
 
