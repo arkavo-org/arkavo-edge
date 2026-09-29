@@ -9,9 +9,9 @@ test_writer. The reviewer doubles as the rubric critic.
 
 | id | role_type | model | purpose |
 |---|---|---|---|
-| `reviewer` | `code_reviewer` | qwen3 7B | Review diff for correctness, design, naming, style. Critic for the kit's evaluation rubric. |
-| `security_auditor` | `security_auditor` | qwen3 7B | Scan diff for OWASP/CWE-class defects. |
-| `test_writer` | `test_author` | gemma-4 9B | Write unit + negative-path tests for changed code paths. |
+| `reviewer` | `code_reviewer` | qwen 9B | Review diff for correctness, design, naming, style. Critic for the kit's evaluation rubric. |
+| `security_auditor` | `security_auditor` | qwen 9B | Scan diff for OWASP/CWE-class defects. |
+| `test_writer` | `test_author` | gemma 12B | Write unit + negative-path tests for changed code paths. |
 
 `role_type` is free-form per spec §4.3; `code_reviewer`, `security_auditor`,
 and `test_author` are domain-specific values not in Appendix C.

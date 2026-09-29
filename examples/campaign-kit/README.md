@@ -6,9 +6,9 @@ Vertical-slice SwarmKit for [arkavo-org/arkavo-edge#573](https://github.com/arka
 
 | id | role_type | model | purpose |
 |---|---|---|---|
-| `analyst` | `asset_analyst` | gemma-4 9B | Summarize source asset, extract selling points |
-| `copy` | `platform_copy` | gemma-4 9B | Write platform-specific copy from selling points |
-| `critic` | `critic` | qwen3 7B | Score against the rubric, flag unsupported claims |
+| `analyst` | `asset_analyst` | gemma 12B | Summarize source asset, extract selling points |
+| `copy` | `platform_copy` | gemma 12B | Write platform-specific copy from selling points |
+| `critic` | `critic` | qwen 9B | Score against the rubric, flag unsupported claims |
 
 `role_type` is free-form per spec §4.3; the values above are domain-specific to campaign workflows and will not appear in the recommended vocabulary (Appendix C of `swarmkit-spec-draft-00.md`).
 

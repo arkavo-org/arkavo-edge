@@ -15,9 +15,9 @@ the runtime ships.
 
 | id | role_type | model | purpose |
 |---|---|---|---|
-| `pii_classifier` | `pii_classifier` | qwen3 7B | Classify documents for PII per jurisdiction. |
-| `policy_enforcer` | `policy_enforcer` | qwen3 7B | Apply jurisdiction-aware redaction or escalation. |
-| `auditor` | `auditor` | qwen3 7B | Produce audit-ready compliance report. Critic for the kit's evaluation rubric (separate evaluating role — not self-evaluation laundering per spec §10.1). |
+| `pii_classifier` | `pii_classifier` | qwen 9B | Classify documents for PII per jurisdiction. |
+| `policy_enforcer` | `policy_enforcer` | qwen 9B | Apply jurisdiction-aware redaction or escalation. |
+| `auditor` | `auditor` | qwen 9B | Produce audit-ready compliance report. Critic for the kit's evaluation rubric (separate evaluating role — not self-evaluation laundering per spec §10.1). |
 
 ## Topology
 

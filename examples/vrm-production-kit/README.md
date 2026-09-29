@@ -13,9 +13,9 @@ plus a glTF/VRM binary emitter (Phase 5 candidate).
 
 | id | role_type | model | purpose |
 |---|---|---|---|
-| `prompt_designer` | `prompt_designer` | gemma-4 9B | Produce avatar specification (visual brief, persona, constraints) from a creator brief. |
-| `vrm_assembler` | `vrm_assembler` | gemma-4 9B | Emit VRM 1.0 metadata JSON (skeleton, blendshapes, metadata fields). |
-| `validator` | `vrm_validator` | qwen3 7B | Validate VRM spec compliance + prompt fidelity. Critic for the kit's evaluation rubric. |
+| `prompt_designer` | `prompt_designer` | gemma 12B | Produce avatar specification (visual brief, persona, constraints) from a creator brief. |
+| `vrm_assembler` | `vrm_assembler` | gemma 12B | Emit VRM 1.0 metadata JSON (skeleton, blendshapes, metadata fields). |
+| `validator` | `vrm_validator` | qwen 9B | Validate VRM spec compliance + prompt fidelity. Critic for the kit's evaluation rubric. |
 
 ## Topology
 
