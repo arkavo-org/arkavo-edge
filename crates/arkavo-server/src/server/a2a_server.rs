@@ -21,6 +21,7 @@ use arkavo_protocol::rate_limit::RateLimiter;
 use arkavo_tasks::task_executor::{TaskExecutor, TaskExecutorConfig};
 use arkavo_tasks::task_store::{SqliteTaskStore, TaskStore};
 
+use super::bind_addr::{bind_socket_addr, endpoint_url};
 use super::config_helpers::{AgentMetadata, reload_configuration_for_watcher};
 use super::learning_bus::LearningBus;
 use super::startup::{AgentPlan, run_startup_planning_phase};
@@ -250,6 +251,16 @@ impl A2aServer {
         registry.map(|r| r.model_names()).unwrap_or_default()
     }
 
+    /// URL of the configured bind address. An address that does not parse
+    /// keeps its configured spelling: it is only ever displayed, because
+    /// `start_with_port` refuses to bind it.
+    fn configured_endpoint(&self) -> String {
+        bind_socket_addr(&self.config.bind_address, self.config.port).map_or_else(
+            |_| format!("http://{}:{}", self.config.bind_address, self.config.port),
+            endpoint_url,
+        )
+    }
+
     pub async fn set_agent_metadata(
         &self,
         name: String,
@@ -263,7 +274,7 @@ impl A2aServer {
         metadata.purpose = purpose;
         metadata.model.clone_from(&model);
         metadata.mode = mode;
-        metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
+        metadata.endpoint = self.configured_endpoint();
         metadata.did = did;
         drop(metadata);
 
@@ -452,8 +463,7 @@ impl A2aServer {
                 let router = if let Some(ref kas) = agent_config.kas {
                     if kas.enabled {
                         // Each agent is its own KAS -- use local endpoint, not cloud SaaS
-                        let local_kas_url =
-                            format!("http://{}:{}", self.config.bind_address, self.config.port);
+                        let local_kas_url = self.configured_endpoint();
                         let tdf_config = arkavo_router::TdfAuditConfig {
                             kas_url: local_kas_url,
                             agent_id: agent_config
@@ -940,9 +950,7 @@ impl A2aServer {
     /// Start the server and return both the handle and the actual bound port
     /// This is useful when binding to port 0 for dynamic port allocation
     pub async fn start_with_port(&self) -> Result<(ServerHandle, u16)> {
-        let addr: SocketAddr = format!("{}:{}", self.config.bind_address, self.config.port)
-            .parse()
-            .map_err(|e| A2aError::InvalidEndpoint(format!("Invalid bind address: {e}")))?;
+        let addr: SocketAddr = bind_socket_addr(&self.config.bind_address, self.config.port)?;
 
         info!("Starting A2A server on {}", addr);
 
@@ -1263,8 +1271,8 @@ impl A2aServer {
 
         info!("A2A server started successfully on {}", actual_addr);
         info!(
-            "Agent Card available at http://{}:{}/.well-known/agent.json",
-            self.config.bind_address, actual_port
+            "Agent Card available at {}/.well-known/agent.json",
+            endpoint_url(actual_addr)
         );
 
         Ok((handle, actual_port))

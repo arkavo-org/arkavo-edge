@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+pub mod listen;
+
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Parse all arguments for flags
@@ -162,10 +164,9 @@ pub fn deprecated_init(
 }
 
 /// Generate the zero-config default agent name: `<hostname>-<folder>`, e.g.
-/// `macbook-arkavo-edge`. Shared by the SwarmKit-kit resolution path
-/// (`agent_kit::resolve_agent_configs`, used when no kit is found anywhere
-/// in the resolution order) and this module's own "listen address turned
-/// out invalid at runtime" recovery fallback below.
+/// `macbook-arkavo-edge`. Used by the SwarmKit-kit resolution path
+/// (`agent_kit::resolve_agent_configs`) when no kit is found anywhere in the
+/// resolution order.
 pub(crate) fn default_agent_name() -> String {
     use std::process::Command;
 
@@ -186,6 +187,31 @@ pub(crate) fn default_agent_name() -> String {
     format!("{hostname}-{folder_name}")
 }
 
+/// Resolve the single agent this process will run, and the address it will
+/// listen on.
+///
+/// Mirrors legacy multi-agent behavior by only ever starting the first
+/// resolved entry, unless -n/--name narrowed the result to one role.
+///
+/// The listen address is parsed here, before anything is started or
+/// exported, so a kit whose `runtime.listen` cannot be understood stops the
+/// run with nothing bound.
+fn resolve_startup_config(
+    cli_config_path: Option<&Path>,
+    name: Option<&str>,
+    port: Option<u16>,
+    cwd: &Path,
+) -> Result<(AgentConfig, std::net::SocketAddr), Box<dyn std::error::Error>> {
+    use crate::commands::agent_kit::resolve_agent_configs;
+
+    let agent_config = resolve_agent_configs(cli_config_path, name, port, cwd)?
+        .into_iter()
+        .next()
+        .ok_or("No agent configuration available")?;
+    let listen_addr = listen::parse_listen(&agent_config.listen)?;
+    Ok((agent_config, listen_addr))
+}
+
 #[allow(clippy::disallowed_methods)]
 fn run_agent_with_options(
     config_file: Option<&str>,
@@ -195,24 +221,19 @@ fn run_agent_with_options(
     override_name: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
-    use crate::commands::agent_kit::{export_resolved_kit_path, resolve_agent_configs};
+    use crate::commands::agent_kit::export_resolved_kit_path;
 
     let cwd = std::env::current_dir()?;
     let cli_config_path = config_file.map(Path::new);
 
     // Resolve config from a SwarmKit kit: -c/--config > discovery > the
     // zero-config default. AGENTS.md is never read on this path (S6).
-    // Mirrors legacy multi-agent behavior by only ever starting the first
-    // resolved entry, unless -n/--name narrowed the result to one role.
-    let mut agent_config = resolve_agent_configs(
+    let (mut agent_config, _listen_addr) = resolve_startup_config(
         cli_config_path,
         override_name.as_deref(),
         override_port,
         &cwd,
-    )?
-    .into_iter()
-    .next()
-    .ok_or("No agent configuration available")?;
+    )?;
 
     // Export the resolved kit path so server-side policy loaders (preflight,
     // budget, KAS — which re-discover their own kit from process cwd/env)
@@ -227,8 +248,9 @@ fn run_agent_with_options(
         println!("Starting agent: {}", agent_config.name);
     }
 
-    // Start the A2A server with the agent configuration
-    let result = match tokio::runtime::Handle::try_current() {
+    // A failed start is final. Retrying with a different configuration would
+    // put the agent on an address and persona the operator never asked for.
+    match tokio::runtime::Handle::try_current() {
         Ok(handle) => {
             handle.block_on(async { agent::start_agent_server(&agent_config, trust).await })
         }
@@ -236,52 +258,6 @@ fn run_agent_with_options(
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async { agent::start_agent_server(&agent_config, trust).await })
         }
-    };
-
-    // If we get an "Invalid listen address" error, fall back to default config
-    if let Err(e) = result {
-        let err_msg = e.to_string();
-        if err_msg.contains("Invalid listen address") {
-            if verbose {
-                eprintln!("Warning: {err_msg}, using default configuration");
-            }
-
-            // Create default config
-            let default_config = AgentConfig {
-                name: default_agent_name(),
-                purpose: "A general-purpose AI agent".to_string(),
-                model: String::new(),
-                mode: arkavo_protocol::agent_config::AgentMode::default(),
-                listen: "0.0.0.0:0".to_string(), // Dynamic port
-                mdns_enabled: true,
-                mcp_servers: Vec::new(),
-                api_keys: std::collections::HashMap::new(),
-                quiet: !verbose,
-                peers: Vec::new(),
-                a2a_enabled: true,
-                a2a_service_type: None,
-                swarm: None,
-            };
-
-            if verbose {
-                println!("Starting default agent: {}", default_config.name);
-            }
-
-            // Try again with default config
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => handle
-                    .block_on(async { agent::start_agent_server(&default_config, trust).await }),
-                Err(_) => {
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime
-                        .block_on(async { agent::start_agent_server(&default_config, trust).await })
-                }
-            }
-        } else {
-            Err(e)
-        }
-    } else {
-        result
     }
 }
 
@@ -361,6 +337,10 @@ pub async fn start_agent_server(
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
+    // First, before any identity or process state is created: a listen
+    // address that cannot be understood must leave nothing behind.
+    let listen_addr = listen::parse_listen(&config.listen)?;
+
     // Load or create persisted device keypair (Phase 1 identity anchor)
     use arkavo_device_identity::keypair as device_keypair_store;
     let device_keypair = {
@@ -405,12 +385,6 @@ pub async fn start_agent_server(
     // Create shutdown flag for mDNS thread
     let shutdown_flag = Arc::new(AtomicBool::new(false));
 
-    // Parse listen address
-    let parts: Vec<&str> = config.listen.split(':').collect();
-    if parts.len() != 2 {
-        return Err("Invalid listen address format. Expected: host:port".into());
-    }
-
     // Use absolute path for task store to avoid issues with directory changes
     let task_store_path = std::env::current_dir()?
         .join(".arkavo")
@@ -418,8 +392,8 @@ pub async fn start_agent_server(
 
     let server_config = ServerConfig {
         enabled: true,
-        bind_address: parts[0].to_string(),
-        port: parts[1].parse()?,
+        bind_address: listen_addr.ip().to_string(),
+        port: listen_addr.port(),
         max_connections: 100,
         idle_timeout_seconds: 300,
         rate_limit: RateLimitConfig::default(),
@@ -996,8 +970,8 @@ pub async fn start_agent_server(
 
     if !quiet {
         // Display the actual bound address (using actual_port from OS if port was 0)
-        let listen_host = config.listen.split(':').next().unwrap_or("0.0.0.0");
-        println!("Ready at {listen_host}:{actual_port}");
+        let ready_addr = std::net::SocketAddr::new(listen_addr.ip(), actual_port);
+        println!("Ready at {ready_addr}");
     }
 
     // Keep the server running
@@ -1530,5 +1504,109 @@ mod tests {
     fn unknown_option_errors_instead_of_running() {
         assert!(execute(&["--bogus".to_string()]).is_err());
         assert!(execute(&["--trsut".to_string()]).is_err()); // typo of --trust
+    }
+
+    /// A single-role kit whose `runtime.listen` is `listen`.
+    fn write_kit_listening_on(dir: &Path, listen: &str) -> std::path::PathBuf {
+        let yaml = format!(
+            r#"
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "hello"
+  version: "0.1.0"
+  authors:
+    - did: "did:web:example.com"
+  created: "2026-04-29T00:00:00Z"
+  expires: "2026-05-29T00:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+objective:
+  goal: "say hello"
+runtime:
+  listen: "{listen}"
+roles:
+  - id: agent
+    role_type: operator
+    agent_provisioning: {{}}
+    skills: []
+    mcp_tools: []
+    handoffs: []
+coordination:
+  topology: hub-spoke
+  protocol: a2a-jsonrpc-2.0
+  routing:
+    strategy: static
+constraints:
+  global_budget:
+    max_wallclock_seconds: 60
+    max_total_tokens: 8000
+    max_cost_usd: 0.01
+  data_classifications: ["public"]
+  network:
+    egress_allowed: false
+    egress_allowlist: []
+completion:
+  rules: ["done"]
+  on_failure: abort
+  max_retries: 0
+provenance:
+  signatures:
+    - signer_did: "did:web:example.com"
+      algorithm: ed25519
+      signature: "AAA"
+"#
+        );
+        let path = dir.join("agent.swarmkit.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        path
+    }
+
+    /// Regression: `[::1]:8080` was split on `:` into more than two parts,
+    /// reported as invalid, and the agent was then restarted on all
+    /// interfaces under a generic persona.
+    #[test]
+    fn a_bracketed_ipv6_listen_address_is_bound_as_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let kit = write_kit_listening_on(dir.path(), "[::1]:8080");
+
+        let (config, listen_addr) =
+            resolve_startup_config(Some(&kit), None, None, dir.path()).unwrap();
+
+        assert_eq!(config.name, "agent");
+        assert_eq!(listen_addr, "[::1]:8080".parse().unwrap());
+    }
+
+    #[test]
+    fn an_unparseable_listen_address_stops_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        for bad in ["localhost:8080", "127.0.0.1", "8080", "not an address"] {
+            let kit = write_kit_listening_on(dir.path(), bad);
+            let err = resolve_startup_config(Some(&kit), None, None, dir.path())
+                .expect_err("an unparseable listen address must not resolve")
+                .to_string();
+            assert!(
+                err.contains("Invalid listen address"),
+                "{bad:?} gave an unexpected error: {err}"
+            );
+        }
+    }
+
+    /// The server entry point refuses the address itself, as its first step,
+    /// so no caller can reach a bind with an address that did not parse.
+    #[tokio::test]
+    #[allow(clippy::disallowed_methods)]
+    async fn start_agent_server_refuses_an_unparseable_listen_address() {
+        let config = AgentConfig {
+            name: "agent".to_string(),
+            listen: "[::1".to_string(),
+            ..AgentConfig::default()
+        };
+
+        let err = start_agent_server(&config, false)
+            .await
+            .expect_err("an unparseable listen address must not start a server")
+            .to_string();
+
+        assert!(err.contains("Invalid listen address"), "{err}");
     }
 }

@@ -4,6 +4,7 @@ mod agent_event;
 mod agent_loop;
 mod anti_pattern;
 mod autolearn_bridge;
+mod bind_addr;
 mod conductor;
 mod conductor_autoresearch;
 mod conductor_evofabric;
