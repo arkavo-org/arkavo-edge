@@ -91,6 +91,13 @@ pub async fn execute_with_conductor_and_learning(
 ) -> std::result::Result<String, String> {
     use arkavo_mcp_tools::ToolRegistry;
 
+    // Every way of running the task below is gated on the compute budget,
+    // and some of them read its counters directly. Start the agent's next
+    // window here, if the last one has ended, so they all see the same budget.
+    if let Some(budget) = compute_budget {
+        budget.write().await.renew_if_expired();
+    }
+
     let mut progress = Progress::new(conductor, task_id, task_executor);
     progress.report("Creating task structure", 10).await;
 

@@ -121,32 +121,20 @@ pub(super) async fn run_tool_loop(
     let char_budget = model_ctx * 4;
 
     for iteration in 0..MAX_TOOL_ITERATIONS {
-        // Budget gate: auto-refresh if expired, stop if truly exhausted
-        if let Some(budget) = compute_budget {
-            let mut b = budget.write().await;
-            if !b.has_remaining() {
-                // Auto-refresh for autonomous agents whose TTL expired.
-                // Specialists get refreshed by commander broadcasts;
-                // autonomous agents (orchestrators, task-generators) need self-refresh.
-                if b.remaining_inferences == 0 {
-                    b.refresh(&arkavo_budget::BudgetAllocation {
-                        max_inferences: 32,
-                        max_tokens: 100_000,
-                        ttl_secs: 600,
-                        ..arkavo_budget::BudgetAllocation::default()
-                    });
-                    info!("Compute budget auto-refreshed at iteration {}", iteration);
-                } else {
-                    info!(
-                        "Compute budget exhausted — stopping tool loop at iteration {}",
-                        iteration
-                    );
-                    failure = Some(format!(
-                        "compute budget exhausted before tool loop iteration {iteration}"
-                    ));
-                    break;
-                }
-            }
+        // Budget gate. A budget that is spent stays spent until its window
+        // ends; the budget starts its own next window then, so there is
+        // nothing to refill here.
+        if let Some(budget) = compute_budget
+            && !budget.read().await.has_remaining()
+        {
+            info!(
+                "Compute budget exhausted — stopping tool loop at iteration {}",
+                iteration
+            );
+            failure = Some(format!(
+                "compute budget exhausted before tool loop iteration {iteration}"
+            ));
+            break;
         }
 
         // Execution iterations (1+) use a stripped inference profile:
