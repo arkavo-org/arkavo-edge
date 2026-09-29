@@ -272,6 +272,10 @@ fn run_agent_with_options(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentConfig {
     pub name: String,
+    /// Id of the kit role this configuration was built from. `None` for the
+    /// zero-config default and for AGENTS.md migration input, which have no
+    /// kit role behind them.
+    pub role_id: Option<String>,
     pub purpose: String, // Used as system prompt for LLM
     pub model: String,
     pub mode: arkavo_protocol::agent_config::AgentMode,
@@ -291,6 +295,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             name: String::new(),
+            role_id: None,
             purpose: String::new(),
             model: String::new(),
             mode: arkavo_protocol::agent_config::AgentMode::default(),
@@ -449,6 +454,8 @@ pub async fn start_agent_server(
             Some(device_did.clone()),
         )
         .await;
+
+    server.set_agent_role(config.role_id.clone()).await;
 
     // Set API keys in the server
     server.set_api_keys(config.api_keys.clone()).await;

@@ -65,6 +65,11 @@ pub struct AgentMetadata {
     /// cloud arms from the manifest (the pricing home) instead of the built-in
     /// static estimate. Empty for an unspecialized agent → static fallback.
     pub manifest_pricing: Vec<arkavo_budget::provider_costs::PricingEntry>,
+    /// Id of the kit role this process was started as. `None` for an agent
+    /// started without a kit. A hot reload re-reads this role from the kit;
+    /// a multi-role kit runs one process per role, and each of them watches
+    /// the same file.
+    pub role_id: Option<String>,
 }
 
 /// Default location for a newly created kit file when the server starts
@@ -196,7 +201,49 @@ pub(super) fn pending_model_change(
     })
 }
 
-/// Update [`AgentMetadata`] from a SwarmKit kit's primary role, then handle
+/// The role a reload applies to an agent started as `role_id`.
+///
+/// An agent started as a kit role keeps that role: if the kit no longer has
+/// it the reload fails, because taking over another role's instructions
+/// would change what the agent is without anyone asking for it. An agent
+/// started without a kit has no role to keep and gets the kit's first role,
+/// the one a restart would run.
+fn reload_role<'a>(
+    runtime_config: &'a arkavo_swarmkit::AgentRuntimeConfig,
+    role_id: Option<&str>,
+) -> Result<Option<&'a arkavo_swarmkit::RoleRuntimeView>> {
+    let Some(role_id) = role_id else {
+        return Ok(runtime_config.primary_role());
+    };
+    runtime_config
+        .roles
+        .iter()
+        .find(|role| role.role_id == role_id)
+        .map(Some)
+        .ok_or_else(|| {
+            A2aError::Configuration(format!(
+                "Kit has no role {role_id:?}, the role this agent is running; \
+                 restart the agent to run another role"
+            ))
+        })
+}
+
+/// System-style purpose string for `role`: the kit objective followed by the
+/// role's skill instructions.
+fn purpose_for_role(
+    objective_goal: &str,
+    role: Option<&arkavo_swarmkit::RoleRuntimeView>,
+) -> String {
+    let mut parts = vec![objective_goal];
+    if let Some(role) = role
+        && !role.skill_instructions.is_empty()
+    {
+        parts.push(&role.skill_instructions);
+    }
+    parts.join("\n\n")
+}
+
+/// Update [`AgentMetadata`] from the kit role this agent runs, then handle
 /// the kit-level MCP server list the same way the legacy AGENTS.md reload
 /// did (clear stale connections, log servers needing a restart).
 ///
@@ -224,7 +271,8 @@ pub(super) async fn apply_kit_reload(
 
     {
         let mut metadata = agent_metadata.write().await;
-        metadata.purpose = runtime_config.purpose_text();
+        let role = reload_role(&runtime_config, metadata.role_id.as_deref())?;
+        metadata.purpose = purpose_for_role(&runtime_config.objective_goal, role);
         if let Some(listen) = &runtime_config.runtime.listen {
             metadata.endpoint.clone_from(listen);
         }
@@ -237,7 +285,7 @@ pub(super) async fn apply_kit_reload(
         // router-hint mapping lives in the CLI's model_map, and adapter
         // recreation is not implemented); surface divergence instead of
         // silently freezing the running model.
-        if let Some(role) = runtime_config.primary_role()
+        if let Some(role) = role
             && let Some(family) = &role.model_family
             && let Some(declared) =
                 pending_model_change(family, role.model_size.as_deref(), &metadata.model)
@@ -478,6 +526,115 @@ provenance:
 
         let metadata = agent_metadata.read().await;
         assert_eq!(metadata.purpose, "say hello");
+    }
+
+    /// MINIMAL_KIT_YAML with two roles that carry their own instructions
+    /// and models.
+    fn two_role_kit_yaml() -> String {
+        let roles = r#"roles:
+  - id: planner
+    role_type: operator
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "8B"
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: inline
+        payload:
+          name: identity
+          description: "System identity"
+          instructions: "You are the planner role."
+          resources: []
+    mcp_tools: []
+    handoffs: []
+  - id: worker
+    role_type: operator
+    agent_provisioning:
+      model:
+        family: "ministral"
+        size: "3B"
+    skills:
+      - id: "skill:identity"
+        version: "0.1.0"
+        source: inline
+        payload:
+          name: identity
+          description: "System identity"
+          instructions: "You are the worker role."
+          resources: []
+    mcp_tools: []
+    handoffs: []
+"#;
+        let single_role = r#"roles:
+  - id: agent
+    role_type: operator
+    agent_provisioning: {}
+    skills: []
+    mcp_tools: []
+    handoffs: []
+"#;
+        assert!(MINIMAL_KIT_YAML.contains(single_role));
+        MINIMAL_KIT_YAML.replacen(single_role, roles, 1)
+    }
+
+    /// Regression: a reload always applied the kit's first role, so every
+    /// process of a multi-role kit took on the first role's instructions
+    /// the first time the kit file changed.
+    #[tokio::test]
+    async fn apply_kit_reload_keeps_the_role_the_agent_was_started_as() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+            name: "worker".to_string(),
+            role_id: Some("worker".to_string()),
+            purpose: "You are the worker role.".to_string(),
+            ..Default::default()
+        }));
+        let mcp_registry = McpRegistry::new();
+
+        apply_kit_reload(&two_role_kit_yaml(), &agent_metadata, &mcp_registry)
+            .await
+            .expect("valid kit should reload");
+
+        let metadata = agent_metadata.read().await;
+        assert_eq!(metadata.purpose, "say hello\n\nYou are the worker role.");
+        assert!(!metadata.purpose.contains("planner"));
+    }
+
+    #[tokio::test]
+    async fn apply_kit_reload_fails_when_the_running_role_left_the_kit() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+            name: "reviewer".to_string(),
+            role_id: Some("reviewer".to_string()),
+            purpose: "You are the reviewer role.".to_string(),
+            ..Default::default()
+        }));
+        let mcp_registry = McpRegistry::new();
+
+        let err = apply_kit_reload(&two_role_kit_yaml(), &agent_metadata, &mcp_registry)
+            .await
+            .expect_err("a reload must not move the agent to another role");
+
+        assert!(err.to_string().contains("reviewer"), "{err}");
+        let metadata = agent_metadata.read().await;
+        assert_eq!(metadata.purpose, "You are the reviewer role.");
+    }
+
+    #[tokio::test]
+    async fn apply_kit_reload_gives_an_agent_started_without_a_kit_the_first_role() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+            name: "host-folder".to_string(),
+            role_id: None,
+            ..Default::default()
+        }));
+        let mcp_registry = McpRegistry::new();
+
+        apply_kit_reload(&two_role_kit_yaml(), &agent_metadata, &mcp_registry)
+            .await
+            .expect("valid kit should reload");
+
+        let metadata = agent_metadata.read().await;
+        assert_eq!(metadata.purpose, "say hello\n\nYou are the planner role.");
     }
 
     #[tokio::test]
