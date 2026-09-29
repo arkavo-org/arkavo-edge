@@ -298,43 +298,6 @@ pub mod mdns {
         }
     }
 
-    /// Registers an A2A agent as an mDNS service
-    pub fn register_service(
-        agent_id: &str,
-        port: u16,
-        purpose: &str,
-        model: &str,
-    ) -> Result<ServiceDaemon, Box<dyn std::error::Error>> {
-        println!("AG-UI: Registering mDNS service for agent: {}", agent_id);
-
-        let mdns = ServiceDaemon::new()?;
-
-        // Create service info
-        let service_type = "_a2a._tcp.local.";
-        let instance_name = format!("arkavo-agent-{}", agent_id);
-        let host_ipv4 = "0.0.0.0"; // Will be resolved to actual IP
-        let host_name = format!("{}.local.", agent_id);
-
-        let mut properties = HashMap::new();
-        properties.insert("agent_id".to_string(), agent_id.to_string());
-        properties.insert("purpose".to_string(), purpose.to_string());
-        properties.insert("model".to_string(), model.to_string());
-
-        let service_info = ServiceInfo::new(
-            service_type,
-            &instance_name,
-            &host_name,
-            host_ipv4,
-            port,
-            properties,
-        )?;
-
-        mdns.register(service_info)?;
-
-        println!("AG-UI: mDNS service registered successfully");
-        Ok(mdns)
-    }
-
     // Runs on macOS only, the one platform this was verified on. Its loopback
     // interface carries multicast; on Linux `lo` usually lacks the MULTICAST
     // flag, and whether mDNS works over it there has not been established.
@@ -425,12 +388,5 @@ pub mod mdns {
         Err("mDNS feature not compiled in".into())
     }
 
-    pub fn register_service(
-        _agent_id: &str,
-        _port: u16,
-        _purpose: &str,
-        _model: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        Err("mDNS feature not compiled in".into())
-    }
+
 }
