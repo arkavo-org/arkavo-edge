@@ -18,6 +18,7 @@ pub mod pricing;
 pub mod role;
 pub mod runtime_config;
 pub mod skill_content;
+pub mod unenforced;
 pub mod validate;
 
 pub use canonical::{canonical_json, content_hash, kit_id_for};
@@ -49,6 +50,7 @@ pub use runtime_config::{
     RuntimeValidationError, TrustedRoot, agent_runtime_config_from_manifest, validate_runtime,
 };
 pub use skill_content::{SkillContent, SkillResource};
+pub use unenforced::{UnenforcedControl, unenforced_on_agent_path};
 pub use validate::{ValidationError, validate, validate_not_expired};
 
 /// Parse a SwarmKit manifest from a JSON string and run cross-block validation.
