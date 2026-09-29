@@ -125,7 +125,7 @@ scenarios:
     when: The tool builds its command line or opens the file
     then:
       - A ripgrep pattern beginning with '-' reaches ripgrep as a search term, never as a flag
-      - A comby template beginning with '-' is refused with InvalidPattern before comby runs, because comby has no end-of-options marker
+      - A comby template, language, file extension or excluded directory beginning with '-' is refused with InvalidPattern before comby runs, because comby has no end-of-options marker
       - The path is confined to the workspace root; a path outside it is refused with OutsideWorkspace
     refs: [crates/arkavo-mcp-code-search/src/codegrep.rs, crates/arkavo-mcp-code-search/src/comby.rs, crates/arkavo-mcp-code-search/src/treesitter.rs]
     changed: "2026-09-29"

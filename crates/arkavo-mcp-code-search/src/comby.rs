@@ -95,11 +95,33 @@ impl CombyTool {
         let rewrite_template = params.get("rewrite_template").and_then(|v| v.as_str());
         // comby's parser reads any argument beginning with '-' as a flag, even
         // after `--` (which it rejects as an unknown flag), so a template such
-        // as `-review` would change what comby does. Refuse it before spawning.
-        if match_template.starts_with('-') || rewrite_template.is_some_and(|r| r.starts_with('-')) {
-            return Err(CodeSearchError::InvalidPattern(
-                "comby templates cannot begin with '-'".to_string(),
-            ));
+        // as `-review`, or a value after `-matcher`, `-extensions` or
+        // `-exclude-dir`, would change what comby does. Refuse every
+        // caller-supplied argument of that shape before resolving or spawning.
+        let string_list = |key: &str| -> Vec<&str> {
+            params
+                .get(key)
+                .and_then(|v| v.as_array())
+                .map(|items| items.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default()
+        };
+        let language = params.get("language").and_then(|v| v.as_str());
+        let extensions = string_list("file_extensions");
+        let exclude_dirs = string_list("exclude_dirs");
+        let guarded = [
+            ("match_template", Some(match_template)),
+            ("rewrite_template", rewrite_template),
+            ("language", language),
+        ]
+        .into_iter()
+        .chain(extensions.iter().map(|v| ("file_extensions", Some(*v))))
+        .chain(exclude_dirs.iter().map(|v| ("exclude_dirs", Some(*v))));
+        for (name, value) in guarded {
+            if value.is_some_and(|v| v.starts_with('-')) {
+                return Err(CodeSearchError::InvalidPattern(format!(
+                    "comby {name} cannot begin with '-'"
+                )));
+            }
         }
 
         let requested = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
@@ -112,18 +134,14 @@ impl CombyTool {
 
         let mut cmd = Command::new("comby");
 
-        if let Some(lang) = params.get("language").and_then(|v| v.as_str())
+        if let Some(lang) = language
             && lang != "auto"
         {
             cmd.arg("-matcher").arg(lang);
         }
 
-        if let Some(exts) = params.get("file_extensions").and_then(|v| v.as_array()) {
-            for ext in exts {
-                if let Some(e) = ext.as_str() {
-                    cmd.arg("-extensions").arg(e);
-                }
-            }
+        for ext in &extensions {
+            cmd.arg("-extensions").arg(ext);
         }
 
         if in_place {
@@ -136,12 +154,8 @@ impl CombyTool {
             cmd.arg("-match-only");
         }
 
-        if let Some(excludes) = params.get("exclude_dirs").and_then(|v| v.as_array()) {
-            for dir in excludes {
-                if let Some(d) = dir.as_str() {
-                    cmd.arg("-exclude-dir").arg(d);
-                }
-            }
+        for dir in &exclude_dirs {
+            cmd.arg("-exclude-dir").arg(dir);
         }
 
         // Positionals last. Neither template begins with '-' and the confined
@@ -246,13 +260,6 @@ mod tests {
     use tempfile::TempDir;
     use tokio::fs;
 
-    fn comby_available() -> bool {
-        std::process::Command::new("comby")
-            .arg("--version")
-            .output()
-            .is_ok_and(|o| o.status.success())
-    }
-
     /// comby reads any argument beginning with '-' as a flag and rejects `--`
     /// as an unknown flag, so such a template is refused before comby runs.
     #[spec("CS-006")]
@@ -267,6 +274,9 @@ mod tests {
                 "rewrite_template": "-editor=sh",
                 "path": dir.path().to_str().unwrap()
             }),
+            json!({ "match_template": "x", "language": "-review" }),
+            json!({ "match_template": "x", "file_extensions": [".rs", "-editor=sh"] }),
+            json!({ "match_template": "x", "exclude_dirs": ["target", "-editor=sh"] }),
         ] {
             let err = tool.execute(params).await.unwrap_err();
             assert!(
@@ -282,12 +292,9 @@ mod tests {
     /// The reordered argv (flags first, then the templates and the confined
     /// absolute path) is accepted by comby and still finds matches.
     #[spec("CS-006")]
+    #[ignore = "requires comby on PATH"]
     #[tokio::test]
     async fn comby_searches_a_confined_file() {
-        if !comby_available() {
-            eprintln!("skip: no comby");
-            return;
-        }
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("a.rs"), "fn a() -> u8 { 1 }\n")
             .await
