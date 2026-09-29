@@ -22,10 +22,18 @@ brew trust --formula arkavo-org/arkavo/arkavo  # required on Homebrew 5.2+
 brew install arkavo
 ```
 
+**Debian/Ubuntu (x86_64):** Download `arkavo_<version>_amd64.deb` from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases) and install it:
+
+```bash
+sudo apt install ./arkavo_<version>_amd64.deb
+```
+
+**Other distributions:** Download `arkavo-<version>-x86_64-linux.tar.gz` from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases), extract it, and place `arkavo` on your `PATH`.
+
 **Raspberry Pi 5:** Download ARM64 binary from [releases](https://github.com/arkavo-org/arkavo-edge/releases). See [deployment guide](docs/raspberry-pi-deployment.md) for setup. First run auto-selects an edge model for the device (Pi 5 → Gemma 4 E4B).
 
 ### Install on Windows
-Download the installer from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases) and run the .exe file.
+Download `arkavo-<version>-x86_64-windows.zip` from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases), extract `arkavo.exe`, and add its folder to your `PATH`. There is no installer.
 
 ### Launch
 ```bash
