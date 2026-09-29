@@ -323,13 +323,20 @@ provenance:
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// A directory no other test shares. The clock alone is not unique
+    /// enough: tests run in parallel and two of them can read the same
+    /// timestamp, after which one finds the other's kit file.
     fn tempfile_dir() -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "swarmkit-discover-{}",
+            "swarmkit-discover-{}-{}-{}",
+            std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
