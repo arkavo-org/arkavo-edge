@@ -1,7 +1,11 @@
 //! Answering a message with the conductor directly, outside the agent loop.
 //!
-//! Execution here starts from the agent's purpose and the message: there is
-//! no conversation behind it, and each message is answered by itself.
+//! The agent loop keeps one conversation for the life of the agent and folds
+//! every message queued in a tick into one cycle. That suits an agent that
+//! acts on its own. It does not suit a message that must be answered on its
+//! own terms: a step of a pipeline run answered from the history of an
+//! earlier run, or two steps answered as one, is a wrong answer. Execution
+//! here starts from the agent's purpose and the message and nothing else.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -17,6 +21,9 @@ use crate::server::config_helpers::AgentMetadata;
 use crate::server::execute_with_conductor_and_learning;
 use crate::server::mcp_bridge::McpBridgeTool;
 use crate::server::tool_memory::ToolMemory;
+
+/// Tool calls a task's own memory keeps, matching the agent's.
+const TASK_MEMORY_ENTRIES: usize = 10;
 
 /// What the conductor needs to answer a message as this agent.
 #[derive(Clone)]
@@ -44,6 +51,23 @@ pub(in crate::server) struct Request {
     pub memory: Arc<RwLock<ToolMemory>>,
     /// Skip the model call that decides whether to split the task up.
     pub skip_complexity: bool,
+}
+
+impl Request {
+    /// A message answered with nothing behind it: no images, no task to
+    /// report progress on, and a tool memory of its own, so nothing an
+    /// earlier message did is visible to it.
+    pub(in crate::server) fn isolated(content: String, task_id: Option<uuid::Uuid>) -> Self {
+        Self {
+            content,
+            images: None,
+            task_id,
+            memory: Arc::new(RwLock::new(ToolMemory::new(TASK_MEMORY_ENTRIES))),
+            // A role's step is one piece of work by definition; the agent
+            // loop, which runs these roles otherwise, skips the check too.
+            skip_complexity: true,
+        }
+    }
 }
 
 impl DirectExecution {
