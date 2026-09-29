@@ -13,6 +13,7 @@ pub mod canonical;
 pub mod coordination;
 pub mod discover;
 pub mod governance;
+pub mod kit_skills;
 pub mod manifest;
 pub mod pricing;
 pub mod role;
@@ -35,6 +36,7 @@ pub use governance::{
     ProposalApprovalMechanism, ProposalBlastRadius, ProposalGovernanceSpec, ProposalOriginSpec,
     RoleProposalCeiling,
 };
+pub use kit_skills::{KitSkill, KitSkillsError, kit_skills_from_yaml};
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
 pub use pricing::ModelPricingEntry;
 #[allow(deprecated)]
