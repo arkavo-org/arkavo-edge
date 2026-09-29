@@ -346,7 +346,8 @@ fn is_version_probe(base_raw: &str, seg: &str) -> bool {
 
 /// Read-only git: subcommand in GIT_READ_SUBCMDS, no top-level `-c` config
 /// override and no output-redirecting flag; `config`/`branch`/`remote` must
-/// stay in their read forms.
+/// stay in their read forms. The read flag must lead: `git config` takes a
+/// later `--get` as a value pattern, and `git remote -v` a subcommand.
 fn git_read_only(toks: &[String]) -> bool {
     // toks[0] == "git"; a global option such as -C or --git-dir in toks[1] is
     // not a read subcommand, so it is refused here too.
@@ -365,16 +366,15 @@ fn git_read_only(toks: &[String]) -> bool {
         "branch" => toks[2..]
             .iter()
             .all(|t| GIT_BRANCH_READ_FLAGS.contains(&t.as_str())),
-        "remote" => matches!(
-            toks.get(2).map(|s| s.to_lowercase()).as_deref(),
-            None | Some("-v" | "show" | "get-url")
+        "remote" => match toks.get(2).map(|s| s.to_lowercase()).as_deref() {
+            None | Some("show" | "get-url") => true,
+            Some("-v") => toks.len() == 3,
+            _ => false,
+        },
+        "config" => matches!(
+            toks.get(2).map(String::as_str),
+            Some("--list" | "--get" | "--get-all" | "--get-regexp")
         ),
-        "config" => toks.iter().any(|t| {
-            matches!(
-                t.as_str(),
-                "--list" | "--get" | "--get-all" | "--get-regexp"
-            )
-        }),
         _ => true,
     }
 }
@@ -589,6 +589,40 @@ mod tests {
         assert_eq!(verdict("git status"), ApprovalResult::AutoApproved);
         assert_eq!(verdict("git log --oneline"), ApprovalResult::AutoApproved);
         assert_eq!(verdict("git branch -a"), ApprovalResult::AutoApproved);
+    }
+
+    /// Regression: a read flag anywhere in the words let a write through.
+    /// `git config` stops parsing options at the key, so a trailing `--get`
+    /// is a value pattern and the key is set, and `git remote -v` accepts a
+    /// subcommand after `-v`. Both wrote `.git/config` when run, which a
+    /// later auto-approved `git status` or `git diff` then obeys
+    /// (`core.fsmonitor`, `diff.external`).
+    #[spec("MCP-013")]
+    #[test]
+    fn git_read_flag_cannot_carry_a_config_write() {
+        for cmd in [
+            "git config user.name evil --get",
+            "git config core.fsmonitor ./x --list",
+            "git remote -v add evil https://x.invalid/r.git",
+            "git remote -v rename a b",
+        ] {
+            assert_eq!(
+                verdict(cmd),
+                ApprovalResult::RequiresReview,
+                "{cmd} must not be auto-approved"
+            );
+        }
+        for cmd in [
+            "git remote -v",
+            "git config --get user.name",
+            "git config --list",
+        ] {
+            assert_eq!(
+                verdict(cmd),
+                ApprovalResult::AutoApproved,
+                "{cmd} stays auto-approved"
+            );
+        }
     }
 
     /// Regression: `sh` drops a backslash and keeps the next character, so
