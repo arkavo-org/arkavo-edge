@@ -23,6 +23,13 @@ use super::super::config_helpers::AgentMetadata;
 use super::super::execute_with_conductor_and_learning;
 use super::super::tool_memory::ToolMemory;
 
+#[cfg(test)]
+// `#[tokio::test]` expands to `Runtime::block_on`, which the crate's lint set
+// disallows in library code. Same waiver as the other async test modules here.
+#[allow(clippy::disallowed_methods)]
+mod budget_tests;
+mod caller_budget;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_message_send(
     metrics: &Arc<MetricsCollector>,
@@ -229,14 +236,12 @@ pub async fn handle_message_send(
         }
     }
 
-    // Extract budget allocation from task metadata and refresh compute budget
-    if let Some(metadata) = &request.message.metadata
-        && let Some(alloc_value) = metadata.get("budget_allocation")
-        && let Ok(allocation) =
-            serde_json::from_value::<arkavo_budget::BudgetAllocation>(alloc_value.clone())
-    {
+    // Refresh the compute budget from the allocation in the task metadata.
+    // The allocation comes from the caller, so it is held to the budget this
+    // agent was configured with.
+    if let Some(allocation) = caller_budget::requested(request.message.metadata.as_ref()) {
         let mut budget = compute_budget.write().await;
-        budget.refresh(&allocation);
+        caller_budget::refresh_within_ceiling(&mut budget, &allocation).await;
         metrics.record_compute_budget_refresh();
         let snapshot = budget.snapshot();
         metrics.record_compute_budget_state(
