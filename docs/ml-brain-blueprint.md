@@ -20,7 +20,7 @@ We do not build monolithic agents. Arkavo Edge is a secure, sovereign, and self-
 | Hippocampus | ~85% | arkavo-context, arkavo-tdf, arkavo-memory | PromptAdvisor persistence landed; federated retrieval pending |
 | Cortex | Complete | arkavo-mcp-tools, arkavo-code-search, arkavo-browser | All 6 MCP tools implemented |
 | Cerebellum | Complete | arkavo-llama-cpp, arkavo-llm | Ministral 3B/8B, Qwen3 0.6B |
-| Prefrontal Cortex | ~80% | arkavo-orchestrator, arkavo-workspace | GitHub webhook workflows; multi-goal planning evolving |
+| Prefrontal Cortex | ~80% | arkavo-orchestrator, arkavo-mcp-workspace | GitHub webhook workflows; multi-goal planning evolving |
 | Amygdala | Complete | arkavo-mcp-tools, arkavo-validation, arkavo-protocol | Preflight policy enforcement + budget governor added |
 | Consolidation | ~40% | arkavo-autolearn, arkavo-gossip, learning/ | PromptAdvisor cross-session learning in place; offline daemon pending |
 
@@ -35,7 +35,7 @@ While the codebase uses standard software terminology (routers, ledgers, orchest
 |                    PREFRONTAL CORTEX                         |
 |                arkavo-orchestrator                           |
 |  Executive planning, task breakdown, and goal management     |
-|  Ephemeral workspace isolation via workspace_container       |
+|  Opt-in container workspace (workspace_container)            |
 +---------------+--------------+------------------------------+
 |   THALAMUS    |  CEREBELLUM  |          AMYGDALA             |
 | arkavo-router | arkavo-llama | arkavo-mcp-tools (security)  |
