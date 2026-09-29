@@ -149,7 +149,7 @@ Add to `arkavo-swarmkit` (validated, optional fields so existing kits stay valid
 ```yaml
 runtime:
   mode: orchestrator | specialist   # default orchestrator for single-role kits
-  listen: "0.0.0.0:0"               # optional; CLI may override
+  listen: "127.0.0.1:0"             # optional; this is the default. -p changes the port, not the host
   mdns: true
   cloud_policy: local_only | ask_before_cloud | cloud_within_cap
   max_cost_per_session: 1.0         # dollars; maps to BudgetYamlConfig
@@ -165,6 +165,8 @@ runtime:
       command: …
       args: []
 ```
+
+The RPC endpoint is not authenticated yet, so set `runtime.listen` to an address other machines can reach (`0.0.0.0`, `[::]` or a LAN address) only on a trusted network.
 
 ### Role-level (optional)
 
