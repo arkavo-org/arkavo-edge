@@ -281,8 +281,11 @@ pub(super) async fn apply_kit_reload(
         if let Some(role) = role {
             metadata.description.clone_from(&role.description);
         }
+        // The endpoint is left alone: a reload does not move the listener,
+        // so the address the server bound is still the one to advertise,
+        // whatever `runtime.listen` says now.
         if let Some(listen) = &runtime_config.runtime.listen {
-            metadata.endpoint.clone_from(listen);
+            info!("  Kit listen address '{listen}' takes effect on restart");
         }
 
         info!("Updated agent metadata for '{}'", metadata.name);
@@ -607,6 +610,30 @@ provenance:
         let metadata = agent_metadata.read().await;
         assert_eq!(metadata.purpose, "say hello\n\nYou are the worker role.");
         assert!(!metadata.purpose.contains("planner"));
+    }
+
+    /// Regression: a reload replaced the advertised endpoint with the kit's
+    /// `runtime.listen`, an address the running server never bound.
+    #[tokio::test]
+    async fn apply_kit_reload_keeps_the_bound_endpoint() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+            name: "agent".to_string(),
+            role_id: Some("agent".to_string()),
+            endpoint: "http://127.0.0.1:8431".to_string(),
+            ..Default::default()
+        }));
+        let mcp_registry = McpRegistry::new();
+        let kit =
+            MINIMAL_KIT_YAML.replacen("kit:", "runtime:\n  listen: \"0.0.0.0:9000\"\nkit:", 1);
+
+        apply_kit_reload(&kit, &agent_metadata, &mcp_registry)
+            .await
+            .expect("valid kit should reload");
+
+        assert_eq!(
+            agent_metadata.read().await.endpoint,
+            "http://127.0.0.1:8431"
+        );
     }
 
     /// The published description follows the kit like the purpose does, and

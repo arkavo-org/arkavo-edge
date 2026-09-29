@@ -294,6 +294,13 @@ impl A2aServer {
         self.agent_metadata.write().await.role_id = role_id;
     }
 
+    /// Set the URL clients are told to connect to. `start_with_addr` sets
+    /// it to the bound address; a caller that bound a wildcard address
+    /// replaces it with an address other machines can reach.
+    pub async fn set_advertised_endpoint(&self, endpoint: String) {
+        self.agent_metadata.write().await.endpoint = endpoint;
+    }
+
     /// Set the short description the agent card publishes. The card never
     /// carries the agent's purpose.
     pub async fn set_agent_description(&self, description: Option<String>) {
@@ -962,6 +969,14 @@ impl A2aServer {
     /// Start the server and return both the handle and the actual bound port
     /// This is useful when binding to port 0 for dynamic port allocation
     pub async fn start_with_port(&self) -> Result<(ServerHandle, u16)> {
+        let (handle, bound_addr) = self.start_with_addr().await?;
+        Ok((handle, bound_addr.port()))
+    }
+
+    /// Start the server and return the handle with the address it bound:
+    /// the configured IP, and the port the OS assigned when the configured
+    /// port was 0. Callers that tell clients where to connect need both.
+    pub async fn start_with_addr(&self) -> Result<(ServerHandle, SocketAddr)> {
         let addr: SocketAddr = bind_socket_addr(&self.config.bind_address, self.config.port)?;
 
         info!("Starting A2A server on {}", addr);
@@ -992,6 +1007,10 @@ impl A2aServer {
         if self.config.port == 0 {
             info!("Server bound to dynamic port: {}", actual_port);
         }
+
+        // Until now the endpoint was the configured address, port 0
+        // included. The agent card must name an address a client can use.
+        self.agent_metadata.write().await.endpoint = endpoint_url(actual_addr);
 
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
         let metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
@@ -1299,7 +1318,7 @@ impl A2aServer {
             endpoint_url(actual_addr)
         );
 
-        Ok((handle, actual_port))
+        Ok((handle, actual_addr))
     }
 
     /// Start the autonomous orchestrator loop.
