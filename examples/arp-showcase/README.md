@@ -10,7 +10,7 @@ A companion `arkavo.swarmkit.yaml` declares a single-role SwarmKit so the same p
 
 ```bash
 # from repo root
-cargo build
+# cargo build    # only when running from source; an installed arkavo needs no build
 
 # Original showcase: just the (local) ARP agent.
 ./examples/arp-showcase/run.sh

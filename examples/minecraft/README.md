@@ -51,7 +51,7 @@ already-loaded local model — no per-agent model pin.
 ### Prerequisites
 
 ```bash
-# Build Arkavo
+# Only when running from source; an installed arkavo needs no build
 cargo build -p arkavo
 
 # Install Docker (for Minecraft server)

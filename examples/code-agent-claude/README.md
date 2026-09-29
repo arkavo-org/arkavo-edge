@@ -48,15 +48,14 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ## Quick Start
 
 ```bash
-# From repo root
-cargo build -q
-
 # Run a coding task with Claude Code tools
-cargo run -p arkavo -- chat --prompt "Explain the Fibonacci function"
+arkavo chat --prompt "Explain the Fibonacci function"
 
 # Run with debug logging
-ARKAVO_DEBUG=1 cargo run -p arkavo -- chat --prompt "Write a unit test for email validation"
+ARKAVO_DEBUG=1 arkavo chat --prompt "Write a unit test for email validation"
 ```
+
+From a source checkout without an installed binary, run `cargo build -q` from the repo root and replace `arkavo` with `cargo run -p arkavo --`.
 
 ## MCP Tools
 

@@ -39,10 +39,14 @@ The Gemini Code Agent showcases:
 
 ### 1. Install Arkavo
 
+Use an installed `arkavo`; the macOS and glibc Linux release builds include the Gemini provider. To build from source instead:
+
 ```bash
 cd ../..
-cargo build --release --features gemini
+cargo build --features gemini
 ```
+
+`launch.sh` uses `$ARKAVO_BIN` or `$BINARY` if set, then the source build, then `arkavo` on `PATH`.
 
 ### 2. Get Gemini API Key
 
@@ -91,10 +95,10 @@ For faster iteration with Flash:
 
 ```bash
 # Simple code generation via chat
-cargo run --features gemini -p arkavo -- chat --model gemini-flash-latest --prompt "Write a function to check if a number is prime"
+arkavo chat --model gemini-flash-latest --prompt "Write a function to check if a number is prime"
 
-# With streaming
-cargo run --features gemini -p arkavo -- chat --model gemini-3-pro-preview --prompt "Create a React component for a todo list"
+# With the Pro model
+arkavo chat --model gemini-3-pro-preview --prompt "Create a React component for a todo list"
 ```
 
 ### 3. Run Benchmarks
@@ -327,7 +331,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-previ
 ### Feature Flag Missing
 
 ```bash
-# Ensure gemini feature is enabled
+# When running from source, ensure the gemini feature is enabled
 cargo build --features gemini
 
 # Check available features

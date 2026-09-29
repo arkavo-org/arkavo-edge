@@ -15,7 +15,7 @@ The scenario: An intelligent coordinator that routes human requests to specializ
 ## Prerequisites
 
 ```bash
-# Build the binary
+# Only when running from source; an installed arkavo needs no build
 cargo build
 
 # Verify port 8340 is free
@@ -29,13 +29,12 @@ lsof -i :8340 && echo "Port 8340 is in use!"
 The orchestrator needs specialist agents to route requests to. Start some from other examples:
 
 ```bash
+# From the repo root
 # Terminal 1: Start a security specialist
-cd examples/software-development-lifecycle/security
-../../target/debug/arkavo agent run
+arkavo agent -c examples/software-development-lifecycle/software-development-lifecycle.swarmkit.yaml -n security-agent -p 8343
 
 # Terminal 2: Start a code review specialist
-cd examples/software-development-lifecycle/code-review
-../../target/debug/arkavo agent run
+arkavo agent -c examples/software-development-lifecycle/software-development-lifecycle.swarmkit.yaml -n code-review-agent -p 8344
 ```
 
 **What to watch for:**
@@ -47,7 +46,7 @@ cd examples/software-development-lifecycle/code-review
 
 ```bash
 cd examples/orchestrator-agent
-../../target/debug/arkavo agent run
+arkavo agent -c orchestrator-agent.swarmkit.yaml
 ```
 
 **What to watch for:**
@@ -85,7 +84,7 @@ lsof -i -P | grep arkavo
 
 ```bash
 # Send a request via chat
-timeout 60 ../../target/debug/arkavo chat --prompt "Review this code for security issues: def login(u, p): return db.query('SELECT * FROM users WHERE user=' + u)"
+timeout 60 arkavo chat --prompt "Review this code for security issues: def login(u, p): return db.query('SELECT * FROM users WHERE user=' + u)"
 ```
 
 **What to watch for:**
@@ -97,7 +96,7 @@ timeout 60 ../../target/debug/arkavo chat --prompt "Review this code for securit
 ### Step 5: Open the AG-UI (Optional)
 
 ```bash
-../../target/debug/arkavo ui
+arkavo ui
 ```
 
 **What to watch for:**
@@ -121,15 +120,14 @@ ps aux | grep "arkavo agent"
 #!/bin/bash
 # test_example.sh - Run this for automated validation
 
+# Run from the repo root.
 # Start a specialist in background
-cd examples/software-development-lifecycle/security
-../../target/debug/arkavo agent run &
+arkavo agent -c examples/software-development-lifecycle/software-development-lifecycle.swarmkit.yaml -n security-agent -p 8343 &
 SPECIALIST_PID=$!
 sleep 3
 
 # Start orchestrator in background
-cd ../../orchestrator-agent
-../../target/debug/arkavo agent run &
+arkavo agent -c examples/orchestrator-agent/orchestrator-agent.swarmkit.yaml &
 ORCHESTRATOR_PID=$!
 sleep 5
 

@@ -30,10 +30,10 @@ aren't representable either — see `RUST_LOG` in `launch.sh`.
 ### Prerequisites
 
 ```bash
-# Build Arkavo
+# Only when running from source; an installed arkavo needs no build
 cargo build -p arkavo
 
-# Build the MCP fleet environment tools
+# Build the MCP fleet environment tools (always built from source)
 cd examples/fleet-immunity/mcp-fleet-env
 cargo build
 cd ..

@@ -12,7 +12,7 @@ Demonstrates the Key Access Service (KAS) exposed as A2A JSON-RPC methods for TD
 
 ## Quick Start
 
-Build with the KAS feature enabled:
+The demo needs an `arkavo` binary with the KAS feature. The Homebrew build includes it. When running from source, enable it:
 
 ```bash
 cargo build --features kas

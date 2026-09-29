@@ -4,7 +4,7 @@ Step-by-step guide to using the KAS (Key Access Service) A2A capability.
 
 ## Prerequisites
 
-Build arkavo with the KAS feature:
+An `arkavo` binary with the KAS feature. The Homebrew build includes it. When running from source, build with the feature enabled:
 
 ```bash
 cd /path/to/arkavo-edge

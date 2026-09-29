@@ -17,7 +17,7 @@ A local 7B model with an 8K context window needs to analyze a 100K+ token codeba
 ### Prerequisites
 
 ```bash
-# Build Arkavo
+# Only when running from source; an installed arkavo needs no build
 cargo build -p arkavo
 ```
 
