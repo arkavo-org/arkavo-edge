@@ -88,7 +88,7 @@ runtime:
 | `objective.goal` | Yes | The kit's overall purpose; the primary role's identity skill carries the same purpose in more detail |
 | `roles[].skills[].payload.instructions` | Yes | The role's system prompt / identity — what it does, shown to other agents |
 | `roles[].agent_provisioning.model` | No | LLM family/size/backend to provision (see Model Providers below); omit to accept the router default |
-| `runtime.listen` | No | Bind address (default: a dynamic port) |
+| `runtime.listen` | No | Bind address (default: `127.0.0.1` on a dynamic port). Set it, for example to `0.0.0.0:8342`, for agents on other devices to reach this one |
 | `runtime.mdns` | No | Enable mDNS discovery (default: true) |
 | `runtime.mcp_servers` + `roles[].mcp_tools` | No | MCP tool servers to connect, and per-role grants against them |
 
@@ -117,7 +117,16 @@ arkavo agent -c <path/to/kit.swarmkit.yaml> [-n <role-id>] [-p <port>]
 
 ## mDNS Discovery
 
-Agents discover each other automatically using **mDNS** (multicast DNS), also known as Bonjour/Avahi. This enables zero-configuration networking.
+Agents discover each other automatically using **mDNS** (multicast DNS), also known as Bonjour/Avahi. Between agents on the same machine this needs no configuration.
+
+An agent listens on `127.0.0.1` by default, so agents on other devices cannot reach it. To form a mesh across devices, set `runtime.listen` in the kit of every agent that must be reachable:
+
+```yaml
+runtime:
+  listen: "0.0.0.0:8342"
+```
+
+The agent's RPC endpoint does not authenticate callers yet, so bind it to other interfaces only on a trusted network.
 
 ### How It Works
 
@@ -143,16 +152,9 @@ dns-sd -L "agent-name" _a2a._tcp local.
 avahi-browse -art | grep a2a
 ```
 
-### When to Use Static Peers
+### Beyond the Local Network
 
-mDNS works on local networks. For cross-network scenarios, use static peers:
-
-```yaml
-a2a:
-  peers:
-    - "http://192.168.1.100:8342"
-    - "http://server.example.com:8342"
-```
+mDNS works on a single local network. A kit has no setting for static peers, so agents on different networks do not find each other through kit configuration.
 
 ---
 
