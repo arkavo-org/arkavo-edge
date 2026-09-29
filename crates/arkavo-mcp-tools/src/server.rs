@@ -33,7 +33,6 @@ pub fn success_response(data: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_test_macros::spec;
     use serde_json::json;
 
     /// Validate that `params` contains all keys listed in the schema's `required` array.
@@ -125,7 +124,6 @@ mod tests {
         }
     }
 
-    #[spec("MCP-003")]
     #[tokio::test]
     async fn test_execute_with_valid_params() {
         let tool = TestCalculatorTool::new();
@@ -138,7 +136,6 @@ mod tests {
         assert_eq!(result["data"]["result"], 15.0);
     }
 
-    #[spec("MCP-003")]
     #[tokio::test]
     async fn test_execute_missing_required_param_returns_error() {
         let tool = TestCalculatorTool::new();
@@ -155,7 +152,6 @@ mod tests {
         );
     }
 
-    #[spec("MCP-003")]
     #[tokio::test]
     async fn test_execute_invalid_param_type_returns_error() {
         let tool = TestCalculatorTool::new();
@@ -172,7 +168,6 @@ mod tests {
         );
     }
 
-    #[spec("MCP-003")]
     #[tokio::test]
     async fn test_execute_captures_runtime_error_in_json() {
         let tool = TestCalculatorTool::new();
@@ -193,7 +188,6 @@ mod tests {
         );
     }
 
-    #[spec("MCP-003")]
     #[tokio::test]
     async fn test_execute_default_optional_param() {
         let tool = TestCalculatorTool::new();

@@ -30,8 +30,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     INIT.call_once(|| {
         logging::init();
 
-        // Initialize security controls
-        // SECURITY: Egress filter prevents SSRF attacks
+        // Seeds the provider allowlist that `secure_http::SecureClient`
+        // enforces; only requests sent through that client are filtered.
         secure_http::init_egress_filter();
         #[cfg(feature = "sentinel")]
         sentinel_wiring::install();

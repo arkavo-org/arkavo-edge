@@ -11,7 +11,6 @@ invariants:
   - First-run setup requires credential configuration
   - Public exposure requires explicit opt-in with warnings
   - Host header must match expected values (anti-rebinding)
-  - Egress to private/metadata IPs is blocked by default
   - Setup tokens never appear in logs or stdout
 
 scenarios:
@@ -27,7 +26,7 @@ scenarios:
       - User is guided through mandatory security setup
       - Random strong API key is generated if user doesn't provide one
       - Agent functionality is locked until setup completes
-    refs: [crates/arkavo-security/src/auth.rs:40-125, crates/arkavo-cli/src/commands/security_audit.rs:190-208]
+    refs: [crates/arkavo-security/src/auth.rs:40-125, crates/arkavo-cli/src/commands/security_audit.rs:231-242]
 
   - id: NET-002
     name: Localhost-only binding by default
@@ -51,6 +50,8 @@ scenarios:
   - id: NET-003
     name: Public binding requires explicit acknowledgment
     criticality: high
+    wip: true
+    issue: "Partly implemented: a non-loopback A2A listen address comes only from --listen or a kit's runtime.listen, and startup prints a warning naming it (NET-002, NET-021). Nothing else is required: there is no acknowledgment step, no TLS requirement and no authentication-strength check. arkavo-security's TlsSettings has no caller outside its crate, and the referenced http.rs lines configure client-side mTLS."
     given:
       - Administrator wants to expose agent publicly
       - Configuration is changed to bind to 0.0.0.0 or public IP
@@ -60,7 +61,8 @@ scenarios:
       - TLS is REQUIRED for public binding
       - Authentication strength is validated
       - Warning banner is shown in logs
-    refs: [crates/arkavo-protocol/src/http.rs:79-94, crates/arkavo-security/src/security.rs:20-46, crates/arkavo-cli/src/commands/security_audit.rs:180-188]
+    refs: [crates/arkavo-protocol/src/http.rs:79-94, crates/arkavo-security/src/security.rs:20-46, crates/arkavo-cli/src/commands/security_audit.rs:181-229]
+    changed: "2026-09-29"
 
   - id: NET-004
     name: No localhost trust exemption
@@ -106,6 +108,8 @@ scenarios:
   - id: NET-007
     name: Block cloud metadata and internal network access
     criticality: critical
+    wip: true
+    issue: "Not in the default build: EgressFilter (crates/arkavo-validation/src/url.rs, covered as a library by VAL-005) is consulted only by secure_http::SecureClient in arkavo-cli, which has no caller, and by EgressGuard, which ships behind the non-default taint feature. Carries the former invariant 'Egress to private/metadata IPs is blocked by default'. Putting the filter on every default request path belongs to the baseline outbound enforcement delivery in docs/swarm-trust-model.md."
     given:
       - Agent attempts to fetch a URL via browsing or tool call
       - URL resolves to private IP or cloud metadata endpoint
@@ -116,6 +120,7 @@ scenarios:
       - Explicit allowlist can override for known-safe internal services
       - Log entry shows "SSRF attempt blocked"
     refs: [crates/arkavo-validation/src/url.rs:1-118]
+    changed: "2026-09-29"
 
   - id: NET-008
     name: Ephemeral setup token (secure first-run)
@@ -175,6 +180,8 @@ scenarios:
   - id: NET-012
     name: Security configuration audit on startup
     criticality: high
+    wip: true
+    issue: "Not implemented: no CLI command or startup hook calls security_audit::execute or AuditReport::run. Only the audit's unit tests run it, so nothing is audited at startup and no misconfiguration prevents startup."
     given:
       - Agent starts up
       - Configuration is loaded
@@ -183,7 +190,8 @@ scenarios:
       - Security configuration is audited
       - Insecure settings generate warnings
       - Critical misconfigurations prevent startup
-    refs: [crates/arkavo-cli/src/commands/security_audit.rs:45-83]
+    refs: [crates/arkavo-cli/src/commands/security_audit.rs:45-84]
+    changed: "2026-09-29"
 
   - id: NET-013
     name: Service fingerprint minimization
@@ -202,6 +210,8 @@ scenarios:
   - id: NET-014
     name: DNS resolution validation before connection
     criticality: high
+    wip: true
+    issue: "Not implemented: EgressFilter::validate_resolved_ip has no caller outside tests, and no request path resolves a hostname and checks the address before connecting. Belongs with NET-007 to the baseline outbound enforcement delivery in docs/swarm-trust-model.md."
     given:
       - Agent is about to connect to external URL
       - URL contains hostname (not raw IP)
@@ -211,6 +221,7 @@ scenarios:
       - Time-of-check/time-of-use mitigated by re-checking at connect
       - DNS rebinding during connection is blocked
     refs: [crates/arkavo-validation/src/url.rs:112-117]
+    changed: "2026-09-29"
 
   - id: NET-015
     name: Prompt injection attack prevention
@@ -236,6 +247,8 @@ scenarios:
   - id: NET-016
     name: Command injection via LLM output is prevented
     criticality: critical
+    wip: true
+    issue: "Not implemented: no command execution is confined. ToolSandbox (crates/arkavo-mcp-tools/src/sandbox.rs) has no caller and nothing constructs a TaskPolicyManager, so Obligation::Sandbox is never enforced. shell_exec runs allowlisted commands directly as the agent's OS user and refuses the rest; no path asks a user to confirm. 'Execution is sandboxed' belongs to the OS-confinement workstream. tests/security_cli_test.sh still checks that chat output is not executed."
     given:
       - LLM generates response to user query
       - Response may contain shell commands or code
@@ -245,12 +258,13 @@ scenarios:
       - User confirmation required before execution
       - Dangerous commands are flagged
       - Execution is sandboxed
-    refs: [crates/arkavo-mcp-tools/src/shell_exec.rs:10-93, crates/arkavo-mcp-tools/src/sandbox.rs:27-85]
+    refs: [crates/arkavo-mcp-tools/src/shell_exec.rs:10-93, crates/arkavo-mcp-tools/src/sandbox.rs:27-85, crates/arkavo-cli/src/commands/security_audit.rs:359-371]
     edge_cases:
       - condition: LLM suggests "rm -rf /"
         expected: Blocked with warning, requires explicit confirmation
       - condition: LLM generates download script
         expected: Scanned for malicious content before execution
+    changed: "2026-09-29"
 
   - id: NET-017
     name: Egress audit logging

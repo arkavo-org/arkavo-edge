@@ -1,6 +1,5 @@
 //! Broader tool sandbox for MCP tool execution
 //!
-//! Triggered by `Obligation::Sandbox` from the Task Policy Manager.
 //! Uses platform-specific isolation: Docker when available, OS-level fallback.
 
 use std::collections::HashMap;

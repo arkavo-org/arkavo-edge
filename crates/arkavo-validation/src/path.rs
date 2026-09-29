@@ -91,8 +91,8 @@ mod tests {
     //! Unit tests for path validation and traversal prevention.
     //!
     //! ## Spec Coverage
-    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-016): Command injection via LLM output prevention
-    //! - [specs/arkavo-edge/mcp-tools.spec.yaml](MCP-003): Filesystem tool security - path traversal prevention
+    //! - [specs/arkavo-edge/validation.spec.yaml](VAL-001): Path traversal prevention
+    //! - [specs/arkavo-edge/validation.spec.yaml](VAL-002): Path within root enforcement
 
     use super::*;
     use arkavo_test_macros::spec;

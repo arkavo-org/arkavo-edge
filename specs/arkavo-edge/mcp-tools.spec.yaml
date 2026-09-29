@@ -8,7 +8,6 @@ invariants:
   - All tools must be registered before execution
   - Tool schemas define valid parameters
   - Registry supports progressive disclosure for small models
-  - Tool execution is sandboxed where possible
   - Results are validated against schema
 
 scenarios:
@@ -43,6 +42,8 @@ scenarios:
   - id: MCP-003
     name: Execute tool with parameters
     criticality: critical
+    wip: true
+    issue: "Not implemented on the production path: ToolRegistry hands params to each tool without validating them against its schema, and no tool executes in a sandbox. The tests previously tagged MCP-003 exercised a test-only calculator in crates/arkavo-mcp-tools/src/server.rs rather than the registry, so their tags were removed. Carries the former invariant 'Tool execution is sandboxed where possible'; sandboxed execution belongs to the OS-confinement workstream."
     given:
       - Tool registered
       - Valid parameters provided
@@ -53,6 +54,7 @@ scenarios:
       - Result returned as JSON
       - Errors captured and returned
     refs: [crates/arkavo-mcp-tools/src/server.rs]
+    changed: "2026-09-29"
 
   - id: MCP-004
     name: Filesystem tool operations
