@@ -62,14 +62,24 @@ See the [migration guide](docs/openclaw-migration-guide.md) for a full compariso
 Declarative multi-agent kits where each role declares its own TDF Attribute Release Policy. The orchestrator constructs role-scoped policies before any data reaches the role — push the trust boundary inward.
 
 ```bash
-# Launch any kit at gateway boot
-ARKAVO_SWARMKIT_PATH=examples/code-review-kit/code-review-kit.swarmkit.yaml arkavo
+# Check a kit manifest
+arkavo kit validate examples/code-review-kit/code-review-kit.swarmkit.yaml
+
+# Load a kit into the web UI gateway; each role appears in the AG-UI ARP panel
+ARKAVO_SWARMKIT_PATH=examples/code-review-kit/code-review-kit.swarmkit.yaml arkavo ui
+
+# Run a role of the kit as an agent (one process per role)
+arkavo agent -c examples/code-review-kit/code-review-kit.swarmkit.yaml -n reviewer -p 8343
 ```
 
-Four shipped kits: `campaign-kit`, `code-review-kit`, `vrm-production-kit`, `compliance-kit`. Full guide: [docs/SWARMKIT.md](docs/SWARMKIT.md). To validate a kit manifest from source, see [Building from Source](#building-from-source).
+`ARKAVO_SWARMKIT_PATH` loads the kit into the gateway that `arkavo ui` starts in builds with the web renderer (Homebrew, the `.deb`, and the release archives). The macOS `.pkg` build opens a native window instead and does not start that gateway. Bare `arkavo` does not start it either: with the variable set it runs the kit's first role as a single agent.
+
+Loading a kit builds per-role policy, trace, and panel entries. It does not start the roles or run the workflow between them; see [what a kit launch does today](docs/SWARMKIT.md#what-a-kit-launch-does-today).
+
+Four example kits: `campaign-kit`, `code-review-kit`, `vrm-production-kit`, `compliance-kit`. They live in this repository's `examples/` directory and are not part of the Homebrew, package, or archive installs, so clone the repository to use them, or start your own kit with `arkavo kit init <name>`. Full guide: [docs/SWARMKIT.md](docs/SWARMKIT.md).
 
 ## Features
-- **SwarmKit** - Declarative multi-agent kits with per-role TDF attribute-release policies. Four shipped examples covering marketing, code review, creative, and regulated domains. See [docs/SWARMKIT.md](docs/SWARMKIT.md).
+- **SwarmKit** - Declarative multi-agent kits with per-role TDF attribute-release policies. Four example kits in `examples/` covering marketing, code review, creative, and regulated domains. See [docs/SWARMKIT.md](docs/SWARMKIT.md).
 - Multi-provider routing (OpenAI, Anthropic, Gemini, Kimi, DeepSeek, local models)
 - **Local edge models via llama.cpp** - Gemma 4 (E2B/E4B/12B) by default; Ministral 3B/8B (with vision) also supported
 - Cost-aware model selection (real per-token estimates on full macOS/Linux builds; the musl-slim and Windows binaries use an approximate estimator)
@@ -217,7 +227,8 @@ These commands run against the source tree (not the installed binary):
 # Measure agent-to-agent latency
 cargo bench -p arkavo-protocol --bench a2a_latency
 
-# Validate a SwarmKit manifest
+# Validate a SwarmKit manifest without the installed binary
+# (the installed equivalent is `arkavo kit validate <path>`)
 cargo run -p arkavo-swarmkit --example validate_kit -- \
   examples/compliance-kit/compliance-kit.swarmkit.yaml
 ```
