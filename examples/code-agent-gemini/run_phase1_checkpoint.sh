@@ -21,14 +21,14 @@ if huggingface-cli scan-cache | grep -q "gemma-3-270m-it-GGUF"; then
     echo "✅ Gemma 270M found"
 else
     echo "❌ Gemma 270M not found"
-    echo "Download with: huggingface-cli download unsloth/gemma-3-270m-it-GGUF"
+    echo "Download with: hf download unsloth/gemma-3-270m-it-GGUF"
 fi
 
 if huggingface-cli scan-cache | grep -q "gemma-3-4b-it-GGUF"; then
     echo "✅ Gemma 4B found"
 else
     echo "❌ Gemma 4B not found"
-    echo "Download with: huggingface-cli download unsloth/gemma-3-4b-it-GGUF"
+    echo "Download with: hf download unsloth/gemma-3-4b-it-GGUF"
 fi
 echo ""
 

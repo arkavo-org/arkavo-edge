@@ -46,7 +46,7 @@ check_prerequisites() {
         ok "gemma-4-e4b model cached"
     else
         warn "gemma-4-e4b not cached; first task will be slow or fail."
-        warn "Download: hf download ggml-org/gemma-4-E4B-it-GGUF gemma-4-E4B-it-Q4_K_M.gguf"
+        warn "Download: hf download ggml-org/gemma-4-E4B-it-GGUF gemma-4-E4B-it-Q4_0.gguf"
     fi
 }
 

@@ -83,7 +83,7 @@ Download the gemma-3 270M Q4_0 quantized model:
 # Create model directory
 mkdir -p ~/.cache/arkavo/models
 
-# Download from Hugging Face (requires huggingface-cli or wget)
+# Download from Hugging Face (requires the hf CLI or wget)
 # Using bartowski's GGUF quantizations
 wget https://huggingface.co/bartowski/google_gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-qat-Q4_0.gguf \
   -O ~/.cache/arkavo/models/gemma-3-270m-it-Q4_0.gguf
