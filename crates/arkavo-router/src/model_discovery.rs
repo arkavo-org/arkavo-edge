@@ -1,7 +1,5 @@
-/// Model discovery utilities using hf-hub API
-///
-/// Future: This will be used by `arkavo models list` command for remote
-/// model subsets.
+//! Locates model weights in the HuggingFace cache and downloads missing ones.
+
 use std::path::{Path, PathBuf};
 
 /// Extension identifying a KAS-protected model (`gguf-tdf/1`).
@@ -49,116 +47,111 @@ pub fn resolve_gguf_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-/// Find a GGUF model file, preferring specific models but accepting any available
+/// Filename prefixes of GGUF files published beside a model's weights that
+/// are not themselves a model: vision projectors and drafter heads. They carry
+/// the `.gguf` extension, so a scan that goes by extension alone hands one to
+/// the loader as if it were the model.
+const COMPANION_PREFIXES: [&str; 3] = ["mmproj", "mtp-", "dflash-"];
+
+fn is_companion_gguf(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_lowercase)
+        .is_some_and(|n| COMPANION_PREFIXES.iter().any(|p| n.starts_with(p)))
+}
+
+/// The command that fetches exactly this file, as shown to the user.
+pub fn download_command(repo_id: &str, filename: &str) -> String {
+    format!("hf download {repo_id} {filename}")
+}
+
+/// Resolve the weights for one specific model, downloading them if needed.
 ///
-/// Priority:
-/// 1. Try to download/use preferred model if available
-/// 2. Scan HF cache for the preferred repo
-/// 3. Scan HF cache for any .gguf file from any repo
+/// A caller that names a repo and file gets that model or an error, never
+/// another model that happens to be cached: a substitute runs under the
+/// requested model's name, memory budget and sampling settings, none of which
+/// fit it. Callers that really want "whatever is on disk" use
+/// [`find_any_gguf`] instead.
 ///
-/// # Arguments
-/// * `repo_id` - Preferred HuggingFace repository ID (e.g., "unsloth/gemma-3-270m-it-GGUF")
-/// * `filename` - Preferred GGUF filename (e.g., "gemma-3-270m-it-Q4_0.gguf")
+/// Order: the exact file in the cache, then a download, then another build of
+/// the same repo that is already cached (a different quantization of the
+/// model that was asked for).
 ///
-/// # Returns
-/// * `Ok(PathBuf)` - Path to the model file
-/// * `Err(String)` - Error with user-friendly message including download instructions
+/// # Errors
+/// Names the reason the download failed and the command that fetches the file.
 pub async fn find_gguf_model(repo_id: &str, filename: &str) -> Result<PathBuf, String> {
-    tracing::debug!(
-        "find_gguf_model: looking for repo={} filename={}",
-        repo_id,
-        filename
-    );
+    let cache = get_hf_cache_dir();
+    resolve_gguf_model(cache.as_deref(), repo_id, filename, || {
+        download_from_hub(repo_id, filename)
+    })
+    .await
+}
 
-    // 1. Check local cache first (no network, instant)
-    if let Some(cache) = get_hf_cache_dir() {
-        let repo_cache_name = format!("models--{}", repo_id.replace('/', "--"));
-        let snapshots_dir = cache.join(&repo_cache_name).join("snapshots");
-        if let Some(path) = find_file_in_dir(&snapshots_dir, filename) {
-            tracing::debug!("find_gguf_model: found in local cache at {:?}", path);
-            return Ok(resolve_gguf_path(&path));
-        }
-    }
+/// [`find_gguf_model`] with the cache location and the download step supplied
+/// by the caller, so resolution can be tested without the network or `HF_HOME`.
+async fn resolve_gguf_model<F, Fut>(
+    cache: Option<&Path>,
+    repo_id: &str,
+    filename: &str,
+    download: F,
+) -> Result<PathBuf, String>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<PathBuf, String>>,
+{
+    let snapshots = cache.map(|c| repo_snapshots_dir(c, repo_id));
 
-    // 2. Not cached — try downloading via hf_hub API
-    use hf_hub::api::tokio::Api;
-    let api = Api::new().map_err(|e| format!("Failed to initialize HuggingFace API: {e}"))?;
-
-    let repo = api.repo(hf_hub::Repo::model(repo_id.to_string()));
-    match repo.get(filename).await {
-        Ok(path) => {
-            tracing::debug!(
-                "find_gguf_model: downloaded/found via hf_hub API at {:?}",
-                path
-            );
-            return Ok(resolve_gguf_path(&path));
-        }
-        Err(e) => {
-            tracing::debug!("find_gguf_model: hf_hub API failed: {}", e);
-        }
-    }
-
-    // 3. Scan cache for any GGUF in the preferred repo
-    if let Some(path) = scan_cache_for_gguf(&api, repo_id).await {
-        tracing::debug!("find_gguf_model: found via cache scan at {:?}", path);
+    // The cache is checked first so an already-downloaded model loads with no
+    // network round trip.
+    if let Some(path) = snapshots
+        .as_deref()
+        .and_then(|dir| find_file_in_dir(dir, filename))
+    {
+        tracing::debug!(repo_id, filename, path = %path.display(), "model found in cache");
         return Ok(resolve_gguf_path(&path));
     }
 
-    // 4. Fallback: use ANY available .gguf file from cache
-    if let Some(path) = find_any_gguf().await {
-        tracing::info!(
-            "Using fallback model: {}",
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
+    let reason = match download().await {
+        Ok(path) => {
+            tracing::debug!(repo_id, filename, path = %path.display(), "model downloaded");
+            return Ok(resolve_gguf_path(&path));
+        }
+        Err(reason) => reason,
+    };
+    tracing::warn!(repo_id, filename, %reason, "model download failed");
+
+    if let Some(path) = snapshots.as_deref().and_then(find_gguf_in_dir) {
+        tracing::warn!(
+            repo_id,
+            requested = filename,
+            using = %path.display(),
+            "requested file is not cached; using another build from the same repository"
         );
         return Ok(resolve_gguf_path(&path));
     }
 
-    // 5. Nothing found - provide helpful error
     Err(format!(
-        "No GGUF models found in HuggingFace cache. Download with: hf download {repo_id} {filename}"
+        "Model {repo_id}/{filename} is not cached and could not be downloaded: {reason}. \
+         Download with: {}",
+        download_command(repo_id, filename)
     ))
 }
 
-/// Scan HuggingFace cache for any .gguf file in a repository
-///
-/// This is a fallback when the preferred model file isn't found.
-/// Looks for any .gguf file in the cache snapshots directory.
-async fn scan_cache_for_gguf(_api: &hf_hub::api::tokio::Api, repo_id: &str) -> Option<PathBuf> {
-    // Get standard HuggingFace cache location
-    let cache = get_hf_cache_dir()?;
-    tracing::debug!("scan_cache_for_gguf: cache_dir={:?}", cache);
+async fn download_from_hub(repo_id: &str, filename: &str) -> Result<PathBuf, String> {
+    let api = hf_hub::api::tokio::Api::new()
+        .map_err(|e| format!("failed to initialize the HuggingFace API: {e}"))?;
+    api.repo(hf_hub::Repo::model(repo_id.to_string()))
+        .get(filename)
+        .await
+        .map_err(|e| e.to_string())
+}
 
-    // Convert repo_id to cache directory format: "org/model" -> "models--org--model"
-    let repo_cache_name = format!("models--{}", repo_id.replace('/', "--"));
-    let repo_cache_path = cache.join(&repo_cache_name);
-    tracing::debug!(
-        "scan_cache_for_gguf: repo_cache_path={:?} exists={}",
-        repo_cache_path,
-        repo_cache_path.exists()
-    );
-
-    if !repo_cache_path.exists() {
-        return None;
-    }
-
-    // Scan snapshots directory for .gguf files
-    let snapshots_dir = repo_cache_path.join("snapshots");
-    tracing::debug!(
-        "scan_cache_for_gguf: snapshots_dir={:?} exists={}",
-        snapshots_dir,
-        snapshots_dir.exists()
-    );
-
-    if !snapshots_dir.exists() {
-        return None;
-    }
-
-    // Recursively search for .gguf files
-    let result = find_gguf_in_dir(&snapshots_dir);
-    tracing::debug!("scan_cache_for_gguf: found={:?}", result);
-    result
+/// Snapshot directory of a repo in the cache: "org/model" is stored under
+/// "models--org--model".
+fn repo_snapshots_dir(cache: &Path, repo_id: &str) -> PathBuf {
+    cache
+        .join(format!("models--{}", repo_id.replace('/', "--")))
+        .join("snapshots")
 }
 
 /// Get the HuggingFace cache directory
@@ -183,14 +176,17 @@ fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
 }
 
 /// Returns the first plaintext GGUF under `dir`; records the first protected
-/// artifact in `protected` when no plaintext has been found yet.
+/// artifact in `protected` when no plaintext has been found yet. Companion
+/// files are passed over: they are not a model in either form.
 fn find_artifact_in_dir(dir: &std::path::Path, protected: &mut Option<PathBuf>) -> Option<PathBuf> {
-    tracing::debug!("find_artifact_in_dir: scanning {:?}", dir);
     if let Ok(entries) = std::fs::read_dir(dir) {
         let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
         paths.sort();
         for path in paths {
             if path.is_file() {
+                if is_companion_gguf(&path) {
+                    continue;
+                }
                 if is_plaintext_gguf(&path) {
                     return Some(path);
                 }
@@ -212,26 +208,9 @@ fn find_artifact_in_dir(dir: &std::path::Path, protected: &mut Option<PathBuf>) 
 /// Returns true if the model file is already cached, false otherwise.
 /// Used by `is_model_available` to check if a model is cached locally.
 pub fn is_model_cached(repo_id: &str, filename: &str) -> bool {
-    let Some(cache) = get_hf_cache_dir() else {
-        return false;
-    };
-
-    // Convert repo_id to cache directory format: "org/model" -> "models--org--model"
-    let repo_cache_name = format!("models--{}", repo_id.replace('/', "--"));
-    let repo_cache_path = cache.join(&repo_cache_name);
-
-    if !repo_cache_path.exists() {
-        return false;
-    }
-
-    // Check snapshots directory for the specific file
-    let snapshots_dir = repo_cache_path.join("snapshots");
-    if !snapshots_dir.exists() {
-        return false;
-    }
-
-    // Search for the exact filename
-    find_file_in_dir(&snapshots_dir, filename).is_some()
+    get_hf_cache_dir().is_some_and(|cache| {
+        find_file_in_dir(&repo_snapshots_dir(&cache, repo_id), filename).is_some()
+    })
 }
 
 /// Find a specific file in a directory tree
@@ -399,33 +378,6 @@ mod tests {
         std::fs::write(&model, b"model").unwrap();
 
         assert!(find_mmproj_for_model(&model).is_none());
-    }
-
-    #[spec("ROUTER-006")]
-    #[tokio::test]
-    async fn test_find_gguf_model() {
-        // This test will only pass if the model is already cached
-        // or if network is available
-        use crate::decision::ModelChoice;
-        let repo = ModelChoice::LocalQwen3.repo_id().unwrap();
-        let file = ModelChoice::LocalQwen3.gguf_filename().unwrap();
-        let result = find_gguf_model(repo, file).await;
-
-        match result {
-            Ok(path) => {
-                assert!(path.exists());
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                assert!(
-                    name.to_lowercase().ends_with(".gguf")
-                        || name.to_lowercase().ends_with(PROTECTED_EXTENSION),
-                    "unexpected model artifact {name}"
-                );
-            }
-            Err(e) => {
-                // Expected if model not cached and no network
-                assert!(e.contains("Download with:"));
-            }
-        }
     }
 }
 
@@ -600,5 +552,187 @@ mod protected_model_tests {
 
         let found = find_gguf_in_dir(root.path()).expect("protected must be found");
         assert_eq!(found, deep.join("model.gguf.tdf"));
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod resolution_tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    const GEMMA_REPO: &str = "ggml-org/gemma-4-12B-it-GGUF";
+    const GEMMA_FILE: &str = "gemma-4-12B-it-Q4_0.gguf";
+
+    /// Creates `files` in a snapshot of `repo_id` under `cache` and returns
+    /// the snapshot directory.
+    fn cache_repo(cache: &Path, repo_id: &str, files: &[&str]) -> PathBuf {
+        let snapshot = repo_snapshots_dir(cache, repo_id).join("abc123");
+        std::fs::create_dir_all(&snapshot).unwrap();
+        for file in files {
+            std::fs::write(snapshot.join(file), b"GGUF").unwrap();
+        }
+        snapshot
+    }
+
+    async fn not_found() -> Result<PathBuf, String> {
+        Err("status code 404".to_string())
+    }
+
+    async fn must_not_download() -> Result<PathBuf, String> {
+        panic!("a cached model must not reach the download step")
+    }
+
+    /// 0.98.0 answered a request for Gemma 4 12B with a cached Qwen 27B, and
+    /// ran it under the Gemma name until the GPU ran out of memory.
+    #[spec("ROUTER-006")]
+    #[tokio::test]
+    async fn a_failed_download_never_substitutes_a_model_from_another_repo() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_repo(
+            cache.path(),
+            "unsloth/Qwen3.5-27B-GGUF",
+            &["Qwen3.5-27B-UD-Q6_K_XL.gguf"],
+        );
+
+        let err = resolve_gguf_model(Some(cache.path()), GEMMA_REPO, GEMMA_FILE, not_found)
+            .await
+            .expect_err("another repo's model must not stand in for the requested one");
+
+        assert!(err.contains("status code 404"), "reason missing: {err}");
+        assert!(
+            err.contains(
+                "Download with: hf download ggml-org/gemma-4-12B-it-GGUF gemma-4-12B-it-Q4_0.gguf"
+            ),
+            "download command missing: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_cached_file_is_returned_without_a_download() {
+        let cache = tempfile::tempdir().unwrap();
+        let snapshot = cache_repo(
+            cache.path(),
+            GEMMA_REPO,
+            &["gemma-4-12B-it-BF16.gguf", GEMMA_FILE],
+        );
+
+        let found = resolve_gguf_model(
+            Some(cache.path()),
+            GEMMA_REPO,
+            GEMMA_FILE,
+            must_not_download,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(found, snapshot.join(GEMMA_FILE));
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_is_downloaded() {
+        let cache = tempfile::tempdir().unwrap();
+        let downloaded = cache.path().join(GEMMA_FILE);
+        std::fs::write(&downloaded, b"GGUF").unwrap();
+
+        let found = resolve_gguf_model(Some(cache.path()), GEMMA_REPO, GEMMA_FILE, || async {
+            Ok(downloaded.clone())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(found, downloaded);
+    }
+
+    /// Another quantization of the requested model is still that model, so an
+    /// offline device keeps working with the build it already has.
+    #[tokio::test]
+    async fn another_build_from_the_same_repo_is_used_when_the_download_fails() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_repo(cache.path(), "unsloth/Qwen3.5-27B-GGUF", &["a.gguf"]);
+        let snapshot = cache_repo(
+            cache.path(),
+            GEMMA_REPO,
+            &[
+                "dflash-gemma-4-12B-it-Q8_0.gguf",
+                "gemma-4-12B-it-Q8_0.gguf",
+                "mmproj-gemma-4-12B-it-Q8_0.gguf",
+                "mtp-gemma-4-12B-it-Q8_0.gguf",
+            ],
+        );
+
+        let found = resolve_gguf_model(Some(cache.path()), GEMMA_REPO, GEMMA_FILE, not_found)
+            .await
+            .unwrap();
+
+        assert_eq!(found, snapshot.join("gemma-4-12B-it-Q8_0.gguf"));
+    }
+
+    /// A repo cached with only its projector and drafter files holds no model.
+    #[spec("ROUTER-006")]
+    #[tokio::test]
+    async fn companion_files_are_never_returned_as_the_model() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_repo(
+            cache.path(),
+            GEMMA_REPO,
+            &[
+                "dflash-gemma-4-12B-it-Q8_0.gguf",
+                "mmproj-gemma-4-12B-it-Q8_0.gguf",
+                "MMPROJ-gemma-4-12B-it-BF16.gguf",
+                "mtp-gemma-4-12B-it-Q4_0.gguf",
+                "mtp-gemma-4-12B-it-Q4_0.gguf.tdf",
+            ],
+        );
+
+        let err = resolve_gguf_model(Some(cache.path()), GEMMA_REPO, GEMMA_FILE, not_found)
+            .await
+            .expect_err("a companion file is not a model");
+
+        assert!(err.contains("Download with: hf download"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_device_without_a_cache_directory_reports_the_download_command() {
+        let err = resolve_gguf_model(None, GEMMA_REPO, GEMMA_FILE, not_found)
+            .await
+            .unwrap_err();
+
+        assert!(err.contains(&download_command(GEMMA_REPO, GEMMA_FILE)));
+    }
+
+    /// The classifier and judge take any model on disk, but a companion file
+    /// is not one: `dflash-` sorts ahead of the weights it ships beside.
+    #[test]
+    fn the_any_model_scan_skips_companion_files() {
+        let cache = tempfile::tempdir().unwrap();
+        let snapshot = cache_repo(
+            cache.path(),
+            "ggml-org/gemma-4-26B-A4B-it-GGUF",
+            &[
+                "dflash-gemma-4-26B-A4B-it-Q8_0.gguf",
+                "gemma-4-26B-A4B-it-Q4_0.gguf",
+            ],
+        );
+
+        assert_eq!(
+            find_any_plain_gguf_in(cache.path()),
+            Some(snapshot.join("gemma-4-26B-A4B-it-Q4_0.gguf"))
+        );
+    }
+
+    #[test]
+    fn the_any_model_scan_finds_nothing_in_a_cache_of_companion_files() {
+        let cache = tempfile::tempdir().unwrap();
+        cache_repo(
+            cache.path(),
+            GEMMA_REPO,
+            &[
+                "mmproj-gemma-4-12B-it-Q8_0.gguf",
+                "mtp-gemma-4-12B-it-Q4_0.gguf",
+            ],
+        );
+
+        assert_eq!(find_any_plain_gguf_in(cache.path()), None);
     }
 }

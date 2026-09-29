@@ -51,9 +51,7 @@ async fn test_deliberation_with_ministral_3b() {
         Some(path) => path,
         None => {
             eprintln!("Ministral 3B model not found in HuggingFace cache");
-            eprintln!(
-                "Download with: huggingface-cli download mistralai/Ministral-3-3B-Instruct-2512-GGUF"
-            );
+            eprintln!("Download with: hf download mistralai/Ministral-3-3B-Instruct-2512-GGUF");
             return;
         }
     };
@@ -185,7 +183,7 @@ async fn test_qwen3_math() {
         Some(path) => path,
         None => {
             eprintln!("Qwen3-0.6B model not found in HuggingFace cache");
-            eprintln!("Download with: huggingface-cli download unsloth/Qwen3.5-0.8B-GGUF");
+            eprintln!("Download with: hf download unsloth/Qwen3.5-0.8B-GGUF");
             return;
         }
     };
