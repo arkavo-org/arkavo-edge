@@ -27,10 +27,7 @@ pub use arkavo_mcp_tools::{Result, Tool, ToolError, ToolRegistry, ToolSchema};
 
 use arkavo_protocol::agent_registry::AgentRegistry;
 use arkavo_protocol::transport::TlsConfig;
-use arkavo_protocol::types::{
-    Message, MessagePart, MessageSendRequest, MessageSendResponse, TaskGetRequest, TaskGetResponse,
-    TaskStatus,
-};
+use arkavo_protocol::types::{Message, MessagePart, TaskStatus};
 use arkavo_protocol::{
     A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, HttpTransport, TransportConfig,
 };
@@ -46,6 +43,12 @@ use tokio::sync::RwLock;
 // flag, and whether mDNS works over it there has not been established.
 #[cfg(all(test, feature = "mdns", target_os = "macos"))]
 mod loopback_discovery_tests;
+
+mod peer;
+mod request;
+
+use peer::{Patience, Peer, PeerError, text_of};
+pub use request::{RequestError, TaskAnswer, send_and_wait};
 
 // Re-export error type for mesh-specific errors
 pub use arkavo_mcp_tools::ToolError as MeshToolError;
@@ -542,34 +545,6 @@ impl Tool for SendTaskTool {
         // Get agent address — auto-discover if needed, fuzzy match on typos
         let address = self.resolve_agent_address(agent_id).await?;
 
-        // Create transport
-        let transport_config = TransportConfig {
-            timeout_ms: 60000,
-            max_retries: 2,
-            tls_config: TlsConfig {
-                require_tls: false,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let transport =
-            Arc::new(HttpTransport::new(transport_config).map_err(|e| {
-                MeshToolError::Execution(format!("Failed to create transport: {e}"))
-            })?);
-
-        let endpoint = A2aEndpoint {
-            url: address.clone(),
-            agent_id: agent_id.to_string(),
-            public_key: None,
-        };
-
-        // Connect
-        transport
-            .connect(&endpoint)
-            .await
-            .map_err(|e| MeshToolError::Execution(format!("Failed to connect to agent: {e}")))?;
-
         // Build message with budget allocation for specialist compute control
         let default_budget = arkavo_budget::BudgetAllocation::default();
         let mut final_metadata = metadata.unwrap_or_else(|| {
@@ -590,28 +565,18 @@ impl Tool for SendTaskTool {
             metadata: Some(final_metadata),
         };
 
-        let send_request = MessageSendRequest {
-            message,
-            task_id: None,
+        let patience = Patience {
+            timeout_ms: 60000,
+            max_retries: 2,
         };
-
-        // Send task
-        let rpc_request = A2aRequest::new("message/send", json!([send_request]));
-
-        let response = transport
-            .send_request(rpc_request)
+        let peer = Peer::connect(&address, agent_id, patience)
             .await
-            .map_err(|e| MeshToolError::Execution(format!("Failed to send task: {e}")))?;
+            .map_err(|e| MeshToolError::Execution(e.to_string()))?;
+        let sent = peer.send_message(message).await;
+        peer.close().await;
 
-        let _ = transport.close().await;
-
-        match response {
-            A2aResponse::Success { result, .. } => {
-                let send_response: MessageSendResponse =
-                    serde_json::from_value(result).map_err(|e| {
-                        MeshToolError::Execution(format!("Failed to parse response: {e}"))
-                    })?;
-
+        match sent {
+            Ok(send_response) => {
                 // Track delegation so orchestrator can pre-fetch the response
                 if !send_response.task_id.is_empty() {
                     self.state
@@ -634,10 +599,14 @@ impl Tool for SendTaskTool {
                     "agent_address": address
                 }))
             }
-            A2aResponse::Error { error, .. } => Ok(json!({
+            Err(PeerError::Request(e)) => Err(MeshToolError::Execution(format!(
+                "Failed to send task: {e}"
+            ))),
+            Err(answer) if answer.is_answer() => Ok(json!({
                 "success": false,
-                "error": format!("{}: {}", error.code, error.message)
+                "error": answer.to_string()
             })),
+            Err(e) => Err(MeshToolError::Execution(e.to_string())),
         }
     }
 }
@@ -701,54 +670,18 @@ impl Tool for GetTaskStatusTool {
             .clone();
         drop(addresses);
 
-        // Create transport
-        let transport_config = TransportConfig {
+        let patience = Patience {
             timeout_ms: 30000,
             max_retries: 1,
-            tls_config: TlsConfig {
-                require_tls: false,
-                ..Default::default()
-            },
-            ..Default::default()
         };
-
-        let transport =
-            Arc::new(HttpTransport::new(transport_config).map_err(|e| {
-                MeshToolError::Execution(format!("Failed to create transport: {e}"))
-            })?);
-
-        let endpoint = A2aEndpoint {
-            url: address.clone(),
-            agent_id: agent_id.to_string(),
-            public_key: None,
-        };
-
-        transport
-            .connect(&endpoint)
+        let peer = Peer::connect(&address, agent_id, patience)
             .await
-            .map_err(|e| MeshToolError::Execution(format!("Failed to connect to agent: {e}")))?;
+            .map_err(|e| MeshToolError::Execution(e.to_string()))?;
+        let fetched = peer.get_task(task_id).await;
+        peer.close().await;
 
-        // Get task status
-        let get_request = TaskGetRequest {
-            task_id: task_id.to_string(),
-        };
-
-        let rpc_request = A2aRequest::new("tasks/get", json!([get_request]));
-
-        let response = transport
-            .send_request(rpc_request)
-            .await
-            .map_err(|e| MeshToolError::Execution(format!("Failed to get task status: {e}")))?;
-
-        let _ = transport.close().await;
-
-        match response {
-            A2aResponse::Success { result, .. } => {
-                let task_response: TaskGetResponse =
-                    serde_json::from_value(result).map_err(|e| {
-                        MeshToolError::Execution(format!("Failed to parse response: {e}"))
-                    })?;
-
+        match fetched {
+            Ok(task_response) => {
                 let mut result_json = json!({
                     "success": true,
                     "task_id": task_response.task_id,
@@ -771,26 +704,19 @@ impl Tool for GetTaskStatusTool {
                 }
 
                 if let Some(result_msg) = task_response.result {
-                    let content: Vec<String> = result_msg
-                        .parts
-                        .iter()
-                        .filter_map(|p| {
-                            if let MessagePart::Text { content } = p {
-                                Some(content.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    result_json["result"] = json!(content.join("\n"));
+                    result_json["result"] = json!(text_of(&result_msg));
                 }
 
                 Ok(result_json)
             }
-            A2aResponse::Error { error, .. } => Ok(json!({
+            Err(PeerError::Request(e)) => Err(MeshToolError::Execution(format!(
+                "Failed to get task status: {e}"
+            ))),
+            Err(answer) if answer.is_answer() => Ok(json!({
                 "success": false,
-                "error": format!("{}: {}", error.code, error.message)
+                "error": answer.to_string()
             })),
+            Err(e) => Err(MeshToolError::Execution(e.to_string())),
         }
     }
 }
@@ -802,75 +728,31 @@ impl Tool for GetTaskStatusTool {
 async fn fetch_task_result(
     delegation: &PendingDelegation,
 ) -> std::result::Result<Option<String>, String> {
-    let transport_config = TransportConfig {
-        timeout_ms: 5000, // Short timeout — just a status check
+    // Short timeout: this is a status check made once per cycle.
+    let patience = Patience {
+        timeout_ms: 5000,
         max_retries: 0,
-        tls_config: TlsConfig {
-            require_tls: false,
-            ..Default::default()
-        },
-        ..Default::default()
     };
-
-    let transport = Arc::new(
-        HttpTransport::new(transport_config)
-            .map_err(|e| format!("Transport creation failed: {e}"))?,
-    );
-
-    let endpoint = A2aEndpoint {
-        url: delegation.address.clone(),
-        agent_id: delegation.agent_id.clone(),
-        public_key: None,
-    };
-
-    transport
-        .connect(&endpoint)
+    let peer = Peer::connect(&delegation.address, &delegation.agent_id, patience)
         .await
-        .map_err(|e| format!("Connection failed: {e}"))?;
+        .map_err(|e| e.to_string())?;
+    let fetched = peer.get_task(&delegation.task_id).await;
+    peer.close().await;
+    let task_response = fetched.map_err(|e| e.to_string())?;
 
-    let get_request = TaskGetRequest {
-        task_id: delegation.task_id.clone(),
-    };
-    let rpc_request = A2aRequest::new("tasks/get", json!([get_request]));
-
-    let response = transport
-        .send_request(rpc_request)
-        .await
-        .map_err(|e| format!("Request failed: {e}"))?;
-
-    let _ = transport.close().await;
-
-    match response {
-        A2aResponse::Success { result, .. } => {
-            let task_response: TaskGetResponse =
-                serde_json::from_value(result).map_err(|e| format!("Parse failed: {e}"))?;
-
-            if matches!(
-                task_response.status,
-                TaskStatus::Completed | TaskStatus::Failed
-            ) {
-                let text = task_response
-                    .result
-                    .map(|msg| {
-                        msg.parts
-                            .iter()
-                            .filter_map(|p| {
-                                if let MessagePart::Text { content } = p {
-                                    Some(content.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .unwrap_or_default();
-                Ok(Some(text))
-            } else {
-                Ok(None) // Still in progress
-            }
-        }
-        A2aResponse::Error { error, .. } => Err(format!("{}: {}", error.code, error.message)),
+    if matches!(
+        task_response.status,
+        TaskStatus::Completed | TaskStatus::Failed
+    ) {
+        Ok(Some(
+            task_response
+                .result
+                .as_ref()
+                .map(text_of)
+                .unwrap_or_default(),
+        ))
+    } else {
+        Ok(None) // Still in progress
     }
 }
 
