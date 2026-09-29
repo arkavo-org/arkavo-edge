@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::time::{Duration, interval};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 /// Configuration for task executor.
@@ -198,17 +198,13 @@ impl TaskExecutor {
     }
 
     /// Update task progress.
+    ///
+    /// Progress reported for a task that has already finished is dropped: the
+    /// work it describes is over, and the task keeps its outcome.
     pub async fn update_task_progress(&self, task_id: &Uuid, progress: TaskProgress) -> Result<()> {
-        let mut task = self
-            .store
-            .get_task(task_id)
-            .await?
-            .ok_or_else(|| TaskError::NotFound(task_id.to_string()))?;
-
-        task.progress = Some(progress);
-        task.updated_at = chrono::Utc::now();
-
-        self.store.update_task(task).await?;
+        if !self.store.update_task_progress(task_id, progress).await? {
+            debug!("Dropped progress for task {task_id}: it has already finished");
+        }
         Ok(())
     }
 
@@ -308,4 +304,231 @@ async fn process_pending_tasks(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+// `#[tokio::test]` expands to `Runtime::block_on`, which the workspace lint
+// set disallows in library code.
+#[allow(clippy::disallowed_methods)]
+mod tests {
+    use super::*;
+    use crate::task_store::SqliteTaskStore;
+    use crate::types::MessagePart;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::Notify;
+
+    /// A store that can hold one caller at the point where it has read a task
+    /// and not yet acted on what it read.
+    struct PausingStore {
+        inner: SqliteTaskStore,
+        pause_next_read: AtomicBool,
+        read: Notify,
+        resume: Notify,
+    }
+
+    impl PausingStore {
+        async fn new() -> Arc<Self> {
+            Arc::new(Self {
+                inner: SqliteTaskStore::new_in_memory()
+                    .await
+                    .expect("in-memory task store"),
+                pause_next_read: AtomicBool::new(false),
+                read: Notify::new(),
+                resume: Notify::new(),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl TaskStore for PausingStore {
+        async fn create_task(&self, task: Task) -> Result<()> {
+            self.inner.create_task(task).await
+        }
+
+        async fn get_task(&self, task_id: &Uuid) -> Result<Option<Task>> {
+            let task = self.inner.get_task(task_id).await;
+            if self.pause_next_read.swap(false, Ordering::SeqCst) {
+                self.read.notify_one();
+                self.resume.notified().await;
+            }
+            task
+        }
+
+        async fn update_task_status(&self, task_id: &Uuid, status: TaskStatus) -> Result<()> {
+            self.inner.update_task_status(task_id, status).await
+        }
+
+        async fn list_tasks(&self, limit: Option<usize>) -> Result<Vec<Task>> {
+            self.inner.list_tasks(limit).await
+        }
+
+        async fn delete_task(&self, task_id: &Uuid) -> Result<()> {
+            self.inner.delete_task(task_id).await
+        }
+
+        async fn get_tasks_by_status(&self, status: TaskStatus) -> Result<Vec<Task>> {
+            self.inner.get_tasks_by_status(status).await
+        }
+
+        async fn store_task_result(&self, task_id: &Uuid, result: serde_json::Value) -> Result<()> {
+            self.inner.store_task_result(task_id, result).await
+        }
+
+        async fn get_task_result(&self, task_id: &Uuid) -> Result<Option<serde_json::Value>> {
+            self.inner.get_task_result(task_id).await
+        }
+
+        async fn update_task(&self, task: Task) -> Result<()> {
+            self.inner.update_task(task).await
+        }
+
+        async fn update_task_progress(
+            &self,
+            task_id: &Uuid,
+            progress: TaskProgress,
+        ) -> Result<bool> {
+            self.inner.update_task_progress(task_id, progress).await
+        }
+    }
+
+    fn executor_over(store: Arc<dyn TaskStore>) -> Arc<TaskExecutor> {
+        Arc::new(TaskExecutor::new(store, TaskExecutorConfig::default()))
+    }
+
+    fn question() -> Message {
+        Message {
+            parts: vec![MessagePart::Text {
+                content: "Which channel should we cut?".to_string(),
+            }],
+            metadata: None,
+        }
+    }
+
+    fn finalizing() -> TaskProgress {
+        TaskProgress {
+            percentage: Some(95),
+            message: Some("Finalizing".to_string()),
+            eta_seconds: None,
+        }
+    }
+
+    /// Regression: a progress update read the task, the task was completed,
+    /// and the update then wrote back the row it had read. The task went back
+    /// to `Working` with no result, and its requester polled until timeout.
+    #[tokio::test]
+    async fn progress_in_flight_does_not_undo_a_completion() {
+        let store = PausingStore::new().await;
+        let executor = executor_over(store.clone());
+        let task_id = executor.submit_task(question()).await.expect("submitted");
+        executor
+            .update_task_status(&task_id, TaskStatus::Working)
+            .await
+            .expect("started");
+
+        store.pause_next_read.store(true, Ordering::SeqCst);
+        let mut in_flight = tokio::spawn({
+            let executor = executor.clone();
+            async move { executor.update_task_progress(&task_id, finalizing()).await }
+        });
+        // Wait for the update to be holding what it read, or to have finished
+        // without reading at all.
+        let finished_early = tokio::select! {
+            () = store.read.notified() => false,
+            outcome = &mut in_flight => {
+                outcome.expect("progress update ran").expect("progress accepted");
+                true
+            }
+        };
+        store.pause_next_read.store(false, Ordering::SeqCst);
+
+        let result = serde_json::json!({"answer": "paid social"});
+        executor
+            .complete_task(&task_id, result.clone())
+            .await
+            .expect("completed");
+        store.resume.notify_one();
+        if !finished_early {
+            in_flight
+                .await
+                .expect("progress update ran")
+                .expect("progress accepted");
+        }
+
+        let task = store
+            .get_task(&task_id)
+            .await
+            .expect("readable")
+            .expect("exists");
+        assert_eq!(task.status, TaskStatus::Completed);
+        assert_eq!(task.result, Some(result));
+    }
+
+    #[tokio::test]
+    async fn progress_never_reopens_a_finished_task() {
+        for finished in [
+            TaskStatus::Completed,
+            TaskStatus::Failed,
+            TaskStatus::Canceled,
+            TaskStatus::Rejected,
+        ] {
+            let store = PausingStore::new().await;
+            let executor = executor_over(store.clone());
+            let task_id = executor.submit_task(question()).await.expect("submitted");
+            executor
+                .update_task_status(&task_id, finished)
+                .await
+                .expect("finished");
+
+            executor
+                .update_task_progress(&task_id, finalizing())
+                .await
+                .expect("late progress is not an error");
+
+            let task = store
+                .get_task(&task_id)
+                .await
+                .expect("readable")
+                .expect("exists");
+            assert_eq!(task.status, finished);
+            assert!(task.progress.is_none(), "{finished:?} took late progress");
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_on_an_open_task_is_recorded() {
+        let store = PausingStore::new().await;
+        let executor = executor_over(store.clone());
+        let task_id = executor.submit_task(question()).await.expect("submitted");
+        executor
+            .update_task_status(&task_id, TaskStatus::Working)
+            .await
+            .expect("started");
+
+        executor
+            .update_task_progress(&task_id, finalizing())
+            .await
+            .expect("progress accepted");
+
+        let task = store
+            .get_task(&task_id)
+            .await
+            .expect("readable")
+            .expect("exists");
+        assert_eq!(task.status, TaskStatus::Working);
+        let progress = task.progress.expect("progress recorded");
+        assert_eq!(progress.percentage, Some(95));
+        assert_eq!(progress.message.as_deref(), Some("Finalizing"));
+    }
+
+    #[tokio::test]
+    async fn progress_for_an_unknown_task_is_an_error() {
+        let executor = executor_over(PausingStore::new().await);
+
+        let outcome = executor
+            .update_task_progress(&Uuid::new_v4(), finalizing())
+            .await;
+
+        assert!(matches!(outcome, Err(TaskError::NotFound(_))));
+    }
 }

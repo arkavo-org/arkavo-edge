@@ -1,7 +1,7 @@
 //! Persistent storage for tasks using SQLite via sqlx.
 
 use crate::error::{Result, TaskError};
-use crate::types::{Task, TaskStatus};
+use crate::types::{Task, TaskProgress, TaskStatus};
 use async_trait::async_trait;
 use chrono::Utc;
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
@@ -37,6 +37,30 @@ pub trait TaskStore: Send + Sync {
 
     /// Update a task (full replacement).
     async fn update_task(&self, task: Task) -> Result<()>;
+
+    /// Record progress on a task that is still open.
+    ///
+    /// Progress is reported from beside the work it describes, so it can
+    /// arrive after the work has finished. Only the progress and the update
+    /// time are written, in one statement, so a status or result written in
+    /// the meantime is kept. Returns `false`, leaving the task untouched, when
+    /// the task has already reached a terminal state.
+    async fn update_task_progress(&self, task_id: &Uuid, progress: TaskProgress) -> Result<bool>;
+}
+
+/// The `status` column value for `status`, which is also how it serializes
+/// inside the task document.
+const fn status_column(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Submitted => "submitted",
+        TaskStatus::Working => "working",
+        TaskStatus::InputRequired => "input_required",
+        TaskStatus::Completed => "completed",
+        TaskStatus::Canceled => "canceled",
+        TaskStatus::Failed => "failed",
+        TaskStatus::Rejected => "rejected",
+        TaskStatus::AuthRequired => "auth_required",
+    }
 }
 
 /// SQLite-based implementation of task storage.
@@ -126,16 +150,7 @@ impl TaskStore for SqliteTaskStore {
     async fn create_task(&self, task: Task) -> Result<()> {
         let task_json =
             serde_json::to_string(&task).map_err(|e| TaskError::Serialization(e.to_string()))?;
-        let status_str = match task.status {
-            TaskStatus::Submitted => "submitted",
-            TaskStatus::Working => "working",
-            TaskStatus::InputRequired => "input_required",
-            TaskStatus::Completed => "completed",
-            TaskStatus::Canceled => "canceled",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Rejected => "rejected",
-            TaskStatus::AuthRequired => "auth_required",
-        };
+        let status_str = status_column(task.status);
 
         sqlx::query(
             r#"
@@ -181,23 +196,16 @@ impl TaskStore for SqliteTaskStore {
     }
 
     async fn update_task_status(&self, task_id: &Uuid, status: TaskStatus) -> Result<()> {
-        let status_str = match status {
-            TaskStatus::Submitted => "submitted",
-            TaskStatus::Working => "working",
-            TaskStatus::InputRequired => "input_required",
-            TaskStatus::Completed => "completed",
-            TaskStatus::Canceled => "canceled",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Rejected => "rejected",
-            TaskStatus::AuthRequired => "auth_required",
-        };
-
+        let status_str = status_column(status);
         let now = Utc::now();
 
+        // The column and the document change in one statement. Reading the
+        // document to rewrite it would put back whatever a concurrent writer
+        // had replaced in between.
         let rows_affected = sqlx::query(
             r#"
-            UPDATE tasks 
-            SET status = ?1, updated_at = ?2
+            UPDATE tasks
+            SET status = ?1, updated_at = ?2, data = json_set(data, '$.status', ?1)
             WHERE id = ?3
             "#,
         )
@@ -212,25 +220,6 @@ impl TaskStore for SqliteTaskStore {
         if rows_affected == 0 {
             return Err(TaskError::NotFound(task_id.to_string()));
         }
-
-        let mut task = self
-            .get_task(task_id)
-            .await?
-            .ok_or_else(|| TaskError::NotFound(task_id.to_string()))?;
-        task.status = status;
-        let task_json =
-            serde_json::to_string(&task).map_err(|e| TaskError::Serialization(e.to_string()))?;
-
-        sqlx::query(
-            r#"
-            UPDATE tasks SET data = ?1 WHERE id = ?2
-            "#,
-        )
-        .bind(task_json)
-        .bind(task_id.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| TaskError::Store(e.to_string()))?;
 
         Ok(())
     }
@@ -281,16 +270,7 @@ impl TaskStore for SqliteTaskStore {
     }
 
     async fn get_tasks_by_status(&self, status: TaskStatus) -> Result<Vec<Task>> {
-        let status_str = match status {
-            TaskStatus::Submitted => "submitted",
-            TaskStatus::Working => "working",
-            TaskStatus::InputRequired => "input_required",
-            TaskStatus::Completed => "completed",
-            TaskStatus::Canceled => "canceled",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Rejected => "rejected",
-            TaskStatus::AuthRequired => "auth_required",
-        };
+        let status_str = status_column(status);
 
         let rows = sqlx::query_as::<_, (String,)>(
             r#"
@@ -361,6 +341,51 @@ impl TaskStore for SqliteTaskStore {
     async fn update_task(&self, task: Task) -> Result<()> {
         // update_task is essentially the same as create_task with upsert behavior
         self.create_task(task).await
+    }
+
+    async fn update_task_progress(&self, task_id: &Uuid, progress: TaskProgress) -> Result<bool> {
+        let progress_json = serde_json::to_string(&progress)
+            .map_err(|e| TaskError::Serialization(e.to_string()))?;
+        let now = Utc::now();
+        // Written the way the task document serializes it, so the document
+        // still reads back as a task.
+        let now_json =
+            serde_json::to_string(&now).map_err(|e| TaskError::Serialization(e.to_string()))?;
+
+        let rows_affected = sqlx::query(
+            r#"
+            UPDATE tasks
+            SET data = json_set(data, '$.progress', json(?1), '$.updated_at', json(?2)),
+                updated_at = ?3
+            WHERE id = ?4
+              AND status NOT IN ('completed', 'canceled', 'failed', 'rejected')
+            "#,
+        )
+        .bind(progress_json)
+        .bind(now_json)
+        .bind(now)
+        .bind(task_id.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| TaskError::Store(e.to_string()))?
+        .rows_affected();
+
+        if rows_affected > 0 {
+            return Ok(true);
+        }
+
+        // Nothing written: the task is finished, or it was never there.
+        let exists = sqlx::query_as::<_, (i64,)>("SELECT 1 FROM tasks WHERE id = ?1")
+            .bind(task_id.to_string())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| TaskError::Store(e.to_string()))?
+            .is_some();
+        if exists {
+            Ok(false)
+        } else {
+            Err(TaskError::NotFound(task_id.to_string()))
+        }
     }
 }
 
@@ -873,6 +898,132 @@ mod tests {
         assert_eq!(progress.percentage, Some(50));
         assert_eq!(progress.message, Some("Processing...".to_string()));
         assert_eq!(progress.eta_seconds, Some(30));
+
+        Ok(())
+    }
+
+    fn half_done() -> TaskProgress {
+        TaskProgress {
+            percentage: Some(50),
+            message: Some("Generating LLM response".to_string()),
+            eta_seconds: None,
+        }
+    }
+
+    /// Progress is written into the stored document in place, so everything
+    /// else in the document has to come back as it went in.
+    #[tokio::test]
+    async fn test_progress_update_keeps_the_rest_of_the_task() -> anyhow::Result<()> {
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let mut task =
+            create_test_task_with_agent("Progress Test", "agent-123", "http://localhost:8080");
+        task.status = TaskStatus::Working;
+        task.result = Some(serde_json::json!({"partial": ["a", "b"]}));
+        task.updated_at = Utc::now() - chrono::Duration::hours(1);
+        store.create_task(task.clone()).await?;
+
+        let written = store.update_task_progress(&task.id, half_done()).await?;
+
+        assert!(written);
+        let stored = store.get_task(&task.id).await?.unwrap();
+        let progress = stored.progress.clone().unwrap();
+        assert_eq!(progress.percentage, Some(50));
+        assert_eq!(
+            progress.message,
+            Some("Generating LLM response".to_string())
+        );
+        assert_eq!(progress.eta_seconds, None);
+        assert!(stored.updated_at > task.updated_at);
+        let mut expected = serde_json::to_value(&task)?;
+        expected["progress"] = serde_json::to_value(&progress)?;
+        expected["updated_at"] = serde_json::to_value(stored.updated_at)?;
+        assert_eq!(serde_json::to_value(&stored)?, expected);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_progress_update_is_refused_once_the_task_is_terminal() -> anyhow::Result<()> {
+        for terminal in [
+            TaskStatus::Completed,
+            TaskStatus::Canceled,
+            TaskStatus::Failed,
+            TaskStatus::Rejected,
+        ] {
+            let store = SqliteTaskStore::new_in_memory().await?;
+            let mut task = create_test_task("Terminal Test", terminal);
+            task.result = Some(serde_json::json!({"answer": 42}));
+            store.create_task(task.clone()).await?;
+
+            let written = store.update_task_progress(&task.id, half_done()).await?;
+
+            assert!(!written, "{terminal:?} accepted progress");
+            let stored = store.get_task(&task.id).await?.unwrap();
+            assert_eq!(serde_json::to_value(&stored)?, serde_json::to_value(&task)?);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_progress_update_is_accepted_while_the_task_is_open() -> anyhow::Result<()> {
+        for open in [
+            TaskStatus::Submitted,
+            TaskStatus::Working,
+            TaskStatus::InputRequired,
+            TaskStatus::AuthRequired,
+        ] {
+            let store = SqliteTaskStore::new_in_memory().await?;
+            let task = create_test_task("Open Test", open);
+            store.create_task(task.clone()).await?;
+
+            let written = store.update_task_progress(&task.id, half_done()).await?;
+
+            assert!(written, "{open:?} refused progress");
+            let stored = store.get_task(&task.id).await?.unwrap();
+            assert_eq!(stored.status, open);
+            assert!(stored.progress.is_some());
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_progress_update_for_a_missing_task_is_not_found() -> anyhow::Result<()> {
+        let store = SqliteTaskStore::new_in_memory().await?;
+
+        let outcome = store
+            .update_task_progress(&Uuid::new_v4(), half_done())
+            .await;
+
+        assert!(matches!(outcome, Err(TaskError::NotFound(_))));
+
+        Ok(())
+    }
+
+    /// The status lives in a column and in the document, and both are
+    /// rewritten by one statement so that nothing a concurrent writer stored
+    /// can be put back. The statement edits the document in place, so the
+    /// two copies have to move together and the rest has to be left alone.
+    #[tokio::test]
+    async fn test_status_update_changes_only_the_status() -> anyhow::Result<()> {
+        let store = SqliteTaskStore::new_in_memory().await?;
+        let mut task =
+            create_test_task_with_agent("Status Test", "agent-123", "http://localhost:8080");
+        task.result = Some(serde_json::json!({"answer": 42}));
+        store.create_task(task.clone()).await?;
+
+        store
+            .update_task_status(&task.id, TaskStatus::InputRequired)
+            .await?;
+
+        let stored = store.get_task(&task.id).await?.unwrap();
+        let mut expected = serde_json::to_value(&task)?;
+        expected["status"] = serde_json::json!("input_required");
+        assert_eq!(serde_json::to_value(&stored)?, expected);
+        let by_column = store.get_tasks_by_status(TaskStatus::InputRequired).await?;
+        assert_eq!(by_column.len(), 1);
+        assert_eq!(by_column[0].id, task.id);
 
         Ok(())
     }
