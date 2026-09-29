@@ -18,6 +18,7 @@ use super::super::agent_cycle_reply::{
     REQUEST_REPLY_BUDGET, apply_outcome, deliver_outcome_to_task,
 };
 use super::super::agent_event::CycleOutcome;
+use super::super::conductor_parallel::for_requester;
 use super::super::config_helpers::AgentMetadata;
 use super::super::execute_with_conductor_and_learning;
 use super::super::tool_memory::ToolMemory;
@@ -375,7 +376,10 @@ pub async fn handle_message_send(
                                 Some(&granted_set)
                             };
 
-                        match execute_with_conductor_and_learning(
+                        // The requester polls this task for the answer, so
+                        // the model's text is the result and is not traded for
+                        // a tool call.
+                        let answer = for_requester(execute_with_conductor_and_learning(
                             &conductor,
                             &router,
                             &mcp_registry,
@@ -399,9 +403,9 @@ pub async fn handle_message_send(
                             granted_opt,
                             #[cfg(feature = "iroh")]
                             iroh_node.as_ref(),
-                        )
-                        .await
-                        {
+                        ))
+                        .await;
+                        match answer {
                             Ok(result_content) => {
                                 let result_for_notice = result_content.clone();
                                 let result_message = Message {

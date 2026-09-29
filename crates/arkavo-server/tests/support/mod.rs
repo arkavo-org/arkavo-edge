@@ -14,11 +14,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse};
+use arkavo_llm::{Message, ParsedToolCall, Provider, ProviderResponse, StreamResponse};
 use arkavo_protocol::agent_config::AgentMode;
 use arkavo_router::{ModelChoice, ProviderFactory};
-use arkavo_server::server::{AgentEvent, AgentLoopConfig, run_agent_loop};
-use tokio::sync::mpsc;
+use arkavo_server::server::{
+    AgentEvent, AgentLoopConfig, CorrelationId, CycleOutcome, run_agent_loop,
+};
+use tokio::sync::{mpsc, oneshot};
 
 /// Replies handed out in order, and a record of every prompt that asked.
 #[derive(Default)]
@@ -40,6 +42,15 @@ impl Script {
         self.prompts.lock().expect("prompt log").len()
     }
 
+    /// The conversation the model saw on its `index`th dispatch, as one string.
+    pub fn prompt(&self, index: usize) -> String {
+        self.prompts.lock().expect("prompt log")[index]
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     fn reply(&self, messages: Vec<Message>) -> ProviderResponse {
         self.prompts.lock().expect("prompt log").push(messages);
         self.replies
@@ -54,6 +65,18 @@ impl Script {
 pub fn text(content: &str) -> ProviderResponse {
     ProviderResponse {
         content: content.to_string(),
+        ..Default::default()
+    }
+}
+
+/// A reply that says nothing and calls `tool_name`.
+pub fn tool_call(tool_name: &str) -> ProviderResponse {
+    ProviderResponse {
+        tool_calls: vec![ParsedToolCall {
+            tool_name: tool_name.to_string(),
+            arguments: serde_json::json!({}),
+            call_id: None,
+        }],
         ..Default::default()
     }
 }
@@ -194,6 +217,28 @@ impl RunningAgent {
         })
         .await
         .expect("agent loop kept ticking");
+    }
+
+    /// Send `content` as an A2A request and wait for the cycle's answer.
+    pub async fn ask(&self, content: &str) -> CycleOutcome {
+        let (reply, _receipt) = oneshot::channel();
+        let (outcome, answer) = oneshot::channel();
+        let sent = self
+            .events
+            .send(AgentEvent::IncomingMessage {
+                sender: "did:key:requester".to_string(),
+                content: content.to_string(),
+                task_id: uuid::Uuid::new_v4(),
+                correlation_id: CorrelationId(uuid::Uuid::new_v4()),
+                reply,
+                outcome,
+            })
+            .await;
+        assert!(sent.is_ok(), "agent loop accepts events");
+        tokio::time::timeout(Duration::from_secs(30), answer)
+            .await
+            .expect("cycle answered in time")
+            .expect("cycle answered")
     }
 
     /// Stop the loop and wait for it, so every count the test reads is final.
