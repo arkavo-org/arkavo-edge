@@ -104,6 +104,8 @@ arkavo chat --prompt "What is 2+2?"  # ❌ Current: Error
 arkavo chat "What is 2+2?"           # ✅ Current: Works
 ```
 
+> This is the record of the CLI at the time of the test run. The behaviour has since reversed: `arkavo chat --prompt "What is 2+2?"` is the one-shot form, and a positional prompt is no longer accepted.
+
 **Impact**: All initial E2E test implementations assumed `--prompt` existed
 **Status**: Issue created, enhancement tracked
 **Priority**: High (UX improvement, AI agent compatibility)

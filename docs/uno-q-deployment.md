@@ -294,6 +294,8 @@ journalctl -u arkavo -f
 
 ## Testing and Validation
 
+`arkavo chat` has no option to cap output tokens or to repeat a prompt, and it rejects options it does not know. The commands below send one prompt per invocation; the sustained tests repeat the invocation in a shell loop. `ARKAVO_CHAT_TIMEOUT_SECS` (whole seconds, 5 to 86400) sets the time budget for a chat inference.
+
 ### Basic Inference Test
 
 ```bash
@@ -301,14 +303,14 @@ journalctl -u arkavo -f
 arkavo chat --model snpe --prompt "What is 2+2?"
 
 # Single inference
-arkavo chat --model snpe --prompt "Hello" --max-tokens 50
+arkavo chat --model snpe --prompt "Hello"
 ```
 
 ### Performance Benchmark
 
 ```bash
 # Latency test
-time arkavo chat --model snpe --prompt "test" --max-tokens 10
+time arkavo chat --model snpe --prompt "test"
 
 # Throughput test
 arkavo bench --model snpe --iterations 100 --input-size 224
@@ -329,7 +331,7 @@ watch -n 1 cat /sys/class/thermal/thermal_zone0/temp
 watch -n 1 cat /sys/class/kgsl/kgsl-3d0/gpubusy
 
 # Run sustained inference test (1 hour)
-timeout 3600 arkavo chat --model snpe --prompt "long context test" --max-tokens 1000
+timeout 3600 sh -c 'while true; do arkavo chat --model snpe --prompt "long context test"; done'
 ```
 
 ### Memory Profiling
@@ -442,7 +444,7 @@ Run the full validation suite:
 
 ```bash
 # 1. Performance: Latency ≤ 50ms
-time arkavo chat --model snpe --prompt "test" --max-tokens 10
+time arkavo chat --model snpe --prompt "test"
 
 # 2. Throughput: ≥ 20 FPS
 arkavo bench --model snpe --fps-target 20
@@ -454,7 +456,7 @@ pidstat -r -p $(pgrep arkavo) 1 10
 pidstat -u -p $(pgrep arkavo) 1 10
 
 # 5. Reliability: 1 hour continuous test
-timeout 3600 arkavo chat --model snpe --prompt "sustained test" --loop
+timeout 3600 sh -c 'while true; do arkavo chat --model snpe --prompt "sustained test"; done'
 
 # 6. Thermal: < 70°C
 watch -n 1 cat /sys/class/thermal/thermal_zone0/temp

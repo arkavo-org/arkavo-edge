@@ -244,7 +244,7 @@ docker run --rm -v $(pwd):/app ubuntu:22.04 /app/target/release/arkavo --help
 
 # PERF-03: Metal NPU (macOS only)
 # Run with Activity Monitor open to observe GPU usage
-target/release/arkavo chat --local-model --prompt "Complex calculation"
+target/release/arkavo chat --model gemma-4-12b --prompt "Complex calculation"
 
 # A2A-01: Protocol test
 # Start two agents and verify communication

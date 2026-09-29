@@ -180,16 +180,16 @@ ssh arduino@uno-q
 # Load SNPE environment
 source /home/arduino/arkavo-env.sh
 
-# Test with FP32 DLC (GPU)
+# Test on the GPU runtime
 export ARKAVO_SNPE_RUNTIME=GPU_FP16
-arkavo chat --model-path /home/arduino/models/qwen3-0.6b_seq64.dlc \
-  --prompt "What is 2+2?"
+arkavo chat --prompt "What is 2+2?"
 
-# Test with INT8 DLC (DSP - faster)
+# Test on the DSP runtime (faster)
 export ARKAVO_SNPE_RUNTIME=DSP
-arkavo chat --model-path /home/arduino/models/qwen3-0.6b_seq64_int8.dlc \
-  --prompt "What is 2+2?"
+arkavo chat --prompt "What is 2+2?"
 ```
+
+`arkavo chat` has no option that takes a `.dlc` path. `--model` and `--gguf` accept a catalog name or a GGUF file only, and the `--model-path` flag shown in earlier versions of this guide does not exist, so a converted DLC cannot be selected from the command line.
 
 ## Troubleshooting
 

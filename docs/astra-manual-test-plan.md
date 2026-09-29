@@ -12,7 +12,7 @@ Hands-on verification of `feature/gpt-6-astra` (PR #688, which includes the trus
 
 **Local weights.** `arkavo model list` must show at least one ✓ GGUF (Qwen3.5-0.8B or Gemma 4). To simulate a machine with no weights, prefix a command with `HF_HOME=$(mktemp -d)`.
 
-**Cloud policy.** Set in the `runtime` block of the SwarmKit kit discovered from the working directory (`ARKAVO_SWARMKIT_PATH`, `.arkavo/*.swarmkit.yaml`, or a `*.swarmkit.yaml` in the directory; `arkavo kit init` writes one). AGENTS.md is not read. Omitted means `ask_before_cloud`.
+**Cloud policy.** Set in the `runtime` block of the SwarmKit kit discovered from the working directory (`ARKAVO_SWARMKIT_PATH`, `.arkavo/*.swarmkit.yaml`, or a `*.swarmkit.yaml` in the directory; `arkavo kit init <name>` writes one to `.arkavo/<name>.swarmkit.yaml`). AGENTS.md is not read. Omitted means `ask_before_cloud`.
 
 ```yaml
 runtime:

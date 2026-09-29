@@ -39,9 +39,7 @@ cargo build
 
 ## Testing Vision
 
-```bash
-cargo run -p arkavo -- chat --prompt "describe this image" --image screenshot.png
-```
+`arkavo chat` has no option for attaching an image, so this example cannot be exercised from the command line with a local file. The `--image` flag shown in earlier versions of this README does not exist.
 
 The router automatically discovers the mmproj file alongside the Qwen3.5-27B model
 and enables vision support. No manual configuration needed.
