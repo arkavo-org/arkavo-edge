@@ -504,10 +504,12 @@ impl ModelChoice {
             Self::LocalQwen36A3B => Some("Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"),
             Self::LocalGlm47Flash => Some("GLM-4.7-Flash-Q4_K_M.gguf"),
             Self::LocalGemma4E2B => Some("gemma-4-E2B-it-Q4_K_M.gguf"),
-            Self::LocalGemma4E4B => Some("gemma-4-e4b-it-Q4_K_M.gguf"),
-            Self::LocalGemma4_26B => Some("gemma-4-26B-A4B-it-Q4_K_M.gguf"),
-            Self::LocalGemma4_31B => Some("gemma-4-31B-it-Q4_K_M.gguf"),
-            Self::LocalGemma4_12B => Some("gemma-4-12B-it-Q4_K_M.gguf"),
+            // ggml-org publishes Gemma 4 only as Q4_0, Q8_0 and BF16; there is
+            // no Q4_K_M build in these repos, so naming one is a guaranteed 404.
+            Self::LocalGemma4E4B => Some("gemma-4-E4B-it-Q4_0.gguf"),
+            Self::LocalGemma4_26B => Some("gemma-4-26B-A4B-it-Q4_0.gguf"),
+            Self::LocalGemma4_31B => Some("gemma-4-31B-it-Q4_0.gguf"),
+            Self::LocalGemma4_12B => Some("gemma-4-12B-it-Q4_0.gguf"),
             Self::LocalGemma270M => Some("gemma-3-270m-it-Q4_0.gguf"),
             Self::LocalGemma4B => Some("gemma-3-4b-it-Q4_0.gguf"),
             Self::LocalGemma12B => Some("gemma-3-12b-it-Q4_0.gguf"),
@@ -541,10 +543,13 @@ impl ModelChoice {
             Self::LocalQwen36A3B => 22_100_000_000,
             Self::LocalGlm47Flash => 20_000_000_000,
             Self::LocalGemma4E2B => 3_000_000_000,
+            // E4B (4.6 GB on disk) and 26B (14.6 GB) are rounded up to the
+            // 5 GB and 15 GB marks: the server reads those marks as speed
+            // tiers, and rounding down would shorten both models' timeouts.
             Self::LocalGemma4E4B => 5_000_000_000,
-            Self::LocalGemma4_26B => 17_000_000_000,
-            Self::LocalGemma4_31B => 20_000_000_000,
-            Self::LocalGemma4_12B => 7_400_000_000,
+            Self::LocalGemma4_26B => 15_000_000_000,
+            Self::LocalGemma4_31B => 18_000_000_000,
+            Self::LocalGemma4_12B => 7_200_000_000,
             Self::LocalGemma270M => 200_000_000,
             Self::LocalGemma4B => 2_500_000_000,
             Self::LocalGemma12B => 7_000_000_000,
@@ -1080,6 +1085,41 @@ mod tests {
     use arkavo_budget::cost::TokenUsage;
     use arkavo_budget::tracker::BudgetTracker;
     use arkavo_test_macros::spec;
+
+    /// 0.98.0 named `Q4_K_M` builds that the ggml-org Gemma 4 repos do not
+    /// publish, so every download of these four arms returned 404.
+    #[test]
+    fn ggml_org_gemma4_arms_name_a_published_quantization() {
+        for (model, file) in [
+            (ModelChoice::LocalGemma4E4B, "gemma-4-E4B-it-Q4_0.gguf"),
+            (ModelChoice::LocalGemma4_12B, "gemma-4-12B-it-Q4_0.gguf"),
+            (ModelChoice::LocalGemma4_26B, "gemma-4-26B-A4B-it-Q4_0.gguf"),
+            (ModelChoice::LocalGemma4_31B, "gemma-4-31B-it-Q4_0.gguf"),
+        ] {
+            assert!(
+                model.repo_id().is_some_and(|r| r.starts_with("ggml-org/")),
+                "{model:?} moved off ggml-org; re-check which quantizations its repo publishes"
+            );
+            assert_eq!(model.gguf_filename(), Some(file), "{model:?}");
+        }
+    }
+
+    /// Every local arm must be downloadable: a repo, a `.gguf` weights file
+    /// that belongs to that repo, and a size the memory budget can use.
+    #[test]
+    fn every_local_arm_names_a_repo_file_and_size() {
+        for model in ModelChoice::ALL_LOCAL {
+            let repo = model
+                .repo_id()
+                .unwrap_or_else(|| panic!("{model:?} has no repo_id"));
+            let file = model
+                .gguf_filename()
+                .unwrap_or_else(|| panic!("{model:?} has no gguf_filename"));
+            assert_eq!(repo.split('/').count(), 2, "{model:?} repo {repo}");
+            assert!(file.ends_with(".gguf"), "{model:?} file {file}");
+            assert!(model.size_bytes() > 0, "{model:?} has no size");
+        }
+    }
 
     #[test]
     fn test_model_choice_name() {
