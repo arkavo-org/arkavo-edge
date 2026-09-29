@@ -1,6 +1,6 @@
 //! TDF (Trusted Data Format) MCP tools for encryption and info operations.
 
-use crate::confine::within_root;
+use crate::confine::{within_root, within_root_for_write};
 use crate::server::Tool;
 use arkavo_mcp::ToolSchema;
 use arkavo_tdf::{OpenTdfService, PolicyBuilder, TdfEncryptor, TdfManifest};
@@ -99,7 +99,7 @@ impl Tool for TdfEncryptTool {
         // Both ends are confined before anything is read or written, so a
         // refused output path never leaves a half-done encryption behind.
         let input_file = within_root(&self.root, input_path)?;
-        let output_file = within_root(&self.root, &output_path)?;
+        let output_file = within_root_for_write(&self.root, &output_path)?;
 
         let plaintext = tokio::fs::read(&input_file)
             .await
@@ -318,7 +318,7 @@ impl Tool for TdfHelpTool {
 // Iroh P2P transport tools (feature-gated)
 #[cfg(feature = "iroh")]
 mod iroh_tools {
-    use crate::confine::within_root;
+    use crate::confine::{within_root, within_root_for_write};
     use crate::server::Tool;
     use arkavo_mcp::ToolSchema;
     use arkavo_tdf_iroh::{IrohNode, IrohTicket, IrohTransport};
@@ -471,7 +471,7 @@ mod iroh_tools {
 
             // Confine before the ticket is parsed or a node is created, so a
             // refused path costs no network activity.
-            let output_file = within_root(&self.root, output_path)?;
+            let output_file = within_root_for_write(&self.root, output_path)?;
 
             // Parse ticket
             let ticket: IrohTicket = ticket_str
@@ -642,6 +642,28 @@ mod tests {
 
     #[spec("MCP-012")]
     #[tokio::test]
+    async fn tdf_encrypt_refuses_an_output_path_inside_dot_git() {
+        let ws = TempDir::new().unwrap();
+        std::fs::create_dir_all(ws.path().join(".git/objects/info")).unwrap();
+        std::fs::write(ws.path().join("in.txt"), b"data").unwrap();
+        let tool = TdfEncryptTool::with_root(ws.path());
+        for target in [".git/objects/info/alternates", ".git/config"] {
+            assert!(denied(
+                tool.execute(json!({ "input_path": "in.txt", "output_path": target }))
+                    .await
+            ));
+            assert!(!ws.path().join(target).exists(), "{target}");
+        }
+        // A default output next to the input is still fine.
+        let ok = tool
+            .execute(json!({ "input_path": "in.txt" }))
+            .await
+            .unwrap();
+        assert!(ok["success"].as_bool().unwrap());
+    }
+
+    #[spec("MCP-012")]
+    #[tokio::test]
     async fn tdf_info_refuses_a_manifest_outside_the_workspace() {
         let ws = TempDir::new().unwrap();
         let elsewhere = TempDir::new().unwrap();
@@ -727,6 +749,20 @@ mod tests {
                 .await
             ));
             assert!(!target.exists());
+        }
+
+        #[spec("MCP-012")]
+        #[tokio::test]
+        async fn tdf_fetch_refuses_an_output_path_inside_dot_git() {
+            let ws = TempDir::new().unwrap();
+            std::fs::create_dir_all(ws.path().join(".git/objects/info")).unwrap();
+            let tool = TdfFetchTool::with_root(ws.path());
+            let target = ".git/objects/info/alternates";
+            assert!(denied(
+                tool.execute(json!({ "ticket": "not-a-ticket", "output_path": target }))
+                    .await
+            ));
+            assert!(!ws.path().join(target).exists());
         }
 
         #[tokio::test]

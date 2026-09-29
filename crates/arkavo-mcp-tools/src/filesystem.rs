@@ -76,9 +76,7 @@ impl FileSystemKit {
     /// Mutations additionally refuse `.git` entries, which decide what the git
     /// tools open and write (MCP-011).
     fn validate_mutation_path(&self, path: &str) -> Result<PathBuf> {
-        let resolved = self.validate_path(path)?;
-        crate::confine::refuse_git_component(&resolved)?;
-        Ok(resolved)
+        crate::confine::within_root_for_write(&self.root, path)
     }
 }
 

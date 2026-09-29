@@ -83,9 +83,10 @@ fn require_no_alternates(common: &Path) -> Result<()> {
             )));
         }
     };
+    // Like libgit2, only a leading `#` starts a comment; an indented one is an entry.
     if listing
         .lines()
-        .map(str::trim)
+        .map(str::trim_end)
         .any(|line| !line.is_empty() && !line.starts_with('#'))
     {
         return Err(ToolError::PolicyDenied(
@@ -114,6 +115,13 @@ fn require_no_symlinked_internals(git_dir: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Resolve a path a tool is about to write: inside `root` and not a `.git` entry.
+pub(crate) fn within_root_for_write(root: &Path, requested: &str) -> Result<PathBuf> {
+    let resolved = within_root(root, requested)?;
+    refuse_git_component(&resolved)?;
+    Ok(resolved)
 }
 
 /// A workspace `.git` (directory, or the file linked worktrees use) decides
@@ -180,6 +188,8 @@ mod tests {
             "sibling/objects",
             "\"quoted\"",
             "objects2",
+            " #x",
+            "\t# tab-indented",
         ] {
             write_alternates(&common.join("objects"), &format!("{entry}\n"));
             assert!(
@@ -190,7 +200,7 @@ mod tests {
                 "{entry}"
             );
         }
-        write_alternates(&common.join("objects"), "\n# nothing here\n  \n");
+        write_alternates(&common.join("objects"), "\n# nothing here\n  \n#x  \n");
         assert!(require_no_alternates(&common).is_ok());
         assert!(require_no_alternates(&ws.path().join("no-such-git-dir")).is_ok());
     }

@@ -18,8 +18,9 @@ use std::path::{Path, PathBuf};
 /// holds no entry; and `objects`, `objects/info`, `refs`, `HEAD`, `index`,
 /// `packed-refs` and `logs` under the git and common directories are not
 /// symlinks. A linked worktree therefore passes only when its main repository is
-/// inside the root too. The file tools refuse to write any `.git` entry, so the
-/// workspace cannot forge these through this crate; other crafted-`.git`
+/// inside the root too. The filesystem and TDF tools (`tdf_encrypt`,
+/// `tdf_fetch`) refuse to write any `.git` entry, so the workspace cannot forge
+/// these through this crate; other crafted-`.git`
 /// vectors remain a residual owned by OS confinement.
 fn safe_open_repo(
     git_manager: &GitManager,
