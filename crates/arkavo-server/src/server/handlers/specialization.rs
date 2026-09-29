@@ -325,6 +325,12 @@ async fn apply_bundle_to_metadata(
 ) {
     let mut meta = agent_metadata.write().await;
     meta.purpose.clone_from(&bundle.persona.purpose);
+    // A bundle carries no description of the role. The one on record
+    // describes the role the agent had before and would be published for
+    // this one, so it is dropped. `role_id` stays: it names the role in the
+    // local kit file that a reload re-reads, not the role of the flight,
+    // which the role store keeps.
+    meta.description = None;
     meta.model.clone_from(&bundle.persona.model);
     meta.api_keys.clone_from(&bundle.api_tokens);
     meta.granted_tools = granted_tool_names(bundle);
@@ -493,6 +499,26 @@ mod tests {
 
     fn no_event_tx() -> Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<AgentEvent>>>> {
         Arc::new(tokio::sync::Mutex::new(None))
+    }
+
+    /// Regression: specialization replaced the purpose and left the previous
+    /// role's description in place, to be published for the new role.
+    #[tokio::test]
+    async fn specializing_drops_the_previous_roles_description() {
+        let agent_metadata = Arc::new(tokio::sync::RwLock::new(AgentMetadata {
+            name: "agent-7".into(),
+            role_id: Some("planner".into()),
+            purpose: "Plan the release".into(),
+            description: Some("Plans the work".into()),
+            ..AgentMetadata::default()
+        }));
+
+        apply_bundle_to_metadata(&agent_metadata, &build_bundle("analyst", "agent-7")).await;
+
+        let meta = agent_metadata.read().await;
+        assert_eq!(meta.purpose, "Be the analyst role for the campaign kit");
+        assert_eq!(meta.description, None);
+        assert_eq!(meta.role_id.as_deref(), Some("planner"));
     }
 
     #[tokio::test]
