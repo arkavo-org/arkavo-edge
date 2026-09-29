@@ -38,33 +38,39 @@ pub fn resolve_agent_configs(
     port: Option<u16>,
     cwd: &Path,
 ) -> Result<Vec<AgentConfig>, Box<dyn std::error::Error>> {
-    // `from_kit` distinguishes real kit roles from the zero-config default,
-    // so a `-n` miss can report "no kit" instead of misleadingly presenting
-    // the hostname-derived default name as a selectable role id.
-    let (mut configs, from_kit) = match cli_config_path {
+    let kit = match cli_config_path {
         // Explicit -c: errors (bad YAML, invalid kit) are fatal. No silent
         // fallback to defaults when the caller named a specific file.
-        Some(explicit) => {
-            let discovered = arkavo_swarmkit::load_kit_file(explicit)?;
-            (agent_configs_from_kit(&discovered.config)?, true)
-        }
+        Some(explicit) => Some(arkavo_swarmkit::load_kit_file(explicit)?),
         None => match arkavo_swarmkit::discover_kit_path(cwd) {
-            Ok(path) => {
-                let discovered = arkavo_swarmkit::load_kit_file(&path)?;
-                (agent_configs_from_kit(&discovered.config)?, true)
-            }
+            Ok(path) => Some(arkavo_swarmkit::load_kit_file(&path)?),
             // Only-AGENTS.md-present is non-fatal: log the migrate hint once
             // and fall through to the zero-config default. The AGENTS.md
             // content itself is never read.
             Err(err @ DiscoverError::AgentsMdUnsupported { .. }) => {
                 eprintln!("{err}");
-                (vec![default_agent_config()], false)
+                None
             }
-            Err(DiscoverError::NotFound) => (vec![default_agent_config()], false),
+            Err(DiscoverError::NotFound) => None,
             // Multiple candidates, or a read/parse failure during
             // discovery itself: fatal, with the error's own message.
             Err(err) => return Err(err.into()),
         },
+    };
+
+    let mut configs = match (&kit, name) {
+        (Some(kit), _) => agent_configs_from_kit(&kit.config, name)?,
+        // Zero-config default: there is no kit, so there are no role ids to
+        // offer — pointing at the default's hostname-derived name would
+        // misleadingly imply a kit exists.
+        (None, Some(name)) => {
+            return Err(format!(
+                "no SwarmKit manifest found, so there is no kit role {name:?} to select; \
+                 create one with 'arkavo kit init <name>' or pass -c <kit.swarmkit.yaml>"
+            )
+            .into());
+        }
+        (None, None) => vec![default_agent_config()],
     };
 
     if let Some(port) = port {
@@ -73,29 +79,7 @@ pub fn resolve_agent_configs(
         }
     }
 
-    let Some(name) = name else {
-        return Ok(configs);
-    };
-
-    match configs.iter().position(|c| c.name == name) {
-        Some(idx) => Ok(vec![configs.remove(idx)]),
-        None if from_kit => {
-            let available: Vec<&str> = configs.iter().map(|c| c.name.as_str()).collect();
-            Err(format!(
-                "no role {name:?} in kit; available role ids: {}",
-                available.join(", ")
-            )
-            .into())
-        }
-        // Zero-config default: there is no kit, so there are no role ids to
-        // offer — pointing at the default's hostname-derived name would
-        // misleadingly imply a kit exists.
-        None => Err(format!(
-            "no SwarmKit manifest found, so there is no kit role {name:?} to select; \
-             create one with 'arkavo kit init <name>' or pass -c <kit.swarmkit.yaml>"
-        )
-        .into()),
-    }
+    Ok(configs)
 }
 
 /// Replace the port of a `listen` address, keeping its host.
@@ -122,15 +106,39 @@ fn listen_with_port(listen: &str, port: u16) -> String {
     format!("{host}:{port}")
 }
 
-/// Map every role in a loaded kit to an [`AgentConfig`]. Kit-level `runtime`
-/// fields (`listen`, `mdns`, `mode`, `mcp_servers`) apply uniformly to every
+/// Map the roles of a loaded kit to [`AgentConfig`]s: every role in manifest
+/// order, or only the role `only_role` names. Kit-level `runtime` fields
+/// (`listen`, `mdns`, `mode`, `mcp_servers`) apply uniformly to every
 /// role — a kit has exactly one `runtime` block, not one per role.
 ///
-/// Fails when any role names a model the router does not know: the model
-/// becomes the router hint (and, for a cloud arm, the operator's consent to
-/// use it), so a typo must stop startup instead of quietly running something
-/// else.
-fn agent_configs_from_kit(runtime_config: &AgentRuntimeConfig) -> Result<Vec<AgentConfig>, String> {
+/// Fails when a mapped role names a model the router does not know: the
+/// model becomes the router hint (and, for a cloud arm, the operator's
+/// consent to use it), so a typo must stop startup instead of quietly running
+/// something else. Roles `only_role` leaves out are never started by this
+/// process, so their models are not resolved — one role's typo must not keep
+/// an unrelated role from starting.
+fn agent_configs_from_kit(
+    runtime_config: &AgentRuntimeConfig,
+    only_role: Option<&str>,
+) -> Result<Vec<AgentConfig>, String> {
+    let roles: Vec<&RoleRuntimeView> = match only_role {
+        Some(name) => {
+            let Some(role) = runtime_config.roles.iter().find(|r| r.role_id == name) else {
+                let available: Vec<&str> = runtime_config
+                    .roles
+                    .iter()
+                    .map(|r| r.role_id.as_str())
+                    .collect();
+                return Err(format!(
+                    "no role {name:?} in kit; available role ids: {}",
+                    available.join(", ")
+                ));
+            };
+            vec![role]
+        }
+        None => runtime_config.roles.iter().collect(),
+    };
+
     let listen = runtime_config
         .runtime
         .listen
@@ -145,9 +153,8 @@ fn agent_configs_from_kit(runtime_config: &AgentRuntimeConfig) -> Result<Vec<Age
         .map(to_mcp_server_config)
         .collect();
 
-    runtime_config
-        .roles
-        .iter()
+    roles
+        .into_iter()
         .map(|role| role_to_agent_config(role, &listen, mdns_enabled, mode.clone(), &mcp_servers))
         .collect()
 }
