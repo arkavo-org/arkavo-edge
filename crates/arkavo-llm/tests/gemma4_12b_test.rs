@@ -32,7 +32,7 @@ mod tests {
             format!("{home}/.cache/huggingface/hub/models--ggml-org--gemma-4-12B-it-GGUF");
         let snapshots = std::fs::read_dir(format!("{model_dir}/snapshots")).ok()?;
         for snapshot in snapshots.flatten() {
-            let gguf = snapshot.path().join("gemma-4-12B-it-Q4_K_M.gguf");
+            let gguf = snapshot.path().join("gemma-4-12B-it-Q4_0.gguf");
             if gguf.exists() {
                 return Some(gguf.to_string_lossy().to_string());
             }

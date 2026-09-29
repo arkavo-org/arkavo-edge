@@ -33,27 +33,27 @@ mod tests {
         ),
         (
             "E4B (4.5B act)",
-            "5.0G",
+            "4.6G",
             "ggml-org/gemma-4-E4B-it-GGUF",
-            "gemma-4-e4b-it-Q4_K_M.gguf",
+            "gemma-4-E4B-it-Q4_0.gguf",
         ),
         (
             "12B dense",
-            "6.9G",
+            "7.2G",
             "ggml-org/gemma-4-12B-it-GGUF",
-            "gemma-4-12B-it-Q4_K_M.gguf",
+            "gemma-4-12B-it-Q4_0.gguf",
         ),
         (
             "26B-A4B MoE",
-            "16G",
+            "15G",
             "ggml-org/gemma-4-26B-A4B-it-GGUF",
-            "gemma-4-26B-A4B-it-Q4_K_M.gguf",
+            "gemma-4-26B-A4B-it-Q4_0.gguf",
         ),
         (
             "31B dense",
-            "17G",
+            "18G",
             "ggml-org/gemma-4-31B-it-GGUF",
-            "gemma-4-31B-it-Q4_K_M.gguf",
+            "gemma-4-31B-it-Q4_0.gguf",
         ),
     ];
 
