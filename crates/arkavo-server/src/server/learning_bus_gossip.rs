@@ -1,33 +1,29 @@
 //! Gossip protocol integration for LearningBus
 
 use arkavo_gossip::{
-    AdvisorAdjustmentAnnouncement, GossipMessage, LessonAnnouncement, LessonDigest,
+    AdvisorAdjustmentAnnouncement, GossipError, GossipMessage, LessonAnnouncement, LessonDigest,
     sign_lesson_announcement,
 };
-use arkavo_router::learning::{BurstFeedback, Lesson, LessonPattern};
+use arkavo_router::learning::{BurstFeedback, Lesson};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::learning_bus::{BehaviorAdvice, LearningBus};
 
+mod held;
+use held::{Signed, Targets};
+
 impl LearningBus {
     /// Handle incoming gossip message from peer
     ///
-    /// For lesson announcements that pass signature verification, immediately
-    /// adds the lesson to the local policy cache for behavior guidance injection.
-    /// For advisor adjustment announcements, applies keep-best merge to local advisor.
+    /// Nothing a message carries is applied unless the protocol accepted it.
+    /// Lesson announcements that pass signature verification are added to the
+    /// local policy cache for behavior guidance injection, and advisor
+    /// adjustment announcements are merged keep-best into the local advisor.
+    /// An announcement whose signer's key has not arrived yet is held and
+    /// verified again, never applied on trust.
     pub async fn handle_gossip(&self, message: GossipMessage) -> Vec<GossipMessage> {
-        let lesson_announce = if let GossipMessage::LessonAnnounce(ref ann) = message {
-            Some(ann.clone())
-        } else {
-            None
-        };
-
-        let advisor_announce = if let GossipMessage::AdvisorAdjustmentAnnounce(ref ann) = message {
-            Some(ann.clone())
-        } else {
-            None
-        };
+        let signed = Signed::of(&message);
 
         let experiment_announce = if let GossipMessage::ExperimentAnnounce(ref ann) = message {
             Some(ann.clone())
@@ -60,52 +56,18 @@ impl LearningBus {
         }
 
         let gossip = self.gossip.read().await;
-        let responses = match gossip.handle_message(message).await {
+        let verdict = gossip.handle_message(message).await;
+        drop(gossip);
+        let responses = match verdict {
             Ok(responses) => responses,
             Err(e) => {
-                // Don't early-return: still apply lessons/adjustments
-                // even when signature verification fails (key exchange timing race)
-                tracing::debug!("Gossip verification pending key exchange: {}", e);
-                vec![]
+                self.refuse(&e, signed);
+                return vec![];
             }
         };
-        drop(gossip);
 
-        if let Some(ann) = lesson_announce {
-            let pattern = LessonPattern::new(
-                ann.condition
-                    .clone()
-                    .unwrap_or_else(|| ann.category.clone()),
-                ann.action
-                    .clone()
-                    .unwrap_or_else(|| "adjust approach".to_string()),
-                ann.expected_outcome
-                    .clone()
-                    .unwrap_or_else(|| "improved quality".to_string()),
-            );
-            let lesson = Lesson::new(
-                ann.originator.clone(),
-                self.swarm_id.clone(),
-                ann.category.clone(),
-                pattern,
-                ann.confidence,
-                1,
-            );
-
-            let mut cache = self.policy_cache.write().await;
-            cache.add_lesson(lesson);
-            drop(cache);
-
-            tracing::info!(
-                lesson_id = %ann.lesson_id,
-                category = %ann.category,
-                originator = %ann.originator,
-                "Gossip lesson applied to policy cache for guidance injection"
-            );
-        }
-
-        if let Some(ann) = advisor_announce {
-            self.apply_remote_adjustment(&ann).await;
+        if let Some(signed) = signed {
+            self.targets().apply(&signed).await;
         }
 
         if let Some(ann) = experiment_announce {
@@ -209,6 +171,45 @@ impl LearningBus {
         }
 
         responses
+    }
+
+    /// The state verified gossip is applied to.
+    fn targets(&self) -> Targets {
+        Targets {
+            gossip: self.gossip.clone(),
+            policy_cache: self.policy_cache.clone(),
+            router: self.router.clone(),
+            swarm_id: self.swarm_id.clone(),
+        }
+    }
+
+    /// Account for a message the protocol did not accept.
+    ///
+    /// A bad signature, a foreign swarm and a replay are final. A signer with
+    /// no registered key may only be early, so that announcement is held
+    /// until the key exchange finishes instead of being lost.
+    fn refuse(&self, error: &GossipError, signed: Option<Signed>) {
+        match (error, signed) {
+            (GossipError::Duplicate(id), _) => {
+                tracing::debug!("Gossip replay ignored: {id}");
+            }
+            (GossipError::UnknownOriginator(signer), Some(signed)) => {
+                if self.targets().hold(signed) {
+                    tracing::debug!(
+                        %signer,
+                        "Gossip held: no key registered for its signer yet"
+                    );
+                } else {
+                    tracing::warn!(
+                        %signer,
+                        "Gossip dropped: signer unknown and too much is already held"
+                    );
+                }
+            }
+            (error, _) => {
+                tracing::warn!("Gossip rejected, not applied: {error}");
+            }
+        }
     }
 
     /// Run anti-entropy synchronization with peers
@@ -480,41 +481,6 @@ impl LearningBus {
                 "Broadcast {} advisor adjustments to {} peers",
                 broadcast_count,
                 peers.len()
-            );
-        }
-    }
-
-    /// Apply a remote advisor adjustment using keep-best merge
-    async fn apply_remote_adjustment(&self, ann: &AdvisorAdjustmentAnnouncement) {
-        use arkavo_router::prompt_advisor::{AdvisorIssue, DynamicSnapshot};
-
-        let issue = match ann.issue.parse::<AdvisorIssue>() {
-            Ok(i) => i,
-            Err(e) => {
-                tracing::warn!("{}", e);
-                return;
-            }
-        };
-
-        let snapshot = DynamicSnapshot {
-            label: ann.label.clone(),
-            model_family: ann.model_family.clone(),
-            issue,
-            text: ann.text.clone(),
-            success_rate: ann.stats.success_rate,
-            applications: ann.stats.applications,
-            feedback_count: ann.stats.feedback_count,
-        };
-
-        let router_guard = self.router.read().await;
-        if let Some(router) = router_guard.as_ref() {
-            router.advisor().import_dynamic_merge_best(vec![snapshot]);
-            tracing::info!(
-                "Applied remote advisor adjustment from {}: {} ({}, {})",
-                ann.originator,
-                ann.label,
-                ann.model_family,
-                ann.issue
             );
         }
     }

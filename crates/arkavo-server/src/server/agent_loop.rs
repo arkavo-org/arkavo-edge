@@ -4,6 +4,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::server::tool_memory::ToolMemory;
 
+mod completions;
 mod cycle_prompt;
 use cycle_prompt::PROACTIVE_ANALYSIS_MARKER;
 
@@ -242,21 +243,7 @@ pub async fn run_agent_loop(
                 // 2. Drain gossip completions into specialist_context
                 if let Some(ref bus) = config.learning_bus {
                     for notice in bus.drain_task_completions().await {
-                        let budget_snapshot = notice
-                            .budget_snapshot
-                            .and_then(|v| serde_json::from_value(v).ok());
-                        config
-                            .mesh_state
-                            .push_completed(
-                                &notice.task_id,
-                                arkavo_mcp_mesh::CompletedDelegation {
-                                    agent_id: notice.specialist_id,
-                                    response: notice.content,
-                                    response_latency_ms: notice.completion_ms,
-                                    budget_snapshot,
-                                },
-                            )
-                            .await;
+                        completions::accept_pushed(&config.mesh_state, notice).await;
                     }
                 }
 
