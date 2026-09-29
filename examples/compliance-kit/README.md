@@ -8,8 +8,9 @@ policy_enforcer → auditor.
 This kit exists primarily to demonstrate **per-role TDF
 attribute-release policies**. Each role carries different attribute
 sets (clearance, jurisdiction, audit_authority) so the orchestrator
-can issue role-scoped TDF policies — exactly the §6.4 capability
-the runtime ships.
+can issue role-scoped TDF policies (spec §6.4). The runtime library
+builds those policies with `role_policy()`; the `arkavo ui` and
+`arkavo agent` launch paths do not call it yet.
 
 ## Roles
 
@@ -132,6 +133,7 @@ Code paths that bypass the gateway (custom `LaunchOptions`) keep
 - A2A JSON-RPC delegation envelope — defined in spec §7.2 but not yet wired.
 - `source: tdf-ref` skills — Phase 2 supports `inline` and `registry` only.
 - Live KAS integration for the per-role TDF policies — the kit
-  declares the attribute sets; orchestrator-side TDF wrapping
-  happens via `arkavo_swarmkit_runtime::role_policy` (already
-  wired per SK-053).
+  declares the attribute sets, and
+  `arkavo_swarmkit_runtime::role_policy` turns them into OpenTDF
+  policies (SK-053), but launching the kit does not build or enforce
+  them.

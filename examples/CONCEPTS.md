@@ -435,14 +435,21 @@ runtime:
         enabled: true
 ```
 
-### Policy Types
+Preflight is active only when the kit declares `runtime.preflight`. A policy either blocks or allows; it does not redact or rewrite the request.
 
-| Type | Description |
-|------|-------------|
-| **Pattern Match** | Regex-based content filtering |
-| **Rate Limit** | Request throttling |
-| **Size Limit** | Max input/output size |
-| **Allow List** | Only permit specific sources |
+### Policy Features
+
+Each policy names one or more features to test the request text for:
+
+| Feature | Matches |
+|---------|---------|
+| `InputContainsPII` | SSN, credit card, and email patterns |
+| `InputContainsSQLKeywords` | SQL keywords |
+| `InputContainsShellCommands` | Shell command names |
+| `InputContainsCodeBlock` | A fenced code block |
+| `InputContainsURL` | An `http://` or `https://` URL |
+| `InputContainsBase64` | A base64-looking run of characters |
+| `InputLengthExceedsThreshold(n)` | More than `n` characters |
 
 ### Example: Secure Agent
 
