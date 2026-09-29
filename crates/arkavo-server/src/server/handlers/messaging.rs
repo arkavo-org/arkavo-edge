@@ -27,6 +27,10 @@ use super::super::tool_memory::ToolMemory;
 // `#[tokio::test]` expands to `Runtime::block_on`, which the crate's lint set
 // disallows in library code. Same waiver as the other async test modules here.
 #[allow(clippy::disallowed_methods)]
+mod answer_tests;
+#[cfg(test)]
+// Same waiver as above.
+#[allow(clippy::disallowed_methods)]
 mod budget_tests;
 mod caller_budget;
 
