@@ -946,7 +946,7 @@ components:
     module: arkavo_validation
     description: Centralized input validation
     criticality: high
-    scenario_count: 7
+    scenario_count: 8
     invariants:
       - All external input validated
       - Validation errors descriptive
@@ -1013,8 +1013,8 @@ components:
 
 stats:
   total_specs: 86
-  total_scenarios: 826
-  critical_scenarios: 256
+  total_scenarios: 827
+  critical_scenarios: 257
   coverage_areas:
     - authentication
     - authorization

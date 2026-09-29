@@ -5,7 +5,10 @@ pub mod size;
 pub mod url;
 
 pub use external_content::{BoundedContent, ContentBoundary};
-pub use path::{PathValidationError, validate_no_traversal, validate_path_within_root};
+pub use path::{
+    PathValidationError, current_workspace_root, resolve_within_root, validate_no_traversal,
+    validate_path_within_root,
+};
 pub use sanitize::{sanitize_json_line_for_log, sanitize_json_value_for_log};
 pub use size::{SizeValidationError, validate_str_size};
 pub use url::{

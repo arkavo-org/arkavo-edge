@@ -2457,6 +2457,7 @@ dependencies = [
  "arkavo-test-macros",
  "ipnet",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

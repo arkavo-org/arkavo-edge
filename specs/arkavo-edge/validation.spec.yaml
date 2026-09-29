@@ -119,3 +119,22 @@ scenarios:
       - Boundary metadata preserved
     refs: [crates/arkavo-validation/src/external_content.rs]
     changed: "2026-03-19"
+
+  - id: VAL-008
+    name: Resolve a path within the workspace root
+    criticality: critical
+    given:
+      - A workspace root
+      - A path supplied by a tool caller, absolute or relative
+    when: resolve_within_root resolves it
+    then:
+      - Existing ancestors are canonicalised, so symlinks are followed before containment is checked
+      - A path inside the root resolves, including an absolute one and a new file under new directories
+      - A path outside the root, by absolute path, parent components or symlink, is refused with OutsideRoot
+      - A dangling symlink ancestor, an empty path or an unreadable root is refused
+      - Parent components are handled per component, so names such as weird..name are accepted
+    refs: [crates/arkavo-validation/src/path.rs]
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: Windows drive-relative path (C:foo)
+        expected: Refused
