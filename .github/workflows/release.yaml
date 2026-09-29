@@ -70,7 +70,7 @@ jobs:
 
             #### Linux
             - **x86_64 full featured** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
-            - **x86_64 static/slim** (musl, memory + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
+            - **x86_64 static/slim** (musl, utility commands only, no local inference backend): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
             - **ARM64/Raspberry Pi 5** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-aarch64-linux.tar.gz
             - **Debian package** (x86_64, full featured): arkavo_${{ steps.version.outputs.version }}_amd64.deb
 
@@ -79,9 +79,9 @@ jobs:
             - **ARM64 .pkg installer** (native CEF window): arkavo-${{ steps.version.outputs.version }}-macos-arm64.pkg
 
             #### Windows
-            - **x86_64** (memory + remote LLM): arkavo-${{ steps.version.outputs.version }}-x86_64-windows.zip
+            - **x86_64** (utility commands only, no local inference backend): arkavo-${{ steps.version.outputs.version }}-x86_64-windows.zip
 
-            Choose the musl build for containers/Alpine Linux with remote LLM support. Choose the glibc build for desktop Linux with both local and remote LLM support. ARM64 build is optimized for Raspberry Pi 5 (16GB) - see [deployment guide](https://github.com/arkavo-org/arkavo-edge/blob/main/docs/raspberry-pi-deployment.md). Windows builds include memory and remote LLM support (iOS testing capabilities are not available on Windows).
+            Choose the glibc build for desktop Linux with both local and remote LLM support. ARM64 build is optimized for Raspberry Pi 5 (16GB) - see [deployment guide](https://github.com/arkavo-org/arkavo-edge/blob/main/docs/raspberry-pi-deployment.md). The musl and Windows builds are compiled without a local inference backend: utility commands such as `arkavo kit` run, while `arkavo agent`, `chat`, `task`, and `ui` require a local backend and exit with an error. iOS testing capabilities are available on macOS only.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

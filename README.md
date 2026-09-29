@@ -33,7 +33,7 @@ sudo apt install ./arkavo_<version>_amd64.deb
 **Raspberry Pi 5:** Download ARM64 binary from [releases](https://github.com/arkavo-org/arkavo-edge/releases). See [deployment guide](docs/raspberry-pi-deployment.md) for setup. First run auto-selects an edge model for the device (Pi 5 → Gemma 4 E4B).
 
 ### Install on Windows
-Download `arkavo-<version>-x86_64-windows.zip` from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases), extract `arkavo.exe`, and add its folder to your `PATH`. There is no installer.
+Download `arkavo-<version>-x86_64-windows.zip` from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases), extract `arkavo.exe`, and add its folder to your `PATH`. There is no installer. This build has no local inference backend; see the note under [Platform Support](#platform-support).
 
 ### Launch
 ```bash
@@ -214,6 +214,8 @@ This split is intentional: encryption, access control, and identity are shipping
 | Windows  | x86_64 | Memory, remote LLM, and mDNS support (no iOS testing) |
 
 mDNS discovery uses pure Rust implementation (mdns-sd crate) with no system dependencies
+
+**Note:** The Linux (musl) and Windows builds are compiled without a local inference backend. `arkavo`, `arkavo agent`, `arkavo chat`, `arkavo task`, and `arkavo ui` require one and exit with an error on those builds; utility commands such as `arkavo kit` still run. A cloud API key does not replace the local backend.
 
 **Note:** iOS simulator automation and testing capabilities are only available on macOS.
 
