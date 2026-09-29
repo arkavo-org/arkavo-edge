@@ -434,7 +434,11 @@ mod tests {
         else {
             panic!("a dangling leaf symlink must be refused as an invalid path");
         };
-        assert!(message.contains("dangling"), "names the path: {message}");
+        let full_path = root.join("dangling");
+        assert!(
+            message.contains(full_path.to_str().unwrap()),
+            "names the full path {full_path:?}: {message}"
+        );
         assert!(
             message.contains("symlink target does not exist"),
             "explains the refusal: {message}"
