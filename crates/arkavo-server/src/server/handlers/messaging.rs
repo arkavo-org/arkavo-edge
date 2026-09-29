@@ -4,8 +4,8 @@ use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::metrics::{MetricsCollector, RpcTimer};
 use arkavo_protocol::rate_limit::RateLimiter;
 use arkavo_protocol::types::{
-    AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType, Message, MessagePart,
-    MessageSendRequest, MessageSendResponse, TaskError, TaskStatus,
+    AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType, MessagePart,
+    MessageSendRequest, MessageSendResponse, TaskStatus,
 };
 use arkavo_tasks::task_executor::TaskExecutor;
 use arkavo_tasks::task_store::TaskStore;
@@ -18,9 +18,7 @@ use super::super::agent_cycle_reply::{
     REQUEST_REPLY_BUDGET, apply_outcome, deliver_outcome_to_task,
 };
 use super::super::agent_event::CycleOutcome;
-use super::super::conductor_parallel::for_requester;
 use super::super::config_helpers::AgentMetadata;
-use super::super::execute_with_conductor_and_learning;
 use super::super::tool_memory::ToolMemory;
 
 #[cfg(test)]
@@ -33,6 +31,10 @@ mod answer_tests;
 #[allow(clippy::disallowed_methods)]
 mod budget_tests;
 mod caller_budget;
+pub(in crate::server) mod direct;
+mod specialist;
+
+use direct::DirectExecution;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_message_send(
@@ -255,254 +257,37 @@ pub async fn handle_message_send(
         );
     }
 
-    // Read agent purpose for system prompt injection so specialists
-    // receive their SwarmKit identity when processing delegated tasks.
-    let purpose = agent_metadata.read().await.purpose.clone();
-
     // Save metadata before submit_task consumes request.message
     let request_metadata_ref = request.message.metadata.clone();
 
     match task_executor.submit_task(request.message).await {
         Ok(task_id) => {
             if let Some(router) = router {
-                let task_id_clone = task_id;
-
-                if let Some(event_tx) = agent_event_tx.lock().await.clone() {
-                    // Orchestrator path: route through the agent event loop
-                    use super::super::agent_event::{AgentEvent, CorrelationId};
-
-                    let correlation_id = CorrelationId(uuid::Uuid::new_v4());
-                    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                    let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
-
-                    let sender_did = request_metadata_ref
-                        .as_ref()
-                        .and_then(|m| m.get("sender_did"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-
-                    let _ = event_tx
-                        .send(AgentEvent::IncomingMessage {
-                            sender: sender_did,
-                            content: task_content,
-                            task_id: task_id_clone,
-                            correlation_id,
-                            reply: reply_tx,
-                            outcome: outcome_tx,
-                        })
-                        .await;
-
-                    // The requester polls this task, so the cycle's answer —
-                    // text, tool summary, or refusal — has to land on it. The
-                    // specialist path below does the same thing inline.
-                    let executor = task_executor.clone();
-                    tokio::spawn(async move {
-                        deliver_outcome_to_task(
-                            executor,
-                            task_id_clone,
-                            reply_rx,
-                            outcome_rx,
-                            REQUEST_REPLY_BUDGET,
-                        )
-                        .await;
-                    });
-                } else {
-                    // Specialist path: execute directly via conductor
-                    let router = router.clone();
-                    let conductor = conductor.clone();
-                    let mcp_registry = mcp_registry.clone();
-                    let task_executor = task_executor.clone();
-                    let task_store = task_store.clone();
-                    let learning_bus = learning_bus.cloned();
-                    let compute_budget = compute_budget.clone();
-                    let mesh_state = mesh_state.cloned();
-                    let agent_memory = agent_memory.clone();
-                    // Read both name and granted_tools in a single lock acquisition
-                    // so the specialist path honours the same least-privilege grant
-                    // set that the orchestrator-loop path enforces (design D9).
-                    let (specialist_id, specialist_granted, specialist_specialized): (
-                        String,
-                        Vec<String>,
-                        bool,
-                    ) = {
-                        let meta = agent_metadata.read().await;
-                        (
-                            meta.name.clone(),
-                            meta.granted_tools.clone(),
-                            meta.specialized,
-                        )
-                    };
-                    let task_start = std::time::Instant::now();
+                let direct = DirectExecution {
+                    router: router.clone(),
+                    conductor: conductor.clone(),
+                    mcp_registry: mcp_registry.clone(),
+                    task_executor: task_executor.clone(),
+                    learning_bus: learning_bus.cloned(),
+                    compute_budget: compute_budget.clone(),
+                    mesh_state: mesh_state.cloned(),
+                    agent_metadata: agent_metadata.clone(),
+                    model_hint,
                     #[cfg(feature = "iroh")]
-                    let iroh_node = iroh_node.cloned();
+                    iroh_node: iroh_node.cloned(),
+                };
 
-                    tokio::spawn(async move {
-                        if let Err(e) = task_executor
-                            .update_task_status(&task_id_clone, TaskStatus::Working)
-                            .await
-                        {
-                            warn!("Failed to update task {} to Working: {}", task_id_clone, e);
-                            return;
-                        }
-
-                        info!("Executing task {} via HRM Conductor", task_id_clone);
-
-                        // Build a registry with mesh tools so specialists can
-                        // use send_task/list_agents to communicate with the swarm.
-                        // When the agent has a non-empty grant set (i.e. it is a
-                        // SwarmKit-specialized agent), filter the registry down to
-                        // exactly those tools before handing it to the conductor.
-                        // This closes the least-privilege bypass on the A2A
-                        // message.send specialist path (mirrors the orchestrator
-                        // loop enforcement in agent_loop.rs — design D9).
-                        let granted_set: std::collections::HashSet<String> =
-                            specialist_granted.iter().cloned().collect();
-                        let specialist_registry = {
-                            let mut reg = arkavo_mcp_tools::ToolRegistry::empty();
-                            if let Some(ref ms) = mesh_state {
-                                arkavo_mcp_mesh::register_tools(&mut reg, ms.clone());
-                            }
-                            if let Ok(mcp_tools) = mcp_registry.list_all_tools().await {
-                                for tool in mcp_tools {
-                                    let name = tool.name.clone();
-                                    let bridge = super::super::mcp_bridge::McpBridgeTool::new(
-                                        mcp_registry.clone(),
-                                        tool,
-                                    );
-                                    reg.register(&name, Box::new(bridge));
-                                }
-                            }
-                            if specialist_specialized {
-                                reg.retain_granted(&granted_set);
-                            }
-                            Arc::new(reg)
-                        };
-                        let granted_opt: Option<&std::collections::HashSet<String>> =
-                            if !specialist_specialized {
-                                None
-                            } else {
-                                Some(&granted_set)
-                            };
-
-                        // The requester polls this task for the answer, so
-                        // the model's text is the result and is not traded for
-                        // a tool call. Boxed because the conductor's future is
-                        // tens of kilobytes and would otherwise sit inline in
-                        // this handler's own future.
-                        let answer = for_requester(Box::pin(execute_with_conductor_and_learning(
-                            &conductor,
-                            &router,
-                            &mcp_registry,
-                            task_content,
-                            Some(task_id_clone),
-                            Some(&task_executor),
-                            learning_bus.as_ref(),
-                            Some(&agent_memory),
-                            if purpose.is_empty() {
-                                None
-                            } else {
-                                Some(purpose.as_str())
-                            },
-                            mesh_state.as_ref(),
-                            model_hint.as_ref(),
-                            images,
-                            Some(&compute_budget),
-                            None,
-                            false, // specialists may need complexity assessment
-                            Some(specialist_registry),
-                            granted_opt,
-                            #[cfg(feature = "iroh")]
-                            iroh_node.as_ref(),
-                        )))
-                        .await;
-                        match answer {
-                            Ok(result_content) => {
-                                let result_for_notice = result_content.clone();
-                                let result_message = Message {
-                                    parts: vec![arkavo_protocol::types::MessagePart::Text {
-                                        content: result_content,
-                                    }],
-                                    metadata: None,
-                                };
-                                let result_value = serde_json::to_value(&result_message)
-                                    .unwrap_or(serde_json::Value::Null);
-
-                                if let Err(e) = task_executor
-                                    .complete_task(&task_id_clone, result_value)
-                                    .await
-                                {
-                                    warn!("Failed to complete task {}: {}", task_id_clone, e);
-                                } else {
-                                    info!("Task {} completed successfully via HRM", task_id_clone);
-
-                                    // Push completion to commander via gossip
-                                    if let Some(ref bus) = learning_bus {
-                                        let snapshot = {
-                                            let b = compute_budget.read().await;
-                                            serde_json::to_value(b.snapshot()).ok()
-                                        };
-                                        let notice = arkavo_gossip::TaskCompletionNotice {
-                                            task_id: task_id_clone.to_string(),
-                                            specialist_id: specialist_id.clone(),
-                                            succeeded: true,
-                                            content: result_for_notice,
-                                            budget_snapshot: snapshot,
-                                            completion_ms: task_start.elapsed().as_millis() as u64,
-                                        };
-                                        bus.broadcast_to_peers(
-                                            arkavo_gossip::GossipMessage::TaskCompleted(notice),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            }
-                            Err(error_msg) => {
-                                let error = TaskError {
-                                    code: "HRM_EXECUTION_ERROR".to_string(),
-                                    message: error_msg.clone(),
-                                    details: None,
-                                };
-
-                                if let Ok(Some(mut task)) =
-                                    task_store.get_task(&task_id_clone).await
-                                {
-                                    task.error = Some(error);
-                                    let _ = task_store.create_task(task).await;
-                                }
-
-                                if let Err(e) = task_executor
-                                    .update_task_status(&task_id_clone, TaskStatus::Failed)
-                                    .await
-                                {
-                                    warn!("Failed to mark task {} as failed: {}", task_id_clone, e);
-                                } else {
-                                    warn!("Task {} failed: {}", task_id_clone, error_msg);
-
-                                    // Push failure to commander via gossip
-                                    if let Some(ref bus) = learning_bus {
-                                        let snapshot = {
-                                            let b = compute_budget.read().await;
-                                            serde_json::to_value(b.snapshot()).ok()
-                                        };
-                                        let notice = arkavo_gossip::TaskCompletionNotice {
-                                            task_id: task_id_clone.to_string(),
-                                            specialist_id: specialist_id.clone(),
-                                            succeeded: false,
-                                            content: error_msg,
-                                            budget_snapshot: snapshot,
-                                            completion_ms: task_start.elapsed().as_millis() as u64,
-                                        };
-                                        bus.broadcast_to_peers(
-                                            arkavo_gossip::GossipMessage::TaskCompleted(notice),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
+                hand_to_agent(
+                    direct,
+                    task_store,
+                    agent_memory,
+                    &agent_event_tx,
+                    request_metadata_ref.as_ref(),
+                    task_id,
+                    task_content,
+                    images,
+                )
+                .await;
             } else {
                 // No router means no way to execute this task, ever. Submitting
                 // it and walking away leaves the requester polling a task that
@@ -533,6 +318,73 @@ pub async fn handle_message_send(
                 Some(format!("Error: {e}")),
             ))
         }
+    }
+}
+
+/// Hand a message to this agent as it runs: to its agent loop when it has
+/// one, and to the conductor directly when it does not.
+#[allow(clippy::too_many_arguments)]
+async fn hand_to_agent(
+    direct: DirectExecution,
+    task_store: &Arc<dyn TaskStore>,
+    agent_memory: &Arc<tokio::sync::RwLock<ToolMemory>>,
+    agent_event_tx: &tokio::sync::Mutex<
+        Option<tokio::sync::mpsc::Sender<super::super::agent_event::AgentEvent>>,
+    >,
+    metadata: Option<&serde_json::Value>,
+    task_id: uuid::Uuid,
+    task_content: String,
+    images: Option<Vec<String>>,
+) {
+    if let Some(event_tx) = agent_event_tx.lock().await.clone() {
+        // Orchestrator path: route through the agent event loop
+        use super::super::agent_event::{AgentEvent, CorrelationId};
+
+        let correlation_id = CorrelationId(uuid::Uuid::new_v4());
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
+
+        let sender_did = metadata
+            .and_then(|m| m.get("sender_did"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let _ = event_tx
+            .send(AgentEvent::IncomingMessage {
+                sender: sender_did,
+                content: task_content,
+                task_id,
+                correlation_id,
+                reply: reply_tx,
+                outcome: outcome_tx,
+            })
+            .await;
+
+        // The requester polls this task, so the cycle's answer — text, tool
+        // summary, or refusal — has to land on it. The specialist path does
+        // the same thing itself.
+        let executor = direct.task_executor;
+        tokio::spawn(async move {
+            deliver_outcome_to_task(
+                executor,
+                task_id,
+                reply_rx,
+                outcome_rx,
+                REQUEST_REPLY_BUDGET,
+            )
+            .await;
+        });
+    } else {
+        // Specialist path: execute directly via conductor
+        tokio::spawn(specialist::run(
+            direct,
+            task_store.clone(),
+            agent_memory.clone(),
+            task_id,
+            task_content,
+            images,
+        ));
     }
 }
 
