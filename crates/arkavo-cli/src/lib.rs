@@ -85,11 +85,11 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "ui" => commands::ui::execute(&args[1..]),
         "mcp" => commands::mcp_proxy::execute(&args[1..]),
         command @ ("login" | "logout") => commands::login::execute(command, &args[1..]),
-        // Hidden commands (still accessible, just not in main help)
         #[cfg(feature = "knowledge-pack")]
         "pack" => commands::pack::execute(&args[1..]).map_err(Into::into),
         #[cfg(not(feature = "knowledge-pack"))]
         "pack" => Err("pack is not in this build; compile with the knowledge-pack feature".into()),
+        // Hidden commands (still accessible, just not in main help)
         "terminal" => commands::terminal::execute(&args[1..]),
         #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
         "test" => commands::test::execute(&args[1..]),
@@ -98,7 +98,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Test command is not available on this platform");
             Err("Test command requires macOS with mcp-tools feature (uses iOS simulator)".into())
         }
-        // Hidden commands with async runtime
         "model" | "models" | "ls" => {
             let run_async = async {
                 use clap::Parser;
@@ -136,6 +135,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        // Hidden, like `terminal` and `test` above
         "dataflow" | "flow" => {
             let run_async = async {
                 use clap::Parser;
@@ -186,26 +186,44 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn print_usage() {
-    println!("Arkavo Edge");
-    println!();
-    println!("USAGE:");
-    println!("    arkavo [COMMAND] [OPTIONS]");
-    println!();
-    println!("COMMANDS:");
-    println!("    chat           Conversational chat");
-    println!("    kit            Author and validate SwarmKit manifests");
-    println!("    task           Plan and apply code changes");
-    println!("    ui             Launch web UI");
-    println!("    pack           Build sealed knowledge-pack components");
-    println!("    mcp proxy      Permit-gated stdio MCP relay");
-    println!("{}", commands::login::login_help());
-    println!();
-    println!("Run 'arkavo <command> --help' for detailed options");
-    println!();
-    println!("OPTIONS:");
-    println!("    -h, --help       Show help");
-    println!("    -v, --version    Show version");
-    println!("    --trust          Run the agent and show its authorization QR code (DID:key)");
+    println!("{}", usage_text());
+}
+
+/// The top-level help. Lists what this build can actually run: `pack`
+/// appears only when the knowledge-pack feature is compiled in, because a
+/// build without it refuses the command.
+fn usage_text() -> String {
+    let mut commands = vec![
+        "    agent          Run an agent (the default when no command is given)",
+        "    chat           Conversational chat",
+        "    kit            Author and validate SwarmKit manifests",
+        "    model          List and download local models",
+        "    task           Plan and apply code changes",
+        "    ui             Launch web UI",
+    ];
+    if cfg!(feature = "knowledge-pack") {
+        commands.push("    pack           Build sealed knowledge-pack components");
+    }
+    commands.push("    mcp proxy      Permit-gated stdio MCP relay");
+    commands.push(commands::login::login_help());
+
+    format!(
+        "Arkavo Edge
+
+USAGE:
+    arkavo [COMMAND] [OPTIONS]
+
+COMMANDS:
+{}
+
+Run 'arkavo <command> --help' for detailed options
+
+OPTIONS:
+    -h, --help       Show help
+    -v, --version    Show version
+    --trust          Run the agent and show its authorization QR code (DID:key)",
+        commands.join("\n")
+    )
 }
 
 /// Handle first-run experience for new users
@@ -275,4 +293,52 @@ async fn handle_first_run(verbose: bool) -> Result<(), Box<dyn std::error::Error
     }
 
     std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn listed_commands() -> Vec<String> {
+        usage_text()
+            .lines()
+            .skip_while(|line| *line != "COMMANDS:")
+            .skip(1)
+            .take_while(|line| !line.is_empty())
+            .filter_map(|line| line.split_whitespace().next().map(str::to_owned))
+            .collect()
+    }
+
+    /// Regression: the help omitted `agent` and `model`, although the README
+    /// and the first-run message tell users to run them.
+    #[test]
+    fn usage_lists_agent_and_model() {
+        let listed = listed_commands();
+        for command in ["agent", "model"] {
+            assert!(
+                listed.contains(&command.to_string()),
+                "{command} missing from {listed:?}"
+            );
+        }
+    }
+
+    /// Regression: the help advertised `pack` in builds that reject it.
+    #[test]
+    fn usage_lists_pack_only_when_it_is_compiled_in() {
+        assert_eq!(
+            listed_commands().contains(&"pack".to_string()),
+            cfg!(feature = "knowledge-pack")
+        );
+    }
+
+    #[test]
+    fn usage_still_lists_the_other_commands() {
+        let listed = listed_commands();
+        for command in ["chat", "kit", "task", "ui", "mcp", "login", "logout"] {
+            assert!(
+                listed.contains(&command.to_string()),
+                "{command} missing from {listed:?}"
+            );
+        }
+    }
 }
