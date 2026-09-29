@@ -12,15 +12,15 @@ Three subsystems:
 
 - **Manifest** (`arkavo-swarmkit` crate) — parser + cross-block validator. `kit.id` is BLAKE3 of the JCS-canonical manifest with `kit.id` and `provenance.signatures` stripped — content-addressed.
 - **Runtime** (`arkavo-swarmkit-runtime` crate) — `SwarmFlight::launch` builds per-role ARP runtimes, isolates DecisionTrace + PolicyCache, optionally resolves and verifies skill signatures via the `PublicKeyResolver` trait. Production resolver: `DidWebPublicKeyResolver` (`did:web` only in this MVP, sync via `ureq`).
-- **Gateway integration** (`arkavo-agui` crate) — `ARKAVO_SWARMKIT_PATH` env var auto-launches a kit at gateway boot; the AG-UI panel surfaces every role under `flight:<flight_id>:<role_id>`.
+- **Gateway integration** (`arkavo-agui` crate) — `ARKAVO_SWARMKIT_PATH` env var auto-launches a kit when the AG-UI gateway boots, which happens under `arkavo ui`; the AG-UI panel surfaces every role under `flight:<flight_id>:<role_id>`.
 
 ## A single agent is a one-role kit
 
 There is no separate single-agent config format — running one agent means authoring a kit with exactly one entry in `roles`. `arkavo agent -c <kit> [-p <port>]` runs it directly; multi-role kits add `-n <role-id>` to pick which role a given process runs. `arkavo kit init <name>` scaffolds this minimal shape; see `examples/01-hello-world/hello-agent.swarmkit.yaml` for a complete single-role kit.
 
-A role's `agent_provisioning.model` picks the model `arkavo agent` runs it on, local or cloud. A local edge model is a family/size pair (`family: ministral`, `size: 3B`); any other model the router knows, cloud models included, is its router id as the family with no size (`family: gpt-6-astra`, `family: kimi-k2.5`). Naming a cloud model counts as consent to use it under the kit's `runtime.cloud_policy`. `arkavo agent` refuses to start a kit whose role names a model the router does not know.
+A role's `agent_provisioning.model` picks the model `arkavo agent` runs it on, local or cloud. A local edge model is a family/size pair (`family: ministral`, `size: 3B`); any other model the router knows, cloud models included, is its router id as the family with no size (`family: gpt-6-astra`, `family: kimi-k2.5`). Naming a cloud model counts as consent to use it under the kit's `runtime.cloud_policy`. `arkavo agent` refuses to start a kit whose role names a model the router does not know, and `arkavo kit validate` fails on one.
 
-Four shipped kits in `examples/`, each with its own README:
+Four example kits in the repository's `examples/` directory, each with its own README:
 
 | Kit | Domain | Roles |
 |---|---|---|
@@ -39,7 +39,7 @@ The compliance-kit demonstrates per-role TDF policy enforcement concretely. Thre
 | `policy_enforcer` | `role/policy_enforcer`, `clearance/restricted`, `jurisdiction/us-ca` |
 | `auditor` | `role/auditor`, `clearance/restricted`, `jurisdiction/us-ca`, **`audit_authority/true`** |
 
-The orchestrator's `role_policy()` (in `crates/arkavo-swarmkit-runtime/src/tdf.rs:186-245`) translates each role's `tdf_attribute_release_policy` block into an OpenTDF `Policy` via `arkavo_tdf::PolicyBuilder`. The Key Access Service (KAS) enforces these policies at unwrap time. Even if the orchestrator (compromised or not) tries to hand the auditor's data to another role, the rewrap fails — the trust boundary is no longer "outside the swarm vs. inside" but "between any two roles within the swarm."
+The runtime's `role_policy()` (in `crates/arkavo-swarmkit-runtime/src/tdf.rs`) translates each role's `tdf_attribute_release_policy` block into an OpenTDF `Policy` via `arkavo_tdf::PolicyBuilder`. It is exercised by the runtime crate's tests; the `arkavo ui` and `arkavo agent` launch paths do not call it yet (see [What a kit launch does today](#what-a-kit-launch-does-today)). The rest of this section describes the design those policies implement. The Key Access Service (KAS) enforces these policies at unwrap time. Even if the orchestrator (compromised or not) tries to hand the auditor's data to another role, the rewrap fails — the trust boundary is no longer "outside the swarm vs. inside" but "between any two roles within the swarm."
 
 This is structurally different from agent-level access control, which gates access *to the orchestrator*. SwarmKit gates access *per role*. A compromised single role cannot exfiltrate other roles' data because the policy is enforced cryptographically before the data ever reaches it.
 
@@ -51,30 +51,109 @@ Ecosystem ties:
 
 ## How to run it
 
-Validate any of the four kits:
+The example kits live in the repository's `examples/` directory. Homebrew, the `.pkg`, the `.deb`, and the release archives install only the `arkavo` binary, so clone the repository to get them:
+
+```bash
+git clone https://github.com/arkavo-org/arkavo-edge.git
+cd arkavo-edge
+```
+
+With only the binary installed, `arkavo kit init <name>` is the starting point; see [Author your own kit](#author-your-own-kit).
+
+### What a kit launch does today
+
+Launching a kit into the gateway (`ARKAVO_SWARMKIT_PATH=<kit> arkavo ui`) parses the manifest and builds, for each role:
+
+- an Agent Runtime Policy (ARP) runtime, made of a policy cache, an adaptation engine, and a decision trace, derived from the role's `agent_provisioning` and the kit's `constraints.global_budget`;
+- the role's resolved skills;
+- an entry in the AG-UI ARP panel under `flight:<flight_id>:<role_id>`.
+
+It does not:
+
+- spawn a process or load a model for any role;
+- execute `handoffs` or pass work from one role to the next;
+- apply the `evaluation` rubric or the `completion` rules;
+- take the kit's `inputs` or write its `deliverables`;
+- build the roles' TDF attribute-release policies;
+- enforce skill signatures, unless `ARKAVO_SWARMKIT_VERIFY=required` is set. By default signatures are parsed and not enforced, because the example kits are signed with a local development key.
+
+A launched kit is a set of per-role policy and audit records that you can inspect in the panel. To run the roles, start each one as an agent, as shown below.
+
+### Validate
+
+```bash
+arkavo kit validate examples/compliance-kit/compliance-kit.swarmkit.yaml
+```
+
+`arkavo kit validate` accepts several paths. It fails on an expired kit, on a `kit.id` that does not match the manifest, and on a role that names a model the router does not know. It also lists the manifest controls that are declared but not enforced on the `arkavo agent -c` path.
+
+### Load a kit into the gateway
+
+```bash
+ARKAVO_SWARMKIT_PATH=examples/compliance-kit/compliance-kit.swarmkit.yaml arkavo ui
+```
+
+Roles surface in the AG-UI ARP panel. This applies to builds with the web renderer (Homebrew, the `.deb`, and the release archives). The macOS `.pkg` build opens a native window and does not start the gateway, so it does not load the kit.
+
+Bare `arkavo` does not start the gateway either. With `ARKAVO_SWARMKIT_PATH` set it runs the kit's first role as a single agent.
+
+### Run the roles as agents
+
+Each role runs as its own process. Start one per role, each on its own port:
+
+```bash
+arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n pii_classifier -p 8341
+arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n policy_enforcer -p 8342
+arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n auditor -p 8343
+```
+
+`-n` takes a role `id` from the manifest; without it the first role runs. Each process takes the role's id, model, and skill instructions, and the kit-level `runtime` block (`listen`, `mdns`, `mode`, `mcp_servers`, `preflight`, `cloud_policy`). The role's `isolation`, network egress, budget, and `mcp_tools` grant fields are not enforced on this path.
+
+Send a running role work with `arkavo chat --agent-id <role-id>` or `arkavo task --agent-id <role-id> '<task>'`.
+
+Agents listen on `127.0.0.1` unless the kit sets `runtime.listen`, so roles on different devices need it:
+
+```yaml
+runtime:
+  listen: "0.0.0.0:0"   # all interfaces; -p still sets the port
+```
+
+The agent's RPC endpoint does not authenticate callers yet, so bind it to other interfaces only on a trusted network.
+
+### Author your own kit
+
+With the binary alone, generate a single-role kit and build on it:
+
+```bash
+arkavo kit init my-kit
+# writes .arkavo/my-kit.swarmkit.yaml; edit it to add roles, models, and skills
+arkavo kit validate .arkavo/my-kit.swarmkit.yaml
+arkavo agent -c .arkavo/my-kit.swarmkit.yaml
+```
+
+From a git checkout you can start from an example kit instead. The copied manifest keeps its old file name, so rename it:
+
+```bash
+cp -r examples/campaign-kit examples/my-kit
+mv examples/my-kit/campaign-kit.swarmkit.yaml examples/my-kit/my-kit.swarmkit.yaml
+# edit examples/my-kit/my-kit.swarmkit.yaml: kit name, created/expires dates, role IDs, descriptions, attributes
+arkavo kit validate examples/my-kit/my-kit.swarmkit.yaml
+```
+
+`kit.id` is a hash of the manifest, so any edit makes the declared id stale. Set `kit.id: ""` while you edit; `arkavo kit validate` then prints the computed id. Paste it into `kit.id` when the manifest is final.
+
+Skill signatures cover the skill content, so an edited skill needs a new signature. The signing helpers are source-only and each one signs the skills of one example kit with a development key: `cargo run -p arkavo-swarmkit-runtime --example sign_campaign_skills` prints the payload, `signature`, and `signed_by` values for the campaign-kit skills. To sign different content, change the skill text in the helper to match your manifest.
+
+Per-kit READMEs in `examples/<kit>/README.md` document each kit's role decomposition, evaluation rubric, and TDF attribute-release sets.
+
+### From source
+
+The same validation is available without an installed binary:
 
 ```bash
 cargo run -p arkavo-swarmkit --example validate_kit -- \
   examples/compliance-kit/compliance-kit.swarmkit.yaml
 ```
-
-Launch a kit at gateway boot — roles surface in the AG-UI ARP panel:
-
-```bash
-ARKAVO_SWARMKIT_PATH=examples/compliance-kit/compliance-kit.swarmkit.yaml arkavo
-```
-
-Author your own kit:
-
-```bash
-cp -r examples/campaign-kit examples/my-kit
-# edit examples/my-kit/my-kit.swarmkit.yaml — change role IDs, descriptions, attributes
-cargo run -p arkavo-swarmkit-runtime --example sign_campaign_skills
-# paste the printed signatures into the YAML's signature/signed_by fields, then re-validate
-# (validate_kit will print the recomputed BLAKE3 kit.id; paste it into kit.id)
-```
-
-Per-kit READMEs in `examples/<kit>/README.md` document each kit's role decomposition, evaluation rubric, and TDF attribute-release sets.
 
 ## The role names are yours
 
@@ -93,14 +172,15 @@ This isn't a label system. Domain-specific role types travel through the manifes
 |---|---|
 | Manifest parser + cross-block validation | wired (SK-001..006) |
 | Per-role ARP runtime construction at launch | wired (SK-010..015) |
-| Per-role TDF attribute-release policies | wired (§6.4 / SK-053..054) |
-| Skill signature verification (ed25519 over BLAKE3 canonical) | wired (SK-090..092) |
+| Per-role TDF attribute-release policies | wired in the runtime library (§6.4 / SK-053..054); not called by a launch path |
+| Skill signature verification (ed25519 over BLAKE3 canonical) | wired (SK-090..092); enforced at gateway launch only with `ARKAVO_SWARMKIT_VERIFY=required` |
 | TDF envelope wrap/unwrap + KAS-gated decrypt | wired (SK-050..062) |
-| `ARKAVO_SWARMKIT_PATH` auto-launch | wired (SK-022, SK-061..062) |
+| `ARKAVO_SWARMKIT_PATH` auto-launch | wired under `arkavo ui` (SK-022, SK-061..062) |
 | AG-UI panel: live SwarmFlight roles | wired (SK-020..033) |
 | Operator stop control (`requestStopFlight`) | wired (SK-040) |
 | A2A JSON-RPC delegation envelope (§7.2) | aspirational |
-| Specialist process spawning + inference | aspirational |
+| Specialist process spawning + inference | aspirational; start each role with `arkavo agent -c <kit> -n <role-id>` |
+| `handoffs`, evaluation rubric, completion rules, `inputs`, `deliverables` | parsed and validated; not executed |
 | Manifest-level signing helper (TDF assertions) | aspirational |
 | `source: tdf-ref` skills | roadmap |
 | `did:key` / `did:plc` resolution | roadmap |
