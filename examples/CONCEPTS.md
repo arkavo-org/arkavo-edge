@@ -46,7 +46,7 @@ Every agent or mesh is configured by a **SwarmKit manifest** — a `*.swarmkit.y
 
 ### Minimal Configuration
 
-Scaffold a starting-point kit with `arkavo kit init my-agent` (writes `.arkavo/my-agent.swarmkit.yaml`), then edit it. An abbreviated single-role kit — see `01-hello-world/hello-agent.swarmkit.yaml` for the complete file:
+Scaffold a starting-point kit with `arkavo kit init my-agent` (writes `.arkavo/my-agent.swarmkit.yaml`), then edit it. An abbreviated single-role kit — see [01-hello-world/hello-agent.swarmkit.yaml](01-hello-world/hello-agent.swarmkit.yaml) for the complete file:
 
 ```yaml
 spec_version: "1.0.0"
@@ -271,7 +271,7 @@ mDNS works on a single local network. A kit has no setting for static peers, so 
 
 ### Example: Family Travel Mesh
 
-See `04-advanced-patterns/family-travel-mesh/` for a complete HRM implementation.
+See [family-travel-mesh](family-travel-mesh/README.md) for a complete HRM implementation.
 
 ---
 
@@ -347,7 +347,7 @@ Sample: A=0.72, B=0.58, C=0.81 → Select C (exploring new agent)
 
 ### Example: Fleet Immunity
 
-See `04-advanced-patterns/fleet-immunity/` for a complete gossip learning implementation.
+See [fleet-immunity](fleet-immunity/README.md) for a complete gossip learning implementation.
 
 ---
 
@@ -446,7 +446,7 @@ runtime:
 
 ### Example: Secure Agent
 
-See `02-single-agent/secure-agent/` for a complete preflight policy implementation.
+See [secure-agent](secure-agent/README.md) for a complete preflight policy implementation.
 
 ---
 
@@ -454,9 +454,9 @@ See `02-single-agent/secure-agent/` for a complete preflight policy implementati
 
 Now that you understand the core concepts:
 
-1. **Start simple**: Try `01-hello-world/` for your first agent
-2. **Add collaboration**: Try `03-multi-agent-basics/` for multi-agent patterns
-3. **Go advanced**: Try `04-advanced-patterns/` for HRM and gossip learning
-4. **Build production**: Study `05-production/` for full system examples
+1. **Start simple**: Try [01-hello-world](01-hello-world/README.md) for your first agent
+2. **Add collaboration**: Try [software-development-simple](software-development-simple/README.md) for multi-agent patterns
+3. **Go advanced**: Try [family-travel-mesh](family-travel-mesh/README.md) for HRM and [fleet-immunity](fleet-immunity/README.md) for gossip learning
+4. **Build production**: Study [software-development-lifecycle](software-development-lifecycle/README.md) for a full system example
 
 See the main [README.md](README.md) for the complete learning path.

@@ -322,8 +322,8 @@ The Agent-to-Agent protocol uses:
 ## Learn More
 
 - [Arkavo Documentation](../../README.md)
-- [A2A Protocol Specification](../../docs/a2a-protocol.md)
-- [MCP Integration Guide](../../docs/mcp-integration.md)
+- [A2A Protocol Specification](../../docs/a2a-protocol-v2.md)
+- [MCP Tool Reference](../../docs/coding-agent-toolset.md)
 - [AGUI Dashboard Guide](../../crates/arkavo-agui/README.md)
 
 ## Contributing
