@@ -222,7 +222,7 @@ Run 'arkavo <command> --help' for detailed options
 OPTIONS:
     -h, --help       Show help
     -v, --version    Show version
-    --trust          Run the agent and show its authorization QR code (DID:key)",
+    --trust          Run the agent on loopback only and show its authorization QR code (DID:key)",
         commands.join("\n")
     )
 }
@@ -321,6 +321,17 @@ mod tests {
                 "{command} missing from {listed:?}"
             );
         }
+    }
+
+    #[test]
+    fn usage_says_that_trust_keeps_the_agent_on_loopback() {
+        let usage = usage_text();
+        let trust = usage
+            .lines()
+            .find(|line| line.trim_start().starts_with("--trust"))
+            .expect("--trust is listed");
+        assert!(trust.contains("loopback"), "{trust}");
+        assert!(trust.contains("QR code"), "{trust}");
     }
 
     /// Regression: the help advertised `pack` in builds that reject it.

@@ -13,7 +13,7 @@ use arkavo_protocol::agent_config::AgentMode;
 use arkavo_swarmkit::runtime_config::RoleRuntimeView;
 use arkavo_swarmkit::{AgentRuntimeConfig, DiscoverError, RuntimeMcpServer, RuntimeMode};
 
-use super::agent::listen::DEFAULT_LISTEN;
+use super::agent::listen::{DEFAULT_LISTEN, parse_listen, trusted_listen};
 use super::agent::{AgentConfig, McpServerConfig, default_agent_name};
 use super::kit::kit_model_to_hint;
 
@@ -35,6 +35,55 @@ pub fn resolve_agent_configs(
     port: Option<u16>,
     cwd: &Path,
 ) -> Result<Vec<AgentConfig>, Box<dyn std::error::Error>> {
+    Ok(resolve(cli_config_path, name, port, cwd)?.configs)
+}
+
+/// [`resolve_agent_configs`] for an agent that is about to start, where
+/// `trust` says whether it was started with `--trust`.
+///
+/// With `trust`, every returned entry listens on loopback. The second value
+/// is the line to show the operator when that set aside an address the kit
+/// asked for. A `listen` that does not parse is an error here, as it is
+/// when the agent binds: `--trust` does not turn it into an address.
+pub(crate) fn resolve_agent_configs_for_start(
+    cli_config_path: Option<&Path>,
+    name: Option<&str>,
+    port: Option<u16>,
+    trust: bool,
+    cwd: &Path,
+) -> Result<(Vec<AgentConfig>, Option<String>), Box<dyn std::error::Error>> {
+    let Resolved {
+        mut configs,
+        kit_listen,
+    } = resolve(cli_config_path, name, port, cwd)?;
+    if !trust {
+        return Ok((configs, None));
+    }
+
+    let mut notice = None;
+    for config in &mut configs {
+        let trusted = trusted_listen(parse_listen(&config.listen)?, kit_listen.as_deref());
+        config.listen = trusted.addr.to_string();
+        // A kit has one `runtime.listen`, so every role gives the same line.
+        notice = trusted.notice;
+    }
+    Ok((configs, notice))
+}
+
+/// What a run resolves to before `--trust` is considered.
+struct Resolved {
+    configs: Vec<AgentConfig>,
+    /// The kit's `runtime.listen` as written. `None` when the listen address
+    /// is the built-in default.
+    kit_listen: Option<String>,
+}
+
+fn resolve(
+    cli_config_path: Option<&Path>,
+    name: Option<&str>,
+    port: Option<u16>,
+    cwd: &Path,
+) -> Result<Resolved, Box<dyn std::error::Error>> {
     let kit = match cli_config_path {
         // Explicit -c: errors (bad YAML, invalid kit) are fatal. No silent
         // fallback to defaults when the caller named a specific file.
@@ -76,7 +125,11 @@ pub fn resolve_agent_configs(
         }
     }
 
-    Ok(configs)
+    let kit_listen = kit.and_then(|kit| kit.config.runtime.listen);
+    Ok(Resolved {
+        configs,
+        kit_listen,
+    })
 }
 
 /// Replace the port of a `listen` address, keeping its host.
@@ -84,8 +137,9 @@ pub fn resolve_agent_configs(
 /// IP literals go through [`std::net::SocketAddr`] so an IPv6 host keeps its
 /// brackets — splitting on the first `:` would reduce `[::]:8080` to `[`.
 /// Hostnames only lose a trailing numeric `:port`, and an address that never
-/// had a port keeps its whole host. An address with no host at all gets the
-/// default's: `-p` picks a port, it does not widen where the agent listens.
+/// had a port keeps its whole host. An address with no host at all stays
+/// without one, and so stays unparseable: `-p` picks a port, it never
+/// chooses where the agent listens.
 fn listen_with_port(listen: &str, port: u16) -> String {
     use std::net::{IpAddr, SocketAddr};
 
@@ -100,9 +154,6 @@ fn listen_with_port(listen: &str, port: u16) -> String {
         Some((host, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => host,
         _ => listen,
     };
-    if host.is_empty() {
-        return listen_with_port(DEFAULT_LISTEN, port);
-    }
     format!("{host}:{port}")
 }
 
@@ -329,28 +380,181 @@ mod tests {
         assert_eq!(listen_with_port("localhost:3000", 8080), "localhost:8080");
     }
 
-    /// Regression: an address with no host was given `0.0.0.0`, so `-p`
-    /// alone could move an agent onto every interface.
+    /// Regression: an address with no host was given one, so `-p` turned a
+    /// `runtime.listen` that stops startup into an address the agent bound.
     #[test]
-    fn listen_with_port_gives_a_missing_host_the_loopback_default() {
-        assert_eq!(listen_with_port("", 8080), "127.0.0.1:8080");
-        assert_eq!(listen_with_port(":3000", 8080), "127.0.0.1:8080");
+    fn listen_with_port_gives_a_missing_host_none() {
+        for hostless in ["", ":3000"] {
+            let listen = listen_with_port(hostless, 8080);
+            assert_eq!(listen, ":8080", "{hostless:?}");
+            assert!(parse_listen(&listen).is_err(), "{hostless:?}");
+        }
     }
 
-    /// Regression: a kit with no `runtime.listen`, and the zero-config
-    /// default, listened on all interfaces.
     #[test]
-    fn a_kit_without_runtime_listen_listens_on_loopback() {
+    fn a_kit_without_runtime_listen_listens_on_every_interface() {
         let dir = tempdir();
         let path = dir.path().join("agent.swarmkit.yaml");
         fs::write(&path, minimal_kit_yaml()).unwrap();
 
         let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
         assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].listen, "127.0.0.1:0");
+        assert_eq!(configs[0].listen, "0.0.0.0:0");
 
         let with_port = resolve_agent_configs(Some(&path), None, Some(8343), dir.path()).unwrap();
-        assert_eq!(with_port[0].listen, "127.0.0.1:8343");
+        assert_eq!(with_port[0].listen, "0.0.0.0:8343");
+    }
+
+    /// A kit in `dir` whose `runtime.listen` is `listen`, or that has no
+    /// runtime block.
+    fn write_kit(dir: &Path, listen: Option<&str>) -> std::path::PathBuf {
+        let kit = match listen {
+            Some(listen) => minimal_kit_yaml().replacen(
+                "kit:",
+                &format!("runtime:\n  listen: \"{listen}\"\nkit:"),
+                1,
+            ),
+            None => minimal_kit_yaml(),
+        };
+        let path = dir.join("agent.swarmkit.yaml");
+        fs::write(&path, kit).unwrap();
+        path
+    }
+
+    /// The listen address and the notice of a `--trust` start.
+    fn trusted_start(
+        kit: Option<&Path>,
+        port: Option<u16>,
+        cwd: &Path,
+    ) -> (String, Option<String>) {
+        let (configs, notice) =
+            resolve_agent_configs_for_start(kit, None, port, true, cwd).unwrap();
+        assert_eq!(configs.len(), 1);
+        (configs[0].listen.clone(), notice)
+    }
+
+    #[test]
+    fn without_trust_a_start_resolves_what_every_other_caller_gets() {
+        let dir = tempdir();
+        let no_kit = resolve_agent_configs_for_start(None, None, None, false, dir.path()).unwrap();
+        assert_eq!(no_kit.0[0].listen, "0.0.0.0:0");
+        assert_eq!(no_kit.1, None);
+
+        let kit = write_kit(dir.path(), Some("10.0.0.140:8342"));
+        let (configs, notice) =
+            resolve_agent_configs_for_start(Some(&kit), None, Some(9000), false, dir.path())
+                .unwrap();
+        assert_eq!(
+            configs,
+            resolve_agent_configs(Some(&kit), None, Some(9000), dir.path()).unwrap()
+        );
+        assert_eq!(configs[0].listen, "10.0.0.140:9000");
+        assert_eq!(notice, None);
+    }
+
+    #[test]
+    fn trust_with_no_kit_listens_on_loopback() {
+        let dir = tempdir();
+        assert_eq!(
+            trusted_start(None, None, dir.path()),
+            ("127.0.0.1:0".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn trust_with_a_kit_that_sets_no_listen_listens_on_loopback() {
+        let dir = tempdir();
+        let kit = write_kit(dir.path(), None);
+        assert_eq!(
+            trusted_start(Some(&kit), None, dir.path()),
+            ("127.0.0.1:0".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn trust_keeps_the_port_that_p_selects() {
+        let dir = tempdir();
+        assert_eq!(
+            trusted_start(None, Some(8343), dir.path()),
+            ("127.0.0.1:8343".to_string(), None)
+        );
+
+        let kit = write_kit(dir.path(), Some("0.0.0.0:8342"));
+        let (listen, _) = trusted_start(Some(&kit), Some(8343), dir.path());
+        assert_eq!(listen, "127.0.0.1:8343");
+    }
+
+    #[test]
+    fn trust_overrides_a_network_address_in_the_kit_and_says_so() {
+        let dir = tempdir();
+        let kit = write_kit(dir.path(), Some("0.0.0.0:8342"));
+
+        let (listen, notice) = trusted_start(Some(&kit), None, dir.path());
+        assert_eq!(listen, "127.0.0.1:8342");
+        let notice = notice.expect("the kit's address was set aside");
+        assert!(notice.contains("--trust"), "{notice}");
+        assert!(notice.contains("0.0.0.0:8342"), "{notice}");
+    }
+
+    #[test]
+    fn trust_keeps_a_loopback_address_in_the_kit() {
+        let dir = tempdir();
+        let kit = write_kit(dir.path(), Some("127.0.0.1:8342"));
+        assert_eq!(
+            trusted_start(Some(&kit), None, dir.path()),
+            ("127.0.0.1:8342".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn trust_keeps_an_ipv6_loopback_address_in_the_kit() {
+        let dir = tempdir();
+        let kit = write_kit(dir.path(), Some("[::1]:8342"));
+        assert_eq!(
+            trusted_start(Some(&kit), None, dir.path()),
+            ("[::1]:8342".to_string(), None)
+        );
+        assert_eq!(
+            trusted_start(Some(&kit), Some(9000), dir.path()),
+            ("[::1]:9000".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn trust_does_not_make_an_unparseable_address_usable() {
+        let dir = tempdir();
+        for bad in ["localhost:8080", ":3000", "not an address"] {
+            let kit = write_kit(dir.path(), Some(bad));
+            for port in [None, Some(8343)] {
+                let err = resolve_agent_configs_for_start(Some(&kit), None, port, true, dir.path())
+                    .expect_err(bad)
+                    .to_string();
+                assert!(err.contains("Invalid listen address"), "{bad:?}: {err}");
+            }
+        }
+    }
+
+    #[test]
+    fn trust_moves_every_role_of_a_kit() {
+        let dir = tempdir();
+        let kit = minimal_kit_yaml()
+            .replacen("kit:", "runtime:\n  listen: \"0.0.0.0:8342\"\nkit:", 1)
+            .replacen(
+                "coordination:",
+                "  - id: worker\n    role_type: operator\n    agent_provisioning: {}\n    \
+                 skills: []\n    mcp_tools: []\n    handoffs: []\ncoordination:",
+                1,
+            );
+        let path = dir.path().join("agent.swarmkit.yaml");
+        fs::write(&path, kit).unwrap();
+
+        let (configs, notice) =
+            resolve_agent_configs_for_start(Some(&path), None, None, true, dir.path()).unwrap();
+        assert_eq!(configs.len(), 2);
+        for config in &configs {
+            assert_eq!(config.listen, "127.0.0.1:8342", "{}", config.name);
+        }
+        assert!(notice.is_some());
     }
 
     /// The role id travels with the configuration so the server can re-read

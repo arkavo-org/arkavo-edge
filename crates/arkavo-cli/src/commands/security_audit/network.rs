@@ -12,7 +12,7 @@ use arkavo_protocol::rate_limit::RateLimitConfig;
 use arkavo_swarmkit::DiscoverError;
 
 use super::{AuditResult, AuditStatus, result};
-use crate::commands::agent::listen::{DEFAULT_LISTEN, is_loopback, parse_listen};
+use crate::commands::agent::listen::{DEFAULT_LISTEN, LOOPBACK_LISTEN, is_loopback, parse_listen};
 
 const NETWORK: &str = "Network";
 const AUTHENTICATION: &str = "Authentication";
@@ -83,7 +83,8 @@ pub(super) fn check_bind(endpoint: &Endpoint) -> AuditResult {
             AuditStatus::Fail,
             format!(
                 "RPC endpoint listens on {addr}, reachable from the network ({origin}); \
-                 set runtime.listen to \"{DEFAULT_LISTEN}\" to restrict it to this machine"
+                 start the agent with --trust, or set runtime.listen to \"{LOOPBACK_LISTEN}\", \
+                 to keep it on this machine"
             ),
         ),
         Endpoint::Invalid { reason } => result(
@@ -277,18 +278,34 @@ provenance:
         ]
     }
 
+    /// Regression: with no kit the audit reported a loopback endpoint and
+    /// passed, while the agent it describes listens on every interface.
     #[test]
-    fn no_kit_is_audited_as_the_built_in_loopback_default() {
+    fn no_kit_is_audited_as_the_built_in_default_on_every_interface() {
         let dir = tempfile::tempdir().unwrap();
-        let bind = check_bind(&effective_endpoint(dir.path()));
+        let endpoint = effective_endpoint(dir.path());
 
-        assert_eq!(bind.status, AuditStatus::Pass);
-        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
+        for check in endpoint_checks(&endpoint) {
+            assert_eq!(check.status, AuditStatus::Fail, "{}", check.message);
+            assert!(check.message.contains("0.0.0.0:0"), "{}", check.message);
+            assert!(
+                !check.message.contains("this machine only"),
+                "{}",
+                check.message
+            );
+        }
+        let bind = check_bind(&endpoint);
         assert!(
-            bind.message.contains("built-in default"),
+            bind.message.contains("built-in default, no kit found"),
             "{}",
             bind.message
         );
+        assert!(
+            bind.message.contains("reachable from the network"),
+            "{}",
+            bind.message
+        );
+        assert!(bind.message.contains("--trust"), "{}", bind.message);
     }
 
     #[test]
@@ -296,8 +313,13 @@ provenance:
         let dir = dir_with_kit(None);
         let bind = check_bind(&effective_endpoint(dir.path()));
 
-        assert_eq!(bind.status, AuditStatus::Pass);
-        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
+        assert_eq!(bind.status, AuditStatus::Fail);
+        assert!(bind.message.contains("0.0.0.0:0"), "{}", bind.message);
+        assert!(
+            bind.message.contains("sets no runtime.listen"),
+            "{}",
+            bind.message
+        );
     }
 
     /// Regression: the bind check passed with "Default bind is

@@ -1,5 +1,5 @@
 //! Discovery of an agent that listens on loopback, which is where an agent
-//! started without `runtime.listen` listens.
+//! started with `--trust` listens.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
