@@ -82,6 +82,7 @@ impl AuditReport {
             check_swarmkit_manifest_at(cwd),
             check_api_keys_in_env(),
             check_shell_command_policy(),
+            check_tool_isolation(),
         ];
 
         let passed = results
@@ -363,6 +364,20 @@ fn check_shell_command_policy() -> AuditResult {
     )
 }
 
+/// A constant because tool dispatch (the conductor tool loop and the MCP
+/// registry) never consults a sandbox: `ToolSandbox` has no caller and nothing
+/// constructs a `TaskPolicyManager`, so there is no runtime state to inspect.
+/// Warn rather than Fail keeps this file's convention that Fail marks a
+/// misconfiguration the operator can correct.
+fn check_tool_isolation() -> AuditResult {
+    AuditResult {
+        name: "Tool isolation".to_string(),
+        status: AuditStatus::Warn,
+        message: "No tool execution path is sandboxed; shell_exec and other process-spawning tools run as the agent's OS user with its files, network and environment (command allow/block lists are string heuristics, not confinement)".to_string(),
+        category: "Tool Execution".to_string(),
+    }
+}
+
 /// Execute the security audit CLI command. `bind` audits the agent as
 /// started with `--bind`.
 pub fn execute(json_output: bool, bind: Option<BindAddress>) -> i32 {
@@ -406,6 +421,33 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.get("results").is_some());
         assert!(parsed.get("summary").is_some());
+    }
+
+    /// Regression: the audit reported a hard-coded Pass named "Task policy
+    /// manager" although no tool call is confined. Nothing constructs a
+    /// `TaskPolicyManager` and `ToolSandbox` has no caller, so the report must
+    /// say tool execution is unconfined.
+    #[test]
+    fn audit_reports_tool_execution_as_unconfined() {
+        let report = AuditReport::run(None);
+        let isolation = report
+            .results
+            .iter()
+            .find(|r| r.name == "Tool isolation")
+            .expect("audit must report tool isolation");
+        assert_eq!(isolation.status, AuditStatus::Warn);
+        assert!(
+            isolation.message.contains("shell_exec"),
+            "message must name the unconfined tool path: {}",
+            isolation.message
+        );
+        assert!(
+            report
+                .results
+                .iter()
+                .all(|r| !(r.name == "Task policy manager" && r.status == AuditStatus::Pass)),
+            "no Pass may be reported for an unwired policy manager"
+        );
     }
 
     /// Regression: the report passed bind, TLS, rate limiting and policy
