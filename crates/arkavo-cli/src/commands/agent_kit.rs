@@ -190,6 +190,7 @@ fn role_to_agent_config(
 
     Ok(AgentConfig {
         name: role.role_id.clone(),
+        role_id: Some(role.role_id.clone()),
         purpose: role.skill_instructions.clone(),
         model,
         mode,
@@ -272,6 +273,7 @@ pub fn export_resolved_kit_path(cli_config_path: Option<&Path>, cwd: &Path) {
 fn default_agent_config() -> AgentConfig {
     AgentConfig {
         name: default_agent_name(),
+        role_id: None,
         purpose: "A general-purpose AI agent".to_string(),
         model: String::new(),
         mode: AgentMode::default(),
@@ -347,6 +349,20 @@ mod tests {
 
         let with_port = resolve_agent_configs(Some(&path), None, Some(8343), dir.path()).unwrap();
         assert_eq!(with_port[0].listen, "127.0.0.1:8343");
+    }
+
+    /// The role id travels with the configuration so the server can re-read
+    /// the same role when the kit is reloaded.
+    #[test]
+    fn a_kit_role_carries_its_role_id_and_the_default_has_none() {
+        let dir = tempdir();
+        let path = dir.path().join("agent.swarmkit.yaml");
+        fs::write(&path, minimal_kit_yaml()).unwrap();
+
+        let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
+        assert_eq!(configs[0].role_id.as_deref(), Some("agent"));
+
+        assert_eq!(default_agent_config().role_id, None);
     }
 
     #[test]

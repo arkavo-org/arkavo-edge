@@ -288,6 +288,12 @@ impl A2aServer {
         // route_with_tools_hinted(). No separate LLM adapter needed.
     }
 
+    /// Record the kit role this process was started as, so a hot reload of
+    /// the kit re-reads that role. `None` for an agent started without a kit.
+    pub async fn set_agent_role(&self, role_id: Option<String>) {
+        self.agent_metadata.write().await.role_id = role_id;
+    }
+
     pub async fn set_api_keys(&self, api_keys: std::collections::HashMap<String, String>) {
         let mut metadata = self.agent_metadata.write().await;
         metadata.api_keys = api_keys;
