@@ -9,13 +9,11 @@
 use std::net::{IpAddr, SocketAddr};
 
 /// Listen address used when the kit has no `runtime.listen`, and for the
-/// zero-config default: every interface, on a port the OS picks.
+/// zero-config default: loopback, on a port the OS picks.
 ///
-/// An agent started with no configuration is meant to be found and reached
-/// by agents on other devices. The endpoint does not authenticate callers,
-/// so such a start prints [`exposure_warning`], and `--bind` moves the agent
-/// to an address of the operator's choosing ([`bind_listen`]).
-pub(crate) const DEFAULT_LISTEN: &str = "0.0.0.0:0";
+/// The endpoint does not authenticate callers, so exposing it to other
+/// machines requires an explicit `--bind` or `runtime.listen` address.
+pub(crate) const DEFAULT_LISTEN: &str = "127.0.0.1:0";
 
 /// A listen address for this machine only, on a port the OS picks. Shown to
 /// the operator as the value to pin in a kit.
@@ -190,11 +188,11 @@ mod tests {
     }
 
     #[test]
-    fn the_default_listen_address_is_every_interface() {
+    fn the_default_listen_address_is_loopback() {
         let default = parse_listen(DEFAULT_LISTEN).unwrap();
-        assert_eq!(default.ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        assert_eq!(default.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert_eq!(default.port(), 0);
-        assert!(exposure_warning(default).is_some());
+        assert_eq!(exposure_warning(default), None);
     }
 
     #[test]

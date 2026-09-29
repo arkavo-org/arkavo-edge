@@ -146,7 +146,7 @@ fn a_source_without_listen_migrates_without_runtime_listen() {
             dir.path(),
         )
         .expect("migrated kit should resolve");
-        assert_eq!(configs[0].listen, "0.0.0.0:0", "{source:?}");
+        assert_eq!(configs[0].listen, "127.0.0.1:0", "{source:?}");
     }
 }
 
