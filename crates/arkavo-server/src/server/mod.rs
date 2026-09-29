@@ -34,6 +34,7 @@ mod llm_intent_analyzer;
 mod local_engine;
 mod local_only;
 mod mcp_bridge;
+pub mod pipeline;
 mod policy_cache;
 mod rlm_bridge;
 #[cfg(feature = "routines")]

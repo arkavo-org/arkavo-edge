@@ -19,6 +19,7 @@ use super::super::agent_cycle_reply::{
 };
 use super::super::agent_event::CycleOutcome;
 use super::super::config_helpers::AgentMetadata;
+use super::super::pipeline;
 use super::super::tool_memory::ToolMemory;
 
 #[cfg(test)]
@@ -33,6 +34,14 @@ mod budget_tests;
 mod caller_budget;
 pub(in crate::server) mod direct;
 mod specialist;
+#[cfg(test)]
+// Same waiver as above.
+#[allow(clippy::disallowed_methods)]
+mod step_tests;
+#[cfg(test)]
+// Same waiver as above.
+#[allow(clippy::disallowed_methods)]
+mod test_agent;
 
 use direct::DirectExecution;
 
@@ -277,17 +286,30 @@ pub async fn handle_message_send(
                     iroh_node: iroh_node.cloned(),
                 };
 
-                hand_to_agent(
-                    direct,
-                    task_store,
-                    agent_memory,
-                    &agent_event_tx,
-                    request_metadata_ref.as_ref(),
-                    task_id,
-                    task_content,
-                    images,
-                )
-                .await;
+                // A step of a pipeline run is answered on its own, outside the
+                // agent loop, so no earlier message is in front of the model
+                // and no other message shares its cycle.
+                if pipeline::is_marked(request_metadata_ref.as_ref()) {
+                    let allowed = pipeline::step_timeout(request_metadata_ref.as_ref());
+                    tokio::spawn(pipeline::answer_step(
+                        direct,
+                        task_id,
+                        task_content,
+                        allowed,
+                    ));
+                } else {
+                    hand_to_agent(
+                        direct,
+                        task_store,
+                        agent_memory,
+                        &agent_event_tx,
+                        request_metadata_ref.as_ref(),
+                        task_id,
+                        task_content,
+                        images,
+                    )
+                    .await;
+                }
             } else {
                 // No router means no way to execute this task, ever. Submitting
                 // it and walking away leaves the requester polling a task that
