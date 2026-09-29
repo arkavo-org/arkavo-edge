@@ -44,7 +44,16 @@ arkavo
 arkavo ui
 ```
 
-That's it. No configuration files, no setup. Agents auto-discover via mDNS and form a mesh.
+That's it. No configuration files, no setup. Agents on the same machine auto-discover via mDNS and form a mesh.
+
+An agent listens on `127.0.0.1` by default, so agents on other devices cannot reach it until its kit sets `runtime.listen`:
+
+```yaml
+runtime:
+  listen: "0.0.0.0:8343"   # all interfaces, fixed port
+```
+
+The agent's RPC endpoint does not authenticate callers yet, so bind it to other interfaces only on a trusted network.
 
 On first run, Arkavo downloads two local models sized to your device — a small model for fast routing (Gemma 4 E2B) and a larger model for inference (Gemma 4 12B on desktop/workstation; Gemma 4 E4B on a Raspberry Pi 5).
 
@@ -61,7 +70,7 @@ arkavo agent run --trust   # or simply: arkavo --trust
 See the [migration guide](docs/openclaw-migration-guide.md) for a full comparison: what you gain (budget controls, TDF encryption, PII preflight, offline operation), what's different, and step-by-step setup.
 
 ## Why Arkavo?
-- **Zero config:** Just run `arkavo`. Auto-naming, auto-routing, auto-discovery.
+- **Zero config:** Just run `arkavo`. Auto-naming, auto-routing, and auto-discovery between agents on the same machine. Reaching agents on other devices takes one kit setting, `runtime.listen` (see [Launch](#launch)).
 - **Fast:** Low-latency agent-to-agent communication (benchmarkable from source — see [Building from Source](#building-from-source)).
 - **Visual:** See live agent communication flows in real-time.
 
