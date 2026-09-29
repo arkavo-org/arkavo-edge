@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use arkavo_swarmkit::pipeline::pipelines;
 use arkavo_swarmkit::unenforced::AGENT_PATH;
 use arkavo_swarmkit::{
     AgentRuntimeConfig, DiscoverError, UnenforcedControl, kit_id_for, read_kit_file,
@@ -28,6 +29,9 @@ pub struct KitValidateReport {
     /// does not match is an error, not a report.
     pub id_matches: bool,
     pub expires: Option<String>,
+    /// The kit's pipelines, each as its role ids in running order. Empty
+    /// unless the topology is `pipeline` and roles hand off to one another.
+    pub pipelines: Vec<Vec<String>>,
     /// Controls the kit declares that the agent path does not act on. They
     /// do not make the kit invalid.
     pub unenforced: Vec<UnenforcedControl>,
@@ -52,6 +56,15 @@ impl KitValidateReport {
         match &self.expires {
             Some(expires) => lines.push(format!("expires: {expires}")),
             None => lines.push("expires: never".to_string()),
+        }
+        // The entry role is the one thing about a pipeline an author cannot
+        // read off a single role's block, and the one they need to use it.
+        for roles in &self.pipelines {
+            lines.push(format!(
+                "pipeline: {} (send requests to {})",
+                roles.join(" -> "),
+                roles[0]
+            ));
         }
         lines.extend(self.unenforced_notice());
         lines
@@ -119,6 +132,8 @@ pub fn validate_kit_at(
         id_matches: computed_id == manifest.kit.id,
         computed_id,
         expires: manifest.kit.expires.clone(),
+        // `read_kit_file` has validated the handoffs, so they can be planned.
+        pipelines: pipelines(manifest)?,
         unenforced: unenforced_on_agent_path(manifest),
     })
 }
@@ -372,6 +387,114 @@ provenance:
             "{notice}"
         );
         assert!(!notice.to_lowercase().contains("error"), "{notice}");
+    }
+
+    /// The fixture with `planner` handing off to `critic`, which reviews.
+    fn pipeline_kit_yaml(topology: &str) -> String {
+        kit_yaml("", GOOD_MODEL)
+            .replace(
+                "  - id: critic",
+                "    handoffs: [{to: critic, on: always}]\n    \
+                 context_scope: {can_read: [self], can_write: [self]}\n  - id: critic",
+            )
+            .replace("topology: pipeline", &format!("topology: {topology}"))
+            .replace(
+                "completion:",
+                "evaluation:\n  critic_role: critic\n  rubric:\n    dimensions:\n      \
+                 - {name: quality, weight: 1.0, threshold: 0.5}\ncompletion:",
+            )
+    }
+
+    /// What a pipeline run carries out is not listed as unenforced for the
+    /// kit it is carried out for, and the author is told where to send work.
+    #[test]
+    fn a_pipeline_kit_names_its_entry_role_and_lists_only_what_a_run_leaves_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_kit(&dir, &pipeline_kit_yaml("pipeline"));
+
+        let report = validate_kit_at(&path, at(VALID_ON)).expect("valid");
+        let printed = report.lines().join("\n");
+
+        assert!(
+            printed.contains("pipeline: planner -> critic (send requests to planner)"),
+            "{printed}"
+        );
+        for enforced in [
+            "  roles[].handoffs",
+            "  roles[].context_scope (",
+            "  evaluation\n",
+            "  completion\n",
+        ] {
+            assert!(!printed.contains(enforced), "{enforced:?} in {printed}");
+        }
+        assert!(
+            printed.contains(
+                "  roles[].context_scope.can_write (roles: planner)\n      \
+                 can_write is not applied; roles share no context store to write to"
+            ),
+            "{printed}"
+        );
+        assert!(
+            printed.contains(
+                "  evaluation.rubric\n      \
+                 the rubric is not scored and sample_size is not applied; the critic's \
+                 verdict line alone decides"
+            ),
+            "{printed}"
+        );
+        assert!(
+            printed.contains("  completion.rules\n      rules are not evaluated"),
+            "{printed}"
+        );
+        assert!(
+            printed.contains(
+                "  constraints.global_budget\n      \
+                 max_total_tokens and max_cost_usd are not applied as limits; \
+                 max_wallclock_seconds bounds a pipeline run and nothing else"
+            ),
+            "{printed}"
+        );
+    }
+
+    /// The same handoffs in a kit of another topology are not run, and the
+    /// notice keeps saying so.
+    #[test]
+    fn handoffs_outside_a_pipeline_kit_are_still_listed_as_unenforced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_kit(&dir, &pipeline_kit_yaml("hub-spoke"));
+
+        let report = validate_kit_at(&path, at(VALID_ON)).expect("valid");
+        let printed = report.lines().join("\n");
+
+        assert!(!printed.contains("pipeline:"), "{printed}");
+        for unenforced in [
+            "  roles[].handoffs (roles: planner)",
+            "  roles[].context_scope (roles: planner)",
+            "  evaluation\n",
+            "  completion\n",
+        ] {
+            assert!(printed.contains(unenforced), "{unenforced:?} in {printed}");
+        }
+    }
+
+    /// Regression: a pipeline kit whose handoffs looped validated, because
+    /// nothing followed the handoffs.
+    #[test]
+    fn a_pipeline_kit_whose_handoffs_loop_is_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = pipeline_kit_yaml("pipeline").replace(
+            "      model: {family: gemma, size: 12B}",
+            "      model: {family: gemma, size: 12B}\n    handoffs: [{to: planner, on: always}]",
+        );
+        let path = write_kit(&dir, &yaml);
+
+        let err = validate_kit_at(&path, at(VALID_ON))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("handoffs form a cycle: planner -> critic -> planner"),
+            "{err}"
+        );
     }
 
     #[test]
