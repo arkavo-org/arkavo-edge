@@ -113,6 +113,62 @@ mdns: false
     assert_eq!(runtime.mdns, Some(false));
 }
 
+/// Regression: a source with no `listen` was migrated with the built-in
+/// default written into `runtime.listen`, pinning the kit to an address the
+/// file never asked for.
+#[test]
+fn a_source_without_listen_migrates_without_runtime_listen() {
+    let sources = [
+        "## quiet-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\n",
+        "---\nname: quiet-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\n---\n",
+        "## quiet-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\nmdns: false\n",
+    ];
+    for source in sources {
+        let dir = tempdir();
+        let in_path = dir.path().join("AGENTS.md");
+        fs::write(&in_path, source).unwrap();
+        let out_path = dir.path().join("agent.swarmkit.yaml");
+
+        let report = migrate_from_agents_md(&in_path, &out_path).expect("migration should succeed");
+        assert!(report.unmapped.is_empty(), "{:?}", report.unmapped);
+
+        let content = fs::read_to_string(&report.path).unwrap();
+        assert!(!content.contains("listen"), "{source:?} gave:\n{content}");
+        let manifest = arkavo_swarmkit::parse_yaml(&content).expect("migrated kit must validate");
+        let runtime = manifest.runtime.expect("runtime block required");
+        assert_eq!(runtime.listen, None, "{source:?}");
+
+        // With nothing pinned, the agent's own default applies.
+        let configs = arkavo_cli::commands::agent_kit::resolve_agent_configs(
+            Some(&report.path),
+            None,
+            None,
+            dir.path(),
+        )
+        .expect("migrated kit should resolve");
+        assert_eq!(configs[0].listen, "0.0.0.0:0", "{source:?}");
+    }
+}
+
+#[test]
+fn a_loopback_listen_in_the_source_is_carried_into_the_kit() {
+    let dir = tempdir();
+    let in_path = dir.path().join("AGENTS.md");
+    fs::write(
+        &in_path,
+        "## local-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\nlisten: 127.0.0.1:8342\n",
+    )
+    .unwrap();
+    let out_path = dir.path().join("agent.swarmkit.yaml");
+
+    let report = migrate_from_agents_md(&in_path, &out_path).expect("migration should succeed");
+
+    let content = fs::read_to_string(&report.path).unwrap();
+    let manifest = arkavo_swarmkit::parse_yaml(&content).expect("migrated kit must validate");
+    let runtime = manifest.runtime.expect("runtime block required");
+    assert_eq!(runtime.listen.as_deref(), Some("127.0.0.1:8342"));
+}
+
 #[test]
 fn multi_agent_sections_produce_one_kit_with_two_roles() {
     let dir = tempdir();
