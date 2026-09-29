@@ -13,8 +13,9 @@ pub use cloud_policy::{
     authorize_cloud_spend,
 };
 pub use compute_budget::{
-    AgentAllocationSummary, AgentComputeBudget, BudgetAllocation, BudgetPolicy,
+    AgentAllocationSummary, AgentComputeBudget, BudgetAllocation, BudgetClock, BudgetPolicy,
     ComputeBudgetSnapshot, SharedComputeBudget, UrgencyLevel, new_shared_compute_budget,
+    new_shared_compute_budget_on,
 };
 pub use config::{BudgetConfig, BudgetLimits, BudgetThresholds};
 pub use cost::TokenCost;

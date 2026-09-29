@@ -1,13 +1,23 @@
+mod clock;
+#[cfg(test)]
+mod window_tests;
+
+pub use clock::BudgetClock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-/// Per-agent compute budget allocation, managed by the commander.
+/// Per-agent compute budget: what the agent may spend before its window ends.
 ///
-/// Specialists check this before each orchestrator tick.
-/// When exhausted or expired, they enter passive mode (sleep longer).
-/// Refreshed when the commander delegates a task or broadcasts state.
+/// A window is started in one of two ways. A caller grants one with
+/// [`refresh`](Self::refresh), which is how a commander paces a specialist it
+/// delegates to. An agent that was given an allocation of its own starts one
+/// for itself, and only once the window before it has ended: a budget spent
+/// inside its window stays spent until then.
+///
+/// An agent with no allocation of its own works only on what it is granted,
+/// and is passive between grants.
 #[derive(Debug, Clone)]
 pub struct AgentComputeBudget {
     pub remaining_tokens: u64,
@@ -24,10 +34,21 @@ pub struct AgentComputeBudget {
     pub remaining_mcp_calls: u32,
 
     pub expires_at: Instant,
+
+    /// What the agent grants itself once a window has ended. `None` for an
+    /// agent that works only on what a caller grants it.
+    own_allocation: Option<BudgetAllocation>,
+    clock: BudgetClock,
 }
 
 impl AgentComputeBudget {
+    /// A budget with nothing to spend until a caller grants something.
     pub fn new_passive() -> Self {
+        Self::passive_on(BudgetClock::system())
+    }
+
+    /// [`new_passive`](Self::new_passive), reading the time from `clock`.
+    pub fn passive_on(clock: BudgetClock) -> Self {
         Self {
             remaining_tokens: 0,
             remaining_cost_usd: 0.0,
@@ -39,11 +60,58 @@ impl AgentComputeBudget {
             remaining_network_bytes: 0,
             remaining_io_ops: 0,
             remaining_mcp_calls: 0,
-            expires_at: Instant::now(),
+            expires_at: clock.now(),
+            own_allocation: None,
+            clock,
         }
     }
 
+    /// A budget for an agent that paces itself with `allocation`, starting
+    /// with a full window.
+    ///
+    /// Nothing outside the agent has to keep it supplied: when a window ends,
+    /// whether the agent's own or one a caller granted, the next thing the
+    /// agent does starts a new window of its own.
+    pub fn self_managed(allocation: BudgetAllocation, clock: BudgetClock) -> Self {
+        let mut budget = Self::passive_on(clock);
+        budget.refresh(&allocation);
+        budget.own_allocation = Some(allocation);
+        budget
+    }
+
+    /// The budget as it will be once the agent starts its own next window, if
+    /// the window in force has ended and the agent has an allocation of its
+    /// own. This is the only refill that no caller granted.
+    fn renewed(&self) -> Option<Self> {
+        let own = self.own_allocation.as_ref()?;
+        if self.clock.now() < self.expires_at {
+            return None;
+        }
+        let mut renewed = self.clone();
+        renewed.refresh(own);
+        Some(renewed)
+    }
+
+    /// Start the agent's own next window if the window in force has ended.
+    ///
+    /// Reading the budget through [`has_remaining`](Self::has_remaining) or
+    /// [`snapshot`](Self::snapshot) already accounts for a window that has
+    /// ended, and spending from it starts the next one. This is for a caller
+    /// about to read the counters directly. Returns whether a window started.
+    pub fn renew_if_expired(&mut self) -> bool {
+        let Some(renewed) = self.renewed() else {
+            return false;
+        };
+        *self = renewed;
+        true
+    }
+
     pub fn has_remaining(&self) -> bool {
+        self.renewed()
+            .map_or_else(|| self.window_has_remaining(), |w| w.window_has_remaining())
+    }
+
+    fn window_has_remaining(&self) -> bool {
         self.remaining_inferences > 0
             && self.remaining_tokens > 0
             && self.remaining_cost_usd > 0.0
@@ -52,24 +120,28 @@ impl AgentComputeBudget {
             && self.remaining_mcp_calls > 0
             && self.used_memory_bytes <= self.max_memory_bytes
             && self.used_disk_bytes <= self.max_disk_bytes
-            && Instant::now() < self.expires_at
+            && self.clock.now() < self.expires_at
     }
 
     pub fn consume_inference(&mut self, tokens: u64, cost: f64) {
+        self.renew_if_expired();
         self.remaining_inferences = self.remaining_inferences.saturating_sub(1);
         self.remaining_tokens = self.remaining_tokens.saturating_sub(tokens);
         self.remaining_cost_usd = (self.remaining_cost_usd - cost).max(0.0);
     }
 
     pub fn consume_mcp_call(&mut self) {
+        self.renew_if_expired();
         self.remaining_mcp_calls = self.remaining_mcp_calls.saturating_sub(1);
     }
 
     pub fn consume_network(&mut self, bytes: u64) {
+        self.renew_if_expired();
         self.remaining_network_bytes = self.remaining_network_bytes.saturating_sub(bytes);
     }
 
     pub fn consume_io_ops(&mut self, ops: u64) {
+        self.renew_if_expired();
         self.remaining_io_ops = self.remaining_io_ops.saturating_sub(ops);
     }
 
@@ -81,6 +153,7 @@ impl AgentComputeBudget {
         self.used_disk_bytes = bytes;
     }
 
+    /// Start a window holding `allocation`, replacing the one in force.
     pub fn refresh(&mut self, allocation: &BudgetAllocation) {
         self.remaining_tokens = allocation.max_tokens;
         self.remaining_cost_usd = allocation.max_cost_usd;
@@ -90,11 +163,16 @@ impl AgentComputeBudget {
         self.remaining_network_bytes = allocation.max_network_bytes;
         self.remaining_io_ops = allocation.max_io_ops;
         self.remaining_mcp_calls = allocation.max_mcp_calls;
-        self.expires_at = Instant::now() + Duration::from_secs(allocation.ttl_secs);
+        self.expires_at = self.clock.now() + Duration::from_secs(allocation.ttl_secs);
     }
 
     pub fn status_label(&self) -> &'static str {
-        if !self.has_remaining() {
+        self.renewed()
+            .map_or_else(|| self.window_status_label(), |w| w.window_status_label())
+    }
+
+    fn window_status_label(&self) -> &'static str {
+        if !self.window_has_remaining() {
             if self.remaining_inferences == 0
                 && self.remaining_tokens == 0
                 && self.remaining_cost_usd <= 0.0
@@ -135,9 +213,14 @@ pub struct ComputeBudgetSnapshot {
 
 impl AgentComputeBudget {
     pub fn snapshot(&self) -> ComputeBudgetSnapshot {
+        self.renewed()
+            .map_or_else(|| self.window_snapshot(), |w| w.window_snapshot())
+    }
+
+    fn window_snapshot(&self) -> ComputeBudgetSnapshot {
         let ttl_remaining = self
             .expires_at
-            .checked_duration_since(Instant::now())
+            .checked_duration_since(self.clock.now())
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
 
@@ -152,8 +235,8 @@ impl AgentComputeBudget {
             remaining_network_bytes: self.remaining_network_bytes,
             remaining_io_ops: self.remaining_io_ops,
             remaining_mcp_calls: self.remaining_mcp_calls,
-            has_remaining: self.has_remaining(),
-            status: self.status_label().to_string(),
+            has_remaining: self.window_has_remaining(),
+            status: self.window_status_label().to_string(),
             ttl_remaining_secs: ttl_remaining,
         }
     }
@@ -189,21 +272,35 @@ impl Default for BudgetAllocation {
     }
 }
 
+impl BudgetAllocation {
+    /// What an agent grants itself when nothing outside it supplies a budget.
+    ///
+    /// Generous next to what a commander grants a specialist, so that an
+    /// autonomous agent gets through several tool-loop iterations a window.
+    pub fn self_managed() -> Self {
+        Self {
+            max_inferences: 32,
+            max_tokens: 100_000,
+            ttl_secs: 600,
+            ..Self::default()
+        }
+    }
+}
+
 /// Shared compute budget handle for thread-safe access.
 pub type SharedComputeBudget = Arc<RwLock<AgentComputeBudget>>;
 
+/// The budget an agent starts with: one it manages itself.
 pub fn new_shared_compute_budget() -> SharedComputeBudget {
-    let mut budget = AgentComputeBudget::new_passive();
-    // Generous initial budget for autonomous agents that may not receive
-    // external budget refreshes. Allows multiple tool-loop iterations
-    // before needing a commander broadcast or message/send refresh.
-    budget.refresh(&BudgetAllocation {
-        max_inferences: 32,
-        max_tokens: 100_000,
-        ttl_secs: 600,
-        ..BudgetAllocation::default()
-    });
-    Arc::new(RwLock::new(budget))
+    new_shared_compute_budget_on(BudgetClock::system())
+}
+
+/// [`new_shared_compute_budget`], reading the time from `clock`.
+pub fn new_shared_compute_budget_on(clock: BudgetClock) -> SharedComputeBudget {
+    Arc::new(RwLock::new(AgentComputeBudget::self_managed(
+        BudgetAllocation::self_managed(),
+        clock,
+    )))
 }
 
 /// Urgency level derived from game state observation (e.g., alert count).
