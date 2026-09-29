@@ -44,11 +44,11 @@ arkavo
 arkavo ui
 ```
 
-That's it. No configuration files, no setup. Agents on the same machine and on other devices on the local network auto-discover via mDNS and form a mesh.
+That's it. No configuration files, no setup. Agents on the same machine auto-discover via mDNS and form a mesh.
 
-By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS. Its RPC endpoint is not authenticated yet, so run it on networks you trust. The agent says so on stderr each time it starts this way.
+By default an agent listens on loopback and announces itself over mDNS for discovery on this machine. Its RPC endpoint is not authenticated yet. To accept connections from other machines, start it with `--bind 0.0.0.0:<port>` or set `runtime.listen` in its kit. A network-reachable start prints a warning; run it on networks you trust.
 
-To keep an agent on this machine, start it with `--bind 127.0.0.1`. It then listens on loopback and is not announced on the network; agents on the same machine still discover it.
+To keep an agent on this machine even when a kit asks for another address, start it with `--bind 127.0.0.1`. It then listens on loopback and is not announced on the network; agents on the same machine still discover it.
 
 ```bash
 arkavo --bind 127.0.0.1

@@ -149,7 +149,7 @@ Add to `arkavo-swarmkit` (validated, optional fields so existing kits stay valid
 ```yaml
 runtime:
   mode: orchestrator | specialist   # default orchestrator for single-role kits
-  listen: "127.0.0.1:0"             # optional; the default is "0.0.0.0:0". -p changes the port, not the host
+  listen: "127.0.0.1:0"             # optional; the default is "127.0.0.1:0". -p changes the port, not the host
   mdns: true
   cloud_policy: local_only | ask_before_cloud | cloud_within_cap
   max_cost_per_session: 1.0         # dollars; maps to BudgetYamlConfig
