@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
 
 use crate::canonical::kit_id_for;
 use crate::manifest::Manifest;
@@ -91,6 +91,11 @@ pub enum ValidationError {
     #[error("kit.expires is at or before kit.created")]
     ExpiryBeforeCreated,
 
+    #[error(
+        "kit expired on {expires} (checked at {checked_at}); set a later kit.expires and recompute kit.id"
+    )]
+    Expired { expires: String, checked_at: String },
+
     #[error("kit.id {found:?} does not match BLAKE3 of canonical manifest (expected {expected:?})")]
     KitIdHashMismatch { found: String, expected: String },
 
@@ -108,6 +113,12 @@ pub enum ValidationError {
 /// author with an empty id, run `validate`, then assign the computed
 /// hash via `Manifest::compute_kit_id` (or the lower-level
 /// `canonical::kit_id_for`) and re-validate.
+///
+/// Whether the kit has expired is deliberately not decided here: that
+/// answer changes with the clock, and this function must give the same
+/// result for the same manifest every time. Callers that are about to run a
+/// kit use [`validate_not_expired`] with the time they read at their own
+/// boundary.
 pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
     let parsed = semver::Version::parse(&m.spec_version).map_err(|e| {
         ValidationError::SpecVersionUnparseable {
@@ -298,6 +309,26 @@ fn validate_expiry(m: &Manifest) -> Result<(), ValidationError> {
     }
     if delta > MAX_EXPIRY_HORIZON_SECONDS {
         return Err(ValidationError::ExpiryHorizonTooLarge);
+    }
+    Ok(())
+}
+
+/// Reject a kit whose `kit.expires` is at or before `now`.
+///
+/// `now` is a parameter so the check stays a pure function of its inputs;
+/// the process boundary that loads a kit to run it (`discover::load_kit_file`)
+/// is the one place that reads the system clock. A kit without `kit.expires`
+/// never expires.
+pub fn validate_not_expired(m: &Manifest, now: DateTime<Utc>) -> Result<(), ValidationError> {
+    let Some(expires_str) = &m.kit.expires else {
+        return Ok(());
+    };
+    let expires = parse_rfc3339(expires_str, "kit.expires")?;
+    if expires <= now {
+        return Err(ValidationError::Expired {
+            expires: expires_str.clone(),
+            checked_at: now.to_rfc3339_opts(SecondsFormat::Secs, true),
+        });
     }
     Ok(())
 }
@@ -605,6 +636,71 @@ mod tests {
         m.kit.expires = Some("2026-04-28T00:00:00Z".into()); // before created
         let err = validate(&m).unwrap_err();
         assert_eq!(err, ValidationError::ExpiryBeforeCreated);
+    }
+
+    fn at(raw: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(raw)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    /// Regression: an expired kit used to pass every check because nothing
+    /// compared `kit.expires` with the current time.
+    #[test]
+    fn expired_kit_is_rejected_with_its_expiry_date() {
+        let m = minimal_manifest();
+        let err = validate_not_expired(&m, at("2026-09-29T12:00:00Z")).unwrap_err();
+        assert_eq!(
+            err,
+            ValidationError::Expired {
+                expires: "2026-05-29T00:00:00Z".into(),
+                checked_at: "2026-09-29T12:00:00Z".into(),
+            }
+        );
+        let message = err.to_string();
+        assert!(
+            message.contains("expired on 2026-05-29T00:00:00Z"),
+            "message must give the expiry date: {message}"
+        );
+    }
+
+    #[test]
+    fn kit_is_accepted_until_the_instant_it_expires() {
+        let m = minimal_manifest();
+        assert_eq!(validate_not_expired(&m, at("2026-05-28T23:59:59Z")), Ok(()));
+        assert!(matches!(
+            validate_not_expired(&m, at("2026-05-29T00:00:00Z")),
+            Err(ValidationError::Expired { .. })
+        ));
+    }
+
+    #[test]
+    fn expiry_comparison_honours_the_declared_offset() {
+        let mut m = minimal_manifest();
+        // 00:00 at +02:00 is 22:00 UTC the previous day.
+        m.kit.expires = Some("2026-05-29T00:00:00+02:00".into());
+        assert_eq!(validate_not_expired(&m, at("2026-05-28T21:59:59Z")), Ok(()));
+        assert!(matches!(
+            validate_not_expired(&m, at("2026-05-28T22:00:00Z")),
+            Err(ValidationError::Expired { .. })
+        ));
+    }
+
+    #[test]
+    fn kit_without_expires_never_expires() {
+        let mut m = minimal_manifest();
+        m.kit.expires = None;
+        assert_eq!(validate_not_expired(&m, at("2099-01-01T00:00:00Z")), Ok(()));
+    }
+
+    /// `validate` must stay a pure function of the manifest: the fixtures
+    /// across the workspace carry fixed dates, and a clock read here would
+    /// make every one of them fail as time passes.
+    #[test]
+    fn validate_does_not_consult_the_clock() {
+        let m = minimal_manifest();
+        assert!(validate_not_expired(&m, Utc::now()).is_err());
+        validate(&m).expect("a past expiry is not a structural error");
     }
 
     #[test]

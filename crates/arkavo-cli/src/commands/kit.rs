@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use arkavo_swarmkit::{discover::ARKAVO_DIR, kit_id_for, load_kit_file, validate};
+use arkavo_swarmkit::{discover::ARKAVO_DIR, validate};
 
 mod agents_md;
 mod agents_md_markdown;
@@ -19,8 +19,10 @@ mod frontmatter;
 mod kit_build;
 mod manifest_template;
 mod model_map;
+mod validate_cmd;
 pub use kit_build::{MigrateReport, migrate_from_agents_md};
 pub(crate) use model_map::kit_model_to_hint;
+pub use validate_cmd::{KitValidateReport, validate_kit, validate_kit_at};
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.is_empty() {
@@ -65,9 +67,9 @@ fn cmd_validate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let report = validate_kit(Path::new(path))?;
-    println!("kit: {}", report.kit_name);
-    println!("kit.id: {}", report.kit_id);
-    println!("kit.id matches recomputed hash: {}", report.id_matches);
+    for line in report.lines() {
+        println!("{line}");
+    }
     Ok(())
 }
 
@@ -182,38 +184,5 @@ pub fn init_kit(base_dir: &Path, name: &str) -> Result<KitInitReport, Box<dyn st
     Ok(KitInitReport {
         path: target,
         kit_id: manifest.kit.id,
-    })
-}
-
-/// Result of a successful `kit validate`.
-pub struct KitValidateReport {
-    pub kit_name: String,
-    pub kit_id: String,
-    pub id_matches: bool,
-}
-
-/// Load and validate a kit file, then confirm the declared `kit.id` matches the recomputed hash.
-///
-/// `load_kit_file` already enforces this internally whenever `kit.id` is
-/// non-empty, so a mismatch (or invalid YAML / cross-block validation
-/// failure) surfaces as an `Err` from that call; the explicit recompute
-/// below only matters for the edge case of an unassigned (empty) `kit.id`.
-pub fn validate_kit(path: &Path) -> Result<KitValidateReport, Box<dyn std::error::Error>> {
-    let manifest = load_kit_file(path)?.manifest;
-    let expected = kit_id_for(&manifest)?;
-    let id_matches = expected == manifest.kit.id;
-
-    if !id_matches {
-        return Err(format!(
-            "kit.id mismatch: declared {:?}, recomputed {:?}",
-            manifest.kit.id, expected
-        )
-        .into());
-    }
-
-    Ok(KitValidateReport {
-        kit_name: manifest.kit.name,
-        kit_id: manifest.kit.id,
-        id_matches,
     })
 }
