@@ -51,11 +51,9 @@ One command: builds Arkavo, launches the agent, runs the five-act competitive na
 
 ## TLS and Transport Security
 
-Transport is plaintext HTTP on loopback (127.0.0.1). This is acceptable because:
+The bridge calls the agent over plaintext HTTP at `localhost`. That traffic never leaves the machine, and TDF provides payload-level encryption regardless of transport.
 
-1. Loopback traffic never leaves the machine
-2. TDF provides payload-level encryption regardless of transport
-3. Production deployments should enable TLS via `--tls-cert` and `--tls-key` flags
+The agent itself listens on every interface by default, and its RPC endpoint is not authenticated and has no TLS yet, so run the demo on a network you trust. To keep the agent on this machine, start it with `--trust` or pin `runtime.listen: "127.0.0.1:8360"` in the kit.
 
 ## Files
 

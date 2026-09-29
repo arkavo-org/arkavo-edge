@@ -111,14 +111,16 @@ arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n auditor 
 
 Send a running role work with `arkavo chat --agent-id <role-id>` or `arkavo task --agent-id <role-id> '<task>'`.
 
-Agents listen on `127.0.0.1` unless the kit sets `runtime.listen`, so roles on different devices need it:
+By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS, so roles on different devices find each other without configuration. The agent's RPC endpoint is not authenticated yet, so run it on networks you trust.
+
+`--trust` keeps an agent on this machine: it listens on `127.0.0.1` and is not announced on the network. A kit can pin an address with `runtime.listen`:
 
 ```yaml
 runtime:
-  listen: "0.0.0.0:0"   # all interfaces; -p still sets the port
+  listen: "127.0.0.1:0"   # this machine only; -p still sets the port
 ```
 
-The agent's RPC endpoint does not authenticate callers yet, so bind it to other interfaces only on a trusted network.
+`--trust` keeps the port that `runtime.listen` or `-p` selects and keeps the agent on loopback whatever host the kit names.
 
 ### Run a pipeline
 
@@ -170,7 +172,7 @@ The message metadata marks it as a step of a run:
 
 `step` and `attempt` count from 1. An agent that receives a message with a `pipeline` key in its metadata answers it on its own: outside its agent loop, with no conversation from earlier messages, and never as the start of a pipeline. If `timeout_ms` is set, the agent stops working on the step after that long and fails its task.
 
-The RPC endpoint does not authenticate callers, so the marker is not a credential. Any caller that can reach an agent can set it, and can send a role whatever text it likes as the output of an earlier role. This is why agents listen on loopback unless the kit sets `runtime.listen`.
+The RPC endpoint does not authenticate callers, so the marker is not a credential: an agent accepts it from any caller that can reach the endpoint. By default that is the local network, so run a pipeline on a network you trust, or start its roles with `--trust` or a loopback `runtime.listen` when they all run on one machine.
 
 #### The critic's verdict
 
