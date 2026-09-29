@@ -31,11 +31,35 @@ both feed into test_writer's coverage targets.
 ## Validate
 
 ```bash
+arkavo kit validate examples/code-review-kit/code-review-kit.swarmkit.yaml
+```
+
+Loads the manifest, validates cross-block invariants, and checks that the declared `kit.id` matches the BLAKE3 hash of the canonical-form manifest. It fails on an expired kit and on a role that names a model the router does not know.
+
+From a source checkout without an installed binary, the equivalent is:
+
+```bash
 cargo run -p arkavo-swarmkit --example validate_kit -- \
   examples/code-review-kit/code-review-kit.swarmkit.yaml
 ```
 
-Parses, validates cross-block invariants, computes the BLAKE3 `kit.id`.
+## Run
+
+Load the kit into the web UI gateway to see one entry per role in the AG-UI ARP panel:
+
+```bash
+ARKAVO_SWARMKIT_PATH=examples/code-review-kit/code-review-kit.swarmkit.yaml arkavo ui
+```
+
+Loading builds per-role policy, trace, and panel entries. It does not start the roles or run the pipeline between them; see [What a kit launch does today](../../docs/SWARMKIT.md#what-a-kit-launch-does-today).
+
+Start each role as its own agent process:
+
+```bash
+arkavo agent -c examples/code-review-kit/code-review-kit.swarmkit.yaml -n reviewer -p 8341
+arkavo agent -c examples/code-review-kit/code-review-kit.swarmkit.yaml -n security_auditor -p 8342
+arkavo agent -c examples/code-review-kit/code-review-kit.swarmkit.yaml -n test_writer -p 8343
+```
 
 ## Skills
 
@@ -49,15 +73,14 @@ To regenerate signatures when content changes:
 cargo run -p arkavo-swarmkit-runtime --example sign_code_review_skills
 ```
 
-Edit the YAML's `signature` and `signed_by` fields with the output, then
-recompute `kit.id`:
+Edit the YAML's `signature` and `signed_by` fields with the output, set
+`kit.id` to `""`, then recompute it:
 
 ```bash
-cargo run -p arkavo-swarmkit --example validate_kit -- \
-  examples/code-review-kit/code-review-kit.swarmkit.yaml
+arkavo kit validate examples/code-review-kit/code-review-kit.swarmkit.yaml
 ```
 
-Set `kit.id` in the YAML to the computed value.
+Set `kit.id` in the YAML to the printed value.
 
 ## Skill signature verification at gateway boot
 

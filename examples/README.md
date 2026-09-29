@@ -10,12 +10,16 @@ Learn to build AI agent systems through hands-on examples.
 
 Four SwarmKits ship as runnable examples. Each is a single YAML manifest with inline-signed skills that exercises the SwarmKit runtime end-to-end (parse + validate + skill resolution + per-role ARP construction).
 
-| Kit | Domain | Roles | One-command run |
+| Kit | Domain | Roles | Validate (from the repository root) |
 |---|---|---|---|
-| [campaign-kit](campaign-kit/README.md) | Marketing | analyst → copy → critic | `cargo run -p arkavo-swarmkit --example validate_kit -- examples/campaign-kit/campaign-kit.swarmkit.yaml` |
-| [code-review-kit](code-review-kit/README.md) | Developer | reviewer → security_auditor → test_writer | `cargo run -p arkavo-swarmkit --example validate_kit -- examples/code-review-kit/code-review-kit.swarmkit.yaml` |
-| [vrm-production-kit](vrm-production-kit/README.md) | Creative | prompt_designer → vrm_assembler → validator | `cargo run -p arkavo-swarmkit --example validate_kit -- examples/vrm-production-kit/vrm-production-kit.swarmkit.yaml` |
-| [compliance-kit](compliance-kit/README.md) | Regulated | pii_classifier → policy_enforcer → auditor | `cargo run -p arkavo-swarmkit --example validate_kit -- examples/compliance-kit/compliance-kit.swarmkit.yaml` |
+| [campaign-kit](campaign-kit/README.md) | Marketing | analyst → copy → critic | `arkavo kit validate examples/campaign-kit/campaign-kit.swarmkit.yaml` |
+| [code-review-kit](code-review-kit/README.md) | Developer | reviewer → security_auditor → test_writer | `arkavo kit validate examples/code-review-kit/code-review-kit.swarmkit.yaml` |
+| [vrm-production-kit](vrm-production-kit/README.md) | Creative | prompt_designer → vrm_assembler → validator | `arkavo kit validate examples/vrm-production-kit/vrm-production-kit.swarmkit.yaml` |
+| [compliance-kit](compliance-kit/README.md) | Regulated | pii_classifier → policy_enforcer → auditor | `arkavo kit validate examples/compliance-kit/compliance-kit.swarmkit.yaml` |
+
+`arkavo kit validate` accepts several paths, so one command can check all four. From a source checkout without an installed binary, the equivalent is `cargo run -p arkavo-swarmkit --example validate_kit -- <path>`.
+
+Each kit's README shows how to load the kit into the gateway and how to start its roles. Loading a kit builds per-role policy, trace, and panel entries; it does not start the roles or run the pipeline between them. See [What a kit launch does today](../docs/SWARMKIT.md#what-a-kit-launch-does-today).
 
 Each kit ships with its own `README.md` in `examples/<kit-name>/` plus an integration test in `crates/arkavo-swarmkit-runtime/tests/<kit-name>_skill_resolver.rs` that asserts every role's skills resolve with `verified=true`.
 
