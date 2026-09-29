@@ -341,6 +341,44 @@ fn kit_role_naming_an_unknown_model_is_rejected() {
     );
 }
 
+/// Regression: every role's model was resolved before `-n` narrowed the
+/// result, so a typo in one role kept every other role from starting.
+#[test]
+fn name_flag_ignores_an_unknown_model_on_a_role_it_did_not_select() {
+    let dir = tempdir();
+    let path = write_kit_with_planner_model(
+        dir.path(),
+        "typo.swarmkit.yaml",
+        "        family: gpt-6-asrta\n",
+    );
+
+    let configs = resolve_agent_configs(Some(&path), Some("worker"), None, dir.path())
+        .expect("the worker's model resolves, so the worker must start");
+
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].name, "worker");
+    assert_eq!(configs[0].model, "gemma-4-e2b");
+}
+
+#[test]
+fn name_flag_still_rejects_an_unknown_model_on_the_selected_role() {
+    let dir = tempdir();
+    let path = write_kit_with_planner_model(
+        dir.path(),
+        "typo.swarmkit.yaml",
+        "        family: gpt-6-asrta\n",
+    );
+
+    let err = resolve_agent_configs(Some(&path), Some("planner"), None, dir.path())
+        .expect_err("the selected role's own model must still resolve")
+        .to_string();
+    assert!(err.contains("planner"), "error must name the role: {err}");
+    assert!(
+        err.contains("not a model the router knows"),
+        "unexpected error: {err}"
+    );
+}
+
 #[test]
 fn explicit_config_path_to_invalid_yaml_is_fatal_with_no_default_fallback() {
     let dir = tempdir();
