@@ -177,14 +177,18 @@ scenarios:
       - The call is refused with PolicyDenied and nothing is read or written
       - Absolute and relative paths inside the root keep working
       - The arkavo-mcp-macos FileSystemKit and the arkavo-mcp-tools git tools apply the same boundary
-      - A git tool opens only a repository whose working directory is inside the root, so a workspace without its own .git never falls through to an enclosing repository
+      - A git tool opens only a repository whose working directory, git directory, common directory and object alternates are all inside the root, so a workspace without its own .git never falls through to an enclosing repository
     refs: [crates/arkavo-mcp-tools/src/filesystem.rs, crates/arkavo-mcp-macos/src/mcp/filesystem_tools.rs, crates/arkavo-mcp-tools/src/git.rs]
     changed: "2026-09-29"
     edge_cases:
       - condition: Workspace is a subdirectory of a monorepo or other enclosing repository and has no .git of its own
         expected: Git tools refuse with PolicyDenied; the workspace must be the repository root, or a linked worktree, to use them
-      - condition: Workspace is a linked worktree (.git is a file)
-        expected: Git tools work, because the working directory is inside the root
+      - condition: Workspace is a linked worktree (.git is a file) whose main repository is inside the root
+        expected: Git tools work
+      - condition: Workspace is a linked worktree whose main repository is outside the root, or its .git names an outer repository through commondir
+        expected: Git tools refuse with PolicyDenied, because refs and objects would be written outside the root
+      - condition: The repository's objects/info/alternates names a path outside the root
+        expected: Git tools refuse with PolicyDenied, because the outer repository's objects would become readable
 
   - id: MCP-012
     name: TDF tool path confinement

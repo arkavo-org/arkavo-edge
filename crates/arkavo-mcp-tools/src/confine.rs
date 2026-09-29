@@ -37,6 +37,48 @@ pub(crate) fn require_inside_root(root: &Path, location: &Path) -> Result<()> {
     }
 }
 
+/// Require every location an opened repository reads or writes to lie inside
+/// `root`: its working directory (or git directory when bare), its git
+/// directory, and its common directory. A workspace-controlled `.git` can name
+/// an outer repository through `commondir` (refs and objects are then written
+/// there) or through `objects/info/alternates` (its objects become readable),
+/// so the working directory alone proves nothing. A legitimate linked worktree
+/// passes only when its main repository is inside the root too.
+pub(crate) fn require_repo_inside_root(root: &Path, repo: &git2::Repository) -> Result<()> {
+    require_inside_root(root, repo.workdir().unwrap_or_else(|| repo.path()))?;
+    require_inside_root(root, repo.path())?;
+    let common = repo.commondir();
+    require_inside_root(root, common)?;
+    require_alternates_inside_root(root, &common.join("objects"))
+}
+
+fn require_alternates_inside_root(root: &Path, objects_dir: &Path) -> Result<()> {
+    let listing = match std::fs::read_to_string(objects_dir.join("info").join("alternates")) {
+        Ok(listing) => listing,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(ToolError::PolicyDenied(format!(
+                "objects/info/alternates: {e}"
+            )));
+        }
+    };
+    for line in listing.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // Git also accepts C-style quoted paths; refusing them is safer than
+        // re-implementing that unquoting inside a security check.
+        if line.starts_with('"') {
+            return Err(ToolError::PolicyDenied(
+                "quoted entry in objects/info/alternates".to_string(),
+            ));
+        }
+        // Relative entries resolve against the objects directory, as in git.
+        require_inside_root(root, &objects_dir.join(line))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,6 +106,18 @@ mod tests {
         }
         assert!(matches!(
             require_inside_root(&ws.path().join("missing"), ws.path()),
+            Err(ToolError::PolicyDenied(_))
+        ));
+    }
+
+    #[test]
+    fn quoted_alternates_entry_is_refused() {
+        let ws = TempDir::new().unwrap();
+        let objects = ws.path().join("objects");
+        std::fs::create_dir_all(objects.join("info")).unwrap();
+        std::fs::write(objects.join("info/alternates"), "\"quoted\"\n").unwrap();
+        assert!(matches!(
+            require_alternates_inside_root(ws.path(), &objects),
             Err(ToolError::PolicyDenied(_))
         ));
     }

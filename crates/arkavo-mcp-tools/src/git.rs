@@ -13,9 +13,11 @@ use std::path::{Path, PathBuf};
 /// `open_repo` discovers upward, so a root with no `.git` of its own would
 /// open an enclosing repository (a monorepo parent, a dotfiles repo) and let
 /// add, commit and diff act outside the workspace. The opened repository's
-/// working directory (or git directory, when bare) must therefore also lie
-/// inside `root`; a linked worktree whose working directory is inside still
-/// passes.
+/// working directory, git directory, common directory and object alternates
+/// must therefore all lie inside `root`. A linked worktree passes only when
+/// its main repository is inside the root as well: a `.git` file or
+/// `commondir` written by the workspace can otherwise point refs and objects
+/// at any repository on the host.
 fn safe_open_repo(
     git_manager: &GitManager,
     root: &Path,
@@ -25,7 +27,7 @@ fn safe_open_repo(
     let repo = git_manager
         .open_repo(&path)
         .map_err(|e| ToolError::Mcp(format!("Failed to open repository: {e}")))?;
-    crate::confine::require_inside_root(root, repo.workdir().unwrap_or_else(|| repo.path()))?;
+    crate::confine::require_repo_inside_root(root, &repo)?;
     Ok(repo)
 }
 
@@ -768,18 +770,132 @@ mod tests {
 
     #[spec("MCP-011")]
     #[tokio::test]
-    async fn git_status_works_in_a_linked_worktree_workspace() {
+    async fn git_status_works_in_a_linked_worktree_whose_main_repository_is_inside_the_root() {
+        let (outer, _ws) = nested_workspace();
+        let repo = git2::Repository::open(outer.path()).unwrap();
+        repo.worktree("wt", &outer.path().join("wt"), None).unwrap();
+        // Root is `outer`: the worktree's `.git` file points at `outer/.git`,
+        // which is inside it.
+        let status = GitStatusKit::with_root(outer.path())
+            .execute(json!({ "path": "wt" }))
+            .await
+            .unwrap();
+        assert!(status["branch"].is_string());
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_refuses_a_linked_worktree_whose_main_repository_is_outside_the_root() {
         let (outer, _ws) = nested_workspace();
         let repo = git2::Repository::open(outer.path()).unwrap();
         let wt_dir = TempDir::new().unwrap();
         let wt_path = wt_dir.path().join("wt");
         repo.worktree("wt", &wt_path, None).unwrap();
-        // The worktree's `.git` is a file pointing back into `outer`; only its
-        // working directory has to be inside the root.
-        let status = GitStatusKit::with_root(&wt_path)
+        // The workspace's working directory is inside the root but its refs
+        // and objects live in `outer/.git`, so the workspace is refused.
+        let err = GitStatusKit::with_root(&wt_path)
             .execute(json!({}))
             .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+    }
+
+    /// Lay out a bare-bones `root/.git` that a test then points at an outer
+    /// repository, the way a workspace-controlled repository could.
+    fn crafted_git_dir(root: &Path) -> PathBuf {
+        let git_dir = root.join(".git");
+        fs::create_dir_all(git_dir.join("objects/info")).unwrap();
+        fs::create_dir_all(git_dir.join("refs")).unwrap();
+        fs::write(git_dir.join("HEAD"), "ref: refs/heads/master\n").unwrap();
+        fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n",
+        )
+        .unwrap();
+        git_dir
+    }
+
+    fn ref_and_object_snapshot(outer: &Path) -> Vec<PathBuf> {
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            for entry in fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                out.push(path.clone());
+                if path.is_dir() {
+                    walk(&path, out);
+                }
+            }
+        }
+        let mut all = Vec::new();
+        walk(&outer.join(".git"), &mut all);
+        all.sort();
+        all
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_commit_refuses_a_workspace_git_dir_whose_commondir_is_an_outer_repository() {
+        let (outer, ws) = nested_workspace();
+        let git_dir = crafted_git_dir(&ws);
+        let outer_git = fs::canonicalize(outer.path().join(".git")).unwrap();
+        fs::write(git_dir.join("commondir"), outer_git.to_str().unwrap()).unwrap();
+        fs::write(
+            git_dir.join("gitdir"),
+            git_dir.join("index").to_str().unwrap(),
+        )
+        .unwrap();
+        let before = ref_and_object_snapshot(outer.path());
+        let head_before = git2::Repository::open(outer.path())
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
             .unwrap();
-        assert!(status["branch"].is_string());
+
+        let err = GitCommitKit::with_root(&ws)
+            .execute(json!({ "message": "pwn" }))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+        assert_eq!(ref_and_object_snapshot(outer.path()), before);
+        let outer_repo = git2::Repository::open(outer.path()).unwrap();
+        assert_eq!(outer_repo.head().unwrap().target().unwrap(), head_before);
+        assert!(outer_repo.find_reference("refs/heads/pwn").is_err());
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_refuses_object_alternates_pointing_outside_the_root() {
+        let (outer, ws) = nested_workspace();
+        // A genuine repository inside the workspace, then an alternate that
+        // makes an outer repository's objects readable through it.
+        GitManager::new().init_repo(&ws).unwrap();
+        let outer_objects = fs::canonicalize(outer.path().join(".git/objects")).unwrap();
+        let alternates = ws.join(".git/objects/info/alternates");
+        fs::create_dir_all(alternates.parent().unwrap()).unwrap();
+        fs::write(&alternates, format!("{}\n", outer_objects.display())).unwrap();
+
+        let err = GitStatusKit::with_root(&ws)
+            .execute(json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+
+        // A relative alternate resolves against the objects directory.
+        fs::write(&alternates, "../../../.git/objects\n").unwrap();
+        let err = GitStatusKit::with_root(&ws)
+            .execute(json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+
+        // An alternate that stays inside the root is accepted.
+        fs::write(&alternates, "# shared\n../../ws-objects\n").unwrap();
+        fs::create_dir_all(ws.join("ws-objects")).unwrap();
+        let status = GitStatusKit::with_root(&ws).execute(json!({})).await;
+        assert!(
+            !matches!(status, Err(ToolError::PolicyDenied(_))),
+            "{status:?}"
+        );
     }
 }
