@@ -10,6 +10,7 @@ use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
 
 use crate::canonical::kit_id_for;
 use crate::manifest::Manifest;
+use crate::pipeline::{PipelineError, check_handoffs};
 use crate::runtime_config::{RuntimeValidationError, validate_runtime};
 
 /// Maximum accepted kit lifetime per spec §10.1 — `expires - created` MUST be ≤ 1 year.
@@ -104,6 +105,9 @@ pub enum ValidationError {
 
     #[error("runtime block invalid: {0}")]
     Runtime(#[from] RuntimeValidationError),
+
+    #[error("coordination.topology is pipeline but the handoffs are not a pipeline: {0}")]
+    Pipeline(#[from] PipelineError),
 }
 
 /// Validate the cross-block invariants of a SwarmKit manifest.
@@ -165,6 +169,10 @@ pub fn validate(m: &Manifest) -> Result<(), ValidationError> {
         validate_network_egress(role, m.constraints.network.egress_allowed)?;
         validate_plane_wiring(role)?;
     }
+
+    // After the loop above, so a handoff to a role that does not exist is
+    // reported as that and not as a line that ends early.
+    check_handoffs(m)?;
 
     if let Some(eval) = &m.evaluation {
         if !role_ids.contains(eval.critic_role.as_str()) {
@@ -910,5 +918,112 @@ mod tests {
             on: "done".into(),
         }];
         assert!(validate(&m).is_ok());
+    }
+
+    fn role_handing_off(id: &str, to: &[&str]) -> RoleSpec {
+        let mut role = minimal_manifest().roles.remove(0);
+        role.id = id.into();
+        role.handoffs = to
+            .iter()
+            .map(|to| Handoff {
+                to: (*to).into(),
+                on: "always".into(),
+            })
+            .collect();
+        role
+    }
+
+    fn pipeline_of(roles: Vec<RoleSpec>) -> Manifest {
+        let mut m = minimal_manifest();
+        m.coordination.topology = Topology::Pipeline;
+        m.roles = roles;
+        m
+    }
+
+    #[test]
+    fn a_linear_pipeline_is_valid() {
+        let m = pipeline_of(vec![
+            role_handing_off("analyst", &["copy"]),
+            role_handing_off("copy", &["critic"]),
+            role_handing_off("critic", &[]),
+        ]);
+        assert_eq!(validate(&m), Ok(()));
+    }
+
+    /// A pipeline kit whose roles hand off to nobody has nothing to run in
+    /// order, and is what every kit looked like before handoffs were
+    /// executed.
+    #[test]
+    fn a_pipeline_kit_without_handoffs_is_valid() {
+        let m = pipeline_of(vec![
+            role_handing_off("alpha", &[]),
+            role_handing_off("beta", &[]),
+        ]);
+        assert_eq!(validate(&m), Ok(()));
+    }
+
+    /// Regression: a pipeline kit whose handoffs branched or looped was
+    /// reported valid, because nothing ever followed the handoffs.
+    #[test]
+    fn a_pipeline_that_branches_or_loops_is_rejected() {
+        let fan_out = pipeline_of(vec![
+            role_handing_off("analyst", &["copy", "legal"]),
+            role_handing_off("copy", &[]),
+            role_handing_off("legal", &[]),
+        ]);
+        let err = validate(&fan_out).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::Pipeline(PipelineError::FanOut { .. })),
+            "{err}"
+        );
+        assert_eq!(
+            err.to_string(),
+            "coordination.topology is pipeline but the handoffs are not a pipeline: role \
+             \"analyst\" hands off to 2 roles (copy, legal); a pipeline role hands off to at \
+             most one"
+        );
+
+        let cycle = pipeline_of(vec![
+            role_handing_off("analyst", &["copy"]),
+            role_handing_off("copy", &["analyst"]),
+        ]);
+        let err = validate(&cycle).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::Pipeline(PipelineError::Cycle { .. })),
+            "{err}"
+        );
+
+        let fan_in = pipeline_of(vec![
+            role_handing_off("analyst", &["critic"]),
+            role_handing_off("copy", &["critic"]),
+            role_handing_off("critic", &[]),
+        ]);
+        let err = validate(&fan_in).unwrap_err();
+        assert!(
+            matches!(err, ValidationError::Pipeline(PipelineError::FanIn { .. })),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn the_same_handoffs_are_valid_outside_a_pipeline_kit() {
+        let mut m = pipeline_of(vec![
+            role_handing_off("hub", &["left", "right"]),
+            role_handing_off("left", &["hub"]),
+            role_handing_off("right", &["hub"]),
+        ]);
+        m.coordination.topology = Topology::HubSpoke;
+        assert_eq!(validate(&m), Ok(()));
+    }
+
+    /// A handoff to a role that does not exist is reported as that, and is
+    /// not mistaken for the end of a line.
+    #[test]
+    fn an_unresolved_handoff_in_a_pipeline_is_reported_first() {
+        let m = pipeline_of(vec![role_handing_off("analyst", &["ghost"])]);
+        assert!(matches!(
+            validate(&m).unwrap_err(),
+            ValidationError::UnresolvedHandoff { .. }
+        ));
     }
 }

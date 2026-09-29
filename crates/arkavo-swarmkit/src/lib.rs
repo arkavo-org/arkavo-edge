@@ -15,6 +15,7 @@ pub mod discover;
 pub mod governance;
 pub mod kit_skills;
 pub mod manifest;
+pub mod pipeline;
 pub mod pricing;
 pub mod role;
 pub mod runtime_config;
@@ -26,7 +27,7 @@ pub use canonical::{canonical_json, content_hash, kit_id_for};
 pub use coordination::{
     CompactionSpec, CompletionSpec, ConstraintsSpec, CoordinationSpec, EvaluationDimension,
     EvaluationRubric, EvaluationSpec, GlobalBudget, NetworkConstraints, OnFailure, ProvenanceSpec,
-    Routing, Signature,
+    Routing, Signature, Topology,
 };
 pub use discover::{
     ARKAVO_DIR, DiscoverError, DiscoveredKit, SWARMKIT_PATH_ENV, discover_kit_path,
@@ -38,6 +39,7 @@ pub use governance::{
 };
 pub use kit_skills::{KitSkill, KitSkillsError, kit_skills_from_yaml};
 pub use manifest::{Author, DeliverableSpec, InputSpec, KitMetadata, Manifest, Objective};
+pub use pipeline::{CriticGate, PipelineError, PipelinePlan, PipelineStep, Verdict, parse_verdict};
 pub use pricing::ModelPricingEntry;
 #[allow(deprecated)]
 pub use role::ArpRule;
