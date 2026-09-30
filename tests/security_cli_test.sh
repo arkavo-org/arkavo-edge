@@ -298,13 +298,17 @@ else
     echo -e "${YELLOW}⚠️ SKIP${NC} (cannot verify from binary)"
 fi
 
-# Test secure HTTP client is compiled in
-echo -n "Testing: Secure HTTP client is compiled ... "
-if strings "$ARKAVO_BIN" 2>/dev/null | grep -q "secure_http\|SecureClient"; then
+# The agent-path HTTP client (arkavo_validation::EgressClient, NET-007/NET-014)
+# must be linked in. Its type name survives only in the symbol table, which
+# macOS `strings` does not read, hence `grep -a`; a stripped release binary has
+# no symbol table, so point this at a debug build.
+echo -n "Testing: Egress client is compiled in ... "
+if LC_ALL=C grep -a -q "EgressClient" "$ARKAVO_BIN"; then
     echo -e "${GREEN}✅ PASS${NC}"
     ((TESTS_PASSED++))
 else
-    echo -e "${YELLOW}⚠️ SKIP${NC} (cannot verify from binary)"
+    echo -e "${RED}❌ FAIL${NC} (EgressClient is not linked into $ARKAVO_BIN)"
+    ((TESTS_FAILED++))
 fi
 
 # Test: Try to fetch metadata endpoint via LLM
