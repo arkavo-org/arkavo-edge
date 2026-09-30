@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-process-env = { path = "../arkavo-process-env" }
 async-trait = { workspace = true }
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 futures = { workspace = true }

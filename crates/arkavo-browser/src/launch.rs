@@ -1,4 +1,5 @@
-//! How `browser_cdp` starts Chrome: inside Chrome's own sandbox.
+//! How `browser_cdp` starts Chrome: inside Chrome's own sandbox, and
+//! without the agent's credentials in its environment.
 //!
 //! The sandbox is what confines a renderer compromised by a hostile page;
 //! without it that page runs code as the agent's user, with the agent's
@@ -7,8 +8,9 @@
 //! without user namespaces has no sandbox to give it — and the decision is
 //! never taken from tool parameters, which the model writes.
 
+use arkavo_process_env::{is_secret_name, withheld_names};
 use chromiumoxide::browser::{BrowserConfig, BrowserConfigBuilder};
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 
 /// Operator opt-out for a Linux host where Chrome has no usable sandbox
 /// (user namespaces disabled and no setuid helper). INSECURE: a compromised
@@ -67,11 +69,42 @@ fn parse_effective_uid(status: &str) -> Option<u32> {
         .ok()
 }
 
+/// chromiumoxide 0.7 can add to Chrome's environment but cannot clear it,
+/// so every credential in `parent` is overridden with an empty value
+/// instead of being inherited. A credential is a credential-shaped name or
+/// one this process registered (a provider's `auth_ref`, which may be any
+/// name). The operator's `ARKAVO_TOOL_ENV_PASSTHROUGH` grant is for tool
+/// programs and is not honoured: a page-controlled renderer is not one.
+pub(crate) fn blanked_credentials(
+    parent: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Vec<(String, String)> {
+    let registered = withheld_names();
+    parent
+        .into_iter()
+        .filter_map(|(name, _)| name.into_string().ok())
+        .filter(|name| {
+            is_secret_name(name)
+                || registered.iter().any(|known| {
+                    if cfg!(windows) {
+                        known.eq_ignore_ascii_case(name)
+                    } else {
+                        known == name
+                    }
+                })
+        })
+        .map(|name| (name, String::new()))
+        .collect()
+}
+
 /// The launch configuration for one `browser_cdp` call. `headless` keeps
 /// its existing effect on chromiumoxide's default arguments and nothing
 /// else.
-pub(crate) fn launch_config(headless: bool, sandbox: Sandbox) -> BrowserConfigBuilder {
-    let mut config = BrowserConfig::builder();
+pub(crate) fn launch_config(
+    headless: bool,
+    sandbox: Sandbox,
+    env: Vec<(String, String)>,
+) -> BrowserConfigBuilder {
+    let mut config = BrowserConfig::builder().envs(env);
     if headless {
         config = config.disable_default_args();
     }
@@ -152,7 +185,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn headless_launch_keeps_the_sandbox() {
-        let (args, _) = fake_chrome_launch(launch_config(true, Sandbox::Enabled)).await;
+        let config = launch_config(true, Sandbox::Enabled, Vec::new());
+        let (args, _) = fake_chrome_launch(config).await;
         assert!(args.iter().any(|a| a == "--headless"), "{args:?}");
         assert!(!args.iter().any(|a| a == "--no-sandbox"), "{args:?}");
     }
@@ -161,8 +195,46 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn root_launch_disables_the_sandbox() {
-        let config = launch_config(true, Sandbox::DisabledRunningAsRoot);
+        let config = launch_config(true, Sandbox::DisabledRunningAsRoot, Vec::new());
         let (args, _) = fake_chrome_launch(config).await;
         assert!(args.iter().any(|a| a == "--no-sandbox"), "{args:?}");
+    }
+
+    #[spec("BROWS-008")]
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chrome_gets_agent_credentials_blanked() {
+        let parent = vec![
+            (
+                OsString::from("OPENAI_API_KEY"),
+                OsString::from("planted-secret"),
+            ),
+            (OsString::from("RUSTFLAGS"), OsString::from("-Dwarnings")),
+        ];
+        let env = blanked_credentials(parent);
+        assert_eq!(env, vec![("OPENAI_API_KEY".to_string(), String::new())]);
+
+        let (_, seen) = fake_chrome_launch(launch_config(true, Sandbox::Enabled, env)).await;
+        assert!(seen.iter().any(|l| l == "OPENAI_API_KEY="), "{seen:?}");
+        assert!(!seen.iter().any(|l| l.contains("planted-secret")));
+    }
+
+    /// A provider's `auth_ref` may name any variable, so the names the
+    /// process registered are blanked as well as the credential-shaped ones.
+    #[spec("BROWS-008")]
+    #[test]
+    fn registered_credential_names_are_blanked_too() {
+        // The registry is process-global and tests run in parallel: this
+        // name is used by no other test.
+        const REGISTERED: &str = "BROWSER_TEST_REGISTERED_LOGIN";
+        arkavo_process_env::withhold_name(REGISTERED);
+        let parent = vec![
+            (OsString::from(REGISTERED), OsString::from("login")),
+            (OsString::from("HOME"), OsString::from("/home/agent")),
+        ];
+        assert_eq!(
+            blanked_credentials(parent),
+            vec![(REGISTERED.to_string(), String::new())]
+        );
     }
 }

@@ -120,3 +120,19 @@ scenarios:
     edge_cases:
       - condition: /proc/self/status unreadable
         expected: Sandbox stays on
+
+  - id: BROWS-008
+    name: Chrome starts with the agent's credentials blanked
+    criticality: high
+    given:
+      - The agent's environment holds credential-shaped variables
+    when: browser_cdp launches Chrome
+    then:
+      - Each credential-shaped variable is set to an empty value in Chrome's environment
+      - Other variables are inherited unchanged
+    refs:
+      - crates/arkavo-browser/src/launch.rs
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: A provider registered a credential under a name no convention recognises
+        expected: That name is blanked as well
