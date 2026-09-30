@@ -116,10 +116,10 @@ scenarios:
     then:
       - An EgressClient request to such an address is BLOCKED by default, before a socket to it is opened
       - Blocked ranges include 169.254.169.254, 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4, ::/96, fc00::/7, fe80::/10, ff00::/8, Teredo 2001::/32 and local-use NAT64 64:ff9b:1::/48, and the IPv4-mapped, NAT64 and 6to4 forms of every IPv4 range
-      - Every reqwest request made by arkavo-mcp-tools goes through EgressClient, and that crate cannot build a raw reqwest client (its clippy.toml); arkavo-browser makes no reqwest requests
+      - Every reqwest request made by arkavo-mcp-tools goes through EgressClient, and that crate cannot build a raw reqwest client (its clippy.toml); arkavo-browser's own code makes none
       - Only an operator ARKAVO_EGRESS_ALLOW origin overrides a block (NET-018)
       - The refusal reads "SSRF attempt blocked"
-    refs: [crates/arkavo-validation/src/url.rs:54-147, crates/arkavo-validation/src/egress_policy.rs:73-90, crates/arkavo-validation/src/egress_client.rs:67-92, crates/arkavo-mcp-tools/clippy.toml, crates/arkavo-browser/src/browser.rs]
+    refs: [crates/arkavo-validation/src/url.rs:54-159, crates/arkavo-validation/src/egress_policy.rs:73-90, crates/arkavo-validation/src/egress_client.rs:67-92, crates/arkavo-mcp-tools/clippy.toml, crates/arkavo-browser/src/browser.rs]
     changed: "2026-09-30"
     edge_cases:
       - condition: Decimal or hex IPv4 host (http://2130706433/, http://0x7f.1/)
@@ -320,13 +320,13 @@ scenarios:
     name: Egress from network stacks outside the agent's HTTP client
     criticality: high
     wip: true
-    issue: "Owned by the egress broker workstream; EgressClient covers in-process reqwest only"
+    issue: "Owned by the credential and egress broker workstream; EgressClient covers in-process reqwest only"
     given:
       - A tool hands the network to another process (Chrome via browser_cdp, sh via shell_exec, git and gh, an external MCP server)
     when: That process connects
     then:
       - Its connections are judged by the same policy as EgressClient (NET-007, NET-014, NET-018)
-      - Chrome redirects, subresources and script-initiated fetches are covered, not only the first navigation
+      - Chrome redirects, subresources and script-initiated fetches, including script the model runs through browser_cdp evaluate, are covered, not only the first navigate URL
       - The DNS answer that process connects with is the one judged
 
   - id: NET-021
