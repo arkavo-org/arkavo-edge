@@ -76,6 +76,13 @@ impl EgressFilter {
             "fc00::/7",
             "fe80::/10",
             "ff00::/8",
+            // Teredo tunnels obfuscate the client's IPv4 address and can be
+            // relayed to any server, so no embedded host is judged; the
+            // range is refused whole.
+            "2001::/32",
+            // Local-use NAT64 prefixes place the IPv4 address at a length-
+            // dependent offset, so the range is refused rather than decoded.
+            "64:ff9b:1::/48",
         ] {
             self.blocked_ranges
                 .push(range.parse().expect("built-in range parses"));
@@ -126,8 +133,8 @@ impl EgressFilter {
 
 /// The IPv4 host an IPv6 address is delivered to, when it names one.
 ///
-/// Mapped (`::ffff:a.b.c.d`) and NAT64 (`64:ff9b::a.b.c.d`) addresses reach the
-/// embedded IPv4 host. Judging that host against the IPv4 ranges, rather than
+/// Mapped (`::ffff:a.b.c.d`), NAT64 (`64:ff9b::a.b.c.d`) and 6to4
+/// (`2002:aabb:ccdd::/48`) addresses reach the embedded IPv4 host. Judging that host against the IPv4 ranges, rather than
 /// mirroring each range in IPv6 form, leaves no range open because someone
 /// forgot to mirror it.
 fn embedded_ipv4(ip: IpAddr) -> IpAddr {
@@ -141,6 +148,11 @@ fn embedded_ipv4(ip: IpAddr) -> IpAddr {
     if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
         let [a, b] = segments[6].to_be_bytes();
         let [c, d] = segments[7].to_be_bytes();
+        return IpAddr::V4(Ipv4Addr::new(a, b, c, d));
+    }
+    if segments[0] == 0x2002 {
+        let [a, b] = segments[1].to_be_bytes();
+        let [c, d] = segments[2].to_be_bytes();
         return IpAddr::V4(Ipv4Addr::new(a, b, c, d));
     }
     ip
@@ -470,6 +482,13 @@ mod tests {
             "::ffff:0.0.0.0",
             "64:ff9b::a9fe:a9fe",
             "64:ff9b::7f00:1",
+            "2002:a9fe:a9fe::",
+            "2002:7f00:1::1",
+            "2002:0a00:0001::1",
+            "64:ff9b:1::7f00:1",
+            "64:ff9b:1::808:808",
+            "2001:0::1",
+            "2001::4136:e378:8000:63bf:3fff:fdd2",
         ] {
             let ip: IpAddr = ip.parse().unwrap();
             assert!(
@@ -488,6 +507,9 @@ mod tests {
             "1.1.1.1",
             "2606:4700:4700::1111",
             "64:ff9b::808:808",
+            "2002:0808:0808::1",
+            "2001:db8::1",
+            "2001:4860:4860::8888",
         ] {
             let ip: IpAddr = ip.parse().unwrap();
             assert!(filter.validate_resolved_ip(ip).is_ok(), "{ip} must pass");

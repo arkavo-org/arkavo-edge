@@ -13,4 +13,13 @@ disallowed-methods = [
     { path = "reqwest::blocking::Client::builder", reason = "Use arkavo_validation::EgressClient (NET-007)." },
     { path = "reqwest::blocking::ClientBuilder::new", reason = "Use arkavo_validation::EgressClient (NET-007)." },
     { path = "reqwest::blocking::get", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    # Splitting a request returns the inner client, which skips the URL check.
+    { path = "reqwest::RequestBuilder::build_split", reason = "Returns the raw client, skipping EgressClient's URL check (NET-007)." },
+]
+# `Default` construction builds a raw client without naming any method above.
+disallowed-types = [
+    { path = "reqwest::Client", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::ClientBuilder", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::blocking::Client", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::blocking::ClientBuilder", reason = "Use arkavo_validation::EgressClient (NET-007)." },
 ]

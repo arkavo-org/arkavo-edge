@@ -17,6 +17,5 @@ url = { workspace = true }
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
-# Added by the confinement layer for the resolve_within_root tests.
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
