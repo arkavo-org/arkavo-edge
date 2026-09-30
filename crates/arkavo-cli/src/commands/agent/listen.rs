@@ -14,7 +14,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 /// An agent started with no configuration is meant to be found and reached
 /// by agents on other devices. The endpoint does not authenticate callers,
 /// so such a start prints [`exposure_warning`], and `--trust` moves the agent
-/// to loopback ([`trusted_listen`]).
+/// to loopback ([`loopback_listen`]).
 pub(crate) const DEFAULT_LISTEN: &str = "0.0.0.0:0";
 
 /// A listen address for this machine only, on a port the OS picks. Shown to
@@ -55,7 +55,7 @@ pub(crate) fn exposure_warning(bound: SocketAddr) -> Option<String> {
 
 /// Where a `--trust` run listens.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct TrustedListen {
+pub(crate) struct LoopbackListen {
     /// The address to bind. Always loopback.
     pub addr: SocketAddr,
     /// What to tell the operator when `--trust` set aside an address the
@@ -71,9 +71,9 @@ pub(crate) struct TrustedListen {
 /// The port is kept: it is what `runtime.listen` or `-p` selected. A
 /// loopback host is kept as written, so a kit that names `[::1]` stays on
 /// IPv6. Any other host becomes `127.0.0.1`.
-pub(crate) fn trusted_listen(resolved: SocketAddr, kit_listen: Option<&str>) -> TrustedListen {
+pub(crate) fn loopback_listen(resolved: SocketAddr, kit_listen: Option<&str>) -> LoopbackListen {
     if is_loopback(resolved.ip()) {
-        return TrustedListen {
+        return LoopbackListen {
             addr: resolved,
             notice: None,
         };
@@ -86,7 +86,7 @@ pub(crate) fn trusted_listen(resolved: SocketAddr, kit_listen: Option<&str>) -> 
             kit_listen.trim()
         )
     });
-    TrustedListen { addr, notice }
+    LoopbackListen { addr, notice }
 }
 
 /// Parse a kit's `runtime.listen` (or the zero-config default) into the
@@ -167,8 +167,8 @@ mod tests {
     #[test]
     fn trust_moves_the_default_to_loopback_without_a_notice() {
         assert_eq!(
-            trusted_listen(addr(DEFAULT_LISTEN), None),
-            TrustedListen {
+            loopback_listen(addr(DEFAULT_LISTEN), None),
+            LoopbackListen {
                 addr: addr("127.0.0.1:0"),
                 notice: None,
             }
@@ -178,11 +178,11 @@ mod tests {
     #[test]
     fn trust_keeps_the_selected_port() {
         assert_eq!(
-            trusted_listen(addr("0.0.0.0:8343"), None).addr,
+            loopback_listen(addr("0.0.0.0:8343"), None).addr,
             addr("127.0.0.1:8343")
         );
         assert_eq!(
-            trusted_listen(addr("[::]:8343"), Some("[::]:8080")).addr,
+            loopback_listen(addr("[::]:8343"), Some("[::]:8080")).addr,
             addr("127.0.0.1:8343")
         );
     }
@@ -195,10 +195,10 @@ mod tests {
             "[::]:8342",
             "[fe80::1]:8342",
         ] {
-            let trusted = trusted_listen(addr(kit_listen), Some(kit_listen));
+            let kept = loopback_listen(addr(kit_listen), Some(kit_listen));
 
-            assert_eq!(trusted.addr, addr("127.0.0.1:8342"), "{kit_listen}");
-            let notice = trusted
+            assert_eq!(kept.addr, addr("127.0.0.1:8342"), "{kit_listen}");
+            let notice = kept
                 .notice
                 .unwrap_or_else(|| panic!("overriding {kit_listen} must be said"));
             assert_eq!(notice.lines().count(), 1, "{notice}");
@@ -213,8 +213,8 @@ mod tests {
     fn trust_keeps_a_loopback_address_from_the_kit_as_written() {
         for kit_listen in ["127.0.0.1:8342", "127.8.9.10:8342", "[::1]:8342"] {
             assert_eq!(
-                trusted_listen(addr(kit_listen), Some(kit_listen)),
-                TrustedListen {
+                loopback_listen(addr(kit_listen), Some(kit_listen)),
+                LoopbackListen {
                     addr: addr(kit_listen),
                     notice: None,
                 },
@@ -226,9 +226,9 @@ mod tests {
     #[test]
     fn a_trusted_address_is_never_warned_about() {
         for resolved in ["0.0.0.0:0", "[::]:9", "10.0.0.140:8342", "[::1]:8342"] {
-            let trusted = trusted_listen(addr(resolved), Some(resolved));
-            assert!(is_loopback(trusted.addr.ip()), "{resolved}");
-            assert_eq!(exposure_warning(trusted.addr), None, "{resolved}");
+            let kept = loopback_listen(addr(resolved), Some(resolved));
+            assert!(is_loopback(kept.addr.ip()), "{resolved}");
+            assert_eq!(exposure_warning(kept.addr), None, "{resolved}");
         }
     }
 
