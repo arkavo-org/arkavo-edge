@@ -200,6 +200,41 @@ mod tests {
         assert!(sanitize_repo_path(repo_root, Path::new("/etc/passwd")).is_err());
     }
 
+    /// The half of the regression test below that runs in the re-run
+    /// process: a validator runs a fake `cargo` that records its
+    /// environment.
+    #[cfg(unix)]
+    #[test]
+    fn cargo_validator_env_probe() {
+        let Some(dir) = crate::env_probe::probe_dir() else {
+            return;
+        };
+        crate::env_probe::fake_program(&dir, "cargo");
+        let repo = Repository::init(&dir).unwrap();
+        RepoGuard::new(&repo)
+            .unwrap()
+            .with_test_check()
+            .transaction(|_| Ok(()))
+            .expect("fake cargo passes the check");
+    }
+
+    /// RepoGuard's checks build the agent-edited repository, so its build
+    /// scripts and tests run under the validator's `cargo`.
+    #[cfg(unix)]
+    #[test]
+    fn cargo_validator_never_sees_a_planted_provider_key() {
+        use crate::env_probe::{KEPT_LINE, PLANTED};
+        let dir = TempDir::new().unwrap();
+        let seen = crate::env_probe::rerun(
+            "safety::tests::cargo_validator_env_probe",
+            dir.path(),
+            &[],
+            "cargo",
+        );
+        assert!(seen.lines().any(|l| l == KEPT_LINE), "{seen}");
+        assert!(!seen.contains(PLANTED), "{seen}");
+    }
+
     #[test]
     fn test_repo_guard_rollback() {
         let temp_dir = TempDir::new().unwrap();

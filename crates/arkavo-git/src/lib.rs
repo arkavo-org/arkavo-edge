@@ -4,6 +4,9 @@ pub mod commit_message;
 pub mod remote_fallback;
 pub mod safety;
 
+#[cfg(all(test, unix))]
+mod env_probe;
+
 use backend::{Git2Backend, GitBackend, GitError, Result};
 pub use git2::{Oid, Repository};
 use std::path::Path;
