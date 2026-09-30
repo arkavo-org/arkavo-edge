@@ -31,6 +31,7 @@ pub fn success_response(data: Value) -> Value {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
     use serde_json::json;

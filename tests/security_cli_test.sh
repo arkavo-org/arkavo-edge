@@ -289,15 +289,6 @@ echo ""
 echo "Feature: SSRF Protection"
 echo "--------------------------------"
 
-# These tests check that the egress filter is initialized
-echo -n "Testing: Egress filter is initialized in binary ... "
-if strings "$ARKAVO_BIN" 2>/dev/null | grep -q "EgressFilter\|egress_filter\|SSRF"; then
-    echo -e "${GREEN}✅ PASS${NC} (egress filter present)"
-    ((TESTS_PASSED++))
-else
-    echo -e "${YELLOW}⚠️ SKIP${NC} (cannot verify from binary)"
-fi
-
 # The agent-path HTTP client (arkavo_validation::EgressClient, NET-007/NET-014)
 # must be linked in. Its type name survives only in the symbol table, which
 # macOS `strings` does not read, hence `grep -a`; a stripped release binary has
