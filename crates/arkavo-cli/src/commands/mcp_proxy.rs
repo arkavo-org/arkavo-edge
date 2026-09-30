@@ -9,7 +9,8 @@
 //! `--env` names: `--env NAME` passes the proxy's own value through (how a
 //! credential reaches it without landing in argv), `--env NAME=VALUE` sets
 //! one. Names that make a program load other code, such as `LD_PRELOAD` or
-//! `NODE_OPTIONS`, are refused.
+//! `NODE_OPTIONS`, are refused, and so is a literal value for a
+//! credential-shaped name such as `OPENAI_API_KEY`: use the passthrough form.
 
 use arkavo_dispatch_gate::{DispatchGate, GateConfig, unix_now};
 use arkavo_mcp_proxy::{McpProxy, PermitPolicy, ProxyConfig};
@@ -162,7 +163,15 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
                     env,
                 });
             }
-            other => return Err(format!("unknown flag {other}")),
+            other if other.starts_with("--env=") => {
+                return Err("--env takes NAME[=VALUE] as the next argument".into());
+            }
+            // Anything after an `=` may be a credential typed into the wrong
+            // flag, so only the flag's own name is reported.
+            other => {
+                let flag = other.split('=').next().unwrap_or_default();
+                return Err(format!("unknown flag {flag}"));
+            }
         }
     }
     Err("missing `-- <upstream command>`".into())
@@ -171,7 +180,10 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
 /// `NAME` passes the proxy's own value through; `NAME=VALUE` sets one. The
 /// errors never repeat the flag, whose value may be a credential. A name that
 /// makes the upstream load other code is refused rather than dropped, so a
-/// launcher never runs without the variable its operator asked for.
+/// launcher never runs without the variable its operator asked for. A
+/// credential-shaped name is accepted only as a passthrough: a literal would
+/// sit in argv, where any local user can read it. Naming one variable both
+/// ways is allowed and the literal wins, as in `ProxyConfig`.
 fn add_env(env: &mut EnvSpec, flag: &str) -> Result<(), String> {
     let (name, value) = match flag.split_once('=') {
         Some((name, value)) => (name, Some(value)),
@@ -183,6 +195,11 @@ fn add_env(env: &mut EnvSpec, flag: &str) -> Result<(), String> {
     if arkavo_process_env::is_loader_or_hijack_name(name) {
         return Err(format!(
             "--env {name} would let the upstream load or run other code and is refused"
+        ));
+    }
+    if value.is_some() && arkavo_process_env::is_secret_name(name) {
+        return Err(format!(
+            "--env {name}=... would put a credential on the command line; use --env {name} to pass the proxy's own value through"
         ));
     }
     match value {
@@ -358,6 +375,47 @@ mod tests {
             let err = parse_with_env(flag).err().expect("refused");
             assert!(!err.contains("/tmp/"), "error echoed the value: {err}");
         }
+    }
+
+    #[test]
+    fn env_flag_with_an_equals_is_refused_without_echoing_any_of_it() {
+        let hex = "07".repeat(32);
+        let issuer_key = ed25519_issuer_key_hex();
+        let err = parse(&s(&[
+            "proxy",
+            "--policy-bundle-hash",
+            &hex,
+            "--issuer-key",
+            &issuer_key,
+            "--env=OPENAI_API_KEY=sk-live-value",
+            "--",
+            "srv",
+        ]))
+        .err()
+        .expect("refused");
+        assert!(!err.contains("sk-live-value"), "{err}");
+        assert!(!err.contains("OPENAI_API_KEY"), "{err}");
+        assert!(err.contains("--env takes NAME[=VALUE]"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_flag_is_reported_without_the_value_after_its_equals() {
+        let err = parse(&s(&["proxy", "--token=sk-live-value"]))
+            .err()
+            .expect("refused");
+        assert!(err.contains("--token"), "{err}");
+        assert!(!err.contains("sk-live-value"), "{err}");
+    }
+
+    #[test]
+    fn env_flag_setting_a_credential_literal_points_to_passthrough() {
+        let err = parse_with_env("OPENAI_API_KEY=sk-live-value")
+            .err()
+            .expect("refused");
+        assert!(!err.contains("sk-live-value"), "{err}");
+        assert!(err.contains("--env OPENAI_API_KEY"), "{err}");
+        let passed = parse_with_env("OPENAI_API_KEY").unwrap();
+        assert_eq!(passed.env.passthrough, s(&["OPENAI_API_KEY"]));
     }
 
     #[test]

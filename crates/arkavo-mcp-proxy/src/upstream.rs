@@ -84,6 +84,11 @@ pub enum UpstreamError {
         source: std::io::Error,
     },
 
+    /// The configured upstream environment was refused before anything was
+    /// started. The message names a variable, never a value.
+    #[error("upstream environment refused: {0}")]
+    Environment(String),
+
     /// The upstream connection was already closed when the request was
     /// made, so nothing was sent.
     #[error("upstream connection closed")]
@@ -131,7 +136,7 @@ impl UpstreamError {
     /// itself cut short — are reported as "never ran".
     pub fn may_have_reached_upstream(&self) -> bool {
         match self {
-            Self::Spawn { .. } | Self::Closed | Self::Write(_) => false,
+            Self::Spawn { .. } | Self::Environment(_) | Self::Closed | Self::Write(_) => false,
             Self::ClosedAfterSend | Self::Flush(_) | Self::WriteTimeout(_) | Self::Timeout(_) => {
                 true
             }

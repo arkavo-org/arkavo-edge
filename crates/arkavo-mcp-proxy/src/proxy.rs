@@ -4,7 +4,7 @@ use crate::framing::{self, Line, MAX_LINE_BYTES};
 use crate::meta::{credentials, strip_arkavo_meta};
 use crate::policy::{CallContext, Decision, ForwardOutcome, PolicyHook};
 use crate::upstream::{UpstreamConnection, UpstreamError};
-use arkavo_process_env::{ChildEnv, EnvSpec};
+use arkavo_process_env::EnvSpec;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -123,7 +123,7 @@ impl McpProxy {
         let upstream = UpstreamConnection::spawn(
             &config.command,
             &config.args,
-            &ChildEnv::isolated_from_current(&config.env),
+            &crate::env::resolve(&config.env)?,
             config.request_timeout,
         )?;
         Ok(Self { upstream, policy })

@@ -43,6 +43,7 @@
 //! [`CallContext`] struct is the extension point where a principal will be
 //! attached without changing the [`PolicyHook`] trait.
 
+mod env;
 pub mod framing;
 mod meta;
 mod permit_hook;
