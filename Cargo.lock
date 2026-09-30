@@ -1579,6 +1579,7 @@ dependencies = [
  "arkavo-dispatch-gate",
  "arkavo-observability",
  "arkavo-permit",
+ "arkavo-process-env",
  "arkavo-test-macros",
  "async-trait",
  "base64 0.22.1",

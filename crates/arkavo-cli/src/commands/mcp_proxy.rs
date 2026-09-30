@@ -4,13 +4,20 @@
 //! Configuration is flags only; the policy bundle hash pins which bundle
 //! the permits must cite, and `--issuer-key` lists the issuer public keys
 //! the dispatch gate trusts.
+//!
+//! The upstream sees a platform baseline of the proxy's environment plus what
+//! `--env` names: `--env NAME` passes the proxy's own value through (how a
+//! credential reaches it without landing in argv), `--env NAME=VALUE` sets
+//! one. Names that make a program load other code, such as `LD_PRELOAD` or
+//! `NODE_OPTIONS`, are refused.
 
 use arkavo_dispatch_gate::{DispatchGate, GateConfig, unix_now};
 use arkavo_mcp_proxy::{McpProxy, PermitPolicy, ProxyConfig};
 use arkavo_permit::{HashAlgorithm, PermitVerifier};
+use arkavo_process_env::EnvSpec;
 use std::sync::Arc;
 
-const USAGE: &str = "usage: arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--issuer-key <hex> ...] [--hash sha256|blake3] -- <upstream command> [args...]";
+const USAGE: &str = "usage: arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--issuer-key <hex> ...] [--hash sha256|blake3] [--env NAME | --env NAME=VALUE ...] -- <upstream command> [args...]";
 
 const HELP: &str = "Permit-gated stdio MCP relay
 
@@ -37,6 +44,7 @@ pub struct ProxyArgs {
     pub trusted_issuers: Vec<PermitVerifier>,
     pub command: String,
     pub args: Vec<String>,
+    pub env: EnvSpec,
 }
 
 // `execute` may run from a context that already has a tokio runtime, so it
@@ -83,7 +91,10 @@ async fn run(parsed: ProxyArgs) -> Result<(), Box<dyn std::error::Error>> {
         clock: unix_now,
         trusted_issuers: parsed.trusted_issuers,
     });
-    let config = ProxyConfig::new(parsed.command, parsed.args);
+    let config = ProxyConfig {
+        env: parsed.env,
+        ..ProxyConfig::new(parsed.command, parsed.args)
+    };
     let proxy = McpProxy::spawn(config, Arc::new(PermitPolicy::new(gate)))?;
     let stdin = tokio::io::BufReader::new(tokio::io::stdin());
     let stdout = tokio::io::stdout();
@@ -98,6 +109,7 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
     let mut policy_bundle_hash = None;
     let mut hash = HashAlgorithm::Sha256;
     let mut trusted_issuers = Vec::new();
+    let mut env = EnvSpec::default();
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -123,6 +135,13 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
                     .ok_or_else(|| format!("unknown hash {value}"))?;
                 index += 2;
             }
+            "--env" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or("--env needs NAME or NAME=VALUE")?;
+                add_env(&mut env, value)?;
+                index += 2;
+            }
             "--" => {
                 let command = args
                     .get(index + 1)
@@ -140,12 +159,39 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
                     trusted_issuers,
                     command,
                     args: rest,
+                    env,
                 });
             }
             other => return Err(format!("unknown flag {other}")),
         }
     }
     Err("missing `-- <upstream command>`".into())
+}
+
+/// `NAME` passes the proxy's own value through; `NAME=VALUE` sets one. The
+/// errors never repeat the flag, whose value may be a credential. A name that
+/// makes the upstream load other code is refused rather than dropped, so a
+/// launcher never runs without the variable its operator asked for.
+fn add_env(env: &mut EnvSpec, flag: &str) -> Result<(), String> {
+    let (name, value) = match flag.split_once('=') {
+        Some((name, value)) => (name, Some(value)),
+        None => (flag, None),
+    };
+    if !arkavo_process_env::is_valid_name(name) {
+        return Err("--env needs a variable name before any '='".into());
+    }
+    if arkavo_process_env::is_loader_or_hijack_name(name) {
+        return Err(format!(
+            "--env {name} would let the upstream load or run other code and is refused"
+        ));
+    }
+    match value {
+        Some(value) => {
+            env.set.insert(name.to_string(), value.to_string());
+        }
+        None => env.passthrough.push(name.to_string()),
+    }
+    Ok(())
 }
 
 fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
@@ -253,6 +299,82 @@ mod tests {
         assert_eq!(parsed.command, "python3");
         assert_eq!(parsed.args, s(&["srv.py", "--flag"]));
         assert_eq!(parsed.trusted_issuers.len(), 1);
+    }
+
+    #[test]
+    fn env_flags_pass_names_through_and_set_values() {
+        let hex = "07".repeat(32);
+        let issuer_key = ed25519_issuer_key_hex();
+        let parsed = parse(&s(&[
+            "proxy",
+            "--policy-bundle-hash",
+            &hex,
+            "--issuer-key",
+            &issuer_key,
+            "--env",
+            "GITHUB_TOKEN",
+            "--env",
+            "LOG_LEVEL=debug",
+            "--",
+            "srv",
+        ]))
+        .unwrap();
+        assert_eq!(parsed.env.passthrough, s(&["GITHUB_TOKEN"]));
+        assert_eq!(
+            parsed.env.set.get("LOG_LEVEL").map(String::as_str),
+            Some("debug")
+        );
+    }
+
+    fn parse_with_env(flag: &str) -> Result<ProxyArgs, String> {
+        let hex = "07".repeat(32);
+        let issuer_key = ed25519_issuer_key_hex();
+        parse(&s(&[
+            "proxy",
+            "--policy-bundle-hash",
+            &hex,
+            "--issuer-key",
+            &issuer_key,
+            "--env",
+            flag,
+            "--",
+            "srv",
+        ]))
+    }
+
+    #[test]
+    fn env_flag_without_a_name_is_rejected() {
+        let err = parse_with_env("=ghp_literal").err().expect("rejected");
+        assert!(
+            !err.contains("ghp_literal"),
+            "error echoed the value: {err}"
+        );
+        assert!(parse_with_env("").is_err());
+    }
+
+    #[test]
+    fn env_flag_naming_a_loader_variable_is_refused_without_echoing_its_value() {
+        for flag in ["LD_PRELOAD=/tmp/evil.so", "NODE_OPTIONS", "path=/tmp/bin"] {
+            let err = parse_with_env(flag).err().expect("refused");
+            assert!(!err.contains("/tmp/"), "error echoed the value: {err}");
+        }
+    }
+
+    #[test]
+    fn env_flag_without_an_argument_is_rejected() {
+        let hex = "07".repeat(32);
+        let issuer_key = ed25519_issuer_key_hex();
+        let err = parse(&s(&[
+            "proxy",
+            "--policy-bundle-hash",
+            &hex,
+            "--issuer-key",
+            &issuer_key,
+            "--env",
+        ]))
+        .err()
+        .expect("rejected");
+        assert!(err.contains("--env"), "{err}");
     }
 
     #[test]

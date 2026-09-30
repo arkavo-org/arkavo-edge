@@ -60,6 +60,7 @@
 
 use crate::framing::{self, Line, MAX_LINE_BYTES};
 use crate::refusals;
+use arkavo_process_env::ChildEnv;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -159,22 +160,20 @@ pub struct UpstreamConnection {
 }
 
 impl UpstreamConnection {
-    /// Spawn `command args` and connect to its stdio.
+    /// Spawn `command args` with exactly `env` as its environment and
+    /// connect to its stdio.
     pub fn spawn(
         command: &str,
         args: &[String],
-        env: &HashMap<String, String>,
+        env: &ChildEnv,
         timeout: Option<Duration>,
     ) -> Result<Self, UpstreamError> {
-        let mut cmd = Command::new(command);
+        let mut cmd = Command::from(env.command(command));
         cmd.args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .kill_on_drop(true);
-        for (key, value) in env {
-            cmd.env(key, value);
-        }
 
         let timeout = timeout.unwrap_or(DEFAULT_TIMEOUT);
         let mut child = cmd.spawn().map_err(|source| UpstreamError::Spawn {
@@ -440,7 +439,59 @@ impl std::fmt::Debug for UpstreamConnection {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_process_env::EnvSpec;
+    use arkavo_test_macros::spec;
+    use std::ffi::OsString;
     use std::time::Instant;
+
+    fn baseline_env() -> ChildEnv {
+        ChildEnv::isolated_from_current(&EnvSpec::default())
+    }
+
+    /// The upstream writes its environment to a file named by a configured
+    /// variable: its stdout belongs to the connection's reader task.
+    #[spec("PDG-012")]
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn upstream_sees_only_baseline_and_declared_environment() {
+        let dump = std::env::temp_dir().join(format!(
+            "arkavo-mcp-proxy-upstream-env-{}",
+            std::process::id()
+        ));
+        let spec = EnvSpec {
+            set: [("ENV_PROBE_OUT".to_string(), dump.display().to_string())].into(),
+            passthrough: vec!["GITHUB_TOKEN".to_string()],
+        };
+        let parent = [
+            ("PATH", std::env::var_os("PATH").unwrap_or_default()),
+            ("OPENAI_API_KEY", OsString::from("planted-secret")),
+            ("GITHUB_TOKEN", OsString::from("declared-token")),
+        ];
+        let conn = UpstreamConnection::spawn(
+            "sh",
+            &["-c".to_string(), r#"env > "$ENV_PROBE_OUT""#.to_string()],
+            &ChildEnv::isolated(parent, &spec),
+            None,
+        )
+        .unwrap();
+        conn.child.lock().await.wait().await.unwrap();
+
+        let seen = std::fs::read_to_string(&dump).expect("environment dump");
+        let _ = std::fs::remove_file(&dump);
+        assert!(
+            seen.lines().any(|l| l.starts_with("ENV_PROBE_OUT=")),
+            "{seen}"
+        );
+        assert!(
+            seen.lines().any(|l| l == "GITHUB_TOKEN=declared-token"),
+            "{seen}"
+        );
+        assert!(!seen.contains("planted-secret"), "{seen}");
+        assert!(
+            !seen.lines().any(|l| l.starts_with("CARGO_MANIFEST_DIR=")),
+            "the proxy's own environment leaked into the upstream"
+        );
+    }
 
     /// Regression: after the upstream exits, a request must fail fast with
     /// `Closed` — never hang for the full timeout because the reader task
@@ -448,7 +499,7 @@ mod tests {
     #[tokio::test]
     async fn request_fails_closed_fast_after_upstream_exit() {
         // `true` exits immediately without reading or writing anything.
-        let conn = UpstreamConnection::spawn("true", &[], &HashMap::new(), None).unwrap();
+        let conn = UpstreamConnection::spawn("true", &[], &baseline_env(), None).unwrap();
 
         // Wait for the reader task to observe EOF and mark disconnected.
         for _ in 0..200 {
@@ -492,7 +543,7 @@ mod tests {
         let conn = UpstreamConnection::spawn(
             "sh",
             &["-c".to_string(), "read line".to_string()],
-            &HashMap::new(),
+            &baseline_env(),
             Some(Duration::from_secs(10)),
         )
         .unwrap();
@@ -527,7 +578,7 @@ mod tests {
         let conn = UpstreamConnection::spawn(
             "sh",
             &["-c".to_string(), "sleep 30".to_string()],
-            &HashMap::new(),
+            &baseline_env(),
             Some(Duration::from_millis(200)),
         )
         .unwrap();
@@ -582,7 +633,7 @@ mod tests {
             UpstreamConnection::spawn(
                 "sh",
                 &["-c".to_string(), "sleep 30".to_string()],
-                &HashMap::new(),
+                &baseline_env(),
                 Some(Duration::from_millis(500)),
             )
             .unwrap(),

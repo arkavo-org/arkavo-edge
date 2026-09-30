@@ -1015,7 +1015,7 @@ components:
     module: arkavo_dispatch_gate
     description: Permit-bound tool dispatch through the MCP proxy - authn, policy and budget stages over CWT permits
     criticality: critical
-    scenario_count: 11
+    scenario_count: 12
     invariants:
       - No tools/call reaches upstream without a trusted-issuer permit and a proof of possession
       - Per-permit state is keyed on the permit's signed identity, never its bytes
@@ -1024,8 +1024,8 @@ components:
 
 stats:
   total_specs: 87
-  total_scenarios: 838
-  critical_scenarios: 261
+  total_scenarios: 839
+  critical_scenarios: 262
   coverage_areas:
     - authentication
     - authorization
