@@ -13,7 +13,7 @@ use arkavo_protocol::agent_config::AgentMode;
 use arkavo_swarmkit::runtime_config::RoleRuntimeView;
 use arkavo_swarmkit::{AgentRuntimeConfig, DiscoverError, RuntimeMcpServer, RuntimeMode};
 
-use super::agent::listen::{DEFAULT_LISTEN, parse_listen, trusted_listen};
+use super::agent::listen::{DEFAULT_LISTEN, loopback_listen, parse_listen};
 use super::agent::{AgentConfig, McpServerConfig, default_agent_name};
 use super::kit::kit_model_to_hint;
 
@@ -62,10 +62,10 @@ pub(crate) fn resolve_agent_configs_for_start(
 
     let mut notice = None;
     for config in &mut configs {
-        let trusted = trusted_listen(parse_listen(&config.listen)?, kit_listen.as_deref());
-        config.listen = trusted.addr.to_string();
+        let kept = loopback_listen(parse_listen(&config.listen)?, kit_listen.as_deref());
+        config.listen = kept.addr.to_string();
         // A kit has one `runtime.listen`, so every role gives the same line.
-        notice = trusted.notice;
+        notice = kept.notice;
     }
     Ok((configs, notice))
 }
@@ -422,7 +422,7 @@ mod tests {
     }
 
     /// The listen address and the notice of a `--trust` start.
-    fn trusted_start(
+    fn start_on_loopback(
         kit: Option<&Path>,
         port: Option<u16>,
         cwd: &Path,
@@ -456,7 +456,7 @@ mod tests {
     fn trust_with_no_kit_listens_on_loopback() {
         let dir = tempdir();
         assert_eq!(
-            trusted_start(None, None, dir.path()),
+            start_on_loopback(None, None, dir.path()),
             ("127.0.0.1:0".to_string(), None)
         );
     }
@@ -466,7 +466,7 @@ mod tests {
         let dir = tempdir();
         let kit = write_kit(dir.path(), None);
         assert_eq!(
-            trusted_start(Some(&kit), None, dir.path()),
+            start_on_loopback(Some(&kit), None, dir.path()),
             ("127.0.0.1:0".to_string(), None)
         );
     }
@@ -475,12 +475,12 @@ mod tests {
     fn trust_keeps_the_port_that_p_selects() {
         let dir = tempdir();
         assert_eq!(
-            trusted_start(None, Some(8343), dir.path()),
+            start_on_loopback(None, Some(8343), dir.path()),
             ("127.0.0.1:8343".to_string(), None)
         );
 
         let kit = write_kit(dir.path(), Some("0.0.0.0:8342"));
-        let (listen, _) = trusted_start(Some(&kit), Some(8343), dir.path());
+        let (listen, _) = start_on_loopback(Some(&kit), Some(8343), dir.path());
         assert_eq!(listen, "127.0.0.1:8343");
     }
 
@@ -489,7 +489,7 @@ mod tests {
         let dir = tempdir();
         let kit = write_kit(dir.path(), Some("0.0.0.0:8342"));
 
-        let (listen, notice) = trusted_start(Some(&kit), None, dir.path());
+        let (listen, notice) = start_on_loopback(Some(&kit), None, dir.path());
         assert_eq!(listen, "127.0.0.1:8342");
         let notice = notice.expect("the kit's address was set aside");
         assert!(notice.contains("--trust"), "{notice}");
@@ -501,7 +501,7 @@ mod tests {
         let dir = tempdir();
         let kit = write_kit(dir.path(), Some("127.0.0.1:8342"));
         assert_eq!(
-            trusted_start(Some(&kit), None, dir.path()),
+            start_on_loopback(Some(&kit), None, dir.path()),
             ("127.0.0.1:8342".to_string(), None)
         );
     }
@@ -511,11 +511,11 @@ mod tests {
         let dir = tempdir();
         let kit = write_kit(dir.path(), Some("[::1]:8342"));
         assert_eq!(
-            trusted_start(Some(&kit), None, dir.path()),
+            start_on_loopback(Some(&kit), None, dir.path()),
             ("[::1]:8342".to_string(), None)
         );
         assert_eq!(
-            trusted_start(Some(&kit), Some(9000), dir.path()),
+            start_on_loopback(Some(&kit), Some(9000), dir.path()),
             ("[::1]:9000".to_string(), None)
         );
     }

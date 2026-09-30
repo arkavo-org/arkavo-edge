@@ -14,7 +14,7 @@ use arkavo_swarmkit::DiscoverError;
 
 use super::{AuditResult, AuditStatus, result};
 use crate::commands::agent::listen::{
-    DEFAULT_LISTEN, LOOPBACK_LISTEN, is_loopback, parse_listen, trusted_listen,
+    DEFAULT_LISTEN, LOOPBACK_LISTEN, is_loopback, loopback_listen, parse_listen,
 };
 
 const NETWORK: &str = "Network";
@@ -69,16 +69,13 @@ pub(super) fn effective_endpoint(cwd: &Path, trust: bool) -> Endpoint {
 
     match parse_listen(&listen) {
         Ok(addr) if trust => {
-            let trusted = trusted_listen(addr, None).addr;
-            let origin = if trusted == addr {
+            let kept = loopback_listen(addr, None).addr;
+            let origin = if kept == addr {
                 origin
             } else {
                 format!("--trust; without it {addr}, {origin}")
             };
-            Endpoint::Bound {
-                addr: trusted,
-                origin,
-            }
+            Endpoint::Bound { addr: kept, origin }
         }
         Ok(addr) => Endpoint::Bound { addr, origin },
         // `--trust` does not make the address usable: the agent refuses to
