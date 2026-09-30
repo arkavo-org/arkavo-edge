@@ -495,7 +495,7 @@ components:
     module: arkavo_mcp_runtime
     description: MCP runtime implementation
     criticality: critical
-    scenario_count: 7
+    scenario_count: 8
     invariants:
       - JSON-RPC 2.0 protocol
       - Tool execution with timeout
@@ -1024,8 +1024,8 @@ components:
 
 stats:
   total_specs: 87
-  total_scenarios: 837
-  critical_scenarios: 260
+  total_scenarios: 838
+  critical_scenarios: 261
   coverage_areas:
     - authentication
     - authorization

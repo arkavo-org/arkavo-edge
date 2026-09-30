@@ -552,7 +552,10 @@ pub async fn start_agent_server(
             use crate::mcp_client::McpClient;
             use crate::mcp_integration::McpConnection;
 
-            match McpClient::new_with_command(command, &mcp_config.args) {
+            // Resolved per server: it sees the platform baseline and what its
+            // kit entry declared, never the agent's provider keys.
+            let child_env = arkavo_process_env::ChildEnv::isolated_from_current(&mcp_config.env);
+            match McpClient::new_with_command(command, &mcp_config.args, &child_env) {
                 Ok(mut client) => {
                     // Set server name for poll notifications
                     client.set_server_name(mcp_config.name.clone());
