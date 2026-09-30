@@ -12,16 +12,35 @@ mod advertise;
 mod gpu_residency;
 pub mod listen;
 
+/// What a command line asks `arkavo agent` to do.
+#[derive(Debug, PartialEq, Eq)]
+enum Invocation {
+    Help,
+    Init { name: Option<String> },
+    Run(RunOptions),
+}
+
+/// The options of an `arkavo agent` run, as parsed from the command line.
+///
+/// `trust` and `bind` are separate on purpose: `--trust` only shows the
+/// authorization QR code, and where the agent listens is `--bind`'s alone.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RunOptions {
+    config_path: Option<String>,
+    verbose: bool,
+    trust: bool,
+    bind: Option<listen::BindAddress>,
+    port: Option<u16>,
+    name: Option<String>,
+}
+
+/// Read the command line. Nothing is resolved or started here, so a
+/// mistake in it is reported before the agent has touched anything.
 #[allow(clippy::disallowed_methods)]
-pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    // Parse all arguments for flags
-    let mut config_path: Option<String> = None;
-    let mut verbose = false;
-    let mut trust = false;
+fn parse_args(args: &[String]) -> Result<Invocation, Box<dyn std::error::Error>> {
+    let mut options = RunOptions::default();
     let mut subcommand: Option<&str> = None;
     let mut init_name: Option<String> = None;
-    let mut override_port: Option<u16> = None;
-    let mut override_name: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -29,14 +48,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         match arg.as_str() {
             "-c" | "--config" => {
                 if i + 1 < args.len() && !args[i + 1].starts_with('-') {
-                    config_path = Some(args[i + 1].clone());
+                    options.config_path = Some(args[i + 1].clone());
                     i += 1;
                 }
             }
             "-p" | "--port" => {
                 if i + 1 < args.len() && !args[i + 1].starts_with('-') {
                     if let Ok(port) = args[i + 1].parse::<u16>() {
-                        override_port = Some(port);
+                        options.port = Some(port);
                     } else {
                         eprintln!("Error: Invalid port number '{}'", args[i + 1]);
                         return Err("Invalid port number".into());
@@ -46,16 +65,25 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
             "-n" | "--name" => {
                 if i + 1 < args.len() && !args[i + 1].starts_with('-') {
-                    override_name = Some(args[i + 1].clone());
+                    options.name = Some(args[i + 1].clone());
                     i += 1;
                 }
             }
-            "-v" | "--verbose" => verbose = true,
-            "--trust" => trust = true,
-            "-h" | "--help" | "help" => {
-                print_usage();
-                return Ok(());
-            }
+            // A `--bind` that cannot be understood is a mistake in the
+            // command line, not something to fall back from. The error is
+            // returned, not printed here as well: the caller prints it once.
+            "--bind" => match args.get(i + 1).filter(|value| !value.starts_with('-')) {
+                Some(value) => {
+                    options.bind = Some(listen::parse_bind(value)?);
+                    i += 1;
+                }
+                None => {
+                    return Err("--bind requires an address, for example --bind 127.0.0.1".into());
+                }
+            },
+            "-v" | "--verbose" => options.verbose = true,
+            "--trust" => options.trust = true,
+            "-h" | "--help" | "help" => return Ok(Invocation::Help),
             "init" => {
                 subcommand = Some("init");
                 if i + 1 < args.len() && !args[i + 1].starts_with('-') {
@@ -84,31 +112,31 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         i += 1;
     }
 
-    // Handle subcommands
-    match subcommand {
-        Some("init") => {
-            if let Some(name) = init_name {
-                let report = deprecated_init(Path::new("."), &name)?;
-                println!("Wrote {}", report.path.display());
-                println!("kit.id: {}", report.kit_id);
-                Ok(())
-            } else {
-                eprintln!("Error: Agent name required");
-                eprintln!("Usage: arkavo agent init <agent-name>");
-                Err("Missing agent name".into())
-            }
+    Ok(match subcommand {
+        Some("init") => Invocation::Init { name: init_name },
+        _ => Invocation::Run(options),
+    })
+}
+
+#[allow(clippy::disallowed_methods)]
+pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    match parse_args(args)? {
+        Invocation::Help => {
+            print_usage();
+            Ok(())
         }
-        Some("run") | None => {
-            // Run agent with optional config and verbose flag
-            run_agent_with_options(
-                config_path.as_deref(),
-                verbose,
-                trust,
-                override_port,
-                override_name,
-            )
+        Invocation::Init { name: Some(name) } => {
+            let report = deprecated_init(Path::new("."), &name)?;
+            println!("Wrote {}", report.path.display());
+            println!("kit.id: {}", report.kit_id);
+            Ok(())
         }
-        _ => unreachable!(),
+        Invocation::Init { name: None } => {
+            eprintln!("Error: Agent name required");
+            eprintln!("Usage: arkavo agent init <agent-name>");
+            Err("Missing agent name".into())
+        }
+        Invocation::Run(options) => run_agent_with_options(&options),
     }
 }
 
@@ -130,26 +158,31 @@ SUBCOMMANDS:
 OPTIONS:
     -c, --config <FILE> SwarmKit manifest path (default: discover .arkavo/*.swarmkit.yaml or ./*.swarmkit.yaml)
     -p, --port <PORT>   Override the listen port (default: random available port)
+    --bind <ADDRESS>    Listen on this IP address instead of the default or the
+                        kit's runtime.listen: 127.0.0.1, [::1] or 0.0.0.0, with an
+                        optional port (127.0.0.1:8342). Without a port, -p or the
+                        kit's port applies
     -n, --name <NAME>   Select a role by id from a multi-role kit (default: the first role)
     -v, --verbose       Show startup messages and status
     --trust             Show the agent authorization QR code (DID:key) on startup
-                        and keep the agent on loopback: it listens on 127.0.0.1
-                        and is not announced on the network
 
 NETWORK:
     By default the agent listens on every interface and announces itself over mDNS,
     so other devices on the local network can discover and reach it. The RPC
-    endpoint is not authenticated yet: run the agent on networks you trust.
-    --trust keeps the agent on this machine, whatever the kit says.
-    A kit can pin an address with runtime.listen, for example
-    runtime.listen: "127.0.0.1:8342".
+    endpoint is not authenticated yet, so every start on an address other
+    machines can reach prints a notice: run the agent on networks you trust.
+    --bind 127.0.0.1 keeps the agent on this machine, whatever the kit says;
+    agents on the same machine still discover it. A kit can pin an address with
+    runtime.listen, for example runtime.listen: "127.0.0.1:8342". --bind
+    overrides it, and says so.
 
 EXAMPLES:
     arkavo agent                           # Run with auto-discovery
     arkavo agent --config agent.swarmkit.yaml  # Run with a specific kit
     arkavo agent --port 8343 -v            # Run on specific port with verbose
     arkavo agent -c team.swarmkit.yaml -n worker -p 8343  # Run one role of a multi-role kit
-    arkavo agent run --trust               # Show the QR code and stay on loopback"#;
+    arkavo agent --bind 127.0.0.1          # Stay on this machine
+    arkavo agent run --trust               # Show the QR code for another device"#;
 
 /// Deprecated: `arkavo agent init` no longer writes AGENTS.md.
 ///
@@ -193,12 +226,12 @@ pub(crate) fn default_agent_name() -> String {
 }
 
 /// What `arkavo agent` starts with: the agent, the address its `listen`
-/// parses to, and the line to show when `--trust` set aside the listen
+/// parses to, and the line to show when `--bind` set aside the listen
 /// address the kit asked for.
 type StartupConfig = (AgentConfig, std::net::SocketAddr, Option<String>);
 
 /// Resolve the single agent this process will run, and the address it will
-/// listen on. With `trust` that address is loopback.
+/// listen on. With `bind` that address is the one `--bind` names.
 ///
 /// Mirrors legacy multi-agent behavior by only ever starting the first
 /// resolved entry, unless -n/--name narrowed the result to one role.
@@ -210,48 +243,44 @@ fn resolve_startup_config(
     cli_config_path: Option<&Path>,
     name: Option<&str>,
     port: Option<u16>,
-    trust: bool,
+    bind: Option<listen::BindAddress>,
     cwd: &Path,
 ) -> Result<StartupConfig, Box<dyn std::error::Error>> {
     use crate::commands::agent_kit::resolve_agent_configs_for_start;
 
-    let (configs, trust_notice) =
-        resolve_agent_configs_for_start(cli_config_path, name, port, trust, cwd)?;
+    let (configs, bind_notice) =
+        resolve_agent_configs_for_start(cli_config_path, name, port, bind, cwd)?;
     let agent = configs
         .into_iter()
         .next()
         .ok_or("No agent configuration available")?;
     let listen_addr = listen::parse_listen(&agent.listen)?;
-    Ok((agent, listen_addr, trust_notice))
+    Ok((agent, listen_addr, bind_notice))
 }
 
 #[allow(clippy::disallowed_methods)]
-fn run_agent_with_options(
-    config_file: Option<&str>,
-    verbose: bool,
-    trust: bool,
-    override_port: Option<u16>,
-    override_name: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn run_agent_with_options(options: &RunOptions) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
     use crate::commands::agent_kit::export_resolved_kit_path;
 
     let cwd = std::env::current_dir()?;
-    let cli_config_path = config_file.map(Path::new);
+    let cli_config_path = options.config_path.as_deref().map(Path::new);
+    let verbose = options.verbose;
+    let trust = options.trust;
 
     // Resolve config from a SwarmKit kit: -c/--config > discovery > the
     // zero-config default. AGENTS.md is never read on this path (S6).
-    let (mut agent_config, _listen_addr, trust_notice) = resolve_startup_config(
+    let (mut agent_config, _listen_addr, bind_notice) = resolve_startup_config(
         cli_config_path,
-        override_name.as_deref(),
-        override_port,
-        trust,
+        options.name.as_deref(),
+        options.port,
+        options.bind,
         &cwd,
     )?;
 
     // Shown in a quiet run too: the kit asked for an address and the agent
     // is not on it.
-    if let Some(notice) = trust_notice {
+    if let Some(notice) = bind_notice {
         eprintln!("{notice}");
     }
 
@@ -372,16 +401,6 @@ pub async fn start_agent_server(
     // First, before any identity or process state is created: a listen
     // address that cannot be understood must leave nothing behind.
     let listen_addr = listen::parse_listen(&config.listen)?;
-
-    // `--trust` promises loopback. The address is moved there when the
-    // configuration is resolved; a caller that skipped that step is refused
-    // here instead of being bound to the network.
-    if trust && !listen::is_loopback(listen_addr.ip()) {
-        return Err(format!(
-            "--trust keeps the agent on loopback, and {listen_addr} is not a loopback address"
-        )
-        .into());
-    }
 
     // Load or create persisted device keypair (Phase 1 identity anchor)
     use arkavo_device_identity::keypair as device_keypair_store;
@@ -678,7 +697,9 @@ pub async fn start_agent_server(
 
     // Shown even in a quiet run: whoever started the agent has to learn that
     // it is reachable from the network whether or not they asked for output.
-    // This is every start without `--trust` or a loopback address in the kit.
+    // This is every start that neither `--bind` nor the kit put on loopback,
+    // a `--trust` start included: the QR code it shows is for a device that
+    // has to reach the address.
     if let Some(warning) = listen::exposure_warning(bound_addr) {
         eprintln!("{warning}");
     }
@@ -1152,7 +1173,7 @@ fn broadcast_agent_mdns_sync(
         // this a loopback address is announced nowhere, not even to this
         // machine; with it the record still never leaves the machine. An
         // agent on a network address needs it too: this daemon also browses,
-        // and an agent started with `--trust` is announced on loopback only.
+        // and an agent bound to loopback is announced on loopback only.
         mdns.enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])?;
 
         // Start browsing for other agents
@@ -1524,10 +1545,79 @@ mod tests {
         assert!(execute(&["--trsut".to_string()]).is_err()); // typo of --trust
     }
 
-    /// Regression: the help said the agent listens on 127.0.0.1 unless the
-    /// kit says otherwise, and described `--trust` as showing a QR code only.
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| (*v).to_owned()).collect()
+    }
+
+    /// The run options a command line parses to.
+    fn run_options(values: &[&str]) -> RunOptions {
+        match parse_args(&args(values)).unwrap() {
+            Invocation::Run(options) => options,
+            other => panic!("{values:?} is not a run: {other:?}"),
+        }
+    }
+
+    /// `--trust` shows the QR code and decides nothing else; in particular
+    /// it leaves `bind` unset, so the agent listens where it would without
+    /// the flag.
     #[test]
-    fn help_describes_the_network_default_and_what_trust_changes() {
+    fn trust_sets_only_the_qr_code() {
+        assert_eq!(
+            run_options(&["--trust"]),
+            RunOptions {
+                trust: true,
+                ..RunOptions::default()
+            }
+        );
+        assert_eq!(
+            run_options(&["run", "--trust", "-p", "8343"]),
+            RunOptions {
+                trust: true,
+                port: Some(8343),
+                ..RunOptions::default()
+            }
+        );
+    }
+
+    #[test]
+    fn bind_is_read_with_and_without_a_port() {
+        for (value, bind) in [
+            ("127.0.0.1", ("127.0.0.1", None)),
+            ("127.0.0.1:8342", ("127.0.0.1", Some(8342))),
+            ("[::1]:8342", ("::1", Some(8342))),
+            ("0.0.0.0", ("0.0.0.0", None)),
+        ] {
+            let options = run_options(&["--bind", value, "-p", "9000", "--trust"]);
+            let expected = listen::BindAddress {
+                ip: bind.0.parse().unwrap(),
+                port: bind.1,
+            };
+            assert_eq!(options.bind, Some(expected), "{value}");
+            assert_eq!(options.port, Some(9000), "{value}");
+            assert!(options.trust, "{value}");
+        }
+    }
+
+    #[test]
+    fn an_unparseable_bind_is_a_startup_error() {
+        for bad in ["localhost", "localhost:8342", "8342", "not an address"] {
+            let err = parse_args(&args(&["--bind", bad]))
+                .expect_err(bad)
+                .to_string();
+            assert!(err.contains("Invalid bind address"), "{bad:?}: {err}");
+        }
+        let err = parse_args(&args(&["--bind"])).unwrap_err().to_string();
+        assert!(err.contains("--bind"), "{err}");
+        let err = parse_args(&args(&["--bind", "--trust"]))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--bind"), "{err}");
+    }
+
+    /// Regression: the help said the agent listens on 127.0.0.1 unless the
+    /// kit says otherwise, and later that `--trust` keeps it on loopback.
+    #[test]
+    fn help_describes_the_network_default_and_the_bind_option() {
         let (options, network) = USAGE
             .split_once("NETWORK:")
             .expect("the help has a NETWORK section");
@@ -1536,16 +1626,28 @@ mod tests {
         let trust = options
             .split_once("--trust")
             .expect("--trust is listed under OPTIONS")
-            .1;
+            .1
+            .lines()
+            .next()
+            .unwrap();
         assert!(trust.contains("QR code"), "{trust}");
-        assert!(trust.contains("loopback"), "{trust}");
-        assert!(trust.contains("not announced on the network"), "{trust}");
+        assert!(!options.contains("loopback"), "{options}");
+
+        let bind = options
+            .split_once("--bind <ADDRESS>")
+            .expect("--bind is listed under OPTIONS")
+            .1;
+        assert!(bind.contains("127.0.0.1"), "{bind}");
+        assert!(bind.contains("runtime.listen"), "{bind}");
+        assert!(bind.contains("-p"), "{bind}");
 
         assert!(network.contains("every interface"), "{network}");
         assert!(network.contains("mDNS"), "{network}");
         assert!(network.contains("not authenticated"), "{network}");
-        assert!(network.contains("--trust"), "{network}");
+        assert!(network.contains("notice"), "{network}");
+        assert!(network.contains("--bind 127.0.0.1"), "{network}");
         assert!(network.contains("runtime.listen"), "{network}");
+        assert!(!network.contains("--trust"), "{network}");
         assert!(
             !network.contains("listens on 127.0.0.1 unless"),
             "{network}"
@@ -1606,6 +1708,23 @@ provenance:
         path
     }
 
+    /// Resolve a start of `arkavo agent <values>` in `cwd`, with the kit at
+    /// `kit` when one is named.
+    fn resolve_start(
+        values: &[&str],
+        kit: Option<&Path>,
+        cwd: &Path,
+    ) -> Result<StartupConfig, Box<dyn std::error::Error>> {
+        let options = run_options(values);
+        resolve_startup_config(
+            kit,
+            options.name.as_deref(),
+            options.port,
+            options.bind,
+            cwd,
+        )
+    }
+
     /// Regression: `[::1]:8080` was split on `:` into more than two parts,
     /// reported as invalid, and the agent was then restarted on all
     /// interfaces under a generic persona.
@@ -1614,13 +1733,13 @@ provenance:
         let dir = tempfile::tempdir().unwrap();
         let kit = write_kit_listening_on(dir.path(), "[::1]:8080");
 
-        for trust in [false, true] {
-            let (config, listen_addr, trust_notice) =
-                resolve_startup_config(Some(&kit), None, None, trust, dir.path()).unwrap();
+        for values in [&[][..], &["--trust"][..]] {
+            let (config, listen_addr, bind_notice) =
+                resolve_start(values, Some(&kit), dir.path()).unwrap();
 
             assert_eq!(config.name, "agent");
             assert_eq!(listen_addr, "[::1]:8080".parse().unwrap());
-            assert_eq!(trust_notice, None);
+            assert_eq!(bind_notice, None);
         }
     }
 
@@ -1629,8 +1748,8 @@ provenance:
         let dir = tempfile::tempdir().unwrap();
         for bad in ["localhost:8080", "127.0.0.1", "8080", "not an address"] {
             let kit = write_kit_listening_on(dir.path(), bad);
-            for trust in [false, true] {
-                let err = resolve_startup_config(Some(&kit), None, None, trust, dir.path())
+            for values in [&[][..], &["--trust"][..], &["--bind", "127.0.0.1"][..]] {
+                let err = resolve_start(values, Some(&kit), dir.path())
                     .expect_err("an unparseable listen address must not resolve")
                     .to_string();
                 assert!(
@@ -1647,8 +1766,8 @@ provenance:
     fn a_port_override_does_not_supply_a_missing_host() {
         let dir = tempfile::tempdir().unwrap();
         let kit = write_kit_listening_on(dir.path(), ":3000");
-        for trust in [false, true] {
-            let err = resolve_startup_config(Some(&kit), None, Some(8080), trust, dir.path())
+        for values in [&["-p", "8080"][..], &["-p", "8080", "--trust"][..]] {
+            let err = resolve_start(values, Some(&kit), dir.path())
                 .expect_err("a listen address with no host must not resolve")
                 .to_string();
             assert!(err.contains("Invalid listen address"), "{err}");
@@ -1658,61 +1777,108 @@ provenance:
     #[test]
     fn a_start_with_no_kit_listens_on_every_interface() {
         let dir = tempfile::tempdir().unwrap();
-        let (config, listen_addr, trust_notice) =
-            resolve_startup_config(None, None, None, false, dir.path()).unwrap();
+        let (config, listen_addr, bind_notice) = resolve_start(&[], None, dir.path()).unwrap();
 
         assert_eq!(listen_addr, "0.0.0.0:0".parse().unwrap());
         assert_eq!(config.listen, "0.0.0.0:0");
         assert!(config.mdns_enabled);
-        assert_eq!(trust_notice, None);
+        assert_eq!(bind_notice, None);
     }
 
-    /// `--trust` moves the address and nothing else: the agent is still
-    /// announced, on the loopback interface, for agents on this machine.
+    /// `--trust` shows the QR code and changes nothing about where the
+    /// agent listens: the address in the code is one another device can
+    /// reach.
     #[test]
-    fn a_trusted_start_listens_on_loopback_and_is_still_discoverable() {
+    fn a_trust_start_listens_where_a_default_start_does() {
         let dir = tempfile::tempdir().unwrap();
-        let (config, listen_addr, trust_notice) =
-            resolve_startup_config(None, None, Some(8343), true, dir.path()).unwrap();
+        let (config, listen_addr, bind_notice) =
+            resolve_start(&["--trust"], None, dir.path()).unwrap();
 
-        assert_eq!(listen_addr, "127.0.0.1:8343".parse().unwrap());
-        assert_eq!(config.listen, "127.0.0.1:8343");
+        assert_eq!(listen_addr, "0.0.0.0:0".parse().unwrap());
+        assert_eq!(config.listen, "0.0.0.0:0");
         assert!(config.mdns_enabled);
-        assert_eq!(trust_notice, None);
+        assert_eq!(bind_notice, None);
+        assert!(listen::exposure_warning(listen_addr).is_some());
+
+        let (_, with_port, _) =
+            resolve_start(&["--trust", "-p", "8343"], None, dir.path()).unwrap();
+        assert_eq!(with_port, "0.0.0.0:8343".parse().unwrap());
     }
 
     #[test]
-    fn a_trusted_start_sets_aside_a_network_address_in_the_kit() {
+    fn a_trust_start_keeps_the_address_in_the_kit() {
         let dir = tempfile::tempdir().unwrap();
-        let kit = write_kit_listening_on(dir.path(), "10.0.0.140:8342");
-        let (_, listen_addr, trust_notice) =
-            resolve_startup_config(Some(&kit), None, None, true, dir.path()).unwrap();
+        for kit_listen in ["10.0.0.140:8342", "0.0.0.0:8342", "127.0.0.1:8342"] {
+            let kit = write_kit_listening_on(dir.path(), kit_listen);
+            let (config, listen_addr, bind_notice) =
+                resolve_start(&["--trust"], Some(&kit), dir.path()).unwrap();
 
-        assert_eq!(listen_addr, "127.0.0.1:8342".parse().unwrap());
-        let notice = trust_notice.expect("the kit's address was set aside");
-        assert!(notice.contains("10.0.0.140:8342"), "{notice}");
+            assert_eq!(listen_addr, kit_listen.parse().unwrap());
+            assert_eq!(config.listen, kit_listen);
+            assert_eq!(bind_notice, None, "{kit_listen}");
+        }
     }
 
-    /// The server entry point holds `--trust` to loopback itself, as it does
-    /// for an address that does not parse, so no caller can bind a trusted
-    /// agent to the network.
-    #[tokio::test]
-    #[allow(clippy::disallowed_methods)]
-    async fn start_agent_server_refuses_a_network_address_under_trust() {
-        for listen in ["0.0.0.0:0", "10.0.0.140:8342", "[::]:0"] {
-            let config = AgentConfig {
-                name: "agent".to_string(),
-                listen: listen.to_string(),
-                ..AgentConfig::default()
-            };
+    #[test]
+    fn a_port_alone_never_changes_the_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, no_kit, _) = resolve_start(&["-p", "8343"], None, dir.path()).unwrap();
+        assert_eq!(no_kit, "0.0.0.0:8343".parse().unwrap());
 
-            let err = start_agent_server(&config, true)
-                .await
-                .expect_err("a trusted agent must not bind a network address")
-                .to_string();
+        let kit = write_kit_listening_on(dir.path(), "127.0.0.1:8342");
+        let (_, with_kit, bind_notice) =
+            resolve_start(&["-p", "8343"], Some(&kit), dir.path()).unwrap();
+        assert_eq!(with_kit, "127.0.0.1:8343".parse().unwrap());
+        assert_eq!(bind_notice, None);
+    }
 
-            assert!(err.contains("--trust"), "{listen}: {err}");
-            assert!(err.contains("loopback"), "{listen}: {err}");
+    #[test]
+    fn a_bind_start_listens_on_the_named_host() {
+        let dir = tempfile::tempdir().unwrap();
+        for (values, listens_on) in [
+            (&["--bind", "127.0.0.1"][..], "127.0.0.1:0"),
+            (&["--bind", "127.0.0.1", "-p", "8343"][..], "127.0.0.1:8343"),
+            (&["--bind", "127.0.0.1:8342"][..], "127.0.0.1:8342"),
+            (&["--bind", "[::1]:8342"][..], "[::1]:8342"),
+            (&["--bind", "127.0.0.1", "--trust"][..], "127.0.0.1:0"),
+            (&["--bind", "0.0.0.0"][..], "0.0.0.0:0"),
+        ] {
+            let (config, listen_addr, bind_notice) =
+                resolve_start(values, None, dir.path()).unwrap();
+
+            assert_eq!(listen_addr, listens_on.parse().unwrap(), "{values:?}");
+            assert_eq!(config.listen, listens_on, "{values:?}");
+            assert!(config.mdns_enabled, "{values:?}");
+            assert_eq!(bind_notice, None, "{values:?}");
+        }
+    }
+
+    #[test]
+    fn a_bind_start_sets_aside_the_address_in_the_kit_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        for (kit_listen, values, listens_on) in [
+            (
+                "10.0.0.140:8342",
+                &["--bind", "127.0.0.1"][..],
+                "127.0.0.1:8342",
+            ),
+            ("127.0.0.1:8342", &["--bind", "0.0.0.0"][..], "0.0.0.0:8342"),
+            (
+                "10.0.0.140:8342",
+                &["--bind", "127.0.0.1", "-p", "9000"][..],
+                "127.0.0.1:9000",
+            ),
+        ] {
+            let kit = write_kit_listening_on(dir.path(), kit_listen);
+            let (_, listen_addr, bind_notice) =
+                resolve_start(values, Some(&kit), dir.path()).unwrap();
+
+            assert_eq!(listen_addr, listens_on.parse().unwrap(), "{values:?}");
+            let notice = bind_notice.expect("the kit's address was set aside");
+            assert_eq!(notice.lines().count(), 1, "{notice}");
+            assert!(notice.contains("--bind"), "{notice}");
+            assert!(notice.contains(kit_listen), "{notice}");
+            assert!(notice.contains(listens_on), "{notice}");
         }
     }
 

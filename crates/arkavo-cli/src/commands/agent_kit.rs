@@ -13,7 +13,7 @@ use arkavo_protocol::agent_config::AgentMode;
 use arkavo_swarmkit::runtime_config::RoleRuntimeView;
 use arkavo_swarmkit::{AgentRuntimeConfig, DiscoverError, RuntimeMcpServer, RuntimeMode};
 
-use super::agent::listen::{DEFAULT_LISTEN, loopback_listen, parse_listen};
+use super::agent::listen::{BindAddress, DEFAULT_LISTEN, bind_listen, parse_listen};
 use super::agent::{AgentConfig, McpServerConfig, default_agent_name};
 use super::kit::kit_model_to_hint;
 
@@ -39,38 +39,39 @@ pub fn resolve_agent_configs(
 }
 
 /// [`resolve_agent_configs`] for an agent that is about to start, where
-/// `trust` says whether it was started with `--trust`.
+/// `bind` is the value of `--bind` when it was given.
 ///
-/// With `trust`, every returned entry listens on loopback. The second value
+/// With `bind`, every returned entry listens on the host it names, on the
+/// port it names or else the one `-p` or the kit selected. The second value
 /// is the line to show the operator when that set aside an address the kit
 /// asked for. A `listen` that does not parse is an error here, as it is
-/// when the agent binds: `--trust` does not turn it into an address.
+/// when the agent binds: `--bind` does not turn it into an address.
 pub(crate) fn resolve_agent_configs_for_start(
     cli_config_path: Option<&Path>,
     name: Option<&str>,
     port: Option<u16>,
-    trust: bool,
+    bind: Option<BindAddress>,
     cwd: &Path,
 ) -> Result<(Vec<AgentConfig>, Option<String>), Box<dyn std::error::Error>> {
     let Resolved {
         mut configs,
         kit_listen,
     } = resolve(cli_config_path, name, port, cwd)?;
-    if !trust {
+    let Some(bind) = bind else {
         return Ok((configs, None));
-    }
+    };
 
     let mut notice = None;
     for config in &mut configs {
-        let kept = loopback_listen(parse_listen(&config.listen)?, kit_listen.as_deref());
-        config.listen = kept.addr.to_string();
+        let chosen = bind_listen(parse_listen(&config.listen)?, bind, kit_listen.as_deref());
+        config.listen = chosen.addr.to_string();
         // A kit has one `runtime.listen`, so every role gives the same line.
-        notice = kept.notice;
+        notice = chosen.notice;
     }
     Ok((configs, notice))
 }
 
-/// What a run resolves to before `--trust` is considered.
+/// What a run resolves to before `--bind` is considered.
 struct Resolved {
     configs: Vec<AgentConfig>,
     /// The kit's `runtime.listen` as written. `None` when the listen address
@@ -345,6 +346,7 @@ fn default_agent_config() -> AgentConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::agent::listen::parse_bind;
     use std::fs;
 
     fn tempdir() -> tempfile::TempDir {
@@ -421,28 +423,30 @@ mod tests {
         path
     }
 
-    /// The listen address and the notice of a `--trust` start.
-    fn start_on_loopback(
+    /// The listen address and the notice of a start with `--bind bind`.
+    fn start_bound_to(
         kit: Option<&Path>,
         port: Option<u16>,
+        bind: &str,
         cwd: &Path,
     ) -> (String, Option<String>) {
+        let bind = parse_bind(bind).unwrap();
         let (configs, notice) =
-            resolve_agent_configs_for_start(kit, None, port, true, cwd).unwrap();
+            resolve_agent_configs_for_start(kit, None, port, Some(bind), cwd).unwrap();
         assert_eq!(configs.len(), 1);
         (configs[0].listen.clone(), notice)
     }
 
     #[test]
-    fn without_trust_a_start_resolves_what_every_other_caller_gets() {
+    fn without_bind_a_start_resolves_what_every_other_caller_gets() {
         let dir = tempdir();
-        let no_kit = resolve_agent_configs_for_start(None, None, None, false, dir.path()).unwrap();
+        let no_kit = resolve_agent_configs_for_start(None, None, None, None, dir.path()).unwrap();
         assert_eq!(no_kit.0[0].listen, "0.0.0.0:0");
         assert_eq!(no_kit.1, None);
 
         let kit = write_kit(dir.path(), Some("10.0.0.140:8342"));
         let (configs, notice) =
-            resolve_agent_configs_for_start(Some(&kit), None, Some(9000), false, dir.path())
+            resolve_agent_configs_for_start(Some(&kit), None, Some(9000), None, dir.path())
                 .unwrap();
         assert_eq!(
             configs,
@@ -452,90 +456,154 @@ mod tests {
         assert_eq!(notice, None);
     }
 
+    /// `-p` picks a port and nothing else: the host stays the default's, or
+    /// the kit's, whatever it is.
     #[test]
-    fn trust_with_no_kit_listens_on_loopback() {
+    fn a_port_alone_never_changes_the_host() {
+        let dir = tempdir();
+        let no_kit =
+            resolve_agent_configs_for_start(None, None, Some(8343), None, dir.path()).unwrap();
+        assert_eq!(no_kit.0[0].listen, "0.0.0.0:8343");
+
+        for (kit_listen, listens_on) in [
+            ("127.0.0.1:8342", "127.0.0.1:8343"),
+            ("[::1]:8342", "[::1]:8343"),
+            ("10.0.0.140:8342", "10.0.0.140:8343"),
+        ] {
+            let kit = write_kit(dir.path(), Some(kit_listen));
+            let (configs, notice) =
+                resolve_agent_configs_for_start(Some(&kit), None, Some(8343), None, dir.path())
+                    .unwrap();
+            assert_eq!(configs[0].listen, listens_on, "{kit_listen}");
+            assert_eq!(notice, None, "{kit_listen}");
+        }
+    }
+
+    #[test]
+    fn bind_with_no_kit_listens_on_the_named_host() {
         let dir = tempdir();
         assert_eq!(
-            start_on_loopback(None, None, dir.path()),
+            start_bound_to(None, None, "127.0.0.1", dir.path()),
             ("127.0.0.1:0".to_string(), None)
+        );
+        assert_eq!(
+            start_bound_to(None, None, "0.0.0.0", dir.path()),
+            ("0.0.0.0:0".to_string(), None)
         );
     }
 
     #[test]
-    fn trust_with_a_kit_that_sets_no_listen_listens_on_loopback() {
+    fn bind_with_a_kit_that_sets_no_listen_listens_on_the_named_host() {
         let dir = tempdir();
         let kit = write_kit(dir.path(), None);
         assert_eq!(
-            start_on_loopback(Some(&kit), None, dir.path()),
+            start_bound_to(Some(&kit), None, "127.0.0.1", dir.path()),
             ("127.0.0.1:0".to_string(), None)
         );
     }
 
     #[test]
-    fn trust_keeps_the_port_that_p_selects() {
+    fn bind_without_a_port_takes_the_port_that_p_selects() {
         let dir = tempdir();
         assert_eq!(
-            start_on_loopback(None, Some(8343), dir.path()),
+            start_bound_to(None, Some(8343), "127.0.0.1", dir.path()),
             ("127.0.0.1:8343".to_string(), None)
         );
 
         let kit = write_kit(dir.path(), Some("0.0.0.0:8342"));
-        let (listen, _) = start_on_loopback(Some(&kit), Some(8343), dir.path());
+        let (listen, _) = start_bound_to(Some(&kit), Some(8343), "127.0.0.1", dir.path());
         assert_eq!(listen, "127.0.0.1:8343");
     }
 
     #[test]
-    fn trust_overrides_a_network_address_in_the_kit_and_says_so() {
+    fn bind_without_a_port_takes_the_port_that_the_kit_selects() {
+        let dir = tempdir();
+        let kit = write_kit(dir.path(), Some("0.0.0.0:8342"));
+        let (listen, _) = start_bound_to(Some(&kit), None, "127.0.0.1", dir.path());
+        assert_eq!(listen, "127.0.0.1:8342");
+    }
+
+    #[test]
+    fn bind_with_a_port_listens_on_it() {
+        let dir = tempdir();
+        assert_eq!(
+            start_bound_to(None, None, "127.0.0.1:8342", dir.path()),
+            ("127.0.0.1:8342".to_string(), None)
+        );
+        assert_eq!(
+            start_bound_to(None, None, "[::1]:8342", dir.path()),
+            ("[::1]:8342".to_string(), None)
+        );
+        // A port in --bind is the most specific choice, so it wins over -p.
+        assert_eq!(
+            start_bound_to(None, Some(9000), "[::1]:8342", dir.path()),
+            ("[::1]:8342".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn bind_overrides_a_network_address_in_the_kit_and_says_so() {
         let dir = tempdir();
         let kit = write_kit(dir.path(), Some("0.0.0.0:8342"));
 
-        let (listen, notice) = start_on_loopback(Some(&kit), None, dir.path());
+        let (listen, notice) = start_bound_to(Some(&kit), None, "127.0.0.1", dir.path());
         assert_eq!(listen, "127.0.0.1:8342");
         let notice = notice.expect("the kit's address was set aside");
-        assert!(notice.contains("--trust"), "{notice}");
+        assert!(notice.contains("--bind"), "{notice}");
+        assert!(notice.contains("0.0.0.0:8342"), "{notice}");
+        assert!(notice.contains("127.0.0.1:8342"), "{notice}");
+    }
+
+    #[test]
+    fn bind_to_every_interface_overrides_a_loopback_address_in_the_kit() {
+        let dir = tempdir();
+        let kit = write_kit(dir.path(), Some("127.0.0.1:8342"));
+
+        let (listen, notice) = start_bound_to(Some(&kit), None, "0.0.0.0", dir.path());
+        assert_eq!(listen, "0.0.0.0:8342");
+        let notice = notice.expect("the kit's address was set aside");
+        assert!(notice.contains("127.0.0.1:8342"), "{notice}");
         assert!(notice.contains("0.0.0.0:8342"), "{notice}");
     }
 
     #[test]
-    fn trust_keeps_a_loopback_address_in_the_kit() {
+    fn bind_that_matches_the_kit_says_nothing() {
         let dir = tempdir();
         let kit = write_kit(dir.path(), Some("127.0.0.1:8342"));
         assert_eq!(
-            start_on_loopback(Some(&kit), None, dir.path()),
+            start_bound_to(Some(&kit), None, "127.0.0.1", dir.path()),
             ("127.0.0.1:8342".to_string(), None)
         );
-    }
 
-    #[test]
-    fn trust_keeps_an_ipv6_loopback_address_in_the_kit() {
-        let dir = tempdir();
         let kit = write_kit(dir.path(), Some("[::1]:8342"));
         assert_eq!(
-            start_on_loopback(Some(&kit), None, dir.path()),
+            start_bound_to(Some(&kit), None, "[::1]", dir.path()),
             ("[::1]:8342".to_string(), None)
         );
         assert_eq!(
-            start_on_loopback(Some(&kit), Some(9000), dir.path()),
+            start_bound_to(Some(&kit), Some(9000), "[::1]", dir.path()),
             ("[::1]:9000".to_string(), None)
         );
     }
 
     #[test]
-    fn trust_does_not_make_an_unparseable_address_usable() {
+    fn bind_does_not_make_an_unparseable_kit_address_usable() {
         let dir = tempdir();
+        let bind = parse_bind("127.0.0.1").unwrap();
         for bad in ["localhost:8080", ":3000", "not an address"] {
             let kit = write_kit(dir.path(), Some(bad));
             for port in [None, Some(8343)] {
-                let err = resolve_agent_configs_for_start(Some(&kit), None, port, true, dir.path())
-                    .expect_err(bad)
-                    .to_string();
+                let err =
+                    resolve_agent_configs_for_start(Some(&kit), None, port, Some(bind), dir.path())
+                        .expect_err(bad)
+                        .to_string();
                 assert!(err.contains("Invalid listen address"), "{bad:?}: {err}");
             }
         }
     }
 
     #[test]
-    fn trust_moves_every_role_of_a_kit() {
+    fn bind_moves_every_role_of_a_kit() {
         let dir = tempdir();
         let kit = minimal_kit_yaml()
             .replacen("kit:", "runtime:\n  listen: \"0.0.0.0:8342\"\nkit:", 1)
@@ -548,8 +616,10 @@ mod tests {
         let path = dir.path().join("agent.swarmkit.yaml");
         fs::write(&path, kit).unwrap();
 
+        let bind = parse_bind("127.0.0.1").unwrap();
         let (configs, notice) =
-            resolve_agent_configs_for_start(Some(&path), None, None, true, dir.path()).unwrap();
+            resolve_agent_configs_for_start(Some(&path), None, None, Some(bind), dir.path())
+                .unwrap();
         assert_eq!(configs.len(), 2);
         for config in &configs {
             assert_eq!(config.listen, "127.0.0.1:8342", "{}", config.name);

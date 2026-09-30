@@ -2,7 +2,7 @@
 //!
 //! Every check here reads the configuration `arkavo agent` would run with
 //! in the audited directory: the kit discovery finds, the defaults the
-//! agent falls back to, and `--trust` when the audit is told the agent is
+//! agent falls back to, and `--bind` when the audit is told the agent is
 //! started with it. A control the endpoint does not have is reported as
 //! missing; nothing passes on an assumption.
 
@@ -14,7 +14,8 @@ use arkavo_swarmkit::DiscoverError;
 
 use super::{AuditResult, AuditStatus, result};
 use crate::commands::agent::listen::{
-    DEFAULT_LISTEN, LOOPBACK_LISTEN, is_loopback, loopback_listen, parse_listen,
+    BindAddress, DEFAULT_LISTEN, LOOPBACK_BIND, LOOPBACK_LISTEN, bind_listen, is_loopback,
+    parse_listen,
 };
 
 const NETWORK: &str = "Network";
@@ -32,12 +33,13 @@ pub(super) enum Endpoint {
 
 /// Resolve the listen address the way `arkavo agent` does when started in
 /// `cwd`: the discovered kit's `runtime.listen`, else the built-in default,
-/// moved to loopback when `trust` says the agent is started with `--trust`.
+/// moved to the host (and port) `bind` names when the audit is told the
+/// agent is started with `--bind`.
 ///
-/// `--trust` exists only on the command line, so nothing in the directory
-/// can tell the audit about it. Without `trust` the audit describes a start
+/// `--bind` exists only on the command line, so nothing in the directory
+/// can tell the audit about it. Without `bind` the audit describes a start
 /// with no flags, which is the start that needs no decision from anybody.
-pub(super) fn effective_endpoint(cwd: &Path, trust: bool) -> Endpoint {
+pub(super) fn effective_endpoint(cwd: &Path, bind: Option<BindAddress>) -> Endpoint {
     let (listen, origin) = match arkavo_swarmkit::discover_kit_path(cwd) {
         Ok(path) => match arkavo_swarmkit::load_kit_file(&path) {
             Ok(kit) => match kit.config.runtime.listen {
@@ -67,20 +69,23 @@ pub(super) fn effective_endpoint(cwd: &Path, trust: bool) -> Endpoint {
         }
     };
 
-    match parse_listen(&listen) {
-        Ok(addr) if trust => {
-            let kept = loopback_listen(addr, None).addr;
-            let origin = if kept == addr {
+    match (parse_listen(&listen), bind) {
+        (Ok(addr), Some(bind)) => {
+            let chosen = bind_listen(addr, bind, None).addr;
+            let origin = if chosen == addr {
                 origin
             } else {
-                format!("--trust; without it {addr}, {origin}")
+                format!("--bind; without it {addr}, {origin}")
             };
-            Endpoint::Bound { addr: kept, origin }
+            Endpoint::Bound {
+                addr: chosen,
+                origin,
+            }
         }
-        Ok(addr) => Endpoint::Bound { addr, origin },
-        // `--trust` does not make the address usable: the agent refuses to
+        (Ok(addr), None) => Endpoint::Bound { addr, origin },
+        // `--bind` does not make the address usable: the agent refuses to
         // start on it either way.
-        Err(reason) => Endpoint::Invalid {
+        (Err(reason), _) => Endpoint::Invalid {
             reason: format!("{reason} ({origin})"),
         },
     }
@@ -101,8 +106,8 @@ pub(super) fn check_bind(endpoint: &Endpoint) -> AuditResult {
             AuditStatus::Fail,
             format!(
                 "RPC endpoint listens on {addr}, reachable from the network ({origin}); \
-                 start the agent with --trust, or set runtime.listen to \"{LOOPBACK_LISTEN}\", \
-                 to keep it on this machine"
+                 start the agent with {LOOPBACK_BIND}, or set runtime.listen to \
+                 \"{LOOPBACK_LISTEN}\", to keep it on this machine"
             ),
         ),
         Endpoint::Invalid { reason } => result(
@@ -226,7 +231,11 @@ pub(super) fn check_rate_limiting(config: &RateLimitConfig) -> AuditResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::agent::listen::rpc_rate_limit;
+    use crate::commands::agent::listen::{parse_bind, rpc_rate_limit};
+
+    fn bind(bind: &str) -> Option<BindAddress> {
+        Some(parse_bind(bind).unwrap())
+    }
 
     const KIT: &str = r#"
 spec_version: "1.0.0"
@@ -301,7 +310,7 @@ provenance:
     #[test]
     fn no_kit_is_audited_as_the_built_in_default_on_every_interface() {
         let dir = tempfile::tempdir().unwrap();
-        let endpoint = effective_endpoint(dir.path(), false);
+        let endpoint = effective_endpoint(dir.path(), None);
 
         for check in endpoint_checks(&endpoint) {
             assert_eq!(check.status, AuditStatus::Fail, "{}", check.message);
@@ -323,13 +332,18 @@ provenance:
             "{}",
             bind.message
         );
-        assert!(bind.message.contains("--trust"), "{}", bind.message);
+        assert!(
+            bind.message.contains("--bind 127.0.0.1"),
+            "{}",
+            bind.message
+        );
+        assert!(!bind.message.contains("--trust"), "{}", bind.message);
     }
 
     #[test]
     fn a_kit_without_runtime_listen_is_audited_as_the_default() {
         let dir = dir_with_kit(None);
-        let bind = check_bind(&effective_endpoint(dir.path(), false));
+        let bind = check_bind(&effective_endpoint(dir.path(), None));
 
         assert_eq!(bind.status, AuditStatus::Fail);
         assert!(bind.message.contains("0.0.0.0:0"), "{}", bind.message);
@@ -346,7 +360,7 @@ provenance:
     fn a_kit_listening_on_the_network_fails_the_endpoint_checks() {
         for listen in ["0.0.0.0:8342", "[::]:8342", "10.0.0.140:8342"] {
             let dir = dir_with_kit(Some(listen));
-            for check in endpoint_checks(&effective_endpoint(dir.path(), false)) {
+            for check in endpoint_checks(&effective_endpoint(dir.path(), None)) {
                 assert_eq!(
                     check.status,
                     AuditStatus::Fail,
@@ -360,57 +374,83 @@ provenance:
     }
 
     #[test]
-    fn a_trusted_start_is_audited_on_loopback() {
+    fn a_loopback_bind_is_audited_on_loopback() {
         let no_kit = tempfile::tempdir().unwrap();
         let dirs = [
-            (no_kit, "127.0.0.1:0", "0.0.0.0:0"),
-            (dir_with_kit(None), "127.0.0.1:0", "0.0.0.0:0"),
+            (no_kit, "127.0.0.1", "127.0.0.1:0", "0.0.0.0:0"),
+            (dir_with_kit(None), "127.0.0.1", "127.0.0.1:0", "0.0.0.0:0"),
             (
                 dir_with_kit(Some("0.0.0.0:8342")),
+                "127.0.0.1",
                 "127.0.0.1:8342",
                 "0.0.0.0:8342",
             ),
             (
                 dir_with_kit(Some("10.0.0.140:8342")),
-                "127.0.0.1:8342",
+                "[::1]",
+                "[::1]:8342",
+                "10.0.0.140:8342",
+            ),
+            (
+                dir_with_kit(Some("10.0.0.140:8342")),
+                "127.0.0.1:9000",
+                "127.0.0.1:9000",
                 "10.0.0.140:8342",
             ),
         ];
-        for (dir, listens_on, without_trust) in &dirs {
-            let endpoint = effective_endpoint(dir.path(), true);
+        for (dir, bind_to, listens_on, without_bind) in &dirs {
+            let endpoint = effective_endpoint(dir.path(), bind(bind_to));
 
             let bind = check_bind(&endpoint);
             assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
             assert!(bind.message.contains(listens_on), "{}", bind.message);
-            assert!(bind.message.contains("--trust"), "{}", bind.message);
-            assert!(bind.message.contains(without_trust), "{}", bind.message);
+            assert!(bind.message.contains("--bind"), "{}", bind.message);
+            assert!(bind.message.contains(without_bind), "{}", bind.message);
 
             assert_eq!(check_transport(&endpoint).status, AuditStatus::Pass);
             assert_eq!(check_authentication(&endpoint).status, AuditStatus::Warn);
         }
     }
 
+    /// The audit describes the bind the operator will use, whichever way
+    /// it goes: `--bind 0.0.0.0` on a loopback kit fails the checks.
     #[test]
-    fn a_trusted_start_keeps_a_loopback_address_from_the_kit() {
-        for listen in ["127.0.0.1:8342", "[::1]:8342"] {
-            let dir = dir_with_kit(Some(listen));
-            let with_trust = check_bind(&effective_endpoint(dir.path(), true));
-            let without = check_bind(&effective_endpoint(dir.path(), false));
+    fn a_network_bind_is_audited_on_the_network() {
+        let dir = dir_with_kit(Some("127.0.0.1:8342"));
+        let endpoint = effective_endpoint(dir.path(), bind("0.0.0.0"));
 
-            assert_eq!(with_trust.status, AuditStatus::Pass);
-            assert_eq!(with_trust.message, without.message);
-            assert!(
-                with_trust.message.contains(listen),
-                "{}",
-                with_trust.message
-            );
+        for check in endpoint_checks(&endpoint) {
+            assert_eq!(check.status, AuditStatus::Fail, "{}", check.message);
+            assert!(check.message.contains("0.0.0.0:8342"), "{}", check.message);
+        }
+        let bind = check_bind(&endpoint);
+        assert!(
+            bind.message.contains("--bind; without it 127.0.0.1:8342"),
+            "{}",
+            bind.message
+        );
+    }
+
+    #[test]
+    fn a_bind_that_matches_the_kit_is_reported_as_the_kit() {
+        for (listen, bind_to) in [
+            ("127.0.0.1:8342", "127.0.0.1"),
+            ("[::1]:8342", "[::1]:8342"),
+        ] {
+            let dir = dir_with_kit(Some(listen));
+            let with_bind = check_bind(&effective_endpoint(dir.path(), bind(bind_to)));
+            let without = check_bind(&effective_endpoint(dir.path(), None));
+
+            assert_eq!(with_bind.status, AuditStatus::Pass);
+            assert_eq!(with_bind.message, without.message);
+            assert!(with_bind.message.contains(listen), "{}", with_bind.message);
         }
     }
 
     #[test]
-    fn trust_does_not_pass_an_unparseable_listen_address() {
+    fn bind_does_not_pass_an_unparseable_listen_address() {
         let dir = dir_with_kit(Some("localhost:8342"));
-        let bind = check_bind(&effective_endpoint(dir.path(), true));
+        let bind = check_bind(&effective_endpoint(dir.path(), bind("127.0.0.1")));
 
         assert_eq!(bind.status, AuditStatus::Fail);
         assert!(bind.message.contains("will not start"), "{}", bind.message);
@@ -420,7 +460,7 @@ provenance:
     fn a_kit_listening_on_loopback_passes_the_bind_check() {
         for listen in ["127.0.0.1:8342", "[::1]:8342"] {
             let dir = dir_with_kit(Some(listen));
-            let bind = check_bind(&effective_endpoint(dir.path(), false));
+            let bind = check_bind(&effective_endpoint(dir.path(), None));
 
             assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
             assert!(bind.message.contains(listen), "{}", bind.message);
@@ -431,7 +471,7 @@ provenance:
     #[test]
     fn an_unparseable_listen_address_fails_the_bind_check() {
         let dir = dir_with_kit(Some("localhost:8342"));
-        let bind = check_bind(&effective_endpoint(dir.path(), false));
+        let bind = check_bind(&effective_endpoint(dir.path(), None));
 
         assert_eq!(bind.status, AuditStatus::Fail);
         assert!(bind.message.contains("will not start"), "{}", bind.message);
@@ -442,7 +482,7 @@ provenance:
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("agent.swarmkit.yaml"), "not: [a, kit").unwrap();
 
-        for check in endpoint_checks(&effective_endpoint(dir.path(), false)) {
+        for check in endpoint_checks(&effective_endpoint(dir.path(), None)) {
             assert_eq!(check.status, AuditStatus::Warn, "{}", check.message);
         }
     }
@@ -459,8 +499,8 @@ provenance:
             dir_with_kit(Some("nonsense")),
         ];
         for dir in &dirs {
-            for trust in [false, true] {
-                let auth = check_authentication(&effective_endpoint(dir.path(), trust));
+            for bind_to in [None, bind("127.0.0.1"), bind("0.0.0.0")] {
+                let auth = check_authentication(&effective_endpoint(dir.path(), bind_to));
                 assert_ne!(auth.status, AuditStatus::Pass, "{}", auth.message);
                 assert!(
                     auth.message.contains("do not authenticate"),
