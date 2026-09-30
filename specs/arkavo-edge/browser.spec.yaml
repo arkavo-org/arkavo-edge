@@ -102,3 +102,21 @@ scenarios:
       - Recovery suggestions included
     refs: [crates/arkavo-browser/src/error.rs:1-40]
     changed: "2025-01-31"
+
+  - id: BROWS-007
+    name: Chrome keeps its sandbox unless it cannot start with one
+    criticality: high
+    given:
+      - browser_cdp launching Chrome with any tool parameters
+    when: The launch configuration is built
+    then:
+      - The sandbox is on for macOS, Windows and non-root Linux, headless or not
+      - It is off only on Linux as root, or with ARKAVO_ALLOW_UNSANDBOXED_BROWSER=1, and a warning is logged
+      - Tool parameters never decide it
+    refs:
+      - crates/arkavo-browser/src/launch.rs
+      - crates/arkavo-browser/src/browser.rs
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: /proc/self/status unreadable
+        expected: Sandbox stays on

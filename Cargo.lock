@@ -751,12 +751,15 @@ name = "arkavo-browser"
 version = "0.99.5"
 dependencies = [
  "arkavo-mcp",
+ "arkavo-test-macros",
  "async-trait",
  "chromiumoxide",
  "futures",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

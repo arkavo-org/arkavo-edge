@@ -143,4 +143,5 @@ ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1 cargo run -p arkavo -- chat --prompt "What ti
 - `ARKAVO_MAX_CONTEXTS`: Inference contexts kept per local model in one process. Unset → 1; further requests wait.
 - `ARKAVO_CONTEXT_WAIT_SECS`: How long a request waits for a free context before it fails. Unset → 300.
 - `ARKAVO_TOOL_ENV_PASSTHROUGH=NAME,NAME`: credential-shaped variables built-in tools may still pass to the programs they run (e.g. a private registry token for `cargo test`); every other `*_KEY`/`*_TOKEN`/`*_SECRET`-style variable is withheld from tool subprocesses.
+- `ARKAVO_ALLOW_UNSANDBOXED_BROWSER=1`: INSECURE — lets `browser_cdp` start Chrome without its sandbox on a Linux host that has no usable one (user namespaces disabled). Running as root on Linux disables it automatically, with a warning; macOS and Windows always sandbox.
 - ccache must be installed for development builds

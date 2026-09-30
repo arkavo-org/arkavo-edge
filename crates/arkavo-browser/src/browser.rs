@@ -1,7 +1,8 @@
+use crate::launch::{current_sandbox, launch_config};
 use crate::{BrowserError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
-use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::browser::Browser;
 use chromiumoxide::cdp::browser_protocol::network::EventRequestWillBeSent;
 use chromiumoxide::cdp::js_protocol::runtime::EventConsoleApiCalled;
 use chromiumoxide::page::ScreenshotParams;
@@ -74,10 +75,7 @@ impl BrowserTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let mut config = BrowserConfig::builder();
-        if headless {
-            config = config.no_sandbox().disable_default_args();
-        }
+        let mut config = launch_config(headless, current_sandbox());
 
         if let Some(viewport) = params.get("viewport")
             && let (Some(width), Some(height)) = (
