@@ -1,11 +1,23 @@
 use crate::{CodeSearchError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
+use arkavo_process_env::ChildEnv;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+
+/// Withheld from `rg` beyond the toolchain policy. Ripgrep reads further
+/// flags, `--pre` among them, from the file `RIPGREP_CONFIG_PATH` names, and
+/// the arguments built here must be the only flags it sees.
+const RG_WITHHELD: &[&str] = &["RIPGREP_CONFIG_PATH"];
+
+fn rg_command() -> std::process::Command {
+    // The operator's environment minus credentials: rg needs none, and
+    // whatever it runs must not inherit the agent's keys.
+    ChildEnv::toolchain_withholding_from_current(&[], RG_WITHHELD).command("rg")
+}
 
 pub struct CodeGrepTool {
     schema: ToolSchema,
@@ -76,7 +88,7 @@ impl CodeGrepTool {
     }
 
     fn validate_dependencies() {
-        if std::process::Command::new("rg")
+        if rg_command()
             .arg("--version")
             .output()
             .map(|o| !o.status.success())
@@ -101,7 +113,7 @@ impl CodeGrepTool {
             .and_then(|v| v.as_str())
             .unwrap_or("files");
 
-        let mut cmd = Command::new("rg");
+        let mut cmd = Command::from(rg_command());
 
         // The pattern travels as --regexp=VALUE so a leading '-' can never be
         // read as a flag such as --pre=<command>, which runs a program for
@@ -267,6 +279,7 @@ impl Tool for CodeGrepTool {
 mod tests {
     use super::*;
     use arkavo_test_macros::spec;
+    use std::ffi::OsString;
     use tempfile::TempDir;
     use tokio::fs;
 
@@ -331,6 +344,45 @@ mod tests {
         if let Ok(value) = result {
             assert!(value.get("lines").is_some());
         }
+    }
+
+    /// Ripgrep reads extra flags, `--pre` among them, from the file
+    /// `RIPGREP_CONFIG_PATH` names. The control run shows it does; the rg
+    /// codegrep starts must see only the flags codegrep gave it.
+    #[spec("MCP-016")]
+    #[test]
+    fn rg_reads_no_flag_file_from_the_environment() {
+        if !is_ripgrep_available() {
+            eprintln!("skip: no rg");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let flag_file = dir.path().join("rgrc");
+        std::fs::write(&flag_file, "--replace=HIJACKED\n").unwrap();
+        let searched = dir.path().join("f.txt");
+        std::fs::write(&searched, "needle\n").unwrap();
+        let mut parent: Vec<(OsString, OsString)> = std::env::vars_os()
+            .filter(|(name, _)| name != "RIPGREP_CONFIG_PATH")
+            .collect();
+        parent.push((
+            OsString::from("RIPGREP_CONFIG_PATH"),
+            flag_file.into_os_string(),
+        ));
+        let search = |env: ChildEnv| {
+            let output = env
+                .command("rg")
+                .arg("--regexp=needle")
+                .arg("--")
+                .arg(&searched)
+                .output()
+                .expect("spawn rg");
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+
+        let hijacked = search(ChildEnv::toolchain(parent.clone(), &[]));
+        assert!(hijacked.contains("HIJACKED"), "control: {hijacked}");
+        let seen = search(ChildEnv::toolchain_withholding(parent, &[], RG_WITHHELD));
+        assert_eq!(seen.trim_end(), "needle");
     }
 
     #[spec("CS-006")]

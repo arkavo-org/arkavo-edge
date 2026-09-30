@@ -380,7 +380,7 @@ impl ToolRegistry {
 
     /// Check if a binary is available in PATH
     fn is_binary_available(name: &str) -> bool {
-        std::process::Command::new(name)
+        crate::child::tool_command(name)
             .arg("--version")
             .output()
             .map(|o| o.status.success())

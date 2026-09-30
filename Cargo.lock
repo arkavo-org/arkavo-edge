@@ -1390,6 +1390,7 @@ dependencies = [
  "arkavo-mcp-tools",
  "arkavo-memory",
  "arkavo-observability",
+ "arkavo-process-env",
  "arkavo-qwen",
  "arkavo-router",
  "arkavo-snpe",
@@ -1485,6 +1486,7 @@ name = "arkavo-mcp-code-search"
 version = "0.99.5"
 dependencies = [
  "arkavo-mcp",
+ "arkavo-process-env",
  "arkavo-test-macros",
  "arkavo-validation",
  "async-trait",
@@ -1627,6 +1629,7 @@ dependencies = [
  "arkavo-mcp-workspace",
  "arkavo-memory",
  "arkavo-observability",
+ "arkavo-process-env",
  "arkavo-tdf",
  "arkavo-tdf-iroh",
  "arkavo-test-macros",
@@ -1807,7 +1810,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-process-env"
-version = "0.98.5"
+version = "0.99.5"
 dependencies = [
  "arkavo-test-macros",
 ]

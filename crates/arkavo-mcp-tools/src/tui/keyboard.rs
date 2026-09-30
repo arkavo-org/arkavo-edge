@@ -1,10 +1,10 @@
+use crate::child::tool_command;
 use crate::server::Tool;
 use crate::{Result, ToolError};
 use arkavo_mcp::ToolSchema;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::process::Command;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -127,7 +127,7 @@ impl TuiKeyboardKit {
 
             let mut attempt = 0;
             while attempt < self.retry_attempts {
-                let result = Command::new("osascript")
+                let result = tool_command("osascript")
                     .arg("-e")
                     .arg(&script)
                     .output()
@@ -154,7 +154,7 @@ impl TuiKeyboardKit {
             // For Linux, use xdotool if available
             let mut attempt = 0;
             while attempt < self.retry_attempts {
-                let result = Command::new("xdotool").arg("type").arg(sequence).output();
+                let result = tool_command("xdotool").arg("type").arg(sequence).output();
 
                 match result {
                     Ok(output) if output.status.success() => return Ok(()),
@@ -204,7 +204,7 @@ impl TuiKeyboardKit {
                 )
             };
 
-            let result = Command::new("osascript")
+            let result = tool_command("osascript")
                 .arg("-e")
                 .arg(&script)
                 .output()
@@ -233,7 +233,7 @@ impl TuiKeyboardKit {
 
             args.push(key_combo);
 
-            let result = Command::new("xdotool")
+            let result = tool_command("xdotool")
                 .args(&args)
                 .output()
                 .map_err(|e| ToolError::Mcp(format!("Failed to execute xdotool: {}", e)))?;

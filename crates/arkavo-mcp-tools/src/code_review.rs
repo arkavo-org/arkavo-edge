@@ -1,3 +1,4 @@
+use crate::child::{async_tool_command, tool_command};
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
@@ -7,7 +8,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Instant;
-use tokio::process::Command;
 
 /// Severity levels for code review findings
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -101,7 +101,7 @@ impl CodeReviewTool {
 
     /// Check if a binary is available in PATH
     fn is_binary_available(name: &str) -> bool {
-        std::process::Command::new(name)
+        tool_command(name)
             .arg("--version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -117,7 +117,7 @@ impl CodeReviewTool {
 
     /// Get list of changed files from git
     async fn get_git_changed_files(&self, path: &str) -> Result<Vec<String>> {
-        let output = Command::new("git")
+        let output = async_tool_command("git")
             .args(["diff", "--name-only", "HEAD"])
             .current_dir(path)
             .output()
@@ -137,7 +137,7 @@ impl CodeReviewTool {
 
     /// Get list of staged files from git
     async fn get_git_staged_files(&self, path: &str) -> Result<Vec<String>> {
-        let output = Command::new("git")
+        let output = async_tool_command("git")
             .args(["diff", "--name-only", "--cached"])
             .current_dir(path)
             .output()
@@ -161,7 +161,7 @@ impl CodeReviewTool {
             return Vec::new();
         }
 
-        let mut cmd = Command::new("semgrep");
+        let mut cmd = async_tool_command("semgrep");
         cmd.args(["--json", "--config", "auto"]);
 
         if files.is_empty() {
@@ -255,7 +255,7 @@ impl CodeReviewTool {
             return Vec::new();
         }
 
-        let output = Command::new("cargo")
+        let output = async_tool_command("cargo")
             .args(["clippy", "--message-format=json", "--", "-W", "clippy::all"])
             .current_dir(path)
             .stdout(Stdio::piped())

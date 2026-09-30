@@ -1,6 +1,7 @@
 #![allow(clippy::uninlined_format_args)]
 
 pub mod browser;
+mod child;
 pub mod code_analysis;
 pub mod code_review;
 pub mod confine;

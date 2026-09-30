@@ -16,6 +16,7 @@ arkavo-browser = { path = "../arkavo-browser" }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-validation = { path = "../arkavo-validation" }
+arkavo-process-env = { path = "../arkavo-process-env" }
 async-recursion = "1.1"
 async-trait = { workspace = true }
 uuid = { version = "1.11", features = ["v4"] }

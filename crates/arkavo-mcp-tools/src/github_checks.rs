@@ -1,11 +1,11 @@
+use crate::child::gh_command;
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::process::Command;
 
 fn check_gh_installed() -> Result<()> {
-    let output = Command::new("gh")
+    let output = gh_command()
         .arg("--version")
         .output()
         .map_err(|_| ToolError::Mcp("GitHub CLI (gh) is not installed".to_string()))?;
@@ -22,7 +22,7 @@ fn check_gh_installed() -> Result<()> {
 fn execute_gh_api(endpoint: &str, method: &str, data: Option<&str>) -> Result<String> {
     check_gh_installed()?;
 
-    let mut cmd = Command::new("gh");
+    let mut cmd = gh_command();
     cmd.arg("api").arg(endpoint).arg("--method").arg(method);
 
     if data.is_some() {

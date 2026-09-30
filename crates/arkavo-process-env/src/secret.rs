@@ -12,9 +12,10 @@
 //! This is a deny-list and fails open twice. A credential stored under an
 //! unconventional name passes, and so does one the operator chose the name
 //! of (a provider's `auth_ref`); callers withhold those explicitly with
-//! `ChildEnv::toolchain_withholding`. Names that are neither
-//! credential-shaped nor declared or configured may therefore still reach a
-//! toolchain child until a broker holds the credentials. See
+//! `ChildEnv::toolchain_withholding`, or register them with `withhold_name`
+//! for every toolchain child resolved from this process. Names that are
+//! neither credential-shaped nor declared or configured may therefore still
+//! reach a toolchain child until a broker holds the credentials. See
 //! `ChildEnv::toolchain` for why the toolchain profile accepts that.
 
 /// Final words that name a credential.

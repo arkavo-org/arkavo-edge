@@ -1,11 +1,18 @@
 use crate::{CodeSearchError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
+use arkavo_process_env::ChildEnv;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+
+fn comby_command() -> std::process::Command {
+    // The operator's environment minus credentials: comby needs none, and
+    // whatever it runs must not inherit the agent's keys.
+    ChildEnv::toolchain_from_current(&[]).command("comby")
+}
 
 pub struct CombyTool {
     schema: ToolSchema,
@@ -75,7 +82,7 @@ impl CombyTool {
     }
 
     fn validate_dependencies() {
-        if std::process::Command::new("comby")
+        if comby_command()
             .arg("--version")
             .output()
             .map(|o| !o.status.success())
@@ -132,7 +139,7 @@ impl CombyTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let mut cmd = Command::new("comby");
+        let mut cmd = Command::from(comby_command());
 
         if let Some(lang) = language
             && lang != "auto"

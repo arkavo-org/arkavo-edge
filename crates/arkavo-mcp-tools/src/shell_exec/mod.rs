@@ -1,5 +1,7 @@
+use crate::child::toolchain_env;
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
+use arkavo_process_env::ChildEnv;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -165,20 +167,7 @@ impl ShellExecTool {
     ) -> Result<(bool, i32, String, String, u64)> {
         let start = Instant::now();
 
-        #[cfg(unix)]
-        let mut command = {
-            let mut c = Command::new("sh");
-            c.arg("-c").arg(cmd);
-            c
-        };
-
-        #[cfg(windows)]
-        let mut command = {
-            let mut c = Command::new("cmd");
-            c.arg("/C").arg(cmd);
-            c
-        };
-
+        let mut command = shell_command(cmd, &toolchain_env(&[]));
         command.current_dir(cwd);
 
         if let Some(env) = env_vars {
@@ -256,6 +245,17 @@ impl Default for ShellExecTool {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The platform shell running `cmd`, with exactly `env` as its environment.
+fn shell_command(cmd: &str, env: &ChildEnv) -> Command {
+    #[cfg(unix)]
+    let (shell, flag) = ("sh", "-c");
+    #[cfg(windows)]
+    let (shell, flag) = ("cmd", "/C");
+    let mut command = env.command(shell);
+    command.arg(flag).arg(cmd);
+    Command::from(command)
 }
 
 #[async_trait]
@@ -378,7 +378,9 @@ impl Tool for ShellExecTool {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use crate::child::toolchain_env_from;
     use arkavo_test_macros::spec;
+    use std::ffi::OsString;
 
     #[test]
     fn test_safe_commands_auto_approved() {
@@ -963,6 +965,86 @@ mod tests {
                 .unwrap();
             assert!(success && stdout.contains("test_value"), "{key}");
         }
+    }
+
+    #[spec("MCP-016")]
+    #[tokio::test]
+    async fn shell_sees_build_settings_but_no_agent_credentials() {
+        let parent = vec![
+            (
+                OsString::from("PATH"),
+                std::env::var_os("PATH").unwrap_or_default(),
+            ),
+            (
+                OsString::from("OPENAI_API_KEY"),
+                OsString::from("planted-secret"),
+            ),
+            (OsString::from("RUSTFLAGS"), OsString::from("-Dwarnings")),
+        ];
+        #[cfg(unix)]
+        let dump = "env";
+        #[cfg(windows)]
+        let dump = "set";
+        let output = shell_command(dump, &ChildEnv::toolchain(parent, &[]))
+            .output()
+            .await
+            .expect("spawn shell");
+        let seen = String::from_utf8_lossy(&output.stdout);
+
+        assert!(
+            seen.lines().any(|l| l.trim_end() == "RUSTFLAGS=-Dwarnings"),
+            "{seen}"
+        );
+        assert!(!seen.contains("planted-secret"), "{seen}");
+        assert!(
+            !seen.lines().any(|l| l.starts_with("CARGO_MANIFEST_DIR=")),
+            "the shell inherited this process's environment instead of the resolved one"
+        );
+    }
+
+    /// The policy `execute_command` spawns under, not just a cleared
+    /// environment: a provider key, a name the operator configured as a
+    /// credential, and ripgrep's flag file all stay out of the shell.
+    #[spec("MCP-016")]
+    #[tokio::test]
+    async fn shell_under_the_tool_policy_sees_no_provider_key_or_rg_config() {
+        let parent = vec![
+            (
+                OsString::from("PATH"),
+                std::env::var_os("PATH").unwrap_or_default(),
+            ),
+            (
+                OsString::from("ANTHROPIC_API_KEY"),
+                OsString::from("planted-provider-key"),
+            ),
+            (
+                OsString::from("CORP_LLM_LOGIN"),
+                OsString::from("planted-configured-login"),
+            ),
+            (
+                OsString::from("RIPGREP_CONFIG_PATH"),
+                OsString::from("planted-rg-config"),
+            ),
+            (OsString::from("RUSTFLAGS"), OsString::from("-Dwarnings")),
+        ];
+        let env = toolchain_env_from(parent, &[], &["CORP_LLM_LOGIN".to_owned()]);
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        #[cfg(unix)]
+        let dump = "env";
+        #[cfg(windows)]
+        let dump = "set";
+        let output = shell_command(dump, &env)
+            .current_dir(dir.path())
+            .output()
+            .await
+            .expect("spawn shell");
+        let seen = String::from_utf8_lossy(&output.stdout);
+
+        assert!(
+            seen.lines().any(|l| l.trim_end() == "RUSTFLAGS=-Dwarnings"),
+            "{seen}"
+        );
+        assert!(!seen.contains("planted-"), "{seen}");
     }
 
     #[test]

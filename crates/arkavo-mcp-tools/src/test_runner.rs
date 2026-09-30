@@ -1,10 +1,10 @@
+use crate::child::async_tool_command;
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 pub struct TestRunnerTool {
     schema: ToolSchema,
@@ -118,7 +118,7 @@ impl TestRunnerTool {
 
         let mut cmd = match framework.as_str() {
             "cargo" => {
-                let mut c = Command::new("cargo");
+                let mut c = async_tool_command("cargo");
                 c.arg("test");
                 if verbose {
                     c.arg("--verbose");
@@ -130,7 +130,7 @@ impl TestRunnerTool {
             }
 
             "go" => {
-                let mut c = Command::new("go");
+                let mut c = async_tool_command("go");
                 c.arg("test");
                 if verbose {
                     c.arg("-v");
@@ -149,7 +149,7 @@ impl TestRunnerTool {
             }
 
             "pytest" => {
-                let mut c = Command::new("pytest");
+                let mut c = async_tool_command("pytest");
                 if verbose {
                     c.arg("-v");
                 }
@@ -167,7 +167,7 @@ impl TestRunnerTool {
             }
 
             "jest" => {
-                let mut c = Command::new("npx");
+                let mut c = async_tool_command("npx");
                 c.arg("jest");
                 if verbose {
                     c.arg("--verbose");
@@ -182,7 +182,7 @@ impl TestRunnerTool {
             }
 
             "xcodebuild" => {
-                let mut c = Command::new("xcodebuild");
+                let mut c = async_tool_command("xcodebuild");
                 c.arg("test");
                 c.arg("-scheme").arg("YourScheme");
                 c.arg("-destination")

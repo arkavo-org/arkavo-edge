@@ -11,6 +11,7 @@ categories = ["development-tools", "parsing"]
 
 [dependencies]
 arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-process-env = { path = "../arkavo-process-env" }
 arkavo-validation = { path = "../arkavo-validation" }
 async-trait = { workspace = true }
 serde_json = { workspace = true }

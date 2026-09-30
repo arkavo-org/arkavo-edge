@@ -18,12 +18,17 @@
 //!   reach them is the agent's own credentials.
 //!
 //! Both take the parent environment as an argument so a caller other than
-//! the agent process (a credential broker) can resolve from its own.
+//! the agent process (a credential broker) can resolve from its own. The
+//! `*_from_current` constructors resolve from this process's environment and
+//! so also withhold the names this process registered with
+//! [`withhold_name`].
 
 mod baseline;
+mod configured;
 mod hijack;
 mod secret;
 
+pub use configured::{withheld_names, withhold_name};
 pub use hijack::is_loader_or_hijack_name;
 pub use secret::is_secret_name;
 
@@ -130,15 +135,36 @@ impl ChildEnv {
         env
     }
 
-    /// [`ChildEnv::toolchain`] resolved from this process's environment.
+    /// [`ChildEnv::toolchain`] resolved from this process's environment,
+    /// also withholding every name registered with [`withhold_name`].
     pub fn toolchain_from_current(readmit: &[&str]) -> Self {
-        Self::toolchain(std::env::vars_os(), readmit)
+        Self::toolchain_withholding_from_current(readmit, &[])
     }
 
     /// [`ChildEnv::toolchain_withholding`] resolved from this process's
-    /// environment.
+    /// environment, also withholding every name registered with
+    /// [`withhold_name`].
     pub fn toolchain_withholding_from_current(readmit: &[&str], withhold: &[&str]) -> Self {
-        Self::toolchain_withholding(std::env::vars_os(), readmit, withhold)
+        Self::toolchain_withholding_registered(std::env::vars_os(), readmit, withhold)
+    }
+
+    /// The registry describes this process's environment, so only the
+    /// constructors resolving from it consult the registry; the ones taking a
+    /// `parent` stay pure for a caller resolving another environment.
+    fn toolchain_withholding_registered<I, K, V>(
+        parent: I,
+        readmit: &[&str],
+        withhold: &[&str],
+    ) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<OsString>,
+        V: Into<OsString>,
+    {
+        let registered = withheld_names();
+        let mut names = withhold.to_vec();
+        names.extend(registered.iter().map(String::as_str));
+        Self::toolchain_withholding(parent, readmit, &names)
     }
 
     /// A command for `program` whose environment is exactly this one.
@@ -346,6 +372,32 @@ mod tests {
 
         let env = ChildEnv::toolchain(vars, &[]);
         assert_eq!(value(&env, "CORP_LLM_LOGIN"), Some(PLANTED));
+    }
+
+    #[spec("PENV-002")]
+    #[test]
+    fn registered_names_are_withheld_from_a_toolchain_child() {
+        // The registry is process-global and tests run in parallel: this
+        // name is used by no other test.
+        const REGISTERED: &str = "PENV_TEST_REGISTERED_LOGIN";
+        assert!(!is_secret_name(REGISTERED));
+        withhold_name(REGISTERED);
+        assert!(withheld_names().iter().any(|name| name == REGISTERED));
+
+        let mut vars = parent();
+        vars.push((OsString::from(REGISTERED), OsString::from(PLANTED)));
+        let env = ChildEnv::toolchain_withholding_registered(vars.clone(), &[], &[]);
+        assert_eq!(value(&env, REGISTERED), None);
+        assert_eq!(value(&env, "RUSTC_WRAPPER"), Some("sccache"));
+        let seen = child_sees(&env);
+        assert!(
+            !seen.iter().any(|l| l.contains(PLANTED)),
+            "a registered credential reached the child: {seen:?}"
+        );
+
+        // The pure constructor resolves only what its caller passes.
+        let env = ChildEnv::toolchain(vars, &[]);
+        assert_eq!(value(&env, REGISTERED), Some(PLANTED));
     }
 
     #[spec("PENV-002")]

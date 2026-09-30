@@ -124,9 +124,7 @@ fn parse_repo(repo_str: &str) -> Result<(&str, &str)> {
 
 /// Get current repository from git config
 fn get_current_repo() -> Result<(String, String)> {
-    use std::process::Command;
-
-    let output = Command::new("git")
+    let output = crate::child::tool_command("git")
         .args(["remote", "get-url", "origin"])
         .output()
         .map_err(|e| ToolError::Mcp(format!("Failed to get git remote: {e}")))?;
@@ -161,9 +159,7 @@ fn get_current_repo() -> Result<(String, String)> {
 
 /// Get current branch name
 fn get_current_branch() -> Result<String> {
-    use std::process::Command;
-
-    let output = Command::new("git")
+    let output = crate::child::tool_command("git")
         .args(["branch", "--show-current"])
         .output()
         .map_err(|e| ToolError::Mcp(format!("Failed to get current branch: {e}")))?;

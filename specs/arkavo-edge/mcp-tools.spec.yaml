@@ -281,3 +281,23 @@ scenarios:
       - Under cmd /C a redirection to a reserved device name (CON, PRN, AUX, COM1-9, LPT1-9, with or without extension) is not auto-approved
     refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/shell_exec/redirect.rs, crates/arkavo-mcp-tools/src/shell_exec/workdir.rs]
     changed: "2026-09-29"
+
+  - id: MCP-016
+    name: Tool subprocesses keep the toolchain environment without the agent's credentials
+    criticality: critical
+    given:
+      - A built-in tool starts a program (shell, test runner, gh, scanners, sandbox, TUI, ripgrep, comby)
+    when: The subprocess is spawned
+    then:
+      - Credential-shaped variables are withheld, every credential the agent reads among them
+      - All other variables are kept, so the operator's build settings still apply
+      - gh additionally keeps GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN when exported
+      - Names listed in ARKAVO_TOOL_ENV_PASSTHROUGH are kept
+      - Names the agent registered as configured credentials (a provider's auth_ref) are withheld even when they are not credential-shaped
+      - RIPGREP_CONFIG_PATH is withheld, so rg reads only the flags on its command line and never a --pre from a flag file
+    refs:
+      - crates/arkavo-mcp-tools/src/child.rs
+      - crates/arkavo-mcp-tools/src/shell_exec/mod.rs
+      - crates/arkavo-mcp-code-search/src/codegrep.rs
+      - crates/arkavo-mcp-code-search/src/comby.rs
+    changed: "2026-09-29"

@@ -206,7 +206,7 @@ components:
     module: arkavo_mcp_tools
     description: MCP tool registry and execution
     criticality: critical
-    scenario_count: 15
+    scenario_count: 16
     invariants:
       - Tools registered before execution
       - Schemas define valid parameters
@@ -1024,8 +1024,8 @@ components:
 
 stats:
   total_specs: 87
-  total_scenarios: 839
-  critical_scenarios: 262
+  total_scenarios: 840
+  critical_scenarios: 263
   coverage_areas:
     - authentication
     - authorization
