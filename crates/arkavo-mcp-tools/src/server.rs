@@ -12,6 +12,21 @@ pub trait Tool: Send + Sync {
 
     /// Get the tool's schema definition
     fn schema(&self) -> &ToolSchema;
+
+    /// The argument naming the agent this call delivers its arguments to, for
+    /// a tool that sends to another agent (SEQ-018).
+    ///
+    /// The egress gate finds URLs and paths by their shape, but an agent
+    /// identifier looks like any other string, so a delegating tool has to say
+    /// which argument names its recipient or the send is never evaluated.
+    /// Declared on the tool rather than as a keyword in its JSON schema:
+    /// `parameters` reaches the LLM providers, and the Gemini sanitizer
+    /// (`McpConverter::make_gemini_compatible`) drops only a fixed list of
+    /// keys, so an extension keyword would reach an API that rejects unknown
+    /// fields.
+    fn peer_recipient_param(&self) -> Option<&str> {
+        None
+    }
 }
 
 // Helper function to create a standard error response
@@ -34,6 +49,7 @@ pub fn success_response(data: Value) -> Value {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use serde_json::json;
 
     /// Validate that `params` contains all keys listed in the schema's `required` array.
@@ -253,5 +269,13 @@ mod tests {
     #[test]
     fn test_tool_is_send_sync() {
         assert_tool_is_send_sync::<TestCalculatorTool>();
+    }
+
+    #[spec("SEQ-018")]
+    #[test]
+    fn a_tool_names_no_peer_recipient_unless_it_declares_one() {
+        let tool: Box<dyn Tool> = Box::new(TestCalculatorTool::new());
+
+        assert_eq!(tool.peer_recipient_param(), None);
     }
 }

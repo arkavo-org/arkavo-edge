@@ -573,7 +573,13 @@ async fn executor_track(
                     // result cannot have reached these params yet.
                     #[cfg(feature = "taint")]
                     if let Some(ref g) = guard
-                        && let Err(message) = g.check_call(&name, &args)
+                        && let Err(message) = g.check_tool_call(
+                            &name,
+                            &args,
+                            registry
+                                .get(&name)
+                                .and_then(|tool| tool.peer_recipient_param()),
+                        )
                     {
                         return (
                             idx,
@@ -909,5 +915,63 @@ mod tests {
         let deduped = super::dedup_tool_calls(calls);
         assert_eq!(deduped.len(), 1);
         assert_eq!(deduped[0].call_id.as_deref(), Some("first"));
+    }
+}
+
+/// SEQ-003, SEQ-018: the batch executor that planned subtasks and specialists
+/// run through.
+#[cfg(all(test, feature = "taint"))]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
+mod egress_guard_peer {
+    use super::super::egress_guard_fixture::{Delegation, offline_router};
+    use super::*;
+
+    /// Regression: the batch path checked the same shape-only destinations as
+    /// the 1:1 loop, so a planned delegation delivered the credential too.
+    #[arkavo_test_macros::spec("SEQ-003", "SEQ-018")]
+    #[tokio::test]
+    async fn a_planned_batch_does_not_deliver_a_credential_to_a_peer() {
+        let delegation = Delegation::with_credential().await;
+        let (plan_tx, plan_rx) = mpsc::channel(1);
+        let (result_tx, mut result_rx) = mpsc::channel(1);
+        let (obs_tx, _observations) = mpsc::channel(1);
+        plan_tx
+            .send(PlannedActions {
+                tool_calls: vec![delegation.call.clone()],
+            })
+            .await
+            .expect("the executor is listening");
+        drop(plan_tx);
+
+        executor_track(
+            &offline_router().await,
+            &delegation.registry,
+            &Arc::new(McpRegistry::new()),
+            plan_rx,
+            result_tx,
+            None,
+            None,
+            &[],
+            obs_tx,
+            None,
+            Some(delegation.guard.clone()),
+        )
+        .await;
+
+        let reported = result_rx
+            .recv()
+            .await
+            .expect("the executor reports the call");
+        assert!(
+            !delegation.peer_was_reached(),
+            "the task reached the peer: {}",
+            reported.result
+        );
+        assert!(!reported.success);
+        assert!(
+            reported.result.contains("egress refused"),
+            "{}",
+            reported.result
+        );
     }
 }

@@ -102,7 +102,9 @@ pub use data_classification::{
 };
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 #[cfg(feature = "taint")]
-pub use egress_destination::{Destination, DestinationPolicy, extract_destinations};
+pub use egress_destination::{
+    Destination, DestinationPolicy, extract_destinations, peer_destination,
+};
 #[cfg(feature = "taint")]
 pub use egress_taint::{
     DenialReason, EgressDecision, EgressDisposition, EgressEvidence, EgressTaintGate, HoldReason,

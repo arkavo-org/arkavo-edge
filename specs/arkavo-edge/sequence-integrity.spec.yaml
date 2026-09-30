@@ -90,10 +90,10 @@ scenarios:
       - Violation logged with full provenance chain
     refs:
       - crates/arkavo-protocol/src/egress_taint.rs:1-420
-      - crates/arkavo-protocol/src/egress_destination.rs:1-240
+      - crates/arkavo-protocol/src/egress_destination.rs:1-350
       - crates/arkavo-protocol/src/taxonomy.rs:1-210
-      - crates/arkavo-server/src/server/egress_guard.rs:1-250
-      - crates/arkavo-server/src/server/conductor_tool_loop.rs:700-760
+      - crates/arkavo-server/src/server/egress_guard.rs:1-372
+      - crates/arkavo-server/src/server/conductor_tool_loop.rs:730-755
       - crates/arkavo-protocol/src/http.rs:110-190
       - crates/arkavo-validation/src/url.rs:83-142
       - schemas/taxonomy-map.v1.json
@@ -102,8 +102,12 @@ scenarios:
       - crates/arkavo-protocol/src/egress_destination.rs:145-176
       - crates/arkavo-protocol/src/egress_destination.rs:272-313
       - crates/arkavo-cli/src/sentinel_wiring.rs:121-137
-    changed: "2026-09-04"
+      - crates/arkavo-server/src/server/conductor_parallel.rs:563-585
+      - crates/arkavo-server/src/server/routine_tools.rs:99-125
+    changed: "2026-09-30"
     edge_cases:
+      - condition: A tool delivers its arguments to another agent named by identifier
+        expected: The declared recipient is evaluated as a peer destination (SEQ-018)
       - condition: A task decomposes into sequential or parallel subtasks
         expected: All stages share the session guard and accumulated taint before tool dispatch
       - condition: An in-workspace path traverses a symlink outside the workspace
@@ -452,3 +456,47 @@ scenarios:
         expected: In-memory fallback with reduced retention
       - condition: Cross-agent taint bridge unavailable
         expected: Local taint tracking continues, cross-agent gap logged
+
+  - id: SEQ-018
+    name: Tools declare the peer their arguments are delivered to
+    criticality: critical
+    issue: https://github.com/arkavo-org/arkavo-edge/issues/548
+    given:
+      - A tool delivers its arguments to another agent named by an identifier
+      - The identifier has no URL or path shape for destination extraction to find
+    when: The conductor evaluates the call before dispatch
+    then:
+      - The argument the tool declares as its recipient names a peer destination
+      - A peer destination is outside the boundary and cannot receive a wrapped payload
+      - The decision does not depend on the tool's name or alias
+      - A refused call never reaches the peer
+    refs:
+      - crates/arkavo-mcp-tools/src/server.rs:9-30
+      - crates/arkavo-protocol/src/egress_destination.rs:19-60
+      - crates/arkavo-protocol/src/egress_destination.rs:131-150
+      - crates/arkavo-protocol/src/egress_destination.rs:203-217
+      - crates/arkavo-server/src/server/egress_guard.rs:179-235
+      - crates/arkavo-mcp-mesh/src/lib.rs:518-527
+    changed: "2026-09-30"
+    edge_cases:
+      - condition: The declared recipient is missing, blank or not a string
+        expected: The destination is unresolved and the call is held
+      - condition: Session data carries the ingestion floor (Internal) and the peer is neither authenticated nor able to consume a TDF
+        expected: Every declared peer send is refused; presenting entitlements changes only the audited reason
+      - condition: The model calls the tool by an alias
+        expected: The same declaration applies; it is read from the tool, not its name
+      - condition: A tool bridged from an external MCP server sends to a peer
+        expected: The send is evaluated
+        status: deferred
+        note: >-
+          A bridged tool cannot declare a recipient, so only shape-based
+          extraction applies. Closing this needs either a trusted declaration
+          channel for external servers or the dispatch gate's registry-level
+          policy.
+      - condition: Peer identity is authenticated (CWT/DID-bound A2A)
+        expected: An authenticated, policy-known peer may be treated as inside the boundary
+        status: deferred
+        note: >-
+          Until then a peer named by the model and resolved over mDNS is
+          external. HttpTransport::check_egress's Internal treatment of a
+          configured peer is reconciled with this when peers authenticate.

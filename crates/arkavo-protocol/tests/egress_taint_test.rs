@@ -6,7 +6,9 @@
 //! it. The gate composes the two, so the composed decision is tested here.
 
 use arkavo_protocol::data_classification::{DlpAction, SensitivityLevel};
-use arkavo_protocol::egress_destination::{Destination, DestinationPolicy, extract_destinations};
+use arkavo_protocol::egress_destination::{
+    Destination, DestinationPolicy, extract_destinations, peer_destination,
+};
 use arkavo_protocol::egress_taint::{
     DenialReason, EgressDisposition, EgressTaintGate, GENERIC_DENIAL, HoldReason,
     RequesterEntitlements,
@@ -340,4 +342,34 @@ fn fake_api_key() -> String {
         .map(|i| char::from(b'a' + ((i * 7 + 3) % 26) as u8))
         .collect();
     format!("{prefix}-{body}")
+}
+
+/// SEQ-018: a peer a tool declared as its recipient is outside the boundary.
+/// Entitlement does not open it either: no peer is known to consume a TDF, and
+/// the only alternative to a wrap is plaintext.
+#[spec("SEQ-018")]
+#[test]
+fn a_declared_peer_gets_neither_plaintext_nor_a_wrap() {
+    let tracker = DataTaintTracker::new("s1");
+    let taint = tracker.ingest(
+        &TaintSource::new(SourceKind::ToolResult, "crm_lookup"),
+        "contact: dana@example.com",
+    );
+    let peer = peer_destination(&json!({"agent_id": "reviewer"}), "agent_id");
+
+    let unentitled = gate().evaluate(&taint, &peer, &RequesterEntitlements::none());
+    assert!(matches!(
+        unentitled.disposition,
+        EgressDisposition::Block(DenialReason::NotEntitled { .. })
+    ));
+
+    let entitled = gate().evaluate(
+        &taint,
+        &peer,
+        &RequesterEntitlements::none().with_attribute(CLEARANCE, "internal"),
+    );
+    assert!(matches!(
+        entitled.disposition,
+        EgressDisposition::Block(DenialReason::DestinationCannotWrap { .. })
+    ));
 }

@@ -103,8 +103,12 @@ impl HostExecutor {
                 "Routine primitive is unavailable or not granted".into(),
             ));
         }
+        let peer = self
+            .registry
+            .get(name)
+            .and_then(|tool| tool.peer_recipient_param());
         self.egress
-            .check_call(name, &arguments)
+            .check_tool_call(name, &arguments, peer)
             .map_err(ToolError::PolicyDenied)?;
         let tool = self
             .registry

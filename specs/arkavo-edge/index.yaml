@@ -754,7 +754,7 @@ components:
     module: arkavo_edge::security::network
     description: Network security and secure defaults
     criticality: critical
-    scenario_count: 20
+    scenario_count: 21
     invariants:
       - Localhost binding by default
       - Authentication always required
@@ -890,7 +890,7 @@ components:
     module: arkavo_sequence_integrity
     description: Agent behavioral sequence integrity and taint tracking
     criticality: critical
-    scenario_count: 17
+    scenario_count: 18
     invariants:
       - Every tool call is taint-tracked from data source to data sink
       - Action sequences are evaluated as directed graphs, not isolated calls
@@ -1024,8 +1024,8 @@ components:
 
 stats:
   total_specs: 87
-  total_scenarios: 850
-  critical_scenarios: 272
+  total_scenarios: 852
+  critical_scenarios: 273
   coverage_areas:
     - authentication
     - authorization

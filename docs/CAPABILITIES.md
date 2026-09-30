@@ -109,7 +109,7 @@ Full-stack implementations:
 |-----------|------|---------|-------------|
 | TDF | [9 scenarios](specs/arkavo-edge/tdf.spec.yaml) | — | Trusted Data Format encryption |
 | Registration | [12 scenarios](specs/arkavo-edge/registration.spec.yaml) | — | Device onboarding |
-| Network Security | [20 scenarios](specs/arkavo-edge/network-security.spec.yaml) | [secure-agent](examples/secure-agent/) | Listener, auth and egress hardening (several scenarios wip) |
+| Network Security | [21 scenarios](specs/arkavo-edge/network-security.spec.yaml) | [secure-agent](examples/secure-agent/) | Listener, auth and egress hardening (several scenarios wip) |
 
 ### Intelligence
 | Component | Spec | Example | Description |

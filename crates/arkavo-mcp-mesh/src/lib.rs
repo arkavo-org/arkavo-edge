@@ -473,12 +473,18 @@ impl SendTaskTool {
         }
     }
 
-    /// Resolve an agent ID to its address, auto-discovering peers if needed.
-    /// Handles typos via fuzzy matching (edit distance ≤ 2).
-    async fn resolve_agent_address(&self, agent_id: &str) -> crate::Result<String> {
+    /// Resolve an agent ID to the agent it matches and that agent's address,
+    /// auto-discovering peers if needed. Handles typos via fuzzy matching
+    /// (edit distance ≤ 2).
+    ///
+    /// The matched ID comes back with the address because it is the one the
+    /// peer knows itself by: a delegation addressed, recorded or reported
+    /// under the requested spelling cannot be found again by the exact
+    /// lookups that follow it.
+    async fn resolve_agent(&self, agent_id: &str) -> crate::Result<(String, String)> {
         // First try with current known agents
-        if let Some(addr) = self.try_find_address(agent_id).await {
-            return Ok(addr);
+        if let Some(found) = self.try_find(agent_id).await {
+            return Ok(found);
         }
 
         // No match — trigger mDNS discovery and retry
@@ -486,8 +492,8 @@ impl SendTaskTool {
         let _ = discover_and_register_agents(&self.state).await;
 
         // Retry after discovery
-        if let Some(addr) = self.try_find_address(agent_id).await {
-            return Ok(addr);
+        if let Some(found) = self.try_find(agent_id).await {
+            return Ok(found);
         }
 
         let available: Vec<_> = self
@@ -503,10 +509,10 @@ impl SendTaskTool {
         )))
     }
 
-    async fn try_find_address(&self, agent_id: &str) -> Option<String> {
+    async fn try_find(&self, agent_id: &str) -> Option<(String, String)> {
         let addresses = self.state.agent_addresses.read().await;
         if let Some(addr) = addresses.get(agent_id) {
-            return Some(addr.clone());
+            return Some((agent_id.to_string(), addr.clone()));
         }
         // Fuzzy match: edit distance ≤ 2 handles common LLM typos
         addresses
@@ -518,19 +524,24 @@ impl SendTaskTool {
                     matched = %matched_id,
                     "Fuzzy-matched agent ID"
                 );
-                addr.clone()
+                (matched_id.clone(), addr.clone())
             })
     }
 }
 
 #[async_trait]
 impl Tool for SendTaskTool {
+    /// The task text goes to whichever agent `agent_id` names.
+    fn peer_recipient_param(&self) -> Option<&str> {
+        Some("agent_id")
+    }
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
 
     async fn execute(&self, args: Value) -> crate::Result<Value> {
-        let agent_id = args
+        let requested = args
             .get("agent_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| MeshToolError::InvalidParams("agent_id is required".to_string()))?;
@@ -543,7 +554,8 @@ impl Tool for SendTaskTool {
         let metadata = args.get("metadata").cloned();
 
         // Get agent address — auto-discover if needed, fuzzy match on typos
-        let address = self.resolve_agent_address(agent_id).await?;
+        let (agent_id, address) = self.resolve_agent(requested).await?;
+        let agent_id = agent_id.as_str();
 
         // Build message with budget allocation for specialist compute control
         let default_budget = arkavo_budget::BudgetAllocation::default();
@@ -992,5 +1004,110 @@ mod tests {
 
         assert_eq!(schema.name, "get_task_status");
         assert!(schema.description.contains("status"));
+    }
+
+    /// Serves one A2A `message/send` with a fixed success, so the delegation
+    /// path runs to completion without a real peer.
+    async fn one_shot_peer() -> (String, tokio::sync::oneshot::Receiver<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a loopback port");
+        let address = format!("http://{}", listener.local_addr().expect("bound address"));
+        let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            // Read the whole request before answering: replying early and
+            // closing with unread bytes resets the connection under the client.
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let Ok(n) = socket.read(&mut chunk).await else {
+                    return;
+                };
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let _ = request_tx.send(String::from_utf8_lossy(&request).into_owned());
+            let body = r#"{"jsonrpc":"2.0","id":"00000000-0000-0000-0000-000000000000","result":{"task_id":"t-1","status":"submitted"}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+        });
+        (address, request_rx)
+    }
+
+    /// Regression: a typo-matched delegation was recorded and reported under
+    /// the requested spelling, which `get_task_status`'s exact lookup cannot
+    /// find, and was sent with that spelling as the addressed agent.
+    #[tokio::test]
+    async fn a_typo_matched_delegation_reports_the_agent_it_reached() {
+        let state = Arc::new(MeshToolsState::new());
+        let (address, request) = one_shot_peer().await;
+        state
+            .agent_addresses
+            .write()
+            .await
+            .insert("reviewer-1".to_string(), address);
+        let tool = SendTaskTool::new(state.clone());
+
+        let sent = tool
+            .execute(json!({"agent_id": "reviewr-1", "task": "review the diff"}))
+            .await
+            .expect("the matched peer accepts the task");
+
+        assert_eq!(sent["agent_id"], "reviewer-1", "{sent}");
+        let pending = state.pending_delegations.read().await;
+        assert_eq!(pending[0].agent_id, "reviewer-1");
+        assert!(
+            request
+                .await
+                .expect("peer received request")
+                .lines()
+                .any(|line| line.eq_ignore_ascii_case("X-Agent-ID: reviewer-1"))
+        );
+    }
+
+    #[test]
+    fn send_task_declares_the_argument_that_names_its_recipient() {
+        let tool = SendTaskTool::new(Arc::new(MeshToolsState::new()));
+
+        let recipient = tool
+            .peer_recipient_param()
+            .expect("send_task delivers to a peer");
+
+        let parameters = &tool.schema().parameters;
+        assert!(
+            parameters["properties"].get(recipient).is_some(),
+            "declared recipient `{recipient}` is not a parameter"
+        );
+        // A recipient the model may omit would hold every call that omits it.
+        assert!(
+            parameters["required"]
+                .as_array()
+                .is_some_and(|required| required.iter().any(|r| r == recipient)),
+            "declared recipient `{recipient}` is optional"
+        );
     }
 }

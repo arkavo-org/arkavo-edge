@@ -349,3 +349,19 @@ scenarios:
       - condition: --bind given without a value
         expected: Refused before startup rather than silently keeping loopback
     changed: "2026-09-29"
+
+  - id: NET-020
+    name: Agent replies and mesh broadcasts pass the egress gate
+    criticality: high
+    wip: true
+    issue: "Not implemented: handlers/messaging.rs completes the requester's task with the full result and broadcasts it, or the error text, as TaskCompleted to every gossip peer without an egress check. The reply is owned by the Universal mediation conductor layer, the broadcast by Default-on egress; either needs an authenticated requester counted inside the boundary, or a wrap path, before a gate can do anything but refuse."
+    given:
+      - A specialist finishes a task handed to it over A2A
+    when: The result is returned to the requester or announced to peers
+    then:
+      - The reply is evaluated against the policy for the authenticated requester before release
+      - Task-completion notices carry no more than the requester may receive
+    refs:
+      - crates/arkavo-server/src/server/handlers/messaging.rs:378-484
+      - crates/arkavo-server/src/server/learning_bus.rs:495-503
+    changed: "2026-09-30"

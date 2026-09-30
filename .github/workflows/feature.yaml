@@ -279,6 +279,7 @@ jobs:
             cargo bench --locked -p arkavo-router --no-run --no-default-features --features llm-remote,gemini,openai
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo test --locked -p arkavo-mcp-tools
+            cargo test --locked -p arkavo-mcp-mesh
             cargo test --locked -p arkavo-mcp-code-search --lib
             cargo test --locked -p arkavo-browser --lib
           elif [ "${{ matrix.group }}" = "routing" ]; then
@@ -319,7 +320,10 @@ jobs:
             cargo test --locked -p arkavo-knowledge-pack
             cargo test --locked -p arkavo-gguf-tdf --features knowledge-pack --lib --test knowledge_pack_test
             cargo test --locked -p arkavo-protocol --features taint --test sentinel_test --test taint_propagation_test --test egress_taint_test
+            cargo test --locked -p arkavo-protocol --features taint --lib egress_
             cargo test --locked -p arkavo-server --features taint,kas --lib egress_guard
+            # routines implies taint; metadata checks keep this caller covered.
+            cargo check --locked -p arkavo-server --features routines,kas --lib
             # ASTRA-004 analyzer regression. Shares the taint-featured
             # arkavo-server artifacts with the line above so this group does
             # not build the crate a second time.

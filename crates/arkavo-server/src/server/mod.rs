@@ -23,6 +23,8 @@ mod conversation_window;
 mod curiosity;
 #[cfg(feature = "taint")]
 mod egress_guard;
+#[cfg(all(test, feature = "taint"))]
+mod egress_guard_fixture;
 mod episode_buffer;
 mod event_loop;
 mod gossip_transport;
