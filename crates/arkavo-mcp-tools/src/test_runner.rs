@@ -403,13 +403,44 @@ mod tests {
 
     #[tokio::test]
     async fn test_cargo_tests() {
+        // Running this crate's suite here would invoke this test again.
+        // A standalone crate also gives the runner a result we can verify.
+        let project = tempfile::TempDir::new().expect("test project");
+        let manifest = project.path().join("Cargo.toml");
+        std::fs::write(
+            &manifest,
+            "[package]\nname = \"test-runner-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n",
+        )
+        .expect("fixture manifest");
+        std::fs::create_dir(project.path().join("src")).expect("fixture source directory");
+        std::fs::write(
+            project.path().join("src/lib.rs"),
+            "#[test]\nfn fixture_passes() { assert_eq!(2 + 2, 4); }\n\
+             #[test]\nfn excluded_failure() { panic!(\"pattern must exclude this test\"); }\n",
+        )
+        .expect("fixture tests");
         let tool = TestRunnerTool::new();
         let params = json!({
             "framework": "cargo",
-            "path": "."
+            "path": project.path(),
+            "pattern": "fixture_passes",
+            "extra_args": [
+                "--manifest-path", manifest,
+                "--target-dir", project.path().join("target"),
+                "--offline", "--lib"
+            ]
         });
 
-        let result = tool.execute(params).await;
-        assert!(result.is_ok() || result.is_err());
+        let result = tool.execute(params).await.expect("fixture cargo test runs");
+        assert_eq!(
+            result,
+            json!({
+                "framework": "cargo",
+                "passed": 1,
+                "failed": 0,
+                "ignored": 0,
+                "total": 1
+            })
+        );
     }
 }
