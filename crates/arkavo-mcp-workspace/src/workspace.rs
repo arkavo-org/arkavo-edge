@@ -414,7 +414,10 @@ mod tests {
         let bin = dir.join("bin");
         std::fs::create_dir_all(&bin).expect("bin dir");
         let docker = bin.join("docker");
-        std::fs::write(&docker, "#!/bin/sh\nenv > docker-env.txt\n").expect("fake docker");
+        // One dump per call: `list` first probes `--version`, then runs `ps`,
+        // and each is a separate child that must be credential-free.
+        let script = "#!/bin/sh\ncase \"$1\" in --version) env > docker-env-version.txt;; ps) env > docker-env-ps.txt;; esac\n";
+        std::fs::write(&docker, script).expect("fake docker");
         std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755))
             .expect("make fake docker executable");
         WorkspaceTool::new()
@@ -453,11 +456,14 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
 
-        let seen = std::fs::read_to_string(dir.path().join("docker-env.txt")).expect("docker ran");
-        assert!(
-            seen.lines().any(|l| l == "ARKAVO_PROBE_SETTING=kept"),
-            "{seen}"
-        );
-        assert!(!seen.contains(PLANTED), "{seen}");
+        for call in ["version", "ps"] {
+            let dump = dir.path().join(format!("docker-env-{call}.txt"));
+            let seen = std::fs::read_to_string(dump).expect("docker ran");
+            assert!(
+                seen.lines().any(|l| l == "ARKAVO_PROBE_SETTING=kept"),
+                "{call}: {seen}"
+            );
+            assert!(!seen.contains(PLANTED), "{call}: {seen}");
+        }
     }
 }

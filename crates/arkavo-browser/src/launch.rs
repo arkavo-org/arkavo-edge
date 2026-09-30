@@ -11,6 +11,7 @@
 use arkavo_process_env::{is_secret_name, withheld_names};
 use chromiumoxide::browser::{BrowserConfig, BrowserConfigBuilder};
 use std::ffi::{OsStr, OsString};
+use std::sync::Once;
 
 /// Operator opt-out for a Linux host where Chrome has no usable sandbox
 /// (user namespaces disabled and no setuid helper). INSECURE: a compromised
@@ -45,11 +46,26 @@ pub(crate) fn decide(os: &str, effective_uid: Option<u32>, opt_out: Option<&OsSt
 /// The decision for this process, logged whenever the sandbox is off.
 pub(crate) fn current_sandbox() -> Sandbox {
     let opt_out = std::env::var_os(ALLOW_UNSANDBOXED_ENV);
+    if opt_out_is_ignored(std::env::consts::OS, opt_out.as_deref()) {
+        static WARNED: Once = Once::new();
+        // Once per process: the decision is taken for every launch.
+        WARNED.call_once(|| {
+            tracing::warn!(
+                "{ALLOW_UNSANDBOXED_ENV} is ignored: Chrome is always sandboxed outside Linux"
+            );
+        });
+    }
     let sandbox = decide(std::env::consts::OS, effective_uid(), opt_out.as_deref());
     if sandbox != Sandbox::Enabled {
         tracing::warn!(?sandbox, "launching Chrome without its sandbox");
     }
     sandbox
+}
+
+/// An operator who sets the opt-out on macOS or Windows expects an
+/// unsandboxed browser and would otherwise never learn they did not get one.
+fn opt_out_is_ignored(os: &str, opt_out: Option<&OsStr>) -> bool {
+    os != "linux" && opt_out.is_some()
 }
 
 /// Effective uid from `/proc/self/status`; std has no `geteuid`. `None`
@@ -148,6 +164,33 @@ mod tests {
         let status = "Name:\tarkavo\nUid:\t1000\t0\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\n";
         assert_eq!(parse_effective_uid(status), Some(0));
         assert_eq!(parse_effective_uid("Name:\tarkavo\n"), None);
+    }
+
+    #[spec("BROWS-007")]
+    #[test]
+    fn a_malformed_uid_line_keeps_the_sandbox_on() {
+        for status in [
+            "Uid:\t1000\n",
+            "Uid:\n",
+            "Uid:\t1000\troot\t1000\t1000\n",
+            "Uid:\t1000\t-1\t1000\t1000\n",
+            "Uid:\t1000\t4294967296\t1000\t1000\n",
+        ] {
+            assert_eq!(parse_effective_uid(status), None, "{status:?}");
+        }
+        assert_eq!(
+            parse_effective_uid("Uid:\t1000\t4294967295\t1000\t1000\n"),
+            Some(u32::MAX)
+        );
+    }
+
+    #[test]
+    fn the_opt_out_is_ignored_only_outside_linux() {
+        let set = Some(OsStr::new("1"));
+        assert!(opt_out_is_ignored("macos", set));
+        assert!(opt_out_is_ignored("windows", set));
+        assert!(!opt_out_is_ignored("linux", set));
+        assert!(!opt_out_is_ignored("macos", None));
     }
 
     /// Launches `/bin/sh` in Chrome's place with the configuration under
