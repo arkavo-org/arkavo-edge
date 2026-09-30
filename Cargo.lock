@@ -753,6 +753,7 @@ dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
  "arkavo-test-macros",
+ "arkavo-validation",
  "async-trait",
  "chromiumoxide",
  "futures",
@@ -761,6 +762,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
 use crate::launch::{current_sandbox, launch_config};
 use crate::{BrowserError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
+use arkavo_validation::EgressPolicy;
 use async_trait::async_trait;
 use chromiumoxide::browser::Browser;
 use chromiumoxide::cdp::browser_protocol::network::EventRequestWillBeSent;
@@ -8,6 +9,7 @@ use chromiumoxide::cdp::js_protocol::runtime::EventConsoleApiCalled;
 use chromiumoxide::page::ScreenshotParams;
 use futures::StreamExt;
 use serde_json::{Value, json};
+use url::Url;
 
 pub struct BrowserTool {
     schema: ToolSchema,
@@ -69,6 +71,15 @@ impl BrowserTool {
         let action = params["action"]
             .as_str()
             .ok_or_else(|| BrowserError::InvalidParams("Missing action".to_string()))?;
+
+        // Before Chrome starts: a refused navigation should cost nothing.
+        if action == "navigate" {
+            let url = params
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| BrowserError::InvalidParams("Missing url".to_string()))?;
+            vet_navigation(url).await?;
+        }
 
         let headless = params
             .get("headless")
@@ -216,6 +227,30 @@ impl BrowserTool {
     }
 }
 
+/// Refuse a navigation the egress policy would refuse (NET-007, BROWS-009).
+///
+/// Chrome dials with its own resolver and follows redirects and subresources
+/// on its own, and this check sees none of that. What it stops is the direct
+/// case: a model told to open an internal or metadata address. The rest needs
+/// Chrome's traffic routed through the egress broker.
+async fn vet_navigation(url: &str) -> Result<()> {
+    let parsed = Url::parse(url)
+        .map_err(|e| BrowserError::InvalidParams(format!("Invalid url {url:?}: {e}")))?;
+    // Other schemes give Chrome ways to reach the network, or the disk, that
+    // an http(s) egress policy does not describe.
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(BrowserError::InvalidParams(format!(
+            "browser_cdp navigates http(s) URLs only, not {}:",
+            parsed.scheme()
+        )));
+    }
+    let policy = EgressPolicy::process().map_err(|e| BrowserError::Navigation(e.to_string()))?;
+    policy
+        .vet_destination(&parsed)
+        .await
+        .map_err(|e| BrowserError::Navigation(e.to_string()))
+}
+
 impl Default for BrowserTool {
     fn default() -> Self {
         Self::new()
@@ -248,17 +283,53 @@ impl Tool for BrowserTool {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("BROWS-009")]
     #[tokio::test]
-    async fn test_browser_navigation() {
+    async fn test_navigate_refuses_internal_addresses_before_launching_chrome() {
         let tool = BrowserTool::new();
-        let params = json!({
-            "action": "navigate",
-            "url": "https://example.com",
-            "headless": true
-        });
+        for url in [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://127.0.0.1:9/",
+            "http://localhost:9/",
+            "http://[::ffff:10.0.0.1]/",
+        ] {
+            let err = tool
+                .execute_browser(&json!({"action": "navigate", "url": url}))
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("SSRF attempt blocked"),
+                "{url}: {err}"
+            );
+        }
+    }
 
-        let result = tool.execute(params).await;
-        assert!(result.is_ok() || result.is_err());
+    #[spec("BROWS-009")]
+    #[tokio::test]
+    async fn test_navigate_refuses_non_http_schemes() {
+        let tool = BrowserTool::new();
+        for url in [
+            "file:///etc/passwd",
+            "chrome://settings",
+            "javascript:alert(1)",
+        ] {
+            let err = tool
+                .execute_browser(&json!({"action": "navigate", "url": url}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, BrowserError::InvalidParams(_)),
+                "{url}: {err}"
+            );
+        }
+    }
+
+    #[spec("BROWS-009")]
+    #[tokio::test]
+    async fn test_vet_navigation_lets_a_public_literal_through() {
+        // An IP literal is decided without a lookup, so this needs no network.
+        vet_navigation("http://93.184.215.14/").await.unwrap();
     }
 }

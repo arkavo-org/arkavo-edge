@@ -144,3 +144,19 @@ scenarios:
         expected: The name is present with an empty value, because chromiumoxide cannot remove it
       - condition: A non-Unicode variable name is not credential-like
         expected: The launch proceeds and the variable is inherited
+
+  - id: BROWS-009
+    name: Refuse navigation to blocked destinations
+    criticality: high
+    given:
+      - browser_cdp navigate called with a URL
+    when: Before Chrome is launched
+    then:
+      - Non-http(s) schemes are refused as invalid parameters
+      - The URL is judged by EgressPolicy with its host resolved; a blocked destination is refused with "SSRF attempt blocked"
+      - Chrome is not launched for a refused navigation
+    refs: [crates/arkavo-browser/src/browser.rs]
+    changed: "2026-09-30"
+    edge_cases:
+      - condition: The page redirects, or loads a subresource, to a blocked address
+        expected: Not covered here; NET-019 (wip)

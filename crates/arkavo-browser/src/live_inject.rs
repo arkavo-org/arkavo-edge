@@ -175,12 +175,3 @@ pub async fn create_injector_for_browser(browser: &Browser) -> Result<LiveInject
 
     Ok(LiveInjector::new(page))
 }
-
-#[cfg(test)]
-#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
-mod tests {
-    #[test]
-    fn test_injector_creation() {
-        // Placeholder test
-    }
-}

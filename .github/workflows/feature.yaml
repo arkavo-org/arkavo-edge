@@ -280,7 +280,7 @@ jobs:
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo test --locked -p arkavo-mcp-tools
             cargo test --locked -p arkavo-mcp-code-search --lib
-            cargo test --locked -p arkavo-browser --lib launch::
+            cargo test --locked -p arkavo-browser --lib
           elif [ "${{ matrix.group }}" = "routing" ]; then
             cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini,openai
             cargo check --locked -p arkavo-router --no-default-features

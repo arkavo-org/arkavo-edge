@@ -587,7 +587,7 @@ components:
     module: arkavo_browser
     description: Browser automation and live injection
     criticality: medium
-    scenario_count: 8
+    scenario_count: 9
     invariants:
       - BrowserTool provides MCP automation
       - LiveInjector enables script injection
@@ -1024,7 +1024,7 @@ components:
 
 stats:
   total_specs: 87
-  total_scenarios: 844
+  total_scenarios: 845
   critical_scenarios: 263
   coverage_areas:
     - authentication

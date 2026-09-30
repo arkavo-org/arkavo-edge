@@ -185,6 +185,7 @@ fn normalize_domain(domain: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
     use arkavo_test_macros::spec;
@@ -303,5 +304,48 @@ mod tests {
     fn an_empty_allowlist_is_strict() {
         let policy = EgressPolicy::with_allowlist("").unwrap();
         assert!(policy.check_url(&url("http://127.0.0.1:3000/")).is_err());
+    }
+
+    #[spec("NET-014")]
+    #[tokio::test]
+    async fn vet_destination_decides_literals_without_a_lookup() {
+        let policy = EgressPolicy::strict();
+        assert!(matches!(
+            policy
+                .vet_destination(&url("http://169.254.169.254/latest/meta-data/"))
+                .await,
+            Err(EgressError::BlockedIp(_))
+        ));
+        assert_eq!(
+            policy.vet_destination(&url("file:///etc/passwd")).await,
+            Err(EgressError::InvalidUrl)
+        );
+        assert_eq!(
+            policy.vet_destination(&url("http://93.184.215.14/")).await,
+            Ok(())
+        );
+    }
+
+    #[spec("NET-014")]
+    #[tokio::test]
+    async fn vet_destination_judges_what_a_name_resolves_to() {
+        // `localhost` resolves from the hosts file, so no network is involved.
+        let strict = EgressPolicy::strict();
+        assert!(matches!(
+            strict.vet_destination(&url("http://localhost:9/")).await,
+            Err(EgressError::BlockedIp(_))
+        ));
+
+        let allowed = EgressPolicy::with_allowlist("http://localhost:3000").unwrap();
+        assert_eq!(
+            allowed
+                .vet_destination(&url("http://localhost:3000/"))
+                .await,
+            Ok(())
+        );
+        assert_eq!(
+            allowed.vet_destination(&url("http://localhost:22/")).await,
+            Err(EgressError::BlockedDomain("localhost:22".into()))
+        );
     }
 }

@@ -1,0 +1,16 @@
+# Replaces the workspace .clippy.toml for this crate (clippy reads the nearest
+# config and does not merge), so the workspace entries are repeated here.
+disallowed-methods = [
+    { path = "tokio::runtime::Handle::block_on", reason = "Can cause 'Cannot start a runtime from within a runtime' panic. Use spawn_blocking or make the function async instead." },
+    { path = "tokio::runtime::Runtime::block_on", reason = "Be careful not to call from async context. Consider using spawn_blocking." },
+    # NET-007: tool requests go through arkavo_validation::EgressClient, which
+    # checks every destination; a raw client checks none.
+    { path = "reqwest::Client::new", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::Client::builder", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::ClientBuilder::new", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::get", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::blocking::Client::new", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::blocking::Client::builder", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::blocking::ClientBuilder::new", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+    { path = "reqwest::blocking::get", reason = "Use arkavo_validation::EgressClient (NET-007)." },
+]
