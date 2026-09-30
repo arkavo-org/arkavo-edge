@@ -172,6 +172,12 @@ Without `runtime.listen` an agent listens on loopback (`127.0.0.1`, OS-assigned 
 
 `arkavo kit migrate-from-agents-md` writes `runtime.listen` only when the AGENTS.md names a listen address other than the default. A file with no `listen` line migrates to a kit without `runtime.listen`, so the default applies.
 
+Values under `env` are published with the kit and are not screened for
+credentials, so never write a secret there. `env_passthrough` can name any
+credential the agent holds, including provider API keys; installing the kit
+is the consent to that. Loader and interpreter variables (`LD_PRELOAD`,
+`NODE_OPTIONS`, `PYTHONPATH`, `GIT_*`, `PATH`) are rejected in both fields.
+
 ### Role-level (optional)
 
 - Keep existing `agent_provisioning`, `mcp_tools`, skills.

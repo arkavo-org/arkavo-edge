@@ -21,8 +21,10 @@
 //! the agent process (a credential broker) can resolve from its own.
 
 mod baseline;
+mod hijack;
 mod secret;
 
+pub use hijack::is_loader_or_hijack_name;
 pub use secret::is_secret_name;
 
 use std::collections::BTreeMap;

@@ -408,6 +408,28 @@ fn unmapped_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+
+    #[spec("SK-105")]
+    #[test]
+    fn server_environment_survives_the_round_trip_into_a_kit() {
+        let config = McpServerConfig {
+            name: "github".into(),
+            command: Some("npx".into()),
+            args: vec![],
+            url: None,
+            env: arkavo_process_env::EnvSpec {
+                set: [("LOG_LEVEL".to_string(), "debug".to_string())].into(),
+                passthrough: vec!["GITHUB_TOKEN".to_string()],
+            },
+        };
+        let server = to_runtime_mcp_server(&config);
+        assert_eq!(
+            server.env.get("LOG_LEVEL").map(String::as_str),
+            Some("debug")
+        );
+        assert_eq!(server.env_passthrough, vec!["GITHUB_TOKEN".to_string()]);
+    }
 
     #[test]
     fn slugify_lowercases_and_collapses_separators() {

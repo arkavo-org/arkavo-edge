@@ -322,34 +322,9 @@ pub fn validate_runtime(runtime: &KitRuntimeConfig) -> Result<(), RuntimeValidat
                 name: server.name.clone(),
             });
         }
-        validate_mcp_server_env(server)?;
+        crate::runtime_mcp_env::validate_mcp_server_env(server)?;
     }
 
-    Ok(())
-}
-
-fn validate_mcp_server_env(server: &RuntimeMcpServer) -> Result<(), RuntimeValidationError> {
-    if let Some(name) = server
-        .env
-        .keys()
-        .chain(&server.env_passthrough)
-        .find(|name| !arkavo_process_env::is_valid_name(name))
-    {
-        return Err(RuntimeValidationError::McpServerInvalidEnvName {
-            server: server.name.clone(),
-            name: name.clone(),
-        });
-    }
-    if let Some(name) = server
-        .env
-        .keys()
-        .find(|name| arkavo_process_env::is_secret_name(name))
-    {
-        return Err(RuntimeValidationError::McpServerCredentialInEnv {
-            server: server.name.clone(),
-            name: name.clone(),
-        });
-    }
     Ok(())
 }
 
@@ -383,6 +358,11 @@ pub enum RuntimeValidationError {
         "runtime.mcp_servers {server:?} env {name:?} looks like a credential; list it in env_passthrough so its value stays out of the kit"
     )]
     McpServerCredentialInEnv { server: String, name: String },
+
+    #[error(
+        "runtime.mcp_servers {server:?} env name {name:?} can make the server load other code (loader, interpreter, git, shell or PATH variable)"
+    )]
+    McpServerLoaderEnvName { server: String, name: String },
 
     #[error("runtime.kas.trusted_roots did {0:?} must be non-empty and start with \"did:\"")]
     InvalidTrustedRootDid(String),
@@ -549,6 +529,80 @@ mcp_servers:
             validate_runtime(&cfg),
             Err(RuntimeValidationError::McpServerInvalidEnvName { .. })
         ));
+    }
+
+    #[spec("SK-105")]
+    #[test]
+    fn loader_and_hijack_names_are_rejected_in_env_and_passthrough() {
+        for name in [
+            "ld_preload",
+            "NODE_OPTIONS",
+            "PYTHONPATH",
+            "GIT_SSH_COMMAND",
+            "PATH",
+        ] {
+            let in_env = RuntimeMcpServer {
+                name: "srv".into(),
+                command: Some("npx".into()),
+                args: vec![],
+                url: None,
+                env: [(name.to_string(), "x".to_string())].into(),
+                env_passthrough: vec![],
+            };
+            let in_passthrough = RuntimeMcpServer {
+                env: BTreeMap::new(),
+                env_passthrough: vec![name.to_string()],
+                ..in_env.clone()
+            };
+            for server in [in_env, in_passthrough] {
+                let cfg = KitRuntimeConfig {
+                    mcp_servers: vec![server],
+                    ..Default::default()
+                };
+                assert_eq!(
+                    validate_runtime(&cfg),
+                    Err(RuntimeValidationError::McpServerLoaderEnvName {
+                        server: "srv".into(),
+                        name: name.into(),
+                    }),
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[spec("SK-105")]
+    #[test]
+    fn empty_nul_and_env_key_names_are_invalid() {
+        for bad in ["", "A\0B", "A=B"] {
+            let in_env = RuntimeMcpServer {
+                name: "srv".into(),
+                command: Some("npx".into()),
+                args: vec![],
+                url: None,
+                env: [(bad.to_string(), "x".to_string())].into(),
+                env_passthrough: vec![],
+            };
+            let in_passthrough = RuntimeMcpServer {
+                env: BTreeMap::new(),
+                env_passthrough: vec![bad.to_string()],
+                ..in_env.clone()
+            };
+            for server in [in_env, in_passthrough] {
+                let cfg = KitRuntimeConfig {
+                    mcp_servers: vec![server],
+                    ..Default::default()
+                };
+                assert_eq!(
+                    validate_runtime(&cfg),
+                    Err(RuntimeValidationError::McpServerInvalidEnvName {
+                        server: "srv".into(),
+                        name: bad.into(),
+                    }),
+                    "{bad:?}"
+                );
+            }
+        }
     }
 
     /// `kit.id` is BLAKE3 of the canonical manifest, so a server that
