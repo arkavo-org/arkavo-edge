@@ -175,6 +175,13 @@ impl ProviderFactoryRegistry {
 
     /// Create a provider instance from configuration
     pub async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
+        // Registered before dispatch so every factory's credential is
+        // withheld from tool subprocesses, a factory registered at runtime
+        // included; the built-in factories also register it themselves
+        // because they are public and are called directly.
+        if let Some(auth_ref) = config.auth_ref.as_deref() {
+            arkavo_process_env::withhold_name(auth_ref);
+        }
         let factory = self.get_factory(&config.provider_type).ok_or_else(|| {
             anyhow::anyhow!(
                 "No factory registered for provider type: {:?}",
@@ -642,6 +649,40 @@ mod tests {
 
         assert!(
             AnthropicProviderFactory
+                .create_provider(&config)
+                .await
+                .is_err()
+        );
+        assert!(
+            arkavo_process_env::withheld_names()
+                .iter()
+                .any(|name| name == AUTH_REF)
+        );
+    }
+
+    /// Every factory is covered: the name is registered before dispatch,
+    /// even for a provider type no factory serves.
+    #[arkavo_test_macros::spec("PENV-002")]
+    #[tokio::test]
+    async fn registry_withholds_the_auth_ref_before_dispatch() {
+        // The registry is process-global: no other test uses this name.
+        const AUTH_REF: &str = "ARKAVO_REGISTRY_TEST_CONFIGURED_LOGIN";
+        let config = ProviderConfig {
+            provider_type: ProviderType::Custom("unregistered-provider".to_string()),
+            base_url: String::new(),
+            auth_ref: Some(AUTH_REF.to_string()),
+            default_model: None,
+            timeout_secs: None,
+            max_retries: None,
+            initial_retry_delay_ms: None,
+            backoff_factor: None,
+            max_retry_delay_ms: None,
+            jitter_factor: None,
+            metadata: None,
+        };
+
+        assert!(
+            ProviderFactoryRegistry::new()
                 .create_provider(&config)
                 .await
                 .is_err()

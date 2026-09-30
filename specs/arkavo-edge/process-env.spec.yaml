@@ -44,7 +44,7 @@ scenarios:
       - Every other variable is kept
       - A name that is not valid Unicode is withheld
       - Names the caller lists as configured credentials are withheld even when they are not credential-shaped, and readmit still wins
-      - Names registered with withhold_name (each provider auth_ref, when the provider factory reads it) are withheld by the constructors resolving from the current process; the constructors taking a parent environment do not consult the registry
+      - Names registered with withhold_name (each provider auth_ref, as the provider factory registry dispatches it and as a factory reads it) are withheld by the constructors resolving from the current process; the constructors taking a parent environment do not consult the registry
     refs:
       - crates/arkavo-process-env/src/lib.rs
       - crates/arkavo-process-env/src/configured.rs
