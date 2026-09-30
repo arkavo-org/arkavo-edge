@@ -5,8 +5,10 @@ use std::path::Path;
 /// Descriptor targets that discard output; writing to them changes nothing.
 /// `NUL` is a device only under `cmd`; on unix it is an ordinary file name,
 /// and a symlink of that name must be resolved like any other target.
+/// Conversely `/dev/null` is a device only on unix: under `cmd` it names
+/// `<drive>:\dev\null`, an ordinary path outside the root.
 #[cfg(windows)]
-const DISCARD_TARGETS: &[&str] = &["/dev/null", "NUL", "nul"];
+const DISCARD_TARGETS: &[&str] = &["NUL", "nul"];
 #[cfg(not(windows))]
 const DISCARD_TARGETS: &[&str] = &["/dev/null"];
 
@@ -56,7 +58,10 @@ fn redirections(chars: &[char]) -> Vec<Redirection> {
         while first > 0 && chars[first - 1].is_ascii_digit() {
             first -= 1;
         }
-        let glued = first > 0 && !chars[first - 1].is_whitespace();
+        // `cmd` takes a single digit as the descriptor; a longer run is not
+        // one, so it is refused as a glued word.
+        let glued =
+            (first > 0 && !chars[first - 1].is_whitespace()) || (cfg!(windows) && op - first > 1);
         while i < chars.len() && matches!(chars[i], '<' | '>') {
             i += 1;
         }
@@ -83,8 +88,9 @@ fn redirections(chars: &[char]) -> Vec<Redirection> {
 
 /// Every file redirection in `seg` must name a literal path that resolves
 /// inside `root`, symlinks followed, and stand apart from the word before it
-/// (`echo hi>out` and `find . -delete>x` are refused; `2>out` is not). A pure descriptor duplication (`2>&1`,
-/// `>&-`) names no file; `>&word` with any other word redirects to that file.
+/// (`echo hi>out` and `find . -delete>x` are refused; `2>out` is not). A pure
+/// descriptor duplication (`2>&1`, `>&-`) names no file; `>&word` with any
+/// other word redirects to that file.
 pub(super) fn redirections_within_root(seg: &str, root: &Path, cwd: &Path) -> bool {
     let chars: Vec<char> = seg.chars().collect();
     redirections(&chars).iter().all(|r| {
@@ -141,7 +147,15 @@ fn is_reserved_device(target: &str) -> bool {
             let numbered = stem
                 .strip_prefix("COM")
                 .or_else(|| stem.strip_prefix("LPT"));
-            numbered.is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9']))
+            // Windows also reserves COM0/LPT0 and the superscript digits in
+            // some versions; refusing them all costs nothing.
+            numbered.is_some_and(|n| {
+                let mut digits = n.chars();
+                matches!(
+                    (digits.next(), digits.next()),
+                    (Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None)
+                )
+            })
         }
     }
 }
@@ -349,12 +363,36 @@ mod tests {
             "sub\\LPT2.x",
             "CONIN$",
             "CONOUT$",
+            "COM0",
+            "lpt0.txt",
+            "COM\u{b9}",
+            "COM\u{b2}",
+            "COM\u{b3}",
+            "LPT\u{b9}.log",
+            "LPT\u{b2}",
+            "LPT\u{b3}",
         ] {
             assert!(is_reserved_device(name), "{name}");
         }
-        for name in ["console", "COM0", "COM10", "LPT", "out.txt", "a/b", "NUL2"] {
+        for name in ["console", "COM10", "LPT", "out.txt", "a/b", "NUL2"] {
             assert!(!is_reserved_device(name), "{name}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_a_single_digit_is_a_descriptor_prefix_under_cmd() {
+        let (_dir, root) = workspace();
+        assert!(redirections_within_root("dir 2>x", &root, &root));
+        assert!(!redirections_within_root("dir 12>x", &root, &root));
+        assert!(!redirections_within_root("12>x dir", &root, &root));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn dev_null_is_an_ordinary_path_under_cmd() {
+        let (_dir, root) = workspace();
+        assert!(!redirections_within_root("dir > /dev/null", &root, &root));
     }
 
     #[cfg(windows)]

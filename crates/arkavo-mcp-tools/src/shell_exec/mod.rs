@@ -44,11 +44,15 @@ const ALLOW_ENV_PREFIX: &[&str] = &["LC_"];
 /// the system zoneinfo directory), but not as an absolute path, which is
 /// read as given, or with a `..` component that climbs out of that directory.
 fn names_a_path(upper_key: &str, value: &str) -> bool {
-    let climbs = value.split('/').any(|component| component == "..");
+    // A leading `:` marks a TZ file path, so `:..` climbs like `..`.
+    let climbs = value
+        .trim_start_matches(':')
+        .split('/')
+        .any(|component| component == "..");
     match upper_key {
         "TZ" => value.trim_start_matches(':').starts_with('/') || climbs,
-        "LANG" => value.contains('/'),
-        key if key.starts_with("LC_") => value.contains('/'),
+        "LANG" => value.contains('/') || climbs,
+        key if key.starts_with("LC_") => value.contains('/') || climbs,
         _ => false,
     }
 }
@@ -875,6 +879,10 @@ mod tests {
             ("TZ", ":/tmp/planted"),
             ("TZ", "../../etc/localtime"),
             ("TZ", "America/../../x"),
+            ("LANG", ".."),
+            ("LC_ALL", ".."),
+            ("TZ", ":../x"),
+            ("TZ", ":.."),
         ];
         for (key, value) in refused {
             let env = HashMap::from([(key.to_string(), value.to_string())]);

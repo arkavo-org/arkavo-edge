@@ -1026,4 +1026,15 @@ mod tests {
     fn caret_is_not_auto_approved_under_cmd() {
         assert_eq!(verdict("find . -del^ete"), ApprovalResult::RequiresReview);
     }
+
+    #[cfg(windows)]
+    #[spec("MCP-015")]
+    #[test]
+    fn multi_digit_descriptor_prefix_is_not_auto_approved_under_cmd() {
+        let (_dir, root) = workspace();
+        assert_eq!(
+            classify("12>x ls", &root, &root),
+            ApprovalResult::RequiresReview
+        );
+    }
 }
