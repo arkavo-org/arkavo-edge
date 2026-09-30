@@ -1802,6 +1802,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-process-env"
+version = "0.98.5"
+dependencies = [
+ "arkavo-test-macros",
+]
+
+[[package]]
 name = "arkavo-protocol"
 version = "0.99.5"
 dependencies = [

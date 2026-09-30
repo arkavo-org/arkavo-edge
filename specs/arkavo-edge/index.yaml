@@ -952,6 +952,17 @@ components:
       - Validation errors descriptive
       - Schema-driven validation
 
+  - name: process-env
+    file: process-env.spec.yaml
+    module: arkavo_process_env
+    description: Environment policy for child processes started by the agent
+    criticality: critical
+    scenario_count: 3
+    invariants:
+      - Children never inherit the agent's environment
+      - Third-party code gets baseline plus declared names only
+      - Toolchains get the environment minus credentials
+
   - name: arp
     file: arp.spec.yaml
     module: arkavo_arp
@@ -1012,9 +1023,9 @@ components:
       - Untrusted input is bounded before it is parsed, hashed, or buffered
 
 stats:
-  total_specs: 86
-  total_scenarios: 833
-  critical_scenarios: 258
+  total_specs: 87
+  total_scenarios: 836
+  critical_scenarios: 260
   coverage_areas:
     - authentication
     - authorization

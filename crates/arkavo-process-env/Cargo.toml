@@ -1,0 +1,18 @@
+[package]
+name = "arkavo-process-env"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Environment policy for child processes started by an Arkavo agent"
+repository.workspace = true
+keywords = ["process", "environment", "secrets", "agent"]
+categories = ["os"]
+
+[dependencies]
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+
+[lints]
+workspace = true

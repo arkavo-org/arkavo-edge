@@ -265,6 +265,7 @@ jobs:
             cargo test --locked -p arkavo-titan
             cargo test --locked -p arkavo-events
             cargo test --locked -p arkavo-validation
+            cargo test --locked -p arkavo-process-env
           elif [ "${{ matrix.group }}" = "benches" ]; then
             # Compile-check benchmarks to prevent bitrot (no execution). The bench
             # profile is release-like, so this builds a second copy of the whole
@@ -372,6 +373,7 @@ jobs:
             cargo clippy --locked -p arkavo-titan --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-events --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-validation --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-process-env --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-mcp-code-search --lib --bins -- -D warnings

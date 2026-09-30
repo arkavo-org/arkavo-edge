@@ -90,6 +90,7 @@ members = [
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
     "crates/arkavo-mcp-proxy",
+    "crates/arkavo-process-env",
     "crates/arkavo-shadow-consolidation",
     "crates/arkavo-lesson-synthesis",
     "crates/arkavo-routines",
@@ -163,6 +164,7 @@ default-members = [
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
     "crates/arkavo-mcp-proxy",
+    "crates/arkavo-process-env",
     "crates/arkavo-shadow-consolidation",
     ".cargo/xtask",
 ]

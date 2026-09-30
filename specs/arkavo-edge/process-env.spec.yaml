@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Child process environment policy
+module: arkavo_process_env
+version: 0.98.5
+
+invariants:
+  - A child started through ChildEnv::command never inherits its parent's environment; it sees exactly the resolved variables
+  - Code the operator did not write gets the platform baseline plus declared names only
+  - The operator's toolchains keep the parent's environment minus credential-shaped names
+  - Debug output of EnvSpec and ChildEnv names variables and never shows a value
+
+scenarios:
+  - id: PENV-001
+    name: Isolated profile keeps the baseline and declared names only
+    criticality: critical
+    given:
+      - A parent environment holding provider keys and unrelated variables
+      - An EnvSpec with literal values and passthrough names
+    when: ChildEnv::isolated resolves it and a child is spawned with ChildEnv::command
+    then:
+      - The child sees the platform baseline, the passthrough names with the parent's values, and the literal values
+      - A literal value replaces an inherited one of the same name
+      - No other parent variable reaches the child, including ones in the real process environment
+      - EnvSpec and ChildEnv Debug output contain names only
+    refs:
+      - crates/arkavo-process-env/src/lib.rs
+      - crates/arkavo-process-env/src/baseline.rs
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: Windows parent spells PATH as Path
+        expected: Matched case-insensitively and kept once
+      - condition: A passthrough name absent from the parent
+        expected: Child starts without it
+
+  - id: PENV-002
+    name: Toolchain profile withholds credentials and keeps build settings
+    criticality: critical
+    given:
+      - A parent environment holding provider keys and build settings (RUSTC_WRAPPER, RUSTFLAGS)
+    when: ChildEnv::toolchain resolves it
+    then:
+      - Every credential-shaped name is withheld unless listed in readmit
+      - Every other variable is kept
+      - A name that is not valid Unicode is withheld
+    refs:
+      - crates/arkavo-process-env/src/lib.rs
+    changed: "2026-09-29"
+
+  - id: PENV-003
+    name: Every credential the agent reads is credential-shaped
+    criticality: high
+    given:
+      - The environment variable names the agent reads credentials from
+    when: is_secret_name classifies them
+    then:
+      - Each is classified as a credential
+      - Toolchain settings (PATH, RUSTC_WRAPPER, CARGO_HOME, SSH_AUTH_SOCK, ARKAVO_MAX_TOKENS) are not
+    refs:
+      - crates/arkavo-process-env/src/secret.rs
+    changed: "2026-09-29"
