@@ -36,6 +36,11 @@ const EXACT: &[&str] = &[
 /// ignores `ld_preload` today may not tomorrow.
 pub fn is_loader_or_hijack_name(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
+    // `NODE_ENV` selects a mode ("production") and loads no code, and
+    // build tooling sets it as a matter of course.
+    if upper == "NODE_ENV" {
+        return false;
+    }
     PREFIXES.iter().any(|prefix| upper.starts_with(prefix)) || EXACT.contains(&upper.as_str())
 }
 
@@ -102,6 +107,8 @@ mod tests {
             "LDAP_URL",
             "NODEJS_VERSION",
             "HOMEPAGE",
+            "NODE_ENV",
+            "node_env",
         ] {
             assert!(!is_loader_or_hijack_name(name), "{name}");
         }

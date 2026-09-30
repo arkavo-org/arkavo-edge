@@ -19,19 +19,24 @@
 //!   toolchain profile every built-in tool's program gets.
 //!
 //! Both take the parent environment as an argument so a caller other than
-//! the agent process (a credential broker) can resolve from its own. The
-//! `*_from_current` constructors resolve from this process's environment and
-//! so also withhold the names this process registered with
-//! [`withhold_name`].
+//! the agent process (a credential broker) can resolve from its own.
+//! [`ChildEnv::tool_from_current`] and [`ChildEnv::isolated_from_current`]
+//! resolve from this process's environment; the tool profile also withholds
+//! the names this process registered with [`withhold_name`], honours the
+//! operator's [`TOOL_ENV_PASSTHROUGH`] grant and withholds the flag-file
+//! variables, which is why every built-in tool starts its program through it
+//! and not through a bare toolchain constructor.
 
 mod baseline;
 mod configured;
 mod hijack;
+mod screen;
 mod secret;
 mod tool;
 
 pub use configured::{withheld_names, withhold_name};
 pub use hijack::is_loader_or_hijack_name;
+pub use screen::{EnvRefusal, screen_entry};
 pub use secret::is_secret_name;
 pub use tool::TOOL_ENV_PASSTHROUGH;
 
@@ -141,38 +146,6 @@ impl ChildEnv {
         env
     }
 
-    /// [`ChildEnv::toolchain`] resolved from this process's environment,
-    /// also withholding every name registered with [`withhold_name`].
-    pub fn toolchain_from_current(readmit: &[&str]) -> Self {
-        Self::toolchain_withholding_from_current(readmit, &[])
-    }
-
-    /// [`ChildEnv::toolchain_withholding`] resolved from this process's
-    /// environment, also withholding every name registered with
-    /// [`withhold_name`].
-    pub fn toolchain_withholding_from_current(readmit: &[&str], withhold: &[&str]) -> Self {
-        Self::toolchain_withholding_registered(std::env::vars_os(), readmit, withhold)
-    }
-
-    /// The registry describes this process's environment, so only the
-    /// constructors resolving from it consult the registry; the ones taking a
-    /// `parent` stay pure for a caller resolving another environment.
-    fn toolchain_withholding_registered<I, K, V>(
-        parent: I,
-        readmit: &[&str],
-        withhold: &[&str],
-    ) -> Self
-    where
-        I: IntoIterator<Item = (K, V)>,
-        K: Into<OsString>,
-        V: Into<OsString>,
-    {
-        let registered = withheld_names();
-        let mut names = withhold.to_vec();
-        names.extend(registered.iter().map(String::as_str));
-        Self::toolchain_withholding(parent, readmit, &names)
-    }
-
     /// A command for `program` whose environment is exactly this one.
     ///
     /// A tokio caller converts it with `tokio::process::Command::from`.
@@ -208,9 +181,10 @@ pub fn is_valid_name(name: &str) -> bool {
     !name.is_empty() && !name.contains(['=', '\0'])
 }
 
-/// Environment names compare case-insensitively on Windows, where the
-/// parent may spell `PATH` as `Path`.
-fn same_name(a: &OsStr, b: &OsStr) -> bool {
+/// Whether two environment names are the same variable. They compare
+/// case-insensitively on Windows, where the parent may spell `PATH` as
+/// `Path`.
+pub fn same_name(a: &OsStr, b: &OsStr) -> bool {
     if cfg!(windows) {
         match (a.to_str(), b.to_str()) {
             (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
@@ -382,32 +356,6 @@ mod tests {
 
     #[spec("PENV-002")]
     #[test]
-    fn registered_names_are_withheld_from_a_toolchain_child() {
-        // The registry is process-global and tests run in parallel: this
-        // name is used by no other test.
-        const REGISTERED: &str = "PENV_TEST_REGISTERED_LOGIN";
-        assert!(!is_secret_name(REGISTERED));
-        withhold_name(REGISTERED);
-        assert!(withheld_names().iter().any(|name| name == REGISTERED));
-
-        let mut vars = parent();
-        vars.push((OsString::from(REGISTERED), OsString::from(PLANTED)));
-        let env = ChildEnv::toolchain_withholding_registered(vars.clone(), &[], &[]);
-        assert_eq!(value(&env, REGISTERED), None);
-        assert_eq!(value(&env, "RUSTC_WRAPPER"), Some("sccache"));
-        let seen = child_sees(&env);
-        assert!(
-            !seen.iter().any(|l| l.contains(PLANTED)),
-            "a registered credential reached the child: {seen:?}"
-        );
-
-        // The pure constructor resolves only what its caller passes.
-        let env = ChildEnv::toolchain(vars, &[]);
-        assert_eq!(value(&env, REGISTERED), Some(PLANTED));
-    }
-
-    #[spec("PENV-002")]
-    #[test]
     fn readmit_wins_over_a_withheld_name() {
         let env = ChildEnv::toolchain_withholding(parent(), &["GITHUB_TOKEN"], &["GITHUB_TOKEN"]);
         assert_eq!(value(&env, "GITHUB_TOKEN"), Some(PLANTED));
@@ -450,6 +398,59 @@ mod tests {
         let env = ChildEnv::isolated(parent, &spec);
         assert_eq!(value(&env, "Path"), Some("D:\\tools"));
         assert_eq!(env.vars.len(), 1);
+    }
+
+    #[test]
+    fn screen_entry_refuses_by_kind_and_names_the_variable() {
+        assert_eq!(screen_entry("", false), Err(EnvRefusal::InvalidName));
+        assert_eq!(screen_entry("A=B", true), Err(EnvRefusal::InvalidName));
+        assert_eq!(
+            screen_entry("LD_PRELOAD", true),
+            Err(EnvRefusal::LoaderName("LD_PRELOAD".into()))
+        );
+        assert_eq!(
+            screen_entry("node_options", false),
+            Err(EnvRefusal::LoaderName("node_options".into()))
+        );
+        assert_eq!(
+            screen_entry("OPENAI_API_KEY", true),
+            Err(EnvRefusal::CredentialLiteral("OPENAI_API_KEY".into()))
+        );
+    }
+
+    #[test]
+    fn screen_entry_allows_a_credential_only_as_a_passthrough() {
+        assert_eq!(screen_entry("OPENAI_API_KEY", false), Ok(()));
+        assert_eq!(screen_entry("LOG_LEVEL", true), Ok(()));
+        assert_eq!(screen_entry("NODE_ENV", true), Ok(()));
+    }
+
+    #[test]
+    fn a_refusal_carries_the_name_and_never_the_value() {
+        let spec = spec_with(&[("API_TOKEN", PLANTED)], &[]);
+        let refusal = spec.screen().unwrap_err();
+        assert_eq!(refusal, EnvRefusal::CredentialLiteral("API_TOKEN".into()));
+        assert!(!format!("{refusal:?}").contains(PLANTED));
+    }
+
+    #[test]
+    fn spec_screen_checks_literals_and_passthrough_names_alike() {
+        assert_eq!(
+            spec_with(&[("LOG_LEVEL", "debug")], &["GITHUB_TOKEN"]).screen(),
+            Ok(())
+        );
+        assert_eq!(
+            spec_with(&[], &["A=B"]).screen(),
+            Err(EnvRefusal::InvalidName)
+        );
+        assert_eq!(
+            spec_with(&[], &["NODE_OPTIONS"]).screen(),
+            Err(EnvRefusal::LoaderName("NODE_OPTIONS".into()))
+        );
+        assert_eq!(
+            spec_with(&[("GITHUB_TOKEN", "x")], &[]).screen(),
+            Err(EnvRefusal::CredentialLiteral("GITHUB_TOKEN".into()))
+        );
     }
 
     #[test]

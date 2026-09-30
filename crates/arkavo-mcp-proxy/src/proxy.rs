@@ -28,7 +28,10 @@ pub struct ProxyConfig {
     /// Arguments for the upstream command.
     pub args: Vec<String>,
     /// What the upstream may see of the proxy's environment beyond the
-    /// platform baseline. Nothing else is inherited.
+    /// platform baseline. Nothing else is inherited. [`McpProxy::spawn`]
+    /// refuses a malformed name, a loader or hijack name such as
+    /// `LD_PRELOAD`, and a credential-shaped name given as a literal in
+    /// `set` (a credential may only be listed in `passthrough`).
     pub env: EnvSpec,
     /// Per-request timeout for upstream calls; `None` uses the default.
     pub request_timeout: Option<Duration>,
@@ -45,7 +48,9 @@ impl ProxyConfig {
         }
     }
 
-    /// Set an environment variable on the upstream process.
+    /// Set an environment variable on the upstream process. A malformed,
+    /// loader or credential-literal name is refused by [`McpProxy::spawn`],
+    /// not here.
     pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.env.set.insert(key.into(), value.into());
         self

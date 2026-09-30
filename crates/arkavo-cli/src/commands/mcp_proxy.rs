@@ -15,7 +15,7 @@
 use arkavo_dispatch_gate::{DispatchGate, GateConfig, unix_now};
 use arkavo_mcp_proxy::{McpProxy, PermitPolicy, ProxyConfig};
 use arkavo_permit::{HashAlgorithm, PermitVerifier};
-use arkavo_process_env::EnvSpec;
+use arkavo_process_env::{EnvRefusal, EnvSpec, screen_entry};
 use std::sync::Arc;
 
 const USAGE: &str = "usage: arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--issuer-key <hex> ...] [--hash sha256|blake3] [--env NAME | --env NAME=VALUE ...] -- <upstream command> [args...]";
@@ -167,11 +167,14 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
                 return Err("--env takes NAME[=VALUE] as the next argument".into());
             }
             // Anything after an `=` may be a credential typed into the wrong
-            // flag, so only the flag's own name is reported.
-            other => {
+            // flag, so only the flag's own name is reported. An argument
+            // that is not a flag may be a credential pasted bare, so it is
+            // not reported at all.
+            other if other.starts_with('-') => {
                 let flag = other.split('=').next().unwrap_or_default();
                 return Err(format!("unknown flag {flag}"));
             }
+            _ => return Err("unexpected argument".into()),
         }
     }
     Err("missing `-- <upstream command>`".into())
@@ -189,19 +192,15 @@ fn add_env(env: &mut EnvSpec, flag: &str) -> Result<(), String> {
         Some((name, value)) => (name, Some(value)),
         None => (flag, None),
     };
-    if !arkavo_process_env::is_valid_name(name) {
-        return Err("--env needs a variable name before any '='".into());
-    }
-    if arkavo_process_env::is_loader_or_hijack_name(name) {
-        return Err(format!(
-            "--env {name} would let the upstream load or run other code and is refused"
-        ));
-    }
-    if value.is_some() && arkavo_process_env::is_secret_name(name) {
-        return Err(format!(
+    screen_entry(name, value.is_some()).map_err(|refusal| match refusal {
+        EnvRefusal::InvalidName => "--env needs a variable name before any '='".to_string(),
+        EnvRefusal::LoaderName(name) => {
+            format!("--env {name} would let the upstream load or run other code and is refused")
+        }
+        EnvRefusal::CredentialLiteral(name) => format!(
             "--env {name}=... would put a credential on the command line; use --env {name} to pass the proxy's own value through"
-        ));
-    }
+        ),
+    })?;
     match value {
         Some(value) => {
             env.set.insert(name.to_string(), value.to_string());
@@ -405,6 +404,15 @@ mod tests {
             .expect("refused");
         assert!(err.contains("--token"), "{err}");
         assert!(!err.contains("sk-live-value"), "{err}");
+    }
+
+    #[test]
+    fn a_bare_positional_is_not_echoed() {
+        let err = parse(&s(&["proxy", "sk-live-value"]))
+            .err()
+            .expect("refused");
+        assert!(!err.contains("sk-live-value"), "{err}");
+        assert!(err.contains("unexpected argument"), "{err}");
     }
 
     #[test]

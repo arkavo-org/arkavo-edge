@@ -190,6 +190,7 @@ scenarios:
       - A passthrough name the proxy does not hold is logged by name, never by value
       - A name given both as passthrough and as a literal takes the literal
     refs:
+      - crates/arkavo-mcp-proxy/src/env.rs
       - crates/arkavo-mcp-proxy/src/upstream.rs
       - crates/arkavo-mcp-proxy/src/proxy.rs
       - crates/arkavo-cli/src/commands/mcp_proxy.rs

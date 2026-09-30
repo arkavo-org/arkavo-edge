@@ -5,41 +5,30 @@
 //! can be refused before it is published or started.
 
 use crate::runtime_config::{RuntimeMcpServer, RuntimeValidationError};
+use arkavo_process_env::{EnvRefusal, screen_entry};
 
 pub(crate) fn validate_mcp_server_env(
     server: &RuntimeMcpServer,
 ) -> Result<(), RuntimeValidationError> {
-    if let Some(name) = server
-        .env
-        .keys()
-        .chain(&server.env_passthrough)
-        .find(|name| !arkavo_process_env::is_valid_name(name))
-    {
-        return Err(RuntimeValidationError::McpServerInvalidEnvName {
-            server: server.name.clone(),
-            name: name.clone(),
-        });
-    }
-    if let Some(name) = server
-        .env
-        .keys()
-        .chain(&server.env_passthrough)
-        .find(|name| arkavo_process_env::is_loader_or_hijack_name(name))
-    {
-        return Err(RuntimeValidationError::McpServerLoaderEnvName {
-            server: server.name.clone(),
-            name: name.clone(),
-        });
-    }
-    if let Some(name) = server
-        .env
-        .keys()
-        .find(|name| arkavo_process_env::is_secret_name(name))
-    {
-        return Err(RuntimeValidationError::McpServerCredentialInEnv {
-            server: server.name.clone(),
-            name: name.clone(),
-        });
+    let literals = server.env.keys().map(|name| (name, true));
+    let passed_through = server.env_passthrough.iter().map(|name| (name, false));
+    for (name, literal) in literals.chain(passed_through) {
+        let server = server.name.clone();
+        match screen_entry(name, literal) {
+            Ok(()) => {}
+            Err(EnvRefusal::InvalidName) => {
+                return Err(RuntimeValidationError::McpServerInvalidEnvName {
+                    server,
+                    name: name.clone(),
+                });
+            }
+            Err(EnvRefusal::LoaderName(name)) => {
+                return Err(RuntimeValidationError::McpServerLoaderEnvName { server, name });
+            }
+            Err(EnvRefusal::CredentialLiteral(name)) => {
+                return Err(RuntimeValidationError::McpServerCredentialInEnv { server, name });
+            }
+        }
     }
     Ok(())
 }

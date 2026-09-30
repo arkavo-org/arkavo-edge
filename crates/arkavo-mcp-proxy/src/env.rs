@@ -12,8 +12,8 @@
 #![allow(clippy::redundant_pub_crate)]
 
 use crate::upstream::UpstreamError;
-use arkavo_process_env::{ChildEnv, EnvSpec};
-use std::ffi::OsString;
+use arkavo_process_env::{ChildEnv, EnvRefusal, EnvSpec, same_name};
+use std::ffi::{OsStr, OsString};
 use tracing::warn;
 
 /// The environment for `spec`, resolved from this process's environment.
@@ -32,8 +32,14 @@ pub(crate) fn resolve_from(
 ) -> Result<ChildEnv, UpstreamError> {
     screen(spec)?;
     for name in &spec.passthrough {
-        let present = parent.iter().any(|(held, _)| held == name.as_str());
-        if !present && !spec.set.contains_key(name) {
+        let present = parent
+            .iter()
+            .any(|(held, _)| same_name(held, OsStr::new(name)));
+        let literal = spec
+            .set
+            .keys()
+            .any(|set| same_name(OsStr::new(set), OsStr::new(name)));
+        if !present && !literal {
             // Values are never logged; the name is what an operator needs to
             // find a credential that did not arrive.
             warn!(
@@ -46,32 +52,17 @@ pub(crate) fn resolve_from(
 }
 
 fn screen(spec: &EnvSpec) -> Result<(), UpstreamError> {
-    let refuse = |name: &str, why: &str| {
-        Err(UpstreamError::Environment(format!(
-            "variable '{name}' {why}"
-        )))
-    };
-    for name in spec.set.keys().chain(&spec.passthrough) {
-        if !arkavo_process_env::is_valid_name(name) {
-            return Err(UpstreamError::Environment(
-                "a variable name is empty or contains '=' or NUL".into(),
-            ));
-        }
-        if arkavo_process_env::is_loader_or_hijack_name(name) {
-            return refuse(name, "would let the upstream load or run other code");
-        }
-    }
-    if let Some(name) = spec
-        .set
-        .keys()
-        .find(|name| arkavo_process_env::is_secret_name(name))
-    {
-        return refuse(
-            name,
-            "holds a credential and is set as a literal; pass it through from the proxy's own environment instead",
-        );
-    }
-    Ok(())
+    spec.screen().map_err(|refusal| {
+        UpstreamError::Environment(match refusal {
+            EnvRefusal::InvalidName => "a variable name is empty or contains '=' or NUL".into(),
+            EnvRefusal::LoaderName(name) => {
+                format!("variable '{name}' would let the upstream load or run other code")
+            }
+            EnvRefusal::CredentialLiteral(name) => format!(
+                "variable '{name}' holds a credential and is set as a literal; pass it through from the proxy's own environment instead"
+            ),
+        })
+    })
 }
 
 #[cfg(test)]
@@ -143,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn passthrough_copies_a_held_name_and_set_wins_a_conflict() {
+    fn passthrough_keeps_only_the_names_the_proxy_holds() {
         let parent = vec![
             (OsString::from("HELD"), OsString::from("from-parent")),
             (OsString::from("BOTH"), OsString::from("from-parent")),
