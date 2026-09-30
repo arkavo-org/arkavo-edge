@@ -23,7 +23,7 @@ pub struct ServerInfo {
 impl McpClient {
     /// Create a new MCP client from configuration
     pub async fn connect(config: McpServerConfig) -> Result<Self, TransportError> {
-        let transport = create_transport(config.transport, config.env).await?;
+        let transport = create_transport(config.transport, &config.env).await?;
 
         let mut client = Self {
             name: config.name,

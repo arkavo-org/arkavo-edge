@@ -245,6 +245,7 @@ jobs:
             cargo test --locked -p arkavo-llm --lib --no-default-features --features llm-remote
             cargo test --locked -p arkavo-llm --no-default-features --features llm-remote --test openai_responses
             cargo test --locked -p arkavo-memory --lib
+            cargo test --locked -p arkavo-mcp-runtime --lib
             cargo test --locked -p arkavo-memory --test mcp_integration_test
             cargo test --locked -p arkavo-memory --test sequence_integrity_test
             cargo test --locked -p arkavo-budget

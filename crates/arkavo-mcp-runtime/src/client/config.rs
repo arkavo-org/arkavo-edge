@@ -1,4 +1,5 @@
 use crate::transport::TransportConfig;
+use arkavo_process_env::EnvSpec;
 use std::collections::HashMap;
 
 /// Configuration for an MCP server connection
@@ -8,8 +9,9 @@ pub struct McpServerConfig {
     pub name: String,
     /// Transport configuration
     pub transport: TransportConfig,
-    /// Environment variables to pass to the server (for Stdio transport)
-    pub env: HashMap<String, String>,
+    /// What a Stdio server may see of this process's environment beyond the
+    /// platform baseline. Nothing else is inherited.
+    pub env: EnvSpec,
     /// Timeout for requests in milliseconds
     pub timeout_ms: u64,
 }
@@ -24,7 +26,7 @@ impl McpServerConfig {
                 args,
                 cwd: None,
             },
-            env: HashMap::new(),
+            env: EnvSpec::default(),
             timeout_ms: 30000,
         }
     }
@@ -37,7 +39,7 @@ impl McpServerConfig {
                 url: url.into(),
                 headers: HashMap::new(),
             },
-            env: HashMap::new(),
+            env: EnvSpec::default(),
             timeout_ms: 30000,
         }
     }
@@ -50,7 +52,7 @@ impl McpServerConfig {
                 url: url.into(),
                 headers: HashMap::new(),
             },
-            env: HashMap::new(),
+            env: EnvSpec::default(),
             timeout_ms: 30000,
         }
     }
@@ -63,9 +65,9 @@ impl McpServerConfig {
         self
     }
 
-    /// Add an environment variable
+    /// Set an environment variable on the server process
     pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.env.insert(key.into(), value.into());
+        self.env.set.insert(key.into(), value.into());
         self
     }
 

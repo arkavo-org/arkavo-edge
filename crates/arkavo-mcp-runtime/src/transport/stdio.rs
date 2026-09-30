@@ -1,4 +1,5 @@
 use super::{Transport, TransportError};
+use arkavo_process_env::ChildEnv;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -21,15 +22,15 @@ pub struct StdioTransport {
 }
 
 impl StdioTransport {
-    /// Create a new stdio transport by spawning a subprocess
+    /// Create a new stdio transport by spawning a subprocess whose environment is exactly `env`
     #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
     pub async fn new(
         command: String,
         args: Vec<String>,
         cwd: Option<String>,
-        env: HashMap<String, String>,
+        env: &ChildEnv,
     ) -> Result<Self, TransportError> {
-        let mut cmd = Command::new(&command);
+        let mut cmd = Command::from(env.command(&command));
         cmd.args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -37,10 +38,6 @@ impl StdioTransport {
 
         if let Some(dir) = cwd {
             cmd.current_dir(dir);
-        }
-
-        for (key, value) in env {
-            cmd.env(key, value);
         }
 
         let mut child = cmd.spawn().map_err(|e| {
@@ -211,7 +208,9 @@ mod tests {
     #![allow(clippy::disallowed_methods)]
 
     use super::*;
+    use arkavo_process_env::EnvSpec;
     use arkavo_test_macros::spec;
+    use std::ffi::OsString;
     use std::time::Duration;
 
     #[spec("MCPR-003")]
@@ -222,7 +221,7 @@ mod tests {
             "sleep".to_string(),
             vec!["100".to_string()],
             None,
-            HashMap::new(),
+            &ChildEnv::isolated_from_current(&EnvSpec::default()),
         )
         .await
         .expect("failed to spawn sleep stub");
@@ -237,5 +236,54 @@ mod tests {
         );
 
         transport.close().await.unwrap();
+    }
+
+    /// The server writes its environment to a file named by a configured
+    /// variable: its stdout belongs to the transport's JSON-RPC reader.
+    #[spec("MCPR-008")]
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn stdio_server_sees_only_baseline_and_declared_environment() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dump = dir.path().join("env");
+        let spec = EnvSpec {
+            set: [("ENV_PROBE_OUT".to_string(), dump.display().to_string())].into(),
+            passthrough: vec!["GITHUB_TOKEN".to_string()],
+        };
+        let parent = [
+            ("PATH", std::env::var_os("PATH").unwrap_or_default()),
+            ("OPENAI_API_KEY", OsString::from("planted-secret")),
+            ("GITHUB_TOKEN", OsString::from("declared-token")),
+        ];
+        let transport = StdioTransport::new(
+            "sh".to_string(),
+            vec!["-c".to_string(), r#"env > "$ENV_PROBE_OUT""#.to_string()],
+            None,
+            &ChildEnv::isolated(parent, &spec),
+        )
+        .await
+        .expect("spawn environment dump");
+        transport
+            .child
+            .lock()
+            .await
+            .wait()
+            .await
+            .expect("environment dump exits");
+
+        let seen = std::fs::read_to_string(&dump).expect("environment dump");
+        assert!(
+            seen.lines().any(|l| l.starts_with("ENV_PROBE_OUT=")),
+            "{seen}"
+        );
+        assert!(
+            seen.lines().any(|l| l == "GITHUB_TOKEN=declared-token"),
+            "{seen}"
+        );
+        assert!(!seen.contains("planted-secret"), "{seen}");
+        assert!(
+            !seen.lines().any(|l| l.starts_with("CARGO_MANIFEST_DIR=")),
+            "this process's own environment leaked into the MCP server"
+        );
     }
 }
