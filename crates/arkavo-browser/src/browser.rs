@@ -78,7 +78,9 @@ impl BrowserTool {
                 .get("url")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| BrowserError::InvalidParams("Missing url".to_string()))?;
-            vet_navigation(url).await?;
+            let policy =
+                EgressPolicy::process().map_err(|e| BrowserError::Navigation(e.to_string()))?;
+            vet_navigation(url, &policy).await?;
         }
 
         let headless = params
@@ -227,13 +229,17 @@ impl BrowserTool {
     }
 }
 
-/// Refuse a navigation the egress policy would refuse (NET-007, BROWS-009).
+/// Refuse the `navigate` action's initial URL if the egress policy would refuse
+/// it (NET-007, BROWS-009).
 ///
-/// Chrome dials with its own resolver and follows redirects and subresources
-/// on its own, and this check sees none of that. What it stops is the direct
-/// case: a model told to open an internal or metadata address. The rest needs
-/// Chrome's traffic routed through the egress broker.
-async fn vet_navigation(url: &str) -> Result<()> {
+/// This covers that one URL and nothing after it. Not covered: the `evaluate`
+/// action, whose model-supplied script can navigate or fetch anywhere Chrome
+/// can; redirects and subresources the page loads; and Chrome's own DNS
+/// lookup when it connects, which can differ from the one judged here
+/// (rebinding). Those need Chrome's traffic routed through the credential and
+/// egress broker (NET-019). What this stops is the direct case: a model told
+/// to open an internal or metadata address.
+async fn vet_navigation(url: &str, policy: &EgressPolicy) -> Result<()> {
     let parsed = Url::parse(url)
         .map_err(|e| BrowserError::InvalidParams(format!("Invalid url {url:?}: {e}")))?;
     // Other schemes give Chrome ways to reach the network, or the disk, that
@@ -244,7 +250,6 @@ async fn vet_navigation(url: &str) -> Result<()> {
             parsed.scheme()
         )));
     }
-    let policy = EgressPolicy::process().map_err(|e| BrowserError::Navigation(e.to_string()))?;
     policy
         .vet_destination(&parsed)
         .await
@@ -285,20 +290,19 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    // These tests pass a strict policy, so an operator's ARKAVO_EGRESS_ALLOW
+    // cannot change what they prove.
     #[spec("BROWS-009")]
     #[tokio::test]
-    async fn test_navigate_refuses_internal_addresses_before_launching_chrome() {
-        let tool = BrowserTool::new();
+    async fn test_navigate_refuses_internal_addresses() {
+        let policy = EgressPolicy::strict();
         for url in [
             "http://169.254.169.254/latest/meta-data/",
             "http://127.0.0.1:9/",
             "http://localhost:9/",
             "http://[::ffff:10.0.0.1]/",
         ] {
-            let err = tool
-                .execute_browser(&json!({"action": "navigate", "url": url}))
-                .await
-                .unwrap_err();
+            let err = vet_navigation(url, &policy).await.unwrap_err();
             assert!(
                 err.to_string().contains("SSRF attempt blocked"),
                 "{url}: {err}"
@@ -309,16 +313,18 @@ mod tests {
     #[spec("BROWS-009")]
     #[tokio::test]
     async fn test_navigate_refuses_non_http_schemes() {
-        let tool = BrowserTool::new();
+        let policy = EgressPolicy::strict();
         for url in [
             "file:///etc/passwd",
+            "FILE:///etc/passwd",
             "chrome://settings",
             "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "about:blank",
+            "blob:http://93.184.215.14/5e1b0f6c",
+            "view-source:http://93.184.215.14/",
         ] {
-            let err = tool
-                .execute_browser(&json!({"action": "navigate", "url": url}))
-                .await
-                .unwrap_err();
+            let err = vet_navigation(url, &policy).await.unwrap_err();
             assert!(
                 matches!(err, BrowserError::InvalidParams(_)),
                 "{url}: {err}"
@@ -326,10 +332,39 @@ mod tests {
         }
     }
 
+    /// The refusal happens before Chrome is launched: a launch would either
+    /// succeed or fail with a different error. Depends only on the process
+    /// policy parsing, not on what ARKAVO_EGRESS_ALLOW admits.
+    #[spec("BROWS-009")]
+    #[tokio::test]
+    async fn test_refused_navigation_never_launches_chrome() {
+        let err = BrowserTool::new()
+            .execute_browser(&json!({"action": "navigate", "url": "file:///etc/passwd"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, BrowserError::InvalidParams(_)), "{err}");
+    }
+
     #[spec("BROWS-009")]
     #[tokio::test]
     async fn test_vet_navigation_lets_a_public_literal_through() {
         // An IP literal is decided without a lookup, so this needs no network.
-        vet_navigation("http://93.184.215.14/").await.unwrap();
+        vet_navigation("http://93.184.215.14/", &EgressPolicy::strict())
+            .await
+            .unwrap();
+    }
+
+    #[spec("BROWS-009")]
+    #[tokio::test]
+    async fn test_vet_navigation_honours_an_explicit_allowlist() {
+        let policy = EgressPolicy::with_allowlist("http://127.0.0.1:3000").unwrap();
+        vet_navigation("http://127.0.0.1:3000/", &policy)
+            .await
+            .unwrap();
+        assert!(
+            vet_navigation("http://127.0.0.1:3001/", &policy)
+                .await
+                .is_err()
+        );
     }
 }

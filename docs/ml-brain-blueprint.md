@@ -133,7 +133,7 @@ The amygdala processes threats fast, operating concurrently with slower reasonin
 |------|----------|
 | `sec_semgrep` | SAST scanning via Semgrep |
 | `sbom_syft` | SBOM generation and dependency vulnerability checks via Syft |
-| Egress filter | IP-level SSRF prevention for metadata endpoints and private ranges, checked after DNS resolution and on every redirect, for built-in tool HTTP requests and browser navigation in every build; processes the agent starts are not yet covered |
+| Egress filter | IP-level SSRF prevention for metadata endpoints and private ranges, checked after DNS resolution and on every redirect, for built-in tool HTTP requests and the browser navigate action's initial URL in every build; script run through browser `evaluate`, Chrome's own redirects and subresources, and processes the agent starts are not covered |
 | Input validation | Unicode normalization, path traversal prevention, injection blocking |
 | Preflight moderation | TØR-G circuit evaluation blocks policy-violating requests before LLM inference |
 | Budget governor | Per-agent token and cost budgets with alerts at configurable thresholds |

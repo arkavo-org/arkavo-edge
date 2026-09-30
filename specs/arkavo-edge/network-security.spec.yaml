@@ -11,7 +11,7 @@ invariants:
   - First-run setup requires credential configuration
   - Public exposure requires explicit opt-in with warnings
   - Host header must match expected values (anti-rebinding)
-  - HTTP requests made by built-in tools, and browser_cdp navigations, to private, loopback or metadata addresses are blocked by default; processes the agent starts are not yet covered (NET-019)
+  - HTTP requests made by built-in tools, and the initial URL of a browser_cdp navigate action, to private, loopback or metadata addresses are blocked by default; script the model runs through browser_cdp evaluate, Chrome's own redirects and subresources, and processes the agent starts are not covered (NET-019)
   - Setup tokens never appear in logs or stdout
 
 scenarios:
@@ -110,17 +110,17 @@ scenarios:
     name: Block cloud metadata and internal network access
     criticality: critical
     given:
-      - A built-in tool requests a URL through EgressClient, or browser_cdp navigates to one
+      - A built-in tool requests a URL through EgressClient, or the browser_cdp navigate action is given one (only its initial URL is checked)
       - URL names, or resolves to, a private, local or cloud metadata address
     when: Outbound connection is initiated
     then:
-      - Connection is BLOCKED by default, before a socket to the address is opened
-      - Blocked ranges include 169.254.169.254, 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4, ::/96, fc00::/7, fe80::/10, ff00::/8, and the IPv4-mapped and NAT64 forms of every IPv4 range
-      - Every HTTP request a tool makes goes through EgressClient; tool crates cannot build a raw reqwest client (crate clippy.toml)
+      - An EgressClient request to such an address is BLOCKED by default, before a socket to it is opened
+      - Blocked ranges include 169.254.169.254, 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4, ::/96, fc00::/7, fe80::/10, ff00::/8, Teredo 2001::/32 and local-use NAT64 64:ff9b:1::/48, and the IPv4-mapped, NAT64 and 6to4 forms of every IPv4 range
+      - Every reqwest request made by arkavo-mcp-tools goes through EgressClient, and that crate cannot build a raw reqwest client (its clippy.toml); arkavo-browser makes no reqwest requests
       - Only an operator ARKAVO_EGRESS_ALLOW origin overrides a block (NET-018)
       - The refusal reads "SSRF attempt blocked"
     refs: [crates/arkavo-validation/src/url.rs:54-147, crates/arkavo-validation/src/egress_policy.rs:73-90, crates/arkavo-validation/src/egress_client.rs:67-92, crates/arkavo-mcp-tools/clippy.toml, crates/arkavo-browser/src/browser.rs]
-    changed: "2026-09-29"
+    changed: "2026-09-30"
     edge_cases:
       - condition: Decimal or hex IPv4 host (http://2130706433/, http://0x7f.1/)
         expected: Normalised to 127.0.0.1 and blocked
@@ -128,6 +128,8 @@ scenarios:
         expected: Refused
       - condition: Out-of-process egress (Chrome redirects, shell subprocesses, MCP servers)
         expected: Not covered by EgressClient; NET-019 (wip)
+      - condition: Script the model runs through the browser_cdp evaluate action navigates or fetches
+        expected: Not covered; only the navigate action's initial URL is checked (BROWS-009), and the rest is NET-019 (wip)
 
   - id: NET-008
     name: Ephemeral setup token (secure first-run)
@@ -227,9 +229,9 @@ scenarios:
       - IP-literal hosts, which skip the resolver, are checked from the URL before the request exists
       - Every redirect hop is re-checked the same way
     refs: [crates/arkavo-validation/src/egress_client.rs:31-58, crates/arkavo-validation/src/egress_policy.rs:92-131]
-    changed: "2026-09-29"
+    changed: "2026-09-30"
     edge_cases:
-      - condition: browser_cdp navigation to a hostname
+      - condition: The browser_cdp navigate action's initial URL is a hostname
         expected: Resolved and judged before Chrome starts, but Chrome resolves again when it connects; that second lookup is NET-019 (wip)
 
   - id: NET-015

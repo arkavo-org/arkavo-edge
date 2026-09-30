@@ -373,7 +373,7 @@ fn check_tool_isolation() -> AuditResult {
     AuditResult {
         name: "Tool isolation".to_string(),
         status: AuditStatus::Warn,
-        message: "Credentials are withheld from MCP servers and tool subprocesses, and agent-path tool HTTP (web search, GitHub) and browser navigation now pass the egress filter, but no tool execution path is confined; shell_exec and other child processes still run on the host as the agent's OS user with its files and unrestricted network until OS confinement exists (command allow/block lists are string heuristics, not confinement)".to_string(),
+        message: "Credentials are withheld from MCP servers and tool subprocesses, and agent-path tool HTTP (web search, GitHub) and the browser navigate action's initial URL pass the egress filter, but no tool execution path is confined; shell_exec and other child processes still run on the host as the agent's OS user with its files and unrestricted network until OS confinement exists (command allow/block lists are string heuristics, not confinement)".to_string(),
         category: "Tool Execution".to_string(),
     }
 }
@@ -447,9 +447,9 @@ mod tests {
             isolation.message
         );
         assert!(
-            isolation.message.contains("browser navigation")
+            isolation.message.contains("navigate action's initial URL")
                 && isolation.message.contains("child processes"),
-            "message must scope the egress filter to tool HTTP and browser navigation: {}",
+            "message must scope the egress filter to tool HTTP and the navigate action: {}",
             isolation.message
         );
         assert!(
