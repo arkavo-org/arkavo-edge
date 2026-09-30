@@ -11,6 +11,7 @@ invariants:
   - First-run setup requires credential configuration
   - Public exposure requires explicit opt-in with warnings
   - Host header must match expected values (anti-rebinding)
+  - HTTP requests made by built-in tools, and browser_cdp navigations, to private, loopback or metadata addresses are blocked by default; processes the agent starts are not yet covered (NET-019)
   - Setup tokens never appear in logs or stdout
 
 scenarios:
@@ -108,10 +109,8 @@ scenarios:
   - id: NET-007
     name: Block cloud metadata and internal network access
     criticality: critical
-    wip: true
-    issue: "Not in the default build: EgressFilter (crates/arkavo-validation/src/url.rs, covered as a library by VAL-005) is consulted only by secure_http::SecureClient in arkavo-cli, which has no caller, and by EgressGuard, which ships behind the non-default taint feature. Carries the former invariant 'Egress to private/metadata IPs is blocked by default'. Putting the filter on every default request path belongs to the baseline outbound enforcement delivery in docs/swarm-trust-model.md."
     given:
-      - Agent attempts to fetch a URL via browsing or tool call
+      - A built-in tool requests a URL through EgressClient, or browser_cdp navigates to one
       - URL names, or resolves to, a private, local or cloud metadata address
     when: Outbound connection is initiated
     then:
@@ -120,7 +119,7 @@ scenarios:
       - Every HTTP request a tool makes goes through EgressClient; tool crates cannot build a raw reqwest client (crate clippy.toml)
       - Only an operator ARKAVO_EGRESS_ALLOW origin overrides a block (NET-018)
       - The refusal reads "SSRF attempt blocked"
-    refs: [crates/arkavo-validation/src/url.rs:54-147, crates/arkavo-validation/src/egress_policy.rs:73-90, crates/arkavo-validation/src/egress_client.rs:67-92, crates/arkavo-mcp-tools/clippy.toml]
+    refs: [crates/arkavo-validation/src/url.rs:54-147, crates/arkavo-validation/src/egress_policy.rs:73-90, crates/arkavo-validation/src/egress_client.rs:67-92, crates/arkavo-mcp-tools/clippy.toml, crates/arkavo-browser/src/browser.rs]
     changed: "2026-09-29"
     edge_cases:
       - condition: Decimal or hex IPv4 host (http://2130706433/, http://0x7f.1/)
@@ -218,10 +217,8 @@ scenarios:
   - id: NET-014
     name: DNS resolution validation before connection
     criticality: high
-    wip: true
-    issue: "Not implemented: EgressFilter::validate_resolved_ip has no caller outside tests, and no request path resolves a hostname and checks the address before connecting. Belongs with NET-007 to the baseline outbound enforcement delivery in docs/swarm-trust-model.md."
     given:
-      - Agent is about to connect to external URL
+      - A built-in tool is about to connect through EgressClient
       - URL contains hostname (not raw IP)
     when: DNS resolution occurs
     then:
@@ -231,6 +228,9 @@ scenarios:
       - Every redirect hop is re-checked the same way
     refs: [crates/arkavo-validation/src/egress_client.rs:31-58, crates/arkavo-validation/src/egress_policy.rs:92-131]
     changed: "2026-09-29"
+    edge_cases:
+      - condition: browser_cdp navigation to a hostname
+        expected: Resolved and judged before Chrome starts, but Chrome resolves again when it connects; that second lookup is NET-019 (wip)
 
   - id: NET-015
     name: Prompt injection attack prevention

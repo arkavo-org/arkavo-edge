@@ -265,7 +265,7 @@ mod tests {
     //! ## Spec Coverage
     //! - [specs/arkavo-edge/network-security.spec.yaml](NET-004): No localhost trust exemption (CRI-001)
     //! - [specs/arkavo-edge/network-security.spec.yaml](CRI-002): Token revocation and replay protection
-    //! - [specs/arkavo-edge/network-security.spec.yaml](NET-007): SSRF prevention via egress filter (CRI-003)
+    //! - [specs/arkavo-edge/validation.spec.yaml](VAL-005): library-level egress URL filter (CRI-003)
     //! - [specs/arkavo-edge/network-security.spec.yaml](NET-010): Rate limiting (HIGH-003)
     //! - [specs/arkavo-edge/network-security.spec.yaml](NET-006): Host header validation (HIGH-004)
     //!
@@ -304,8 +304,8 @@ mod tests {
         ));
     }
 
-    /// Test NET-007: Block cloud metadata and internal network access
-    #[spec("NET-007")]
+    /// Test VAL-005: URL filter blocks cloud metadata and internal addresses
+    #[spec("VAL-005")]
     #[test]
     fn test_egress_filter_blocks_private_ips() {
         let filter = EgressFilter::new();
@@ -323,8 +323,8 @@ mod tests {
         ));
     }
 
-    /// Test NET-007: Allow public URLs (inverse test)
-    #[spec("NET-007")]
+    /// Test VAL-005: URL filter allows public URLs (inverse test)
+    #[spec("VAL-005")]
     #[test]
     fn test_egress_filter_allows_public_urls() {
         let filter = EgressFilter::new();
@@ -433,8 +433,8 @@ mod tests {
         assert!(validator.validate("10.0.0.1").is_err());
     }
 
-    /// Test NET-007: Block various cloud metadata endpoints
-    #[spec("NET-007")]
+    /// Test VAL-005: URL filter blocks various cloud metadata endpoints
+    #[spec("VAL-005")]
     #[test]
     fn test_egress_filter_blocks_cloud_metadata() {
         let filter = EgressFilter::new();

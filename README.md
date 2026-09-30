@@ -232,10 +232,10 @@ For offensive-security reviewers: here's what is real today and what is still on
 | **Hardware-bound key storage** | Not yet | Device identity and agent keypairs are stored on disk with filesystem permissions; they are not yet stored in the Secure Enclave, Keychain (non-extractable), or a TPM. |
 | **Verifiable remote attestation** | Not yet | No attestation evidence or DID proof is verified. Published trust scores report every subject as unattested (VERIFICATION 0), including the local agent's own score; gossip peers are identified by discovery names, not proven DIDs. |
 | **Tool execution confinement** | Not yet | `shell_exec` and other process-spawning tools run as the agent's OS user with its files, network and environment variables. Only `workspace_container` isolates execution, and only for commands the model chooses to run in a container. OS-level confinement is planned. |
-| **Outbound SSRF / egress filtering** | Not in the default build | The private-range and cloud-metadata filter is enforced only by `EgressGuard`, which ships behind the non-default `taint` feature. Default-build tools make outbound requests without it. |
+| **Outbound SSRF / egress filtering** | Tool HTTP and browser navigation only | Requests built-in tools make (`web_search`, the GitHub API tools) go through `EgressClient`, which refuses loopback, private, CGNAT, multicast and cloud-metadata addresses after DNS resolution and on every redirect; `browser_cdp` refuses such a navigation before Chrome starts. `ARKAVO_EGRESS_ALLOW` exempts named origins. Processes the agent starts (`shell_exec`, `git`, `gh`, MCP servers) and Chrome's own redirects and subresources are not filtered yet. |
 | **Agent listener authentication** | Not yet | The A2A agent listener binds loopback (`127.0.0.1`) by default; `--bind <address>` or `runtime.listen` in a SwarmKit kit exposes it to other hosts, and the agent warns at startup when it does. It does not authenticate callers, so any local process, and any host that can reach an exposed listener, can send it tasks. The AG-UI gateway also binds loopback by default. |
 
-This split is intentional: encryption, access control, and identity are shipping now; hardware-bound trust roots, tool-execution confinement and default-build egress filtering are being built in the open.
+This split is intentional: encryption, access control, and identity are shipping now; hardware-bound trust roots, tool-execution confinement and egress filtering for processes the agent starts are being built in the open.
 
 ## Platform Support
 

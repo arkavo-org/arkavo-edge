@@ -133,7 +133,7 @@ The amygdala processes threats fast, operating concurrently with slower reasonin
 |------|----------|
 | `sec_semgrep` | SAST scanning via Semgrep |
 | `sbom_syft` | SBOM generation and dependency vulnerability checks via Syft |
-| Egress filter | IP-level SSRF prevention for metadata endpoints and private ranges; enforced only by `EgressGuard` in builds with the non-default `taint` feature |
+| Egress filter | IP-level SSRF prevention for metadata endpoints and private ranges, checked after DNS resolution and on every redirect, for built-in tool HTTP requests and browser navigation in every build; processes the agent starts are not yet covered |
 | Input validation | Unicode normalization, path traversal prevention, injection blocking |
 | Preflight moderation | TØR-G circuit evaluation blocks policy-violating requests before LLM inference |
 | Budget governor | Per-agent token and cost budgets with alerts at configurable thresholds |
@@ -141,7 +141,7 @@ The amygdala processes threats fast, operating concurrently with slower reasonin
 
 These tools can immediately flag or block unsafe code modifications before they are ever committed. Preflight moderation and budget enforcement act as **metabolic governors** -- the amygdala intervenes before resources are spent, not after.
 
-**Crates:** `arkavo-mcp-tools` (semgrep, syft wrappers), `arkavo-validation` (input sanitization), `arkavo-protocol` (egress filtering, `taint` feature), `arkavo-budget` (cost tracking and enforcement)
+**Crates:** `arkavo-mcp-tools` (semgrep, syft wrappers), `arkavo-validation` (input sanitization, the egress client), `arkavo-protocol` (taint-aware egress, `taint` feature), `arkavo-budget` (cost tracking and enforcement)
 
 ---
 
