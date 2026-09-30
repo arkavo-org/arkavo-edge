@@ -431,7 +431,15 @@ mod tests {
             ]
         });
 
-        let result = tool.execute(params).await.expect("fixture cargo test runs");
+        let output = tool
+            .execute_tests(&params)
+            .await
+            .expect("fixture cargo test runs");
+        assert!(
+            output.contains("test result: ok. 1 passed; 0 failed; 0 ignored;"),
+            "fixture did not pass with the requested filter: {output}"
+        );
+        let result = tool.parse_results("cargo", &output);
         assert_eq!(
             result,
             json!({
