@@ -202,3 +202,43 @@ async fn an_allowlisted_name_is_reached_on_its_port_and_no_other() {
     );
     assert_untouched(&other);
 }
+
+/// `hops` allowlisted redirectors in a row, the last pointing at `port`.
+/// Returns the first redirector's port and an allowlist admitting every hop
+/// and `port`, so the hop limit is the only thing that can stop the chain.
+fn redirect_chain(hops: usize, port: u16) -> (u16, String) {
+    let mut allow = vec![format!("http://127.0.0.1:{port}")];
+    let mut next = port;
+    for _ in 0..hops {
+        next = serve_once(redirect_to(&format!("http://127.0.0.1:{next}/")));
+        allow.push(format!("http://127.0.0.1:{next}"));
+    }
+    (next, allow.join(","))
+}
+
+#[spec("NET-014")]
+#[tokio::test]
+async fn ten_redirects_are_followed_and_an_eleventh_is_not() {
+    let (first, allow) = redirect_chain(10, serve_once(OK.to_string()));
+    let body = client(&allow)
+        .get(&format!("http://127.0.0.1:{first}/"))
+        .unwrap()
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(body, "ok");
+
+    let (target, target_port) = silent_listener();
+    let (first, allow) = redirect_chain(11, target_port);
+    let err = client(&allow)
+        .get(&format!("http://127.0.0.1:{first}/"))
+        .unwrap()
+        .send()
+        .await
+        .unwrap_err();
+    assert!(err.is_redirect(), "{}", error_chain(&err));
+    assert_untouched(&target);
+}
