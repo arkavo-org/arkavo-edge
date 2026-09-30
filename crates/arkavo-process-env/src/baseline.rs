@@ -43,6 +43,30 @@ const NAMES: &[&str] = &[
     "NUMBER_OF_PROCESSORS",
     "PROCESSOR_ARCHITECTURE",
     "OS",
+    "ALLUSERSPROFILE",
+    "PUBLIC",
+    "USERDOMAIN",
+    "COMPUTERNAME",
+    "PROCESSOR_ARCHITEW6432",
+];
+
+/// The POSIX locale categories. `LC_` alone would also admit
+/// `LC_<anything>`, which is an operator-invented name, not a locale.
+#[cfg(not(windows))]
+const LOCALE_CATEGORIES: &[&str] = &[
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_COLLATE",
+    "LC_MESSAGES",
+    "LC_MONETARY",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "LC_ADDRESS",
+    "LC_IDENTIFICATION",
+    "LC_MEASUREMENT",
+    "LC_NAME",
+    "LC_PAPER",
+    "LC_TELEPHONE",
 ];
 
 pub(crate) fn is_baseline(name: &OsStr) -> bool {
@@ -52,9 +76,15 @@ pub(crate) fn is_baseline(name: &OsStr) -> bool {
         || is_locale_category(name)
 }
 
-/// `LC_ALL`, `LC_CTYPE` and the other POSIX locale categories.
+#[cfg(not(windows))]
 fn is_locale_category(name: &OsStr) -> bool {
-    cfg!(not(windows)) && name.to_str().is_some_and(|name| name.starts_with("LC_"))
+    name.to_str()
+        .is_some_and(|name| LOCALE_CATEGORIES.contains(&name))
+}
+
+#[cfg(windows)]
+fn is_locale_category(_name: &OsStr) -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -68,6 +98,15 @@ mod tests {
         assert!(!is_baseline(OsStr::new("CARGO_MANIFEST_DIR")));
         #[cfg(not(windows))]
         assert!(is_baseline(OsStr::new("LC_CTYPE")));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn only_posix_locale_categories_are_baseline() {
+        assert!(is_baseline(OsStr::new("LC_ALL")));
+        assert!(is_baseline(OsStr::new("LC_TELEPHONE")));
+        assert!(!is_baseline(OsStr::new("LC_ACCESS_TOKEN")));
+        assert!(!is_baseline(OsStr::new("LC_")));
     }
 
     #[cfg(windows)]

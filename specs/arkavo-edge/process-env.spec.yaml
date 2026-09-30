@@ -43,6 +43,7 @@ scenarios:
       - Every credential-shaped name is withheld unless listed in readmit
       - Every other variable is kept
       - A name that is not valid Unicode is withheld
+      - Names the caller lists as configured credentials are withheld even when they are not credential-shaped, and readmit still wins
     refs:
       - crates/arkavo-process-env/src/lib.rs
     changed: "2026-09-29"
@@ -55,7 +56,11 @@ scenarios:
     when: is_secret_name classifies them
     then:
       - Each is classified as a credential
-      - Toolchain settings (PATH, RUSTC_WRAPPER, CARGO_HOME, SSH_AUTH_SOCK, ARKAVO_MAX_TOKENS) are not
+      - Credential words match whatever the scope (PGPASSWORD, MYSQL_PWD, DB_PASS, ID_JWT, AUTH_BEARER, SESSION_COOKIE), and a trailing _FILE is ignored (GITHUB_TOKEN_FILE, SSH_KEY_FILE)
+      - Toolchain settings (PATH, PWD, RUSTC_WRAPPER, CARGO_HOME, SSH_AUTH_SOCK, ARKAVO_MAX_TOKENS) are not
     refs:
       - crates/arkavo-process-env/src/secret.rs
     changed: "2026-09-29"
+    edge_cases:
+      - condition: A credential held under a name that is neither credential-shaped nor declared or configured
+        expected: It may still reach a toolchain child until a broker holds credentials; callers withhold operator-configured names (an auth_ref) through ChildEnv::toolchain_withholding

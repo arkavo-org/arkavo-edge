@@ -99,13 +99,29 @@ impl ChildEnv {
         K: Into<OsString>,
         V: Into<OsString>,
     {
+        Self::toolchain_withholding(parent, readmit, &[])
+    }
+
+    /// [`ChildEnv::toolchain`] that also withholds `withhold`, the names an
+    /// operator configured to hold credentials (an `auth_ref` may be any
+    /// name, so no naming convention finds it). `readmit` still wins over
+    /// both: it is an explicit grant for one named tool.
+    pub fn toolchain_withholding<I, K, V>(parent: I, readmit: &[&str], withhold: &[&str]) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<OsString>,
+        V: Into<OsString>,
+    {
         let mut env = Self::default();
         for (name, value) in parent {
             let name = name.into();
-            let readmitted = readmit
-                .iter()
-                .any(|wanted| same_name(&name, OsStr::new(wanted)));
-            if readmitted || !name.to_str().is_none_or(is_secret_name) {
+            let listed = |names: &[&str]| {
+                names
+                    .iter()
+                    .any(|wanted| same_name(&name, OsStr::new(wanted)))
+            };
+            let withheld = listed(withhold) || name.to_str().is_none_or(is_secret_name);
+            if listed(readmit) || !withheld {
                 env.insert(name, value.into());
             }
         }
@@ -115,6 +131,12 @@ impl ChildEnv {
     /// [`ChildEnv::toolchain`] resolved from this process's environment.
     pub fn toolchain_from_current(readmit: &[&str]) -> Self {
         Self::toolchain(std::env::vars_os(), readmit)
+    }
+
+    /// [`ChildEnv::toolchain_withholding`] resolved from this process's
+    /// environment.
+    pub fn toolchain_withholding_from_current(readmit: &[&str], withhold: &[&str]) -> Self {
+        Self::toolchain_withholding(std::env::vars_os(), readmit, withhold)
     }
 
     /// A command for `program` whose environment is exactly this one.
@@ -145,6 +167,9 @@ impl fmt::Debug for ChildEnv {
 
 /// Whether `name` can be set on a child process: non-empty, and free of the
 /// `=` and NUL that would corrupt the environment block.
+///
+/// Rejecting `=` anywhere also refuses the leading `=` of Windows' hidden
+/// `=C:` variables.
 pub fn is_valid_name(name: &str) -> bool {
     !name.is_empty() && !name.contains(['=', '\0'])
 }
@@ -307,8 +332,69 @@ mod tests {
         assert!(format!("{env:?}").contains("API_TOKEN"));
     }
 
+    #[spec("PENV-002")]
+    #[test]
+    fn toolchain_withholds_configured_names_that_are_not_credential_shaped() {
+        let mut vars = parent();
+        vars.push((OsString::from("CORP_LLM_LOGIN"), OsString::from(PLANTED)));
+        let env = ChildEnv::toolchain_withholding(vars.clone(), &[], &["CORP_LLM_LOGIN"]);
+        assert_eq!(value(&env, "CORP_LLM_LOGIN"), None);
+        assert_eq!(value(&env, "RUSTC_WRAPPER"), Some("sccache"));
+        assert_eq!(value(&env, "OPENAI_API_KEY"), None);
+
+        let env = ChildEnv::toolchain(vars, &[]);
+        assert_eq!(value(&env, "CORP_LLM_LOGIN"), Some(PLANTED));
+    }
+
+    #[spec("PENV-002")]
+    #[test]
+    fn readmit_wins_over_a_withheld_name() {
+        let env = ChildEnv::toolchain_withholding(parent(), &["GITHUB_TOKEN"], &["GITHUB_TOKEN"]);
+        assert_eq!(value(&env, "GITHUB_TOKEN"), Some(PLANTED));
+    }
+
+    #[cfg(unix)]
+    #[spec("PENV-002")]
+    #[test]
+    fn toolchain_withholds_a_name_that_is_not_unicode() {
+        use std::os::unix::ffi::OsStringExt;
+        let mut vars = parent();
+        vars.push((
+            OsString::from_vec(b"BAD\xffNAME".to_vec()),
+            OsString::from("x"),
+        ));
+        let env = ChildEnv::toolchain(vars, &[]);
+        assert!(env.vars.iter().all(|(name, _)| name.to_str().is_some()));
+        assert_eq!(value(&env, "RUSTC_WRAPPER"), Some("sccache"));
+    }
+
+    #[spec("PENV-001")]
+    #[test]
+    fn passthrough_name_absent_from_the_parent_leaves_the_child_without_it() {
+        let spec = spec_with(&[], &["NOT_IN_PARENT"]);
+        let env = ChildEnv::isolated(parent(), &spec);
+        assert_eq!(value(&env, "NOT_IN_PARENT"), None);
+        let seen = child_sees(&env);
+        assert!(!seen.iter().any(|l| l.starts_with("NOT_IN_PARENT=")));
+    }
+
+    #[cfg(windows)]
+    #[spec("PENV-001")]
+    #[test]
+    fn windows_path_spelled_either_way_is_kept_once() {
+        let parent = [(OsString::from("Path"), OsString::from("C:\\bin"))];
+        let kept = ChildEnv::isolated(parent.clone(), &EnvSpec::default());
+        assert_eq!(value(&kept, "PATH"), Some("C:\\bin"));
+
+        let spec = spec_with(&[("PATH", "D:\\tools")], &[]);
+        let env = ChildEnv::isolated(parent, &spec);
+        assert_eq!(value(&env, "Path"), Some("D:\\tools"));
+        assert_eq!(env.vars.len(), 1);
+    }
+
     #[test]
     fn names_that_would_corrupt_the_environment_are_invalid() {
+        assert!(!is_valid_name("=C:"));
         assert!(is_valid_name("GITHUB_TOKEN"));
         assert!(!is_valid_name(""));
         assert!(!is_valid_name("A=B"));

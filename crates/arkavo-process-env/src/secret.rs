@@ -3,12 +3,19 @@
 //! Every credential the agent reads follows the `<SCOPE>_<KIND>` convention
 //! providers and CI systems use (`OPENAI_API_KEY`, `GITHUB_TOKEN`,
 //! `JWT_SECRET`, `ARKAVO_MASTER_KEY`), so the last underscore-separated word
-//! names the kind. A word that only ever means a secret (`SECRET`,
-//! `PASSWORD`) marks the name wherever it appears.
+//! names the kind. A trailing `_FILE` is ignored, because `GITHUB_TOKEN_FILE`
+//! points at the same credential. A word that contains `SECRET` or
+//! `PASSWORD`, or is `TOKEN` or ends in it, marks the name wherever it
+//! appears (`AWS_SECRET_ACCESS_KEY`, `PGPASSWORD`). `TOKENS` is a count, not
+//! a credential.
 //!
-//! This is a deny-list, and it is fail-open for a credential stored under an
-//! unconventional name; see `ChildEnv::toolchain` for why the toolchain
-//! profile accepts that.
+//! This is a deny-list and fails open twice. A credential stored under an
+//! unconventional name passes, and so does one the operator chose the name
+//! of (a provider's `auth_ref`); callers withhold those explicitly with
+//! `ChildEnv::toolchain_withholding`. Names that are neither
+//! credential-shaped nor declared or configured may therefore still reach a
+//! toolchain child until a broker holds the credentials. See
+//! `ChildEnv::toolchain` for why the toolchain profile accepts that.
 
 /// Final words that name a credential.
 const KIND_WORDS: &[&str] = &[
@@ -24,18 +31,30 @@ const KIND_WORDS: &[&str] = &[
     "PEM",
     "PAT",
     "AUTH",
+    "PWD",
+    "PASS",
+    "JWT",
+    "CWT",
+    "BEARER",
+    "COOKIE",
+    "SESSION",
 ];
-
-/// Words that mark a credential wherever they appear (`AWS_SECRET_ACCESS_KEY`,
-/// `DB_PASSWORD_FILE`).
-const ANYWHERE_WORDS: &[&str] = &["SECRET", "PASSWORD", "PASSWD"];
 
 /// Whether an environment variable name, by convention, holds a
 /// credential.
 pub fn is_secret_name(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
-    let last = upper.rsplit('_').next().unwrap_or_default();
-    KIND_WORDS.contains(&last) || upper.split('_').any(|word| ANYWHERE_WORDS.contains(&word))
+    // A shell keeps the working directory in a bare `PWD`; only a scoped
+    // `MYSQL_PWD` is a password.
+    if upper == "PWD" {
+        return false;
+    }
+    let stem = upper.strip_suffix("_FILE").unwrap_or(&upper);
+    let last = stem.rsplit('_').next().unwrap_or_default();
+    KIND_WORDS.contains(&last)
+        || stem.split('_').any(|word| {
+            word.contains("SECRET") || word.contains("PASSWORD") || word.ends_with("TOKEN")
+        })
 }
 
 #[cfg(test)]
@@ -87,6 +106,33 @@ mod tests {
             "github_pat",
         ] {
             assert!(is_secret_name(name), "{name}");
+        }
+    }
+
+    #[spec("PENV-003")]
+    #[test]
+    fn credentials_without_the_scope_kind_shape_are_secret_shaped() {
+        for name in [
+            "PGPASSWORD",
+            "MYSQL_PWD",
+            "DB_PASS",
+            "ID_JWT",
+            "ARKAVO_IDENTITY_CWT",
+            "AUTH_BEARER",
+            "SESSION_COOKIE",
+            "GITHUB_TOKEN_FILE",
+            "SSH_KEY_FILE",
+            "GHTOKEN",
+        ] {
+            assert!(is_secret_name(name), "{name}");
+        }
+    }
+
+    #[spec("PENV-003")]
+    #[test]
+    fn names_without_a_credential_word_are_not_secret_shaped() {
+        for name in ["RUST_LOG", "CARGO_HOME", "PATH", "PWD", "OLDPWD", "LANG"] {
+            assert!(!is_secret_name(name), "{name}");
         }
     }
 
