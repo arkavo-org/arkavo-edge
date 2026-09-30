@@ -150,7 +150,9 @@ scenarios:
       - Results formatted
       - Snippets extracted
       - URLs included
+      - Request made through EgressClient (NET-007)
     refs: [crates/arkavo-mcp-tools/src/web_search.rs]
+    changed: "2026-09-30"
 
   - id: MCP-010
     name: TDF encryption tool

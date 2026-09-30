@@ -70,6 +70,9 @@ pub enum ToolError {
     #[error("Policy denied: {0}")]
     PolicyDenied(String),
 
+    #[error("{0}")]
+    Egress(#[from] arkavo_validation::EgressError),
+
     #[error("Other error: {0}")]
     Other(String),
 }

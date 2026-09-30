@@ -1,10 +1,11 @@
-//! GitHub MCP tools using direct API calls via reqwest
+//! GitHub MCP tools using direct API calls through the egress client
 //!
 //! This module uses the GitHub REST API directly instead of a third-party client.
 
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use arkavo_git::attribution::format_pr_body;
+use arkavo_validation::EgressClient;
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -62,7 +63,7 @@ pub(crate) struct GhUser {
 }
 
 pub(crate) struct GitHubClient {
-    pub(crate) client: reqwest::Client,
+    pub(crate) client: EgressClient,
     token: String,
 }
 
@@ -76,10 +77,7 @@ pub(crate) async fn get_github_client() -> Result<&'static GitHubClient> {
             let token = std::env::var("GITHUB_TOKEN")
                 .map_err(|_| ToolError::Mcp("GITHUB_TOKEN environment variable not set".into()))?;
 
-            let client = reqwest::Client::builder()
-                .user_agent(USER_AGENT)
-                .build()
-                .map_err(|e| ToolError::Mcp(format!("Failed to create HTTP client: {e}")))?;
+            let client = EgressClient::builder().user_agent(USER_AGENT).build()?;
 
             Ok(GitHubClient { client, token })
         })
@@ -252,7 +250,7 @@ impl Tool for GitHubPrCreateTool {
         let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls");
         let resp = github_request(
             gh,
-            gh.client.post(&url).json(&json!({
+            gh.client.post(&url)?.json(&json!({
                 "title": title,
                 "body": formatted_body,
                 "head": head,
@@ -343,7 +341,7 @@ impl Tool for GitHubPrListTool {
         };
 
         let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls?state={state}");
-        let resp = github_request(gh, gh.client.get(&url), "list PRs").await?;
+        let resp = github_request(gh, gh.client.get(&url)?, "list PRs").await?;
 
         let prs: Vec<GhPullRequest> = resp
             .json()
@@ -445,7 +443,7 @@ impl Tool for GitHubPrMergeTool {
         github_request(
             gh,
             gh.client
-                .put(&url)
+                .put(&url)?
                 .json(&json!({ "merge_method": merge_method })),
             "merge PR",
         )
@@ -529,7 +527,7 @@ impl Tool for GitHubIssueCreateTool {
         let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues");
         let resp = github_request(
             gh,
-            gh.client.post(&url).json(&json!({
+            gh.client.post(&url)?.json(&json!({
                 "title": title,
                 "body": formatted_body
             })),
@@ -614,7 +612,7 @@ impl Tool for GitHubIssueListTool {
         };
 
         let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues?state={state}");
-        let resp = github_request(gh, gh.client.get(&url), "list issues").await?;
+        let resp = github_request(gh, gh.client.get(&url)?, "list issues").await?;
 
         let issues: Vec<GhIssue> = resp
             .json()
@@ -715,7 +713,7 @@ impl Tool for GitHubReleaseCreateTool {
         let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/releases");
         let resp = github_request(
             gh,
-            gh.client.post(&url).json(&json!({
+            gh.client.post(&url)?.json(&json!({
                 "tag_name": tag,
                 "name": title,
                 "body": notes
