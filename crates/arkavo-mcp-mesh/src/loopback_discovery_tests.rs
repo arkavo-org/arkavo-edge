@@ -1,5 +1,5 @@
 //! Discovery of an agent that listens on loopback, which is where an agent
-//! started with `--trust` listens.
+//! started with `--bind 127.0.0.1` listens.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
