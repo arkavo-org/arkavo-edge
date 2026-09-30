@@ -1,4 +1,4 @@
-use crate::launch::{blanked_credentials, current_sandbox, launch_config};
+use crate::launch::{current_sandbox, launch_config};
 use crate::{BrowserError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
@@ -75,11 +75,7 @@ impl BrowserTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let mut config = launch_config(
-            headless,
-            current_sandbox(),
-            blanked_credentials(std::env::vars_os()),
-        );
+        let mut config = launch_config(headless, current_sandbox(), std::env::vars_os())?;
 
         if let Some(viewport) = params.get("viewport")
             && let (Some(width), Some(height)) = (

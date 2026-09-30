@@ -8,7 +8,8 @@
 //! without user namespaces has no sandbox to give it — and the decision is
 //! never taken from tool parameters, which the model writes.
 
-use arkavo_process_env::{is_secret_name, withheld_names};
+use crate::{BrowserError, Result};
+use arkavo_process_env::credential_names;
 use chromiumoxide::browser::{BrowserConfig, BrowserConfigBuilder};
 use std::ffi::{OsStr, OsString};
 use std::sync::Once;
@@ -87,47 +88,50 @@ fn parse_effective_uid(status: &str) -> Option<u32> {
 
 /// chromiumoxide 0.7 can add to Chrome's environment but cannot clear it,
 /// so every credential in `parent` is overridden with an empty value
-/// instead of being inherited. A credential is a credential-shaped name or
-/// one this process registered (a provider's `auth_ref`, which may be any
-/// name). The operator's `ARKAVO_TOOL_ENV_PASSTHROUGH` grant is for tool
-/// programs and is not honoured: a page-controlled renderer is not one.
-pub(crate) fn blanked_credentials(
+/// instead of being inherited. Which names are credentials is the shared
+/// child-environment policy's decision. Its operator grant,
+/// `ARKAVO_TOOL_ENV_PASSTHROUGH`, is for tool programs and is not honoured:
+/// a renderer that hostile pages can reach is not one.
+///
+/// A credential-like name that is not valid Unicode cannot be overridden
+/// through chromiumoxide's `String` keys, so the launch is refused rather
+/// than letting Chrome inherit it. The error names the variable, never its
+/// value.
+fn blanked_credentials(
     parent: impl IntoIterator<Item = (OsString, OsString)>,
-) -> Vec<(String, String)> {
-    let registered = withheld_names();
-    parent
+) -> Result<Vec<(String, String)>> {
+    let names: Vec<OsString> = parent.into_iter().map(|(name, _)| name).collect();
+    let found = credential_names(&names);
+    if !found.unblankable.is_empty() {
+        return Err(BrowserError::Environment(format!(
+            "refusing to start Chrome: {} looks like a credential but is not valid Unicode, \
+             so it cannot be withheld from Chrome",
+            found.unblankable.join(", ")
+        )));
+    }
+    Ok(found
+        .blankable
         .into_iter()
-        .filter_map(|(name, _)| name.into_string().ok())
-        .filter(|name| {
-            is_secret_name(name)
-                || registered.iter().any(|known| {
-                    if cfg!(windows) {
-                        known.eq_ignore_ascii_case(name)
-                    } else {
-                        known == name
-                    }
-                })
-        })
         .map(|name| (name, String::new()))
-        .collect()
+        .collect())
 }
 
-/// The launch configuration for one `browser_cdp` call. `headless` keeps
-/// its existing effect on chromiumoxide's default arguments and nothing
-/// else.
+/// The launch configuration for one `browser_cdp` call: the sandbox
+/// decision and `parent`'s credentials blanked. `headless` keeps its
+/// existing effect on chromiumoxide's default arguments and nothing else.
 pub(crate) fn launch_config(
     headless: bool,
     sandbox: Sandbox,
-    env: Vec<(String, String)>,
-) -> BrowserConfigBuilder {
-    let mut config = BrowserConfig::builder().envs(env);
+    parent: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Result<BrowserConfigBuilder> {
+    let mut config = BrowserConfig::builder().envs(blanked_credentials(parent)?);
     if headless {
         config = config.disable_default_args();
     }
     if sandbox != Sandbox::Enabled {
         config = config.no_sandbox();
     }
-    config
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -228,7 +232,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn headless_launch_keeps_the_sandbox() {
-        let config = launch_config(true, Sandbox::Enabled, Vec::new());
+        let config = launch_config(true, Sandbox::Enabled, Vec::new()).expect("config");
         let (args, _) = fake_chrome_launch(config).await;
         assert!(args.iter().any(|a| a == "--headless"), "{args:?}");
         assert!(!args.iter().any(|a| a == "--no-sandbox"), "{args:?}");
@@ -238,28 +242,47 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn root_launch_disables_the_sandbox() {
-        let config = launch_config(true, Sandbox::DisabledRunningAsRoot, Vec::new());
+        let config =
+            launch_config(true, Sandbox::DisabledRunningAsRoot, Vec::new()).expect("config");
         let (args, _) = fake_chrome_launch(config).await;
         assert!(args.iter().any(|a| a == "--no-sandbox"), "{args:?}");
     }
 
+    fn var(name: &str, value: &str) -> (OsString, OsString) {
+        (OsString::from(name), OsString::from(value))
+    }
+
+    /// Goes through `launch_config`, the only path `execute_browser` takes,
+    /// so the credentials it blanks are the ones Chrome is started without.
     #[spec("BROWS-008")]
     #[cfg(unix)]
     #[tokio::test]
     async fn chrome_gets_agent_credentials_blanked() {
         let parent = vec![
-            (
-                OsString::from("OPENAI_API_KEY"),
-                OsString::from("planted-secret"),
-            ),
-            (OsString::from("RUSTFLAGS"), OsString::from("-Dwarnings")),
+            var("OPENAI_API_KEY", "planted-secret"),
+            var("RUSTFLAGS", "-Dwarnings"),
         ];
-        let env = blanked_credentials(parent);
-        assert_eq!(env, vec![("OPENAI_API_KEY".to_string(), String::new())]);
-
-        let (_, seen) = fake_chrome_launch(launch_config(true, Sandbox::Enabled, env)).await;
+        let config = launch_config(true, Sandbox::Enabled, parent).expect("config");
+        let (_, seen) = fake_chrome_launch(config).await;
         assert!(seen.iter().any(|l| l == "OPENAI_API_KEY="), "{seen:?}");
         assert!(!seen.iter().any(|l| l.contains("planted-secret")));
+    }
+
+    #[spec("BROWS-008")]
+    #[test]
+    fn only_credentials_are_blanked_each_under_its_own_spelling() {
+        let parent = vec![
+            var("OPENAI_API_KEY", "planted-secret"),
+            var("Openai_Api_Key", "planted-secret"),
+            var("RUSTFLAGS", "-Dwarnings"),
+        ];
+        assert_eq!(
+            blanked_credentials(parent).expect("blanked"),
+            vec![
+                ("OPENAI_API_KEY".to_string(), String::new()),
+                ("Openai_Api_Key".to_string(), String::new()),
+            ]
+        );
     }
 
     /// A provider's `auth_ref` may name any variable, so the names the
@@ -271,13 +294,53 @@ mod tests {
         // name is used by no other test.
         const REGISTERED: &str = "BROWSER_TEST_REGISTERED_LOGIN";
         arkavo_process_env::withhold_name(REGISTERED);
+        let parent = vec![var(REGISTERED, "login"), var("HOME", "/home/agent")];
+        assert_eq!(
+            blanked_credentials(parent).expect("blanked"),
+            vec![(REGISTERED.to_string(), String::new())]
+        );
+    }
+
+    /// The operator's tool-program grant does not readmit a credential into
+    /// Chrome.
+    #[spec("BROWS-008")]
+    #[test]
+    fn the_tool_passthrough_grant_does_not_reach_chrome() {
         let parent = vec![
-            (OsString::from(REGISTERED), OsString::from("login")),
-            (OsString::from("HOME"), OsString::from("/home/agent")),
+            var("ARKAVO_TOOL_ENV_PASSTHROUGH", "OPENAI_API_KEY"),
+            var("OPENAI_API_KEY", "planted-secret"),
         ];
         assert_eq!(
-            blanked_credentials(parent),
-            vec![(REGISTERED.to_string(), String::new())]
+            blanked_credentials(parent).expect("blanked"),
+            vec![("OPENAI_API_KEY".to_string(), String::new())]
+        );
+    }
+
+    #[spec("BROWS-008")]
+    #[cfg(unix)]
+    #[test]
+    fn a_non_unicode_credential_name_refuses_the_launch_without_its_value() {
+        use std::os::unix::ffi::OsStringExt;
+        let credential = OsString::from_vec(b"MY_\xff_TOKEN".to_vec());
+        let parent = vec![(credential, OsString::from("planted-secret"))];
+        let Err(refusal) = launch_config(true, Sandbox::Enabled, parent) else {
+            panic!("a non-Unicode credential name must refuse the launch");
+        };
+        let refusal = refusal.to_string();
+        assert!(refusal.contains("MY_\u{fffd}_TOKEN"), "{refusal}");
+        assert!(!refusal.contains("planted-secret"), "{refusal}");
+    }
+
+    #[spec("BROWS-008")]
+    #[cfg(unix)]
+    #[test]
+    fn a_non_unicode_name_that_is_no_credential_does_not_block() {
+        use std::os::unix::ffi::OsStringExt;
+        let plain = OsString::from_vec(b"PLAIN_\xff_NAME".to_vec());
+        let parent = vec![(plain, OsString::from("x")), var("OPENAI_API_KEY", "s")];
+        assert_eq!(
+            blanked_credentials(parent).expect("blanked"),
+            vec![("OPENAI_API_KEY".to_string(), String::new())]
         );
     }
 }

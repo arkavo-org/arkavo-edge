@@ -20,6 +20,9 @@ pub enum BrowserError {
     #[error("Timeout: {0}")]
     Timeout(String),
 
+    #[error("Environment error: {0}")]
+    Environment(String),
+
     #[error("Invalid parameters: {0}")]
     InvalidParams(String),
 

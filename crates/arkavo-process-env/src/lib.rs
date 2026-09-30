@@ -29,12 +29,14 @@
 
 mod baseline;
 mod configured;
+mod credential_names;
 mod hijack;
 mod screen;
 mod secret;
 mod tool;
 
 pub use configured::{withheld_names, withhold_name};
+pub use credential_names::{CredentialNames, credential_names};
 pub use hijack::is_loader_or_hijack_name;
 pub use screen::{EnvRefusal, screen_entry};
 pub use secret::is_secret_name;

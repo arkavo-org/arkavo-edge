@@ -125,14 +125,22 @@ scenarios:
     name: Chrome starts with the agent's credentials blanked
     criticality: high
     given:
-      - The agent's environment holds credential-shaped variables
+      - The agent's environment holds credential-shaped variables, or variables registered as holding a provider credential
     when: browser_cdp launches Chrome
     then:
-      - Each credential-shaped variable is set to an empty value in Chrome's environment
+      - Each credential-shaped or registered variable is set to an empty value in Chrome's environment, under its own spelling
       - Other variables are inherited unchanged
+      - A credential-like variable name that is not valid Unicode refuses the launch, naming the variable and never its value
     refs:
       - crates/arkavo-browser/src/launch.rs
+      - crates/arkavo-browser/src/browser.rs
     changed: "2026-09-29"
     edge_cases:
+      - condition: ARKAVO_TOOL_ENV_PASSTHROUGH lists a credential
+        expected: Chrome is excluded from the grant and the credential is still blanked
       - condition: A provider registered a credential under a name no convention recognises
         expected: That name is blanked as well
+      - condition: A blanked credential is inspected in Chrome's environment
+        expected: The name is present with an empty value, because chromiumoxide cannot remove it
+      - condition: A non-Unicode variable name is not credential-like
+        expected: The launch proceeds and the variable is inherited
