@@ -646,11 +646,6 @@ mod tests {
                 "{cmd} must not be auto-approved"
             );
         }
-        assert_eq!(
-            verdict("git remote -v"),
-            ApprovalResult::AutoApproved,
-            "git remote -v stays auto-approved"
-        );
     }
 
     /// Regression: `sh` drops a backslash and keeps the next character, so
@@ -834,7 +829,20 @@ mod tests {
             "git remote show origin",
             "git remote show",
         ]);
-        assert_approved(&["git remote", "git remote -v", "git remote get-url origin"]);
+        assert_approved(&["git remote"]);
+    }
+
+    /// Regression: `git remote -v` and `get-url` print remote URLs, which can
+    /// embed a token (`https://user:token@host/repo`).
+    #[spec("MCP-013")]
+    #[test]
+    fn git_remote_urls_are_not_auto_approved() {
+        assert_not_approved(&[
+            "git remote -v",
+            "git remote get-url origin",
+            "git remote get-url --all origin",
+            "git remote --verbose",
+        ]);
     }
 
     /// Regression: `file -C` compiles the magic file into `magic.mgc` in the
