@@ -276,7 +276,8 @@ scenarios:
       - Relative redirection targets resolve against the command's working directory
       - A < or > glued to a preceding word other than a bare descriptor number (-delete>x, echo hi>out) is not auto-approved, because the glued word would escape the option checks; 2>out and 1>>out are unaffected
       - Option, base and path checks read the argument words with redirections and descriptor prefixes removed
-      - Descriptor duplication (2>&1) and /dev/null stay auto-approvable; NUL discards only under cmd /C, and is an ordinary, symlink-resolved file name on unix
+      - Descriptor duplication (2>&1) stays auto-approvable; on unix the only discard target is /dev/null (NUL is an ordinary file name, symlinks resolved), and under cmd /C the only one is NUL (a /dev/null target is an ordinary path and is refused)
+      - Under cmd /C only a single digit before an operator is a descriptor prefix; a longer digit run counts as a glued word and is refused
       - Under cmd /C a redirection to a reserved device name (CON, PRN, AUX, COM1-9, LPT1-9, with or without extension) is not auto-approved
     refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/shell_exec/redirect.rs, crates/arkavo-mcp-tools/src/shell_exec/workdir.rs]
     changed: "2026-09-29"
