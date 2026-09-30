@@ -2,6 +2,8 @@
 //! previously lived in AGENTS.md. Optional: existing kits omit it and keep
 //! the same `kit.id` (field is skipped when absent).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::Manifest;
@@ -100,6 +102,17 @@ pub struct RuntimeMcpServer {
     pub args: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Literal values set on the server process. A kit is content-addressed
+    /// and shared, so whatever is written here is published with it;
+    /// credential-shaped names are rejected in favour of `env_passthrough`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+    /// Names copied from the agent's own environment when the server starts:
+    /// how a server receives a credential without the kit carrying it.
+    /// Nothing else of the agent's environment reaches the server beyond a
+    /// platform baseline (`PATH`, `HOME`, locale).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env_passthrough: Vec<String>,
 }
 
 /// Kit-level runtime configuration replacing product AGENTS.md fields.
@@ -309,8 +322,34 @@ pub fn validate_runtime(runtime: &KitRuntimeConfig) -> Result<(), RuntimeValidat
                 name: server.name.clone(),
             });
         }
+        validate_mcp_server_env(server)?;
     }
 
+    Ok(())
+}
+
+fn validate_mcp_server_env(server: &RuntimeMcpServer) -> Result<(), RuntimeValidationError> {
+    if let Some(name) = server
+        .env
+        .keys()
+        .chain(&server.env_passthrough)
+        .find(|name| !arkavo_process_env::is_valid_name(name))
+    {
+        return Err(RuntimeValidationError::McpServerInvalidEnvName {
+            server: server.name.clone(),
+            name: name.clone(),
+        });
+    }
+    if let Some(name) = server
+        .env
+        .keys()
+        .find(|name| arkavo_process_env::is_secret_name(name))
+    {
+        return Err(RuntimeValidationError::McpServerCredentialInEnv {
+            server: server.name.clone(),
+            name: name.clone(),
+        });
+    }
     Ok(())
 }
 
@@ -336,6 +375,14 @@ pub enum RuntimeValidationError {
 
     #[error("runtime.mcp_servers {name:?} needs command or url")]
     McpServerMissingEndpoint { name: String },
+
+    #[error("runtime.mcp_servers {server:?} env name {name:?} is empty or contains '=' or NUL")]
+    McpServerInvalidEnvName { server: String, name: String },
+
+    #[error(
+        "runtime.mcp_servers {server:?} env {name:?} looks like a credential; list it in env_passthrough so its value stays out of the kit"
+    )]
+    McpServerCredentialInEnv { server: String, name: String },
 
     #[error("runtime.kas.trusted_roots did {0:?} must be non-empty and start with \"did:\"")]
     InvalidTrustedRootDid(String),
@@ -435,6 +482,8 @@ mcp_servers:
                 command: None,
                 args: vec![],
                 url: None,
+                env: BTreeMap::new(),
+                env_passthrough: vec![],
             }],
             ..Default::default()
         };
@@ -442,6 +491,84 @@ mcp_servers:
             validate_runtime(&cfg),
             Err(RuntimeValidationError::McpServerMissingEndpoint { .. })
         ));
+    }
+
+    #[spec("SK-105")]
+    #[test]
+    fn mcp_server_env_parses_and_validates() {
+        let yaml = r#"
+mcp_servers:
+  - name: github
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      LOG_LEVEL: debug
+    env_passthrough: [GITHUB_TOKEN]
+"#;
+        let cfg: KitRuntimeConfig = serde_yaml::from_str(yaml).unwrap();
+        let server = &cfg.mcp_servers[0];
+        assert_eq!(
+            server.env.get("LOG_LEVEL").map(String::as_str),
+            Some("debug")
+        );
+        assert_eq!(server.env_passthrough, vec!["GITHUB_TOKEN".to_string()]);
+        validate_runtime(&cfg).unwrap();
+    }
+
+    #[spec("SK-105")]
+    #[test]
+    fn credential_written_into_kit_env_is_rejected() {
+        let yaml = r#"
+mcp_servers:
+  - name: github
+    command: npx
+    env:
+      GITHUB_TOKEN: ghp_literal
+"#;
+        let cfg: KitRuntimeConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            validate_runtime(&cfg),
+            Err(RuntimeValidationError::McpServerCredentialInEnv {
+                server: "github".into(),
+                name: "GITHUB_TOKEN".into(),
+            })
+        );
+    }
+
+    #[spec("SK-105")]
+    #[test]
+    fn malformed_env_name_is_rejected() {
+        let yaml = r#"
+mcp_servers:
+  - name: github
+    command: npx
+    env_passthrough: ["GITHUB_TOKEN=ghp_literal"]
+"#;
+        let cfg: KitRuntimeConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(
+            validate_runtime(&cfg),
+            Err(RuntimeValidationError::McpServerInvalidEnvName { .. })
+        ));
+    }
+
+    /// `kit.id` is BLAKE3 of the canonical manifest, so a server that
+    /// declares no environment must serialize exactly as it did before the
+    /// fields existed.
+    #[spec("SK-105")]
+    #[test]
+    fn mcp_server_without_env_serializes_as_before() {
+        let server = RuntimeMcpServer {
+            name: "fs".into(),
+            command: Some("arkavo".into()),
+            args: vec![],
+            url: None,
+            env: BTreeMap::new(),
+            env_passthrough: vec![],
+        };
+        assert_eq!(
+            serde_json::to_value(&server).unwrap(),
+            serde_json::json!({"name": "fs", "command": "arkavo"})
+        );
     }
 
     #[spec("SK-103")]

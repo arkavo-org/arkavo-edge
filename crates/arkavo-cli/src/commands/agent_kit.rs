@@ -272,6 +272,10 @@ fn to_mcp_server_config(s: &RuntimeMcpServer) -> McpServerConfig {
         command: s.command.clone(),
         args: s.args.clone(),
         url: s.url.clone(),
+        env: arkavo_process_env::EnvSpec {
+            set: s.env.clone(),
+            passthrough: s.env_passthrough.clone(),
+        },
     }
 }
 
@@ -794,5 +798,24 @@ provenance:
       signature: "AAA"
 "#
         .to_string()
+    }
+
+    #[spec("SK-105")]
+    #[test]
+    fn kit_mcp_server_environment_reaches_the_agent_config() {
+        let server = RuntimeMcpServer {
+            name: "github".into(),
+            command: Some("npx".into()),
+            args: vec![],
+            url: None,
+            env: [("LOG_LEVEL".to_string(), "debug".to_string())].into(),
+            env_passthrough: vec!["GITHUB_TOKEN".to_string()],
+        };
+        let config = to_mcp_server_config(&server);
+        assert_eq!(
+            config.env.set.get("LOG_LEVEL").map(String::as_str),
+            Some("debug")
+        );
+        assert_eq!(config.env.passthrough, vec!["GITHUB_TOKEN".to_string()]);
     }
 }

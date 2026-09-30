@@ -831,6 +831,7 @@ dependencies = [
  "arkavo-observability",
  "arkavo-orchestrator",
  "arkavo-permit",
+ "arkavo-process-env",
  "arkavo-protocol",
  "arkavo-registration",
  "arkavo-repo",
@@ -2217,6 +2218,7 @@ name = "arkavo-swarmkit"
 version = "0.99.5"
 dependencies = [
  "arkavo-budget",
+ "arkavo-process-env",
  "arkavo-test-macros",
  "base64 0.22.1",
  "blake3",

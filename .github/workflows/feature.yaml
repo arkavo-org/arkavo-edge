@@ -266,6 +266,7 @@ jobs:
             cargo test --locked -p arkavo-events
             cargo test --locked -p arkavo-validation
             cargo test --locked -p arkavo-process-env
+            cargo test --locked -p arkavo-swarmkit
           elif [ "${{ matrix.group }}" = "benches" ]; then
             # Compile-check benchmarks to prevent bitrot (no execution). The bench
             # profile is release-like, so this builds a second copy of the whole

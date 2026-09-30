@@ -270,6 +270,8 @@ fn to_runtime_mcp_server(s: &McpServerConfig) -> RuntimeMcpServer {
         command: s.command.clone(),
         args: s.args.clone(),
         url: s.url.clone(),
+        env: s.env.set.clone(),
+        env_passthrough: s.env.passthrough.clone(),
     }
 }
 

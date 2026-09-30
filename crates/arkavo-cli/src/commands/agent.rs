@@ -370,6 +370,9 @@ pub struct McpServerConfig {
     pub command: Option<String>,
     pub args: Vec<String>,
     pub url: Option<String>,
+    /// What the server process may see of the agent's environment beyond
+    /// the platform baseline.
+    pub env: arkavo_process_env::EnvSpec,
 }
 
 /// Check if a tool's input schema has required arguments

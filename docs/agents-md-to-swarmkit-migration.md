@@ -164,6 +164,8 @@ runtime:
     - name: filesystem
       command: …
       args: []
+      env: { LOG_LEVEL: info }        # literal, published with the kit
+      env_passthrough: [GITHUB_TOKEN]  # names only
 ```
 
 Without `runtime.listen` an agent listens on loopback (`127.0.0.1`, OS-assigned port) and announces itself over mDNS for discovery on this machine. Accepting connections from other machines requires an explicit `--bind` or `runtime.listen` address. The RPC endpoint is not authenticated yet, so run it on networks you trust. `--bind 127.0.0.1` keeps an agent on this machine: it listens on loopback, keeps the port that `-p` or `runtime.listen` selects, and is not announced on the network. A kit can pin an address with `runtime.listen`; `--bind` overrides it.

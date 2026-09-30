@@ -109,6 +109,7 @@ pub(super) fn parse_yaml_properties(
             command: None,
             args: Vec::new(),
             url: None,
+            env: arkavo_process_env::EnvSpec::default(),
         });
         return;
     }
