@@ -7,6 +7,8 @@
 //! control to an unlisted program.
 
 use super::blocklist::{check_blocklist, check_injection};
+use super::redirect::redirections_within_root;
+use std::path::Path;
 
 /// Result of command classification for auto-approval
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,7 +155,7 @@ const PACKAGE_INFO: &[&str] = &[
     "gem list",
 ];
 
-pub(super) fn classify(command: &str) -> ApprovalResult {
+pub(super) fn classify(command: &str, root: &Path, cwd: &Path) -> ApprovalResult {
     let cmd_lower = command.to_lowercase();
     let cmd_trimmed = command.trim();
 
@@ -170,7 +172,7 @@ pub(super) fn classify(command: &str) -> ApprovalResult {
     if cfg!(not(windows)) && cmd_trimmed.contains('\\') {
         return ApprovalResult::RequiresReview;
     }
-    if all_segments_safe(cmd_trimmed) {
+    if all_segments_safe(cmd_trimmed, root, cwd) {
         return ApprovalResult::AutoApproved;
     }
     ApprovalResult::RequiresReview
@@ -178,12 +180,14 @@ pub(super) fn classify(command: &str) -> ApprovalResult {
 
 /// Split on unquoted `|` and require every segment to be a safe read-only
 /// command. Subsumes the original single-pipe special case.
-fn all_segments_safe(cmd: &str) -> bool {
+fn all_segments_safe(cmd: &str, root: &Path, cwd: &Path) -> bool {
     let segments = split_pipeline(cmd);
     if segments.is_empty() {
         return false;
     }
-    segments.iter().all(|seg| segment_safe(seg.trim()))
+    segments
+        .iter()
+        .all(|seg| segment_safe(seg.trim(), root, cwd))
 }
 
 /// Quote-aware split on `|`. A `|` inside single or double quotes (e.g. a grep
@@ -216,10 +220,10 @@ fn split_pipeline(cmd: &str) -> Vec<String> {
     out
 }
 
-fn segment_safe(seg: &str) -> bool {
-    // Any redirection downgrades to review here; confining its target to the
-    // workspace root is what makes it safe to approve.
-    if seg.contains('>') || seg.contains('<') {
+fn segment_safe(seg: &str, root: &Path, cwd: &Path) -> bool {
+    // A redirection is approvable only when its target is confined to the
+    // workspace root.
+    if !redirections_within_root(seg, root, cwd) {
         return false;
     }
     // `/proc/<pid>/environ` of the `sh -c` parent is the agent's own
@@ -397,7 +401,95 @@ mod tests {
     /// Classification of a command with no redirection, where the workspace
     /// root plays no part.
     fn verdict(cmd: &str) -> ApprovalResult {
-        classify(cmd)
+        let here = std::env::current_dir().unwrap();
+        classify(cmd, &here, &here)
+    }
+
+    /// A canonical temporary workspace, so targets are judged the way
+    /// `resolve_within_root` judges them on disk.
+    fn workspace() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        (dir, root)
+    }
+
+    #[spec("MCP-015")]
+    #[test]
+    fn redirection_target_confined_to_root() {
+        let (_dir, root) = workspace();
+        let at_root = |cmd: &str| classify(cmd, &root, &root);
+        let inside = root.join("out.txt");
+        assert_eq!(
+            at_root(&format!("echo hi > {}", inside.display())),
+            ApprovalResult::AutoApproved
+        );
+        assert_eq!(at_root("echo hi > out.txt"), ApprovalResult::AutoApproved);
+        assert_eq!(at_root("echo hi>out.txt"), ApprovalResult::AutoApproved);
+        assert_eq!(at_root("cat < out.txt"), ApprovalResult::AutoApproved);
+        assert_eq!(
+            at_root("ls -la 2>&1 | grep foo"),
+            ApprovalResult::AutoApproved
+        );
+        assert_eq!(at_root("ls 2>/dev/null"), ApprovalResult::AutoApproved);
+        assert_eq!(
+            at_root("echo hi > /etc/passwd"),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(
+            at_root("echo hi>/etc/passwd"),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(
+            at_root("echo hi > ../escape"),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(at_root("cat < /etc/hosts"), ApprovalResult::RequiresReview);
+        // Targets the shell expands cannot be judged from the string.
+        assert_eq!(
+            at_root("echo hi > ~/.bashrc"),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(
+            at_root("echo hi > $HOME/.bashrc"),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(
+            at_root("echo hi >&$HOME/.bashrc"),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(
+            at_root("echo hi > %USERPROFILE%\\x"),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(at_root("echo hi >"), ApprovalResult::RequiresReview);
+    }
+
+    #[cfg(unix)]
+    #[spec("MCP-015")]
+    #[test]
+    fn redirection_through_a_symlink_is_refused() {
+        use std::os::unix::fs::symlink;
+        let (_dir, root) = workspace();
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path(), root.join("escape")).unwrap();
+        assert_eq!(
+            classify("echo hi > escape/loot", &root, &root),
+            ApprovalResult::RequiresReview
+        );
+
+        // Relative targets resolve against the directory the command runs in:
+        // `link` is a real directory at the root but an outward symlink in `sub`.
+        std::fs::create_dir(root.join("link")).unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        symlink(outside.path(), root.join("sub").join("link")).unwrap();
+        assert_eq!(
+            classify("echo hi > link/x", &root, &root),
+            ApprovalResult::AutoApproved
+        );
+        assert_eq!(
+            classify("echo hi > link/x", &root, &root.join("sub")),
+            ApprovalResult::RequiresReview
+        );
     }
 
     #[spec("MCP-013")]

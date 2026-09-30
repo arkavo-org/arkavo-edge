@@ -131,6 +131,7 @@ scenarios:
       - Every pipeline and chain segment is classified, not only the first word
       - Exec-wrappers and interpreters are never auto-approved
       - Caller environment map is validated against loader, tool-hijack and config-redirect variables
+      - Working directory and redirection targets are confined to the workspace root
     refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs]
     changed: "2026-09-29"
     edge_cases:
@@ -247,4 +248,18 @@ scenarios:
       - Loader, shell-init, pager, editor, git, interpreter-hook, toolchain-selector and home or config-directory variables are refused (PATH, LD_*, DYLD_*, BASH_ENV, GIT_*, LESSOPEN, PAGER, EDITOR, VISUAL, HOME, XDG_CONFIG_HOME, JAVA_TOOL_OPTIONS, RIPGREP_CONFIG_PATH, RUSTUP_*, GOTOOLCHAIN)
       - Other variables are passed to the command
     refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs]
+    changed: "2026-09-29"
+
+  - id: MCP-015
+    name: Shell command paths are confined to the workspace root
+    criticality: high
+    given:
+      - ShellExecTool rooted at the workspace (the process working directory by default)
+    when: A call names a working_dir, or its command redirects input or output
+    then:
+      - A working_dir that resolves outside the root, directly or through a symlink, is refused with policy_denied
+      - A redirection target must be a literal path that resolves inside the root, symlinks followed, or the call is not auto-approved
+      - Relative redirection targets resolve against the command's working directory
+      - Descriptor duplication (2>&1) and /dev/null stay auto-approvable
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/shell_exec/redirect.rs, crates/arkavo-mcp-tools/src/shell_exec/workdir.rs]
     changed: "2026-09-29"

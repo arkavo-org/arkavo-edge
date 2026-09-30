@@ -3,12 +3,15 @@ use crate::{Result, ToolError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 
 mod blocklist;
 mod classifier;
+mod redirect;
+mod workdir;
 
 pub use classifier::ApprovalResult;
 
@@ -63,14 +66,35 @@ const DENY_ENV_EXACT: &[&str] = &[
 ];
 const DENY_ENV_PREFIX: &[&str] = &["LD_", "DYLD_", "GIT_", "BASH_FUNC_", "RUSTUP_"];
 
+/// Denial for a working directory the command may not start in.
+fn working_dir_denied(detail: &str) -> Value {
+    json!({
+        "success": false,
+        "exit_code": -1,
+        "stdout": "",
+        "stderr": detail,
+        "duration_ms": 0,
+        "approval": "policy_denied",
+        "reason": "working_dir must stay within the workspace root"
+    })
+}
+
 /// Shell command execution tool with auto-approval heuristics
 pub struct ShellExecTool {
     schema: ToolSchema,
+    root: PathBuf,
 }
 
 impl ShellExecTool {
     pub fn new() -> Self {
+        // Zero-config: the agent process's cwd is its workspace, as for the
+        // filesystem tools.
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "shell_exec".to_string(),
                 aliases: Some(vec![
@@ -115,7 +139,7 @@ impl ShellExecTool {
 
     /// Classify a command for auto-approval
     pub fn classify_command(&self, command: &str) -> ApprovalResult {
-        classifier::classify(command)
+        classifier::classify(command, &self.root, &self.root)
     }
 
     /// Refuse an env map that could redirect code loading or configuration.
@@ -139,7 +163,7 @@ impl ShellExecTool {
     async fn execute_command(
         &self,
         cmd: &str,
-        working_dir: Option<&str>,
+        cwd: &Path,
         timeout_secs: u64,
         env_vars: Option<&HashMap<String, String>>,
         capture_stderr: bool,
@@ -160,9 +184,7 @@ impl ShellExecTool {
             c
         };
 
-        if let Some(dir) = working_dir {
-            command.current_dir(dir);
-        }
+        command.current_dir(cwd);
 
         if let Some(env) = env_vars {
             for (key, value) in env {
@@ -284,15 +306,25 @@ impl Tool for ShellExecTool {
             }));
         }
 
-        // Classify the command
-        let approval = self.classify_command(command);
+        // The directory the command runs in, confined to the workspace, and
+        // the form of it the platform shell can start in. The confined path
+        // is what redirection targets resolve against.
+        let confined = match workdir::confine(&self.root, working_dir) {
+            Ok(dir) => dir,
+            Err(reason) => return Ok(working_dir_denied(&reason)),
+        };
+        let approval = classifier::classify(command, &self.root, &confined);
 
         match approval {
             ApprovalResult::AutoApproved => {
+                let run_dir = match workdir::spawn_dir(&confined) {
+                    Ok(dir) => dir,
+                    Err(reason) => return Ok(working_dir_denied(&reason)),
+                };
                 let (success, exit_code, stdout, stderr, duration_ms) = self
                     .execute_command(
                         command,
-                        working_dir,
+                        &run_dir,
                         timeout_secs,
                         env_vars.as_ref(),
                         capture_stderr,
@@ -559,20 +591,125 @@ mod tests {
         assert!(result["service_account_info"].as_str().is_some());
     }
 
+    #[spec("MCP-015")]
+    #[tokio::test]
+    async fn working_dir_outside_root_denied() {
+        let root = tempfile::tempdir().unwrap();
+        let tool = ShellExecTool::with_root(root.path());
+        let outside = tempfile::tempdir().unwrap();
+        let params =
+            json!({ "command": "echo hi", "working_dir": outside.path().to_str().unwrap() });
+        let result = tool.execute(params).await.unwrap();
+        assert_eq!(result["success"], false);
+        assert_eq!(result["approval"], "policy_denied");
+        // A working_dir inside root is still allowed.
+        let params = json!({ "command": "echo hi", "working_dir": root.path().to_str().unwrap() });
+        assert_eq!(tool.execute(params).await.unwrap()["success"], true);
+    }
+
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_execute_with_working_dir() {
-        let tool = ShellExecTool::new();
-        let params = json!({
-            "command": "pwd",
-            "working_dir": "/tmp"
-        });
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("sub")).unwrap();
+        let tool = ShellExecTool::with_root(root.path());
+        let params = json!({ "command": "pwd", "working_dir": "sub" });
 
         let result = tool.execute(params).await.unwrap();
         assert_eq!(result["success"], true);
         assert!(
-            result["stdout"].as_str().unwrap().contains("/tmp")
-                || result["stdout"].as_str().unwrap().contains("/private/tmp")
-        ); // macOS
+            result["stdout"]
+                .as_str()
+                .unwrap()
+                .trim_end()
+                .ends_with("sub")
+        );
+    }
+
+    #[cfg(unix)]
+    #[spec("MCP-015")]
+    #[tokio::test]
+    async fn redirection_runs_only_inside_the_root() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let tool = ShellExecTool::with_root(root.path());
+
+        let result = tool
+            .execute(json!({ "command": "echo hi > out.txt" }))
+            .await
+            .unwrap();
+        assert_eq!(result["approval"], "auto_approved");
+        assert!(root.path().join("out.txt").exists());
+
+        let target = outside.path().join("loot");
+        let command = format!("echo hi > {}", target.display());
+        let result = tool.execute(json!({ "command": command })).await.unwrap();
+        assert_eq!(result["approval"], "policy_denied");
+        assert!(!target.exists());
+    }
+
+    /// The relative target is opened from the directory the command runs in,
+    /// so the classifier must judge it from there, not from the root.
+    #[cfg(unix)]
+    #[spec("MCP-015")]
+    #[tokio::test]
+    async fn relative_redirection_is_judged_from_the_working_dir() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("link")).unwrap();
+        std::fs::create_dir(root.path().join("sub")).unwrap();
+        symlink(outside.path(), root.path().join("sub").join("link")).unwrap();
+        let tool = ShellExecTool::with_root(root.path());
+
+        let result = tool
+            .execute(json!({ "command": "echo hi > link/x" }))
+            .await
+            .unwrap();
+        assert_eq!(result["approval"], "auto_approved");
+        assert!(root.path().join("link").join("x").exists());
+
+        let result = tool
+            .execute(json!({ "command": "echo hi > link/x", "working_dir": "sub" }))
+            .await
+            .unwrap();
+        assert_eq!(result["approval"], "policy_denied");
+        assert!(!outside.path().join("x").exists());
+
+        let result = tool
+            .execute(json!({ "command": "echo hi > here.txt", "working_dir": "sub" }))
+            .await
+            .unwrap();
+        assert_eq!(result["approval"], "auto_approved");
+        assert!(root.path().join("sub").join("here.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[spec("MCP-015")]
+    #[tokio::test]
+    async fn working_dir_symlink_out_of_root_denied() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
+        let tool = ShellExecTool::with_root(root.path());
+        let result = tool
+            .execute(json!({ "command": "pwd", "working_dir": "escape" }))
+            .await
+            .unwrap();
+        assert_eq!(result["success"], false);
+        assert_eq!(result["approval"], "policy_denied");
+    }
+
+    #[tokio::test]
+    async fn missing_root_denies_every_working_dir() {
+        let tool = ShellExecTool::with_root("");
+        let result = tool
+            .execute(json!({ "command": "echo hi", "working_dir": "." }))
+            .await
+            .unwrap();
+        assert_eq!(result["approval"], "policy_denied");
+        let result = tool.execute(json!({ "command": "echo hi" })).await.unwrap();
+        assert_eq!(result["approval"], "policy_denied");
     }
 
     #[tokio::test]
