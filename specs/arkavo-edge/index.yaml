@@ -754,7 +754,7 @@ components:
     module: arkavo_edge::security::network
     description: Network security and secure defaults
     criticality: critical
-    scenario_count: 18
+    scenario_count: 20
     invariants:
       - Localhost binding by default
       - Authentication always required
@@ -1024,7 +1024,7 @@ components:
 
 stats:
   total_specs: 87
-  total_scenarios: 842
+  total_scenarios: 844
   critical_scenarios: 263
   coverage_areas:
     - authentication

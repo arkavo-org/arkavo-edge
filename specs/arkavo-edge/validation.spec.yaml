@@ -85,13 +85,15 @@ scenarios:
       - Cloud metadata IPs blocked (169.254.169.254)
       - Localhost blocked for external requests
       - Public IPs allowed
-    refs: [crates/arkavo-validation/src/url.rs]
-    changed: "2026-03-19"
+    refs: [crates/arkavo-validation/src/url.rs:54-147, crates/arkavo-validation/src/egress_policy.rs]
+    changed: "2026-09-29"
     edge_cases:
       - condition: DNS resolves to private IP
         expected: Blocked after resolution
       - condition: IPv6 mapped IPv4 private
         expected: Detected and blocked
+      - condition: NAT64 or IPv4-mapped form of a blocked IPv4 address
+        expected: Blocked
 
   - id: VAL-006
     name: Host validation

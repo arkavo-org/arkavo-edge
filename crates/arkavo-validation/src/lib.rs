@@ -1,9 +1,13 @@
+pub mod egress_client;
+pub mod egress_policy;
 pub mod external_content;
 pub mod path;
 pub mod sanitize;
 pub mod size;
 pub mod url;
 
+pub use egress_client::{EgressClient, EgressClientBuilder};
+pub use egress_policy::{EGRESS_ALLOW_ENV, EgressPolicy};
 pub use external_content::{BoundedContent, ContentBoundary};
 pub use path::{
     PathValidationError, current_workspace_root, resolve_through_existing_ancestors,

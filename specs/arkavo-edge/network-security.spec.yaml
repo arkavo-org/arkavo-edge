@@ -112,15 +112,23 @@ scenarios:
     issue: "Not in the default build: EgressFilter (crates/arkavo-validation/src/url.rs, covered as a library by VAL-005) is consulted only by secure_http::SecureClient in arkavo-cli, which has no caller, and by EgressGuard, which ships behind the non-default taint feature. Carries the former invariant 'Egress to private/metadata IPs is blocked by default'. Putting the filter on every default request path belongs to the baseline outbound enforcement delivery in docs/swarm-trust-model.md."
     given:
       - Agent attempts to fetch a URL via browsing or tool call
-      - URL resolves to private IP or cloud metadata endpoint
+      - URL names, or resolves to, a private, local or cloud metadata address
     when: Outbound connection is initiated
     then:
-      - Connection is BLOCKED by default
-      - Blocked ranges include 169.254.169.254, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8
-      - Explicit allowlist can override for known-safe internal services
-      - Log entry shows "SSRF attempt blocked"
-    refs: [crates/arkavo-validation/src/url.rs:1-118]
+      - Connection is BLOCKED by default, before a socket to the address is opened
+      - Blocked ranges include 169.254.169.254, 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4, ::/96, fc00::/7, fe80::/10, ff00::/8, and the IPv4-mapped and NAT64 forms of every IPv4 range
+      - Every HTTP request a tool makes goes through EgressClient; tool crates cannot build a raw reqwest client (crate clippy.toml)
+      - Only an operator ARKAVO_EGRESS_ALLOW origin overrides a block (NET-018)
+      - The refusal reads "SSRF attempt blocked"
+    refs: [crates/arkavo-validation/src/url.rs:54-147, crates/arkavo-validation/src/egress_policy.rs:73-90, crates/arkavo-validation/src/egress_client.rs:67-92, crates/arkavo-mcp-tools/clippy.toml]
     changed: "2026-09-29"
+    edge_cases:
+      - condition: Decimal or hex IPv4 host (http://2130706433/, http://0x7f.1/)
+        expected: Normalised to 127.0.0.1 and blocked
+      - condition: Non-http(s) scheme
+        expected: Refused
+      - condition: Out-of-process egress (Chrome redirects, shell subprocesses, MCP servers)
+        expected: Not covered by EgressClient; NET-019 (wip)
 
   - id: NET-008
     name: Ephemeral setup token (secure first-run)
@@ -217,10 +225,11 @@ scenarios:
       - URL contains hostname (not raw IP)
     when: DNS resolution occurs
     then:
-      - Resolved IP is checked BEFORE connection is made
-      - Time-of-check/time-of-use mitigated by re-checking at connect
-      - DNS rebinding during connection is blocked
-    refs: [crates/arkavo-validation/src/url.rs:112-117]
+      - The client's resolver checks every address DNS returns, and the connection uses only those addresses, so no second lookup can answer differently
+      - A mixed public/private answer is refused, not filtered
+      - IP-literal hosts, which skip the resolver, are checked from the URL before the request exists
+      - Every redirect hop is re-checked the same way
+    refs: [crates/arkavo-validation/src/egress_client.rs:31-58, crates/arkavo-validation/src/egress_policy.rs:92-131]
     changed: "2026-09-29"
 
   - id: NET-015
@@ -288,6 +297,35 @@ scenarios:
       - condition: TLS handshake failure
         expected: Log shows "TLS error" with certificate details
     changed: "2025-01-31"
+
+  - id: NET-018
+    name: Operator allowlist for private egress destinations
+    criticality: high
+    given:
+      - An agent legitimately needs a private destination, such as a dev server under test on localhost
+      - The operator sets ARKAVO_EGRESS_ALLOW on the machine running the agent
+    when: A tool requests a URL on that origin
+    then:
+      - Entries are bare http(s) origins; the exemption covers that host and port only
+      - A host is exempt in the form written (localhost and 127.0.0.1 are separate entries)
+      - A malformed entry makes every egress client fail to build, naming the entry
+      - Nothing an agent, manifest or peer supplies can add an entry
+      - HTTP(S)_PROXY is not honoured on this path, because a proxy resolves the target out of the policy's sight
+    refs: [crates/arkavo-validation/src/egress_policy.rs:15-71, crates/arkavo-validation/src/egress_policy.rs:133-185]
+    changed: "2026-09-29"
+
+  - id: NET-019
+    name: Egress from network stacks outside the agent's HTTP client
+    criticality: high
+    wip: true
+    issue: "Owned by the egress broker workstream; EgressClient covers in-process reqwest only"
+    given:
+      - A tool hands the network to another process (Chrome via browser_cdp, sh via shell_exec, git and gh, an external MCP server)
+    when: That process connects
+    then:
+      - Its connections are judged by the same policy as EgressClient (NET-007, NET-014, NET-018)
+      - Chrome redirects, subresources and script-initiated fetches are covered, not only the first navigation
+      - The DNS answer that process connects with is the one judged
 
   - id: NET-021
     name: The agent listener is exposed only by an explicit listen address
