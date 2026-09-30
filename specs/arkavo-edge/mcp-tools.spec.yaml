@@ -130,6 +130,7 @@ scenarios:
       - Exit code returned
       - Every pipeline and chain segment is classified, not only the first word
       - Exec-wrappers and interpreters are never auto-approved
+      - Caller environment map is validated against loader, tool-hijack and config-redirect variables
     refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs]
     changed: "2026-09-29"
     edge_cases:
@@ -233,4 +234,17 @@ scenarios:
       - env and printenv are not auto-approved, because they print the inherited environment
       - A segment naming /proc is not auto-approved, because /proc/<pid>/environ exposes the agent's environment
     refs: [crates/arkavo-mcp-tools/src/shell_exec/classifier.rs]
+    changed: "2026-09-29"
+
+  - id: MCP-014
+    name: Shell command environment map is validated
+    criticality: high
+    given:
+      - shell_exec called with an env map
+    when: The map names a variable that changes how the shell, loader or a tool resolves code or configuration
+    then:
+      - The whole call is refused with approval policy_denied, whatever the command's classification
+      - Loader, shell-init, pager, editor, git, interpreter-hook, toolchain-selector and home or config-directory variables are refused (PATH, LD_*, DYLD_*, BASH_ENV, GIT_*, LESSOPEN, PAGER, EDITOR, VISUAL, HOME, XDG_CONFIG_HOME, JAVA_TOOL_OPTIONS, RIPGREP_CONFIG_PATH, RUSTUP_*, GOTOOLCHAIN)
+      - Other variables are passed to the command
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs]
     changed: "2026-09-29"
