@@ -279,7 +279,7 @@ fn to_runtime_mcp_server(s: &McpServerConfig) -> RuntimeMcpServer {
 /// The parser starts every agent at the built-in default, so an address
 /// equal to it is one the file did not choose. Writing it into the kit would
 /// pin the migrated agent to that address: the kit would keep it if the
-/// default changed, and an agent started with `--trust` would report
+/// default changed, and an agent started with `--bind` would report
 /// overriding an address nobody asked for. A file that names the default
 /// explicitly migrates the same way; it listens on the same address either
 /// way.

@@ -18,7 +18,7 @@ use jsonrpsee::types::error::METHOD_NOT_FOUND_CODE;
     "agent '{agent_id}' at {endpoint} does not serve {method}. An agent serves its kit \
      configuration only when it listens on a loopback address, because the endpoint does not \
      authenticate callers. Edit the kit file on the agent's machine, or restart the agent on \
-     loopback: with --trust, or with runtime.listen: \"127.0.0.1:0\" in the kit"
+     loopback: with --bind 127.0.0.1, or with runtime.listen: \"127.0.0.1:0\" in the kit"
 )]
 pub struct KitConfigNotServed {
     pub agent_id: String,
@@ -89,7 +89,8 @@ mod tests {
         assert!(message.contains(endpoint), "{message}");
         assert!(message.contains("loopback"), "{message}");
         assert!(message.contains("runtime.listen"), "{message}");
-        assert!(message.contains("--trust"), "{message}");
+        assert!(message.contains("--bind 127.0.0.1"), "{message}");
+        assert!(!message.contains("--trust"), "{message}");
         assert!(!message.contains("Method not found"), "{message}");
     }
 
