@@ -131,7 +131,7 @@ Agents discover each other automatically using **mDNS** (multicast DNS), also kn
 
 By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS. Its RPC endpoint is not authenticated yet, so run it on networks you trust.
 
-`--trust` keeps an agent on this machine: it listens on `127.0.0.1` and is not announced on the network, and agents on the same machine still discover it. A kit can pin an address with `runtime.listen`:
+`--bind 127.0.0.1` keeps an agent on this machine: it listens on loopback and is not announced on the network, and agents on the same machine still discover it. A kit can pin an address with `runtime.listen`:
 
 ```yaml
 runtime:

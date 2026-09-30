@@ -41,7 +41,7 @@ OpenClaw and Arkavo use different terminology for similar concepts. This table h
 
 | OpenClaw concept | Arkavo Edge equivalent | Notes |
 |---|---|---|
-| Gateway (daemon on port 18789) | Arkavo agent process (ports 8340+) | Both are long-running processes. An Arkavo agent listens on every interface by default; `--trust` keeps it on loopback |
+| Gateway (daemon on port 18789) | Arkavo agent process (ports 8340+) | Both are long-running processes. An Arkavo agent listens on every interface by default; `--bind 127.0.0.1` keeps it on loopback |
 | `SKILL.md` with YAML frontmatter | `AGENTS.md` with YAML frontmatter | Similar format. Arkavo agents combine capabilities (KAS, preflight, A2A) in one config |
 | `SOUL.md` (personality) | Agent purpose field + system prompt | Less separation in Arkavo; personality is part of agent config |
 | `MEMORY.md` (long-term memory) | SQLite-backed persistent memory | Arkavo persists learned adjustments to encrypted local storage; OpenClaw stored memory as plaintext Markdown |
@@ -254,7 +254,7 @@ These aren't bolt-on features. They're architectural decisions that OpenClaw can
 
 **OpenClaw**: Default bind is `0.0.0.0:18789`, exposing the API to all network interfaces. Censys found 30,000+ publicly exposed instances. CVE-2026-25253 allowed unauthenticated WebSocket connections to execute arbitrary commands.
 
-**Arkavo**: By default an agent is discoverable and reachable on the local network: it listens on every interface on an OS-assigned port and announces itself over mDNS. Its RPC endpoint is not authenticated yet, so run it on networks you trust. `--trust` keeps an agent on this machine, and a kit can pin an address with `runtime.listen`. The methods that read and replace the kit are served only on a loopback endpoint, and the web UI gateway listens on loopback unless `ARKAVO_AGUI_BIND` says otherwise.
+**Arkavo**: By default an agent is discoverable and reachable on the local network: it listens on every interface on an OS-assigned port and announces itself over mDNS. Its RPC endpoint is not authenticated yet, so run it on networks you trust. `--bind 127.0.0.1` keeps an agent on this machine, and a kit can pin an address with `runtime.listen`. The methods that read and replace the kit are served only on a loopback endpoint, and the web UI gateway listens on loopback unless `ARKAVO_AGUI_BIND` says otherwise.
 
 ### Supply chain
 

@@ -166,7 +166,7 @@ runtime:
       args: []
 ```
 
-Without `runtime.listen` an agent listens on every interface (`0.0.0.0`, OS-assigned port) and announces itself over mDNS, so by default it is discoverable and reachable on the local network. The RPC endpoint is not authenticated yet, so run it on networks you trust. `--trust` keeps an agent on this machine: it listens on `127.0.0.1`, keeps the port that `runtime.listen` or `-p` selects, and is not announced on the network. A kit can pin an address with `runtime.listen`.
+Without `runtime.listen` an agent listens on every interface (`0.0.0.0`, OS-assigned port) and announces itself over mDNS, so by default it is discoverable and reachable on the local network. The RPC endpoint is not authenticated yet, so run it on networks you trust. `--bind 127.0.0.1` keeps an agent on this machine: it listens on loopback, keeps the port that `-p` or `runtime.listen` selects, and is not announced on the network. A kit can pin an address with `runtime.listen`; `--bind` overrides it.
 
 `arkavo kit migrate-from-agents-md` writes `runtime.listen` only when the AGENTS.md names a listen address other than the default. A file with no `listen` line migrates to a kit without `runtime.listen`, so the default applies.
 
