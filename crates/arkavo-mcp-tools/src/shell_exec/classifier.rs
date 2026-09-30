@@ -6,8 +6,9 @@
 //! every segment of the pipeline and refuses to bless a command that can hand
 //! control to an unlisted program.
 
+use super::args::{arguments_stay_inside, long_option, option_words, short_option};
 use super::blocklist::{check_blocklist, check_injection};
-use super::redirect::redirections_within_root;
+use super::redirect::{redirections_within_root, without_redirections};
 use std::path::Path;
 
 /// Result of command classification for auto-approval
@@ -32,7 +33,8 @@ const SAFE_BASE: &[&str] = &[
 ];
 
 /// Programs that launch or become another command. Never auto-approved as a
-/// segment base, and never eligible for the version-flag shortcut.
+/// segment base, except for the fixed probes in PACKAGE_INFO and
+/// VERSION_PROBE_OK.
 const EXEC_DENY: &[&str] = &[
     // interpreters
     "sh",
@@ -155,6 +157,14 @@ const PACKAGE_INFO: &[&str] = &[
     "gem list",
 ];
 
+/// Tools whose `--version` only prints a version. A fixed set: any other bare
+/// name runs whatever PATH resolves it to (`curl`, a planted binary), and
+/// `-v` is not a version flag everywhere.
+const VERSION_PROBE_OK: &[&str] = &[
+    "cargo", "rustc", "rustup", "node", "npm", "python3", "python", "pip", "go", "java", "javac",
+    "clang", "gcc", "make", "cmake", "git", "docker", "kubectl", "deno", "bun",
+];
+
 pub(super) fn classify(command: &str, root: &Path, cwd: &Path) -> ApprovalResult {
     let cmd_lower = command.to_lowercase();
     let cmd_trimmed = command.trim();
@@ -226,12 +236,16 @@ fn segment_safe(seg: &str, root: &Path, cwd: &Path) -> bool {
     if !redirections_within_root(seg, root, cwd) {
         return false;
     }
-    // `/proc/<pid>/environ` of the `sh -c` parent is the agent's own
-    // environment, provider keys included, and same-UID reads are allowed.
-    // Quotes are removed first so `/pr''oc` is caught, but a string check
-    // stops literal spellings only (a glob such as `/pro[c]` still reaches
-    // it); the broker holding the keys closes it.
-    if seg.replace(['\'', '"'], "").contains("/proc") {
+    // An expansion's value is not in the string: `$KEY` prints the agent's
+    // environment and `/pr${X}oc` builds a path no check can read. `%` expands
+    // the same way under `cmd /C`.
+    if seg.contains('$') || (cfg!(windows) && seg.contains('%')) {
+        return false;
+    }
+    // Arguments stay inside the working tree: no absolute or home path, no
+    // `..`, no glob that can match `..` (this is what keeps `/proc/*/environ`
+    // and `~/.ssh` out). Redirection targets were judged against the root.
+    if !arguments_stay_inside(&without_redirections(seg)) {
         return false;
     }
     let Some(base_raw) = seg.split_whitespace().next() else {
@@ -244,7 +258,7 @@ fn segment_safe(seg: &str, root: &Path, cwd: &Path) -> bool {
         return false;
     }
     // Before the interpreter list: `python --version` only prints a version.
-    if is_package_info(seg) {
+    if is_package_info(seg) || is_version_probe(seg) {
         return true;
     }
     if EXEC_DENY.contains(&base.as_str()) {
@@ -262,18 +276,16 @@ fn segment_safe(seg: &str, root: &Path, cwd: &Path) -> bool {
         });
     }
 
-    if SAFE_BASE.contains(&base.as_str()) {
-        return !runs_or_writes(&base, seg);
-    }
-    is_version_probe(base_raw, seg)
+    SAFE_BASE.contains(&base.as_str()) && !runs_or_writes(&base, seg)
 }
 
 /// Options that turn a safe-listed base into one that runs a program or
 /// writes a file: ripgrep's `--pre`/`--pre-glob` preprocessors and
 /// `--hostname-bin`, `sort -o`/`--output`/`--compress-program`, `uniq`'s
-/// OUTPUT operand, `tree -o`/`-R` and `less`'s log files.
+/// OUTPUT operand, `tree -o`/`-R`, `less`'s log files and `file -C`, which
+/// compiles `magic.mgc` into the working directory.
 fn runs_or_writes(base: &str, seg: &str) -> bool {
-    if !matches!(base, "rg" | "sort" | "uniq" | "tree" | "less") {
+    if !matches!(base, "rg" | "sort" | "uniq" | "tree" | "less" | "file") {
         return false;
     }
     let Some(words) = option_words(seg) else {
@@ -298,60 +310,25 @@ fn runs_or_writes(base: &str, seg: &str) -> bool {
                 || long_option(a, "--LOG-FILE")
                 || short_option(a, &['o', 'O'])
         }),
+        "file" => args
+            .iter()
+            .any(|a| long_option(a, "--compile") || short_option(a, &['C'])),
         _ => false,
     }
 }
 
-/// The words of `seg` as the program receives them, for the bases whose
-/// options are checked. Quotes are removed, so `-e''xec` is judged as
-/// `-exec` (a backslash never gets here; `classify` refuses it). `None` when
-/// a word can still change at run time: a `$` expansion, whose value the
-/// caller's env map can choose, or a bash brace expansion such as `-{exec,}`.
-fn option_words(seg: &str) -> Option<Vec<String>> {
-    seg.split_whitespace()
-        .map(|word| {
-            let braces = word.contains('{') && (word.contains(',') || word.contains(".."));
-            (!word.contains('$') && !braces).then(|| word.replace(['\'', '"'], ""))
-        })
-        .collect()
-}
-
-/// Whether `arg` is the long option `name`, or a GNU-style abbreviation of it
-/// (getopt_long accepts any unambiguous prefix), with or without `=value`.
-fn long_option(arg: &str, name: &str) -> bool {
-    let given = arg.split('=').next().unwrap_or(arg);
-    given.len() > 2 && given.starts_with("--") && name.starts_with(given)
-}
-
-/// Whether `arg` is a cluster of short options (`-nro`) containing one of
-/// `letters`.
-fn short_option(arg: &str, letters: &[char]) -> bool {
-    arg.len() > 1
-        && arg.starts_with('-')
-        && !arg.starts_with("--")
-        && arg[1..].chars().any(|c| letters.contains(&c))
-}
-
-/// `<tool> --version` / `-v` / `-V`, exactly two tokens, tool a bare name.
-/// `segment_safe` has already refused paths and `EXEC_DENY` names.
-fn is_version_probe(base_raw: &str, seg: &str) -> bool {
-    let toks: Vec<&str> = seg.split_whitespace().collect();
-    if toks.len() != 2 {
-        return false;
-    }
-    let flag = toks[1].to_lowercase();
-    if !matches!(flag.as_str(), "--version" | "-v") {
-        return false;
-    }
-    base_raw
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+/// `<tool> --version` for a tool in VERSION_PROBE_OK, and nothing more.
+fn is_version_probe(seg: &str) -> bool {
+    let words: Vec<String> = seg.split_whitespace().map(str::to_lowercase).collect();
+    matches!(words.as_slice(), [tool, flag]
+        if flag == "--version" && VERSION_PROBE_OK.contains(&tool.as_str()))
 }
 
 /// Read-only git: subcommand in GIT_READ_SUBCMDS, no top-level `-c` config
 /// override and no output-redirecting flag; `config`/`branch`/`remote` must
 /// stay in their read forms. The read flag must lead: `git config` takes a
 /// later `--get` as a value pattern, and `git remote -v` a subcommand.
+/// `git remote show` contacts the remote, so only the local listings pass.
 fn git_read_only(toks: &[String]) -> bool {
     // toks[0] == "git"; a global option such as -C or --git-dir in toks[1] is
     // not a read subcommand, so it is refused here too.
@@ -371,7 +348,7 @@ fn git_read_only(toks: &[String]) -> bool {
             .iter()
             .all(|t| GIT_BRANCH_READ_FLAGS.contains(&t.as_str())),
         "remote" => match toks.get(2).map(|s| s.to_lowercase()).as_deref() {
-            None | Some("show" | "get-url") => true,
+            None | Some("get-url") => true,
             Some("-v") => toks.len() == 3,
             _ => false,
         },
@@ -757,7 +734,8 @@ mod tests {
         }
         // Quoted arguments that name no option stay approved.
         assert_eq!(verdict("find . -name '*.rs'"), ApprovalResult::AutoApproved);
-        assert_eq!(verdict("echo $HOME"), ApprovalResult::AutoApproved);
+        // Any expansion is refused, so even a plain `echo $HOME` goes to review.
+        assert_eq!(verdict("echo $HOME"), ApprovalResult::RequiresReview);
     }
 
     /// Regression: a bare `version` operand is not a version flag. `crontab
@@ -796,5 +774,144 @@ mod tests {
         );
         assert_eq!(verdict("grep -r \"a|b\" ."), ApprovalResult::AutoApproved); // pipe inside quotes
         assert_eq!(verdict("git diff HEAD"), ApprovalResult::AutoApproved);
+    }
+    fn assert_not_approved(cmds: &[&str]) {
+        for cmd in cmds {
+            assert_ne!(
+                verdict(cmd),
+                ApprovalResult::AutoApproved,
+                "{cmd} must not be auto-approved"
+            );
+        }
+    }
+
+    fn assert_approved(cmds: &[&str]) {
+        for cmd in cmds {
+            assert_eq!(
+                verdict(cmd),
+                ApprovalResult::AutoApproved,
+                "{cmd} stays auto-approved"
+            );
+        }
+    }
+
+    /// Regression: a `$` expansion printed or opened the agent's environment
+    /// (`echo $ANTHROPIC_API_KEY`), and built a `/proc` path the literal check
+    /// could not see. No expansion is auto-approved.
+    #[spec("MCP-013")]
+    #[test]
+    fn expansion_cannot_read_the_environment() {
+        assert_not_approved(&[
+            "echo $ANTHROPIC_API_KEY",
+            "echo \"${X}\"",
+            "echo ${FAKE_PROVIDER_KEY}",
+            "cat $P/$PPID/environ",
+            "cat /pr${X}oc/$PPID/environ",
+            "grep 'foo$' src/lib.rs",
+        ]);
+    }
+
+    /// Regression: safe-listed readers took any path, so the agent's keys and
+    /// files beside the workspace were auto-approved reads.
+    #[spec("MCP-013")]
+    #[test]
+    fn arguments_cannot_name_paths_outside_the_working_tree() {
+        assert_not_approved(&[
+            "cat ~/.ssh/id_rsa",
+            "cat ~/.aws/credentials",
+            "head ~/.ssh/id_rsa",
+            "grep . ~/.aws/credentials",
+            "less ~/.ssh/id_rsa",
+            "cat /etc/passwd",
+            "head /etc/passwd",
+            "grep . /etc/passwd",
+            "less /etc/passwd",
+            "cut -d: -f1 /etc/passwd",
+            "stat /etc/passwd",
+            "cat ../outside",
+            "cat ../outside_secret.txt",
+            "ls ..",
+            "grep -r KEY ./..",
+            "cat sub/../../x",
+            "cat '/etc/passwd'",
+            "cat /etc/passwd>out.txt",
+            // Values glued to an option or listed after `=` or `:`.
+            "grep -f/etc/passwd x",
+            "grep --file=/etc/passwd x",
+            "grep -f~/x y",
+            "file -m a:/etc/passwd x",
+            "cat {..,x}/secret",
+        ]);
+        assert_approved(&[
+            "cat src/lib.rs",
+            "cut -d: -f1 f",
+            "git log HEAD~1",
+            "ls ./src",
+        ]);
+    }
+
+    /// Regression: a glob reached `/proc` without spelling it, and a glob in a
+    /// dot-led component can match `..`.
+    #[spec("MCP-013")]
+    #[test]
+    fn globs_cannot_reach_outside_the_working_tree() {
+        assert_not_approved(&[
+            "cat /pr?c/self/environ",
+            "cat /pro[c]/self/environ",
+            "cat .*/secret",
+            "ls x/.?",
+            "cat .[.]*/secret",
+        ]);
+        assert_approved(&["ls *.rs", "grep foo src/*.rs", "find . -name '*.rs'"]);
+    }
+
+    /// Regression: `git remote show` contacts the remote, and the URL may be
+    /// given on the command line.
+    #[spec("MCP-013")]
+    #[test]
+    fn git_remote_show_is_not_auto_approved() {
+        assert_not_approved(&[
+            "git remote show http://attacker/x.git",
+            "git remote show origin",
+            "git remote show",
+        ]);
+        assert_approved(&["git remote", "git remote -v", "git remote get-url origin"]);
+    }
+
+    /// Regression: `file -C` compiles the magic file into `magic.mgc` in the
+    /// working directory.
+    #[spec("MCP-013")]
+    #[test]
+    fn file_compile_is_not_auto_approved() {
+        assert_not_approved(&[
+            "file -C -m /etc/passwd",
+            "file -C -m magic",
+            "file -bC -m magic",
+            "file --compile -m magic",
+        ]);
+        assert_approved(&["file src/lib.rs", "file -b src/lib.rs"]);
+    }
+
+    /// Regression: any bare name followed by `--version` or `-v` ran whatever
+    /// PATH resolved it to (`curl --version`), and `-v` is not a version flag
+    /// everywhere. Only a fixed set of tools, with `--version`, is a probe.
+    #[spec("MCP-013")]
+    #[test]
+    fn version_probe_is_a_fixed_set_with_long_flag() {
+        assert_not_approved(&[
+            "curl --version",
+            "wget -v",
+            "curl -v",
+            "evilbin --version",
+            "node -v",
+            "clang -v",
+        ]);
+        assert_approved(&[
+            "rustc --version",
+            "rustup --version",
+            "git --version",
+            "make --version",
+            "gcc --version",
+        ]);
     }
 }

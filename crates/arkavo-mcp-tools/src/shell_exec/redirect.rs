@@ -5,14 +5,20 @@ use std::path::Path;
 /// Descriptor targets that discard output; writing to them changes nothing.
 const DISCARD_TARGETS: &[&str] = &["/dev/null", "NUL", "nul"];
 
-/// Every file redirection in `seg` must name a literal path that resolves
-/// inside `root`, symlinks followed. The shell treats an unquoted `<` or `>`
-/// as a redirection wherever it appears, glued to a word (`echo hi>out`) or
-/// not, so the scan is character-level and quote-aware rather than per
-/// whitespace token. A pure descriptor duplication (`2>&1`, `>&-`) names no
-/// file; `>&word` with any other word redirects to that file.
-pub(super) fn redirections_within_root(seg: &str, root: &Path, cwd: &Path) -> bool {
-    let chars: Vec<char> = seg.chars().collect();
+/// A redirection operator with the word it applies to: `span` covers both,
+/// in char offsets into the segment.
+struct Redirection {
+    span: std::ops::Range<usize>,
+    target: String,
+    duplicates: bool,
+}
+
+/// Every redirection in `seg`. The shell treats an unquoted `<` or `>` as a
+/// redirection wherever it appears, glued to a word (`echo hi>out`) or not,
+/// so the scan is character-level and quote-aware rather than per whitespace
+/// token.
+fn redirections(chars: &[char]) -> Vec<Redirection> {
+    let mut found = Vec::new();
     let mut quote: Option<char> = None;
     let mut i = 0;
     while i < chars.len() {
@@ -33,6 +39,7 @@ pub(super) fn redirections_within_root(seg: &str, root: &Path, cwd: &Path) -> bo
             i += 1;
             continue;
         }
+        let op = i;
         while i < chars.len() && matches!(chars[i], '<' | '>') {
             i += 1;
         }
@@ -47,17 +54,36 @@ pub(super) fn redirections_within_root(seg: &str, root: &Path, cwd: &Path) -> bo
         while i < chars.len() && !chars[i].is_whitespace() && !matches!(chars[i], '<' | '>') {
             i += 1;
         }
-        let target: String = chars[start..i].iter().collect();
-        let names_descriptor =
-            target == "-" || (!target.is_empty() && target.chars().all(|d| d.is_ascii_digit()));
-        if duplicates && names_descriptor {
-            continue;
-        }
-        if !literal_target_within_root(&target, root, cwd) {
-            return false;
-        }
+        found.push(Redirection {
+            span: op..i,
+            target: chars[start..i].iter().collect(),
+            duplicates,
+        });
     }
-    true
+    found
+}
+
+/// Every file redirection in `seg` must name a literal path that resolves
+/// inside `root`, symlinks followed. A pure descriptor duplication (`2>&1`,
+/// `>&-`) names no file; `>&word` with any other word redirects to that file.
+pub(super) fn redirections_within_root(seg: &str, root: &Path, cwd: &Path) -> bool {
+    let chars: Vec<char> = seg.chars().collect();
+    redirections(&chars).iter().all(|r| {
+        let names_descriptor = r.target == "-"
+            || (!r.target.is_empty() && r.target.chars().all(|d| d.is_ascii_digit()));
+        (r.duplicates && names_descriptor) || literal_target_within_root(&r.target, root, cwd)
+    })
+}
+
+/// `seg` with each redirection and its target blanked out, leaving the words
+/// the program receives as arguments. Targets are judged above, against the
+/// root, so the argument rules must not see them.
+pub(super) fn without_redirections(seg: &str) -> String {
+    let mut chars: Vec<char> = seg.chars().collect();
+    for r in redirections(&chars) {
+        chars[r.span].fill(' ');
+    }
+    chars.into_iter().collect()
 }
 
 /// `cmd /C` has no single-quote quoting: `echo it's > C:\x` really redirects,
@@ -162,6 +188,23 @@ mod tests {
             let seg = format!("ls > {target}");
             assert!(!redirections_within_root(&seg, &root, &root), "{seg}");
         }
+    }
+
+    #[test]
+    fn stripping_leaves_only_argument_words() {
+        assert_eq!(
+            without_redirections("cat /etc/passwd>out.txt 2>&1")
+                .split_whitespace()
+                .collect::<Vec<_>>(),
+            ["cat", "/etc/passwd", "2"]
+        );
+        assert_eq!(
+            without_redirections("echo \"a > b\" > /abs/in/root")
+                .split_whitespace()
+                .collect::<Vec<_>>(),
+            ["echo", "\"a", ">", "b\""]
+        );
+        assert_eq!(without_redirections("ls"), "ls");
     }
 
     #[test]

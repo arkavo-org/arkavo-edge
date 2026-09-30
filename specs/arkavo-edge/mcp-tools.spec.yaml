@@ -227,15 +227,25 @@ scenarios:
       - Every pipeline segment must be a read-only command for the call to be auto-approved
       - Exec wrappers and interpreters (env, xargs, nohup, sh, python, awk) are never auto-approved
       - find with an action predicate (-exec, -execdir, -ok, -delete, -fprint) is not auto-approved
-      - Safe-listed bases lose approval when given options that run a program or write a file (rg --pre, sort -o, uniq OUTPUT, tree -o, less -o)
+      - Safe-listed bases lose approval when given options that run a program or write a file (rg --pre, sort -o, uniq OUTPUT, tree -o, less -o, file -C)
       - Background '&', carriage return and other control characters are blocked as chaining
-      - The version shortcut applies only to --version or -v after a bare tool name that is not an interpreter or wrapper; a bare version operand is not a version flag
-      - On unix, a command containing a backslash is not auto-approved, and option checks see words with quotes removed; a word with a $ or brace expansion is not auto-approved for find, rg, sort, uniq, tree, less or git
-      - Git is auto-approved only for read subcommands without -c or --output
+      - The version shortcut is only `<tool> --version` for a fixed set of toolchain names (cargo, rustc, rustup, node, npm, python, python3, pip, go, java, javac, clang, gcc, make, cmake, git, docker, kubectl, deno, bun); -v and any other name are not probes, and a bare version operand is not a version flag
+      - A segment containing $ (or % under cmd /C) is not auto-approved, because an expansion's value is not in the string and can print the agent's environment
+      - On unix, a command containing a backslash is not auto-approved, and option and path checks see words with quotes removed; a word with a brace expansion is not auto-approved
+      - No argument word, and no option value glued after an equals sign, after a colon or inside a short-option cluster, may start with / or ~ (or a drive letter or UNC prefix under cmd /C), contain a .. component, or put a glob (*, ?, [) in a component that starts with a dot; redirection targets are judged by MCP-015 instead
+      - Git is auto-approved only for read subcommands without -c or --output; git config only with a leading read action, and git remote only bare, as sole -v, or get-url
       - env and printenv are not auto-approved, because they print the inherited environment
-      - A segment naming /proc is not auto-approved, because /proc/<pid>/environ exposes the agent's environment
-    refs: [crates/arkavo-mcp-tools/src/shell_exec/classifier.rs]
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/shell_exec/args.rs, crates/arkavo-mcp-tools/src/shell_exec/redirect.rs]
     changed: "2026-09-29"
+    edge_cases:
+      - condition: A safe-listed reader given a path outside the working tree (cat ~/.ssh/id_rsa, stat /etc/passwd, cat ../x, grep --file=/etc/x, file -m a:/etc/x)
+        expected: RequiresReview
+      - condition: A glob or expansion that can reach /proc/<pid>/environ (cat /pr?c/self/environ, cat /pr${X}oc/$PPID/environ, cat .*/secret)
+        expected: RequiresReview
+      - condition: git remote show with a remote name or URL
+        expected: RequiresReview, because it contacts the network
+      - condition: A symlink inside the working tree that points outside it, named by a relative argument
+        expected: Not detected by these string rules; a residual owned by OS confinement
 
   - id: MCP-014
     name: Shell command environment map is restricted to an allowlist

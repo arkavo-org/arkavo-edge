@@ -8,6 +8,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 
+mod args;
 mod blocklist;
 mod classifier;
 mod redirect;
@@ -16,11 +17,11 @@ mod workdir;
 pub use classifier::ApprovalResult;
 
 /// Environment names a caller may set; anything else denies the call. This is
-/// an allowlist because auto-approved commands include arbitrary
-/// `<tool> --version` probes, and each tool has config, home, module-path or
-/// plugin variables that load code; those hooks cannot be enumerated, so a
-/// denylist always lags the tools. These names only affect display, locale,
-/// time zone and logging.
+/// an allowlist because auto-approved commands include `<tool> --version`
+/// probes and package listings across many toolchains, and each tool has
+/// config, home, module-path or plugin variables that load code; those hooks
+/// cannot be enumerated, so a denylist always lags the tools. These names
+/// only affect display, locale, time zone and logging.
 const ALLOW_ENV_EXACT: &[&str] = &[
     "LANG",
     "TZ",
@@ -683,9 +684,13 @@ mod tests {
         assert_eq!(result["approval"], "policy_denied");
     }
 
+    /// Regression: `echo $VAR` was auto-approved and printed the variable. A
+    /// listed name in the env map does not make an expansion approvable.
+    #[spec("MCP-013")]
     #[tokio::test]
     async fn test_execute_with_env() {
-        let tool = ShellExecTool::new();
+        let root = tempfile::tempdir().unwrap();
+        let tool = ShellExecTool::with_root(root.path());
         let params = json!({
             "command": "echo $TZ",
             "env": {
@@ -694,8 +699,26 @@ mod tests {
         });
 
         let result = tool.execute(params).await.unwrap();
-        assert_eq!(result["success"], true);
-        assert!(result["stdout"].as_str().unwrap().contains("test_value"));
+        assert_eq!(result["approval"], "policy_denied");
+        assert!(!result["stdout"].as_str().unwrap().contains("test_value"));
+    }
+
+    /// Regression: a safe-listed reader was auto-approved on a path beside the
+    /// workspace and returned its contents.
+    #[spec("MCP-013")]
+    #[tokio::test]
+    async fn reads_outside_the_root_are_denied_before_running() {
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("ws");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(outer.path().join("outside_secret.txt"), "SENTINEL").unwrap();
+        let tool = ShellExecTool::with_root(&root);
+        let absolute = format!("cat {}", outer.path().join("outside_secret.txt").display());
+        for command in ["cat ../outside_secret.txt", absolute.as_str()] {
+            let result = tool.execute(json!({ "command": command })).await.unwrap();
+            assert_eq!(result["approval"], "policy_denied", "{command}");
+            assert!(!result["stdout"].as_str().unwrap().contains("SENTINEL"));
+        }
     }
 
     const ALLOWED_ENV_NAMES: &[&str] = &[
@@ -855,13 +878,27 @@ mod tests {
     #[spec("MCP-014")]
     #[tokio::test]
     async fn listed_env_names_reach_the_command() {
-        let tool = ShellExecTool::new();
+        let root = tempfile::tempdir().unwrap();
+        let tool = ShellExecTool::with_root(root.path());
         for key in ALLOWED_ENV_NAMES {
-            let params =
-                json!({ "command": format!("echo \"${{{key}}}\""), "env": { *key: "test_value" } });
+            let params = json!({ "command": "echo hi", "env": { *key: "test_value" } });
             let result = tool.execute(params).await.unwrap();
             assert_eq!(result["approval"], "auto_approved", "{key}");
             assert_eq!(result["success"], true, "{key}");
+            // No `$` command is auto-approved, so the value is observed on
+            // the spawn path the approved command takes.
+            let env = HashMap::from([(key.to_string(), "test_value".to_string())]);
+            let (success, _, stdout, _, _) = tool
+                .execute_command(
+                    &format!("echo \"${{{key}}}\""),
+                    root.path(),
+                    10,
+                    Some(&env),
+                    true,
+                )
+                .await
+                .unwrap();
+            assert!(success && stdout.contains("test_value"), "{key}");
         }
     }
 
