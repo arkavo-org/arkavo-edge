@@ -239,7 +239,7 @@ ln -s /mnt/nvme/arkavo/models ~/.cache/arkavo/models
 
 Raspberry Pi 5 can participate in Arkavo mesh networks via mDNS, which is enabled by default.
 
-By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS, so agents on other devices find the Pi without configuration. The agent's RPC endpoint is not authenticated yet, so run it on networks you trust. `arkavo --trust` keeps the agent on the Pi itself.
+By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS, so agents on other devices find the Pi without configuration. The agent's RPC endpoint is not authenticated yet, so run it on networks you trust. `arkavo --bind 127.0.0.1` keeps the agent on the Pi itself.
 
 To give the agent a fixed port or a name, create a kit. A kit can pin an address with `runtime.listen`:
 

@@ -113,14 +113,14 @@ Send a running role work with `arkavo chat --agent-id <role-id>` or `arkavo task
 
 By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS, so roles on different devices find each other without configuration. The agent's RPC endpoint is not authenticated yet, so run it on networks you trust.
 
-`--trust` keeps an agent on this machine: it listens on `127.0.0.1` and is not announced on the network. A kit can pin an address with `runtime.listen`:
+`--bind 127.0.0.1` keeps an agent on this machine: it listens on loopback and is not announced on the network. A kit can pin an address with `runtime.listen`:
 
 ```yaml
 runtime:
   listen: "127.0.0.1:0"   # this machine only; -p still sets the port
 ```
 
-`--trust` keeps the port that `runtime.listen` or `-p` selects and keeps the agent on loopback whatever host the kit names.
+`--bind <address>` overrides the host the kit names, and says so on stderr. Without a port in the address it keeps the port that `-p` or `runtime.listen` selects; `--bind 127.0.0.1:8343` names both. `--trust` shows the agent's authorization QR code and does not change where it listens.
 
 ### Run a pipeline
 
@@ -172,7 +172,7 @@ The message metadata marks it as a step of a run:
 
 `step` and `attempt` count from 1. An agent that receives a message with a `pipeline` key in its metadata answers it on its own: outside its agent loop, with no conversation from earlier messages, and never as the start of a pipeline. If `timeout_ms` is set, the agent stops working on the step after that long and fails its task.
 
-The RPC endpoint does not authenticate callers, so the marker is not a credential: an agent accepts it from any caller that can reach the endpoint. By default that is the local network, so run a pipeline on a network you trust, or start its roles with `--trust` or a loopback `runtime.listen` when they all run on one machine.
+The RPC endpoint does not authenticate callers, so the marker is not a credential: an agent accepts it from any caller that can reach the endpoint. By default that is the local network, so run a pipeline on a network you trust, or start its roles with `--bind 127.0.0.1` or a loopback `runtime.listen` when they all run on one machine.
 
 #### The critic's verdict
 

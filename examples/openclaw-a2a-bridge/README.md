@@ -53,7 +53,7 @@ One command: builds Arkavo, launches the agent, runs the five-act competitive na
 
 The bridge calls the agent over plaintext HTTP at `localhost`. That traffic never leaves the machine, and TDF provides payload-level encryption regardless of transport.
 
-The agent itself listens on every interface by default, and its RPC endpoint is not authenticated and has no TLS yet, so run the demo on a network you trust. To keep the agent on this machine, start it with `--trust` or pin `runtime.listen: "127.0.0.1:8360"` in the kit.
+The agent itself listens on every interface by default, and its RPC endpoint is not authenticated and has no TLS yet, so run the demo on a network you trust. To keep the agent on this machine, start it with `--bind 127.0.0.1` or pin `runtime.listen: "127.0.0.1:8360"` in the kit.
 
 ## Files
 
