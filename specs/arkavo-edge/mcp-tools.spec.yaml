@@ -130,7 +130,7 @@ scenarios:
       - Exit code returned
       - Every pipeline and chain segment is classified, not only the first word
       - Exec-wrappers and interpreters are never auto-approved
-      - Caller environment map is validated against loader, tool-hijack and config-redirect variables
+      - Caller environment map is restricted to an allowlist of locale, time zone, terminal display and logging variables
       - Working directory and redirection targets are confined to the workspace root
     refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs]
     changed: "2026-09-29"
@@ -238,15 +238,16 @@ scenarios:
     changed: "2026-09-29"
 
   - id: MCP-014
-    name: Shell command environment map is validated
+    name: Shell command environment map is restricted to an allowlist
     criticality: high
     given:
       - shell_exec called with an env map
-    when: The map names a variable that changes how the shell, loader or a tool resolves code or configuration
+    when: The map names a variable outside the allowlist
     then:
       - The whole call is refused with approval policy_denied, whatever the command's classification
-      - Loader, shell-init, pager, editor, git, interpreter-hook, toolchain-selector and home or config-directory variables are refused (PATH, LD_*, DYLD_*, BASH_ENV, GIT_*, LESSOPEN, PAGER, EDITOR, VISUAL, HOME, XDG_CONFIG_HOME, JAVA_TOOL_OPTIONS, RIPGREP_CONFIG_PATH, RUSTUP_*, GOTOOLCHAIN)
-      - Other variables are passed to the command
+      - Only LANG, LC_*, TZ, TERM, COLUMNS, LINES, NO_COLOR, FORCE_COLOR, CLICOLOR, CLICOLOR_FORCE, RUST_BACKTRACE, RUST_LOG and CI are accepted, matched case-insensitively
+      - Every other name is refused, including PATH, LD_*, DYLD_*, GIT_*, HOME, PAGER, EDITOR and per-tool config, module-path and toolchain variables, because auto-approved version probes make per-tool hooks impossible to enumerate
+      - Listed variables are passed to the command
     refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs]
     changed: "2026-09-29"
 

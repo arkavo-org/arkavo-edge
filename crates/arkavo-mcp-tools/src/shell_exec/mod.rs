@@ -15,56 +15,27 @@ mod workdir;
 
 pub use classifier::ApprovalResult;
 
-/// Environment variables that change how the shell, loader or a common tool
-/// resolves and executes code, or where it reads its configuration. Present
-/// in the caller map, they deny the call.
-const DENY_ENV_EXACT: &[&str] = &[
-    "PATH",
-    "PATHEXT",
-    "COMSPEC",
-    "IFS",
-    "ENV",
-    "BASH_ENV",
-    "SHELLOPTS",
-    "BASHOPTS",
-    "GLOBIGNORE",
-    "PROMPT_COMMAND",
-    "PS1",
-    "PS4",
-    "LESSOPEN",
-    "LESSCLOSE",
-    "LESSKEY",
-    "PAGER",
-    "EDITOR",
-    "VISUAL",
-    // Where configuration is read from: git, ripgrep and others follow these.
-    "HOME",
-    "USERPROFILE",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "XDG_CONFIG_HOME",
-    "XDG_CONFIG_DIRS",
-    "RIPGREP_CONFIG_PATH",
-    // Interpreter hooks for the interpreters on the auto-approved version list.
-    "JAVA_TOOL_OPTIONS",
-    "_JAVA_OPTIONS",
-    "JDK_JAVA_OPTIONS",
-    "NODE_OPTIONS",
-    "PYTHONPATH",
-    "PYTHONHOME",
-    "PYTHONSTARTUP",
-    "RUBYOPT",
-    "PERL5OPT",
-    "PERL5LIB",
-    // Toolchain selectors: RUSTUP_TOOLCHAIN accepts a path, so a toolchain
-    // planted in the workspace would run as the auto-approved `cargo --version`;
-    // GOTOOLCHAIN/GOPROXY make `go version` fetch and run another toolchain.
-    "GOTOOLCHAIN",
-    "GOPROXY",
-    "GOSUMDB",
-    "GOFLAGS",
+/// Environment names a caller may set; anything else denies the call. This is
+/// an allowlist because auto-approved commands include arbitrary
+/// `<tool> --version` probes, and each tool has config, home, module-path or
+/// plugin variables that load code; those hooks cannot be enumerated, so a
+/// denylist always lags the tools. These names only affect display, locale,
+/// time zone and logging.
+const ALLOW_ENV_EXACT: &[&str] = &[
+    "LANG",
+    "TZ",
+    "TERM",
+    "COLUMNS",
+    "LINES",
+    "NO_COLOR",
+    "FORCE_COLOR",
+    "CLICOLOR",
+    "CLICOLOR_FORCE",
+    "RUST_BACKTRACE",
+    "RUST_LOG",
+    "CI",
 ];
-const DENY_ENV_PREFIX: &[&str] = &["LD_", "DYLD_", "GIT_", "BASH_FUNC_", "RUSTUP_"];
+const ALLOW_ENV_PREFIX: &[&str] = &["LC_"];
 
 /// Denial for a working directory the command may not start in.
 fn working_dir_denied(detail: &str) -> Value {
@@ -124,7 +95,7 @@ impl ShellExecTool {
                         },
                         "env": {
                             "type": "object",
-                            "description": "Environment variables to set for the command"
+                            "description": "Environment variables to set for the command. Only LANG, LC_*, TZ, TERM, COLUMNS, LINES, NO_COLOR, FORCE_COLOR, CLICOLOR, CLICOLOR_FORCE, RUST_BACKTRACE, RUST_LOG and CI are accepted; any other name refuses the call"
                         },
                         "capture_stderr": {
                             "type": "boolean",
@@ -142,17 +113,17 @@ impl ShellExecTool {
         classifier::classify(command, &self.root, &self.root)
     }
 
-    /// Refuse an env map that could redirect code loading or configuration.
-    /// Denying the whole call, instead of dropping the variable, keeps a
-    /// loader override from riding on an auto-approved command.
-    fn reject_dangerous_env(&self, env: &HashMap<String, String>) -> Option<String> {
+    /// Refuse an env map naming a variable outside the allowlist. Denying the
+    /// whole call, instead of dropping the variable, keeps a loader or
+    /// config override from riding on an auto-approved command.
+    fn reject_unpermitted_env(&self, env: &HashMap<String, String>) -> Option<String> {
         for key in env.keys() {
             let upper = key.to_ascii_uppercase();
-            if DENY_ENV_EXACT.contains(&upper.as_str())
-                || DENY_ENV_PREFIX.iter().any(|p| upper.starts_with(p))
-            {
+            let allowed = ALLOW_ENV_EXACT.contains(&upper.as_str())
+                || ALLOW_ENV_PREFIX.iter().any(|p| upper.starts_with(p));
+            if !allowed {
                 return Some(format!(
-                    "Environment variable '{key}' can redirect command resolution, configuration or code loading"
+                    "Environment variable '{key}' is not permitted; only locale, time zone, terminal display and logging variables may be set"
                 ));
             }
         }
@@ -293,7 +264,7 @@ impl Tool for ShellExecTool {
             });
 
         if let Some(env) = env_vars.as_ref()
-            && let Some(reason) = self.reject_dangerous_env(env)
+            && let Some(reason) = self.reject_unpermitted_env(env)
         {
             return Ok(json!({
                 "success": false,
@@ -716,9 +687,9 @@ mod tests {
     async fn test_execute_with_env() {
         let tool = ShellExecTool::new();
         let params = json!({
-            "command": "echo $MY_VAR",
+            "command": "echo $TZ",
             "env": {
-                "MY_VAR": "test_value"
+                "TZ": "test_value"
             }
         });
 
@@ -727,91 +698,145 @@ mod tests {
         assert!(result["stdout"].as_str().unwrap().contains("test_value"));
     }
 
+    const ALLOWED_ENV_NAMES: &[&str] = &[
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LC_MESSAGES",
+        "TZ",
+        "TERM",
+        "COLUMNS",
+        "LINES",
+        "NO_COLOR",
+        "FORCE_COLOR",
+        "CLICOLOR",
+        "CLICOLOR_FORCE",
+        "RUST_BACKTRACE",
+        "RUST_LOG",
+        "CI",
+        "lang",
+        "Lc_Time",
+        "rust_log",
+    ];
+
+    /// Every previously denied name, the hooks the review found on
+    /// auto-approved `pip list`, `gem list`, `go version` and `less`, and
+    /// arbitrary names. An allowlist refuses them all because the hooks of an
+    /// auto-approved `<tool> --version` probe cannot be enumerated.
+    const REFUSED_ENV_NAMES: &[&str] = &[
+        "PATH",
+        "PATHEXT",
+        "COMSPEC",
+        "IFS",
+        "ENV",
+        "BASH_ENV",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "GLOBIGNORE",
+        "PROMPT_COMMAND",
+        "PS1",
+        "PS4",
+        "LESSOPEN",
+        "LESSCLOSE",
+        "LESSKEY",
+        "PAGER",
+        "EDITOR",
+        "VISUAL",
+        "HOME",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "XDG_CONFIG_HOME",
+        "XDG_CONFIG_DIRS",
+        "RIPGREP_CONFIG_PATH",
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "JDK_JAVA_OPTIONS",
+        "NODE_OPTIONS",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "RUBYOPT",
+        "PERL5OPT",
+        "PERL5LIB",
+        "GOTOOLCHAIN",
+        "GOPROXY",
+        "GOSUMDB",
+        "GOFLAGS",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "DYLD_INSERT_LIBRARIES",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_EXEC_PATH",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_ASKPASS",
+        "GIT_PAGER",
+        "BASH_FUNC_x%%",
+        "RUSTUP_TOOLCHAIN",
+        "RUSTUP_HOME",
+        "PYTHONUSERBASE",
+        "GEM_HOME",
+        "GEM_PATH",
+        "RUBYLIB",
+        "BUNDLE_GEMFILE",
+        "BUNDLE_PATH",
+        "GOENV",
+        "GOPATH",
+        "GOMODCACHE",
+        "GOROOT",
+        "LESS",
+        "LESSGLOBALTAGS",
+        "MY_VAR",
+        "P",
+        "X",
+        "FOO",
+        "LCALL",
+        "LANGUAGE",
+        "TERMINFO",
+        "ld_preload",
+        "Home",
+        "",
+    ];
+
+    #[spec("MCP-014")]
+    #[test]
+    fn env_allowlist_admits_only_listed_names() {
+        let tool = ShellExecTool::new();
+        for key in ALLOWED_ENV_NAMES {
+            let env = HashMap::from([(key.to_string(), "x".to_string())]);
+            assert_eq!(tool.reject_unpermitted_env(&env), None, "{key}");
+        }
+        for key in REFUSED_ENV_NAMES {
+            let env = HashMap::from([(key.to_string(), "x".to_string())]);
+            assert!(tool.reject_unpermitted_env(&env).is_some(), "{key:?}");
+        }
+    }
+
     #[spec("MCP-014")]
     #[tokio::test]
-    async fn dangerous_env_vars_denied() {
+    async fn unlisted_env_names_deny_the_call() {
         let tool = ShellExecTool::new();
-        for key in [
-            "LD_PRELOAD",
-            "DYLD_INSERT_LIBRARIES",
-            "PATH",
-            "BASH_ENV",
-            "GIT_EXTERNAL_DIFF",
-            "GIT_CONFIG_COUNT",
-            "LESSOPEN",
-            "IFS",
-        ] {
-            let params = json!({ "command": "ls", "env": { key: "x" } });
+        for key in REFUSED_ENV_NAMES {
+            let params = json!({ "command": "ls", "env": { *key: "x" } });
             let result = tool.execute(params).await.unwrap();
-            assert_eq!(result["success"], false, "{key} should be denied");
+            assert_eq!(result["success"], false, "{key:?} should be denied");
             assert_eq!(
                 result["approval"], "policy_denied",
-                "{key} should be denied"
+                "{key:?} should be denied"
             );
         }
     }
 
-    /// Regression: `HOME` and `XDG_CONFIG_HOME` choose the gitconfig an
-    /// auto-approved `git status` reads, so a caller could point it at a planted
-    /// `core.fsmonitor` without setting any `GIT_*` variable. The JVM, ripgrep,
-    /// rustup and Go selectors reach the auto-approved `java -version`, `rg`,
-    /// `cargo --version` and `go version` the same way.
     #[spec("MCP-014")]
     #[tokio::test]
-    async fn config_directory_and_tool_hook_redirects_denied() {
-        let tool = ShellExecTool::new();
-        for key in [
-            "HOME",
-            "XDG_CONFIG_HOME",
-            "USERPROFILE",
-            "GIT_CONFIG_GLOBAL",
-            "JAVA_TOOL_OPTIONS",
-            "RIPGREP_CONFIG_PATH",
-            "RUSTUP_TOOLCHAIN",
-            "GOTOOLCHAIN",
-        ] {
-            let params = json!({ "command": "git status", "env": { key: "/tmp/planted" } });
-            let result = tool.execute(params).await.unwrap();
-            assert_eq!(
-                result["approval"], "policy_denied",
-                "{key} should be denied"
-            );
-        }
-    }
-
-    /// Pager, editor and git helper variables name programs that an
-    /// auto-approved `git log` or `less` would run.
-    #[spec("MCP-014")]
-    #[tokio::test]
-    async fn pager_editor_and_git_helper_variables_denied() {
-        let tool = ShellExecTool::new();
-        for key in [
-            "PAGER",
-            "GIT_PAGER",
-            "LESSCLOSE",
-            "EDITOR",
-            "VISUAL",
-            "GIT_EXEC_PATH",
-            "GIT_SSH",
-            "GIT_SSH_COMMAND",
-            "GIT_ASKPASS",
-            "GIT_CONFIG_SYSTEM",
-        ] {
-            let params = json!({ "command": "git log", "env": { key: "/tmp/planted" } });
-            let result = tool.execute(params).await.unwrap();
-            assert_eq!(
-                result["approval"], "policy_denied",
-                "{key} should be denied"
-            );
-        }
-    }
-
-    #[spec("MCP-014")]
-    #[tokio::test]
-    async fn dangerous_env_denied_for_every_classification() {
+    async fn unlisted_env_name_denies_every_classification() {
         let tool = ShellExecTool::new();
         for command in ["ls", "rm -rf /", "some-unknown-tool"] {
-            let params = json!({ "command": command, "env": { "LD_PRELOAD": "x" } });
+            let params = json!({ "command": command, "env": { "FOO": "x" } });
             let result = tool.execute(params).await.unwrap();
             assert_eq!(result["approval"], "policy_denied", "{command}");
         }
@@ -819,9 +844,9 @@ mod tests {
 
     #[spec("MCP-014")]
     #[tokio::test]
-    async fn env_denylist_ignores_key_case() {
+    async fn one_unlisted_name_denies_a_map_of_listed_names() {
         let tool = ShellExecTool::new();
-        let params = json!({ "command": "ls", "env": { "ld_preload": "x" } });
+        let params = json!({ "command": "ls", "env": { "LANG": "C", "TZ": "UTC", "PYTHONUSERBASE": "/tmp/x" } });
         let result = tool.execute(params).await.unwrap();
         assert_eq!(result["approval"], "policy_denied");
     }
@@ -829,12 +854,15 @@ mod tests {
     #[cfg(unix)]
     #[spec("MCP-014")]
     #[tokio::test]
-    async fn benign_env_var_still_passed() {
+    async fn listed_env_names_reach_the_command() {
         let tool = ShellExecTool::new();
-        let params = json!({ "command": "echo $MY_VAR", "env": { "MY_VAR": "test_value" } });
-        let result = tool.execute(params).await.unwrap();
-        assert_eq!(result["success"], true);
-        assert!(result["stdout"].as_str().unwrap().contains("test_value"));
+        for key in ALLOWED_ENV_NAMES {
+            let params =
+                json!({ "command": format!("echo \"${{{key}}}\""), "env": { *key: "test_value" } });
+            let result = tool.execute(params).await.unwrap();
+            assert_eq!(result["approval"], "auto_approved", "{key}");
+            assert_eq!(result["success"], true, "{key}");
+        }
     }
 
     #[test]
