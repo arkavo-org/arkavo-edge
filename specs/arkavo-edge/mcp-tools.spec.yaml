@@ -286,18 +286,22 @@ scenarios:
     name: Tool subprocesses keep the toolchain environment without the agent's credentials
     criticality: critical
     given:
-      - A built-in tool starts a program (shell, test runner, gh, scanners, sandbox, TUI, ripgrep, comby)
+      - A built-in tool starts a program (shell, test runner, gh, scanners, sandbox, TUI, ripgrep, comby, the git remote fallback, workspace containers)
     when: The subprocess is spawned
     then:
       - Credential-shaped variables are withheld, every credential the agent reads among them
       - All other variables are kept, so the operator's build settings still apply
-      - gh additionally keeps GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN when exported
-      - Names listed in ARKAVO_TOOL_ENV_PASSTHROUGH are kept
+      - gh and the git remote fallback additionally keep GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN when exported, so gh's git credential helper still authenticates
       - Names the agent registered as configured credentials (a provider's auth_ref) are withheld even when they are not credential-shaped
-      - RIPGREP_CONFIG_PATH is withheld, so rg reads only the flags on its command line and never a --pre from a flag file
+      - RIPGREP_CONFIG_PATH, LESS, LESSOPEN and LESSCLOSE are withheld, so rg and less take only the options on their command line and never a --pre, log file or preprocessor from the environment
+      - ARKAVO_TOOL_ENV_PASSTHROUGH is a global operator grant that wins over everything above - each listed name reaches every tool subprocess, shell_exec's shell included, whether it was withheld as credential-shaped, as a registered name or as a flag-file variable
     refs:
+      - crates/arkavo-process-env/src/tool.rs
       - crates/arkavo-mcp-tools/src/child.rs
       - crates/arkavo-mcp-tools/src/shell_exec/mod.rs
+      - crates/arkavo-mcp-tools/src/test_runner.rs
       - crates/arkavo-mcp-code-search/src/codegrep.rs
       - crates/arkavo-mcp-code-search/src/comby.rs
+      - crates/arkavo-git/src/remote_fallback.rs
+      - crates/arkavo-mcp-workspace/src/workspace.rs
     changed: "2026-09-29"

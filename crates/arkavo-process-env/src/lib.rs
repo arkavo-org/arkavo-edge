@@ -15,7 +15,8 @@
 //!   minus credential-shaped names. Build tooling reads an open-ended set of
 //!   variables (`RUSTC_WRAPPER`, `CARGO_HOME`, `SDKROOT`, `DATABASE_URL`), so
 //!   an allowlist there would break the operator's builds; what must not
-//!   reach them is the agent's own credentials.
+//!   reach them is the agent's own credentials. [`ChildEnv::tool`] is the
+//!   toolchain profile every built-in tool's program gets.
 //!
 //! Both take the parent environment as an argument so a caller other than
 //! the agent process (a credential broker) can resolve from its own. The
@@ -27,10 +28,12 @@ mod baseline;
 mod configured;
 mod hijack;
 mod secret;
+mod tool;
 
 pub use configured::{withheld_names, withhold_name};
 pub use hijack::is_loader_or_hijack_name;
 pub use secret::is_secret_name;
+pub use tool::TOOL_ENV_PASSTHROUGH;
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -112,7 +115,10 @@ impl ChildEnv {
     /// [`ChildEnv::toolchain`] that also withholds `withhold`, the names an
     /// operator configured to hold credentials (an `auth_ref` may be any
     /// name, so no naming convention finds it). `readmit` still wins over
-    /// both: it is an explicit grant for one named tool.
+    /// both: it is an explicit grant for one named tool. [`ChildEnv::tool`]
+    /// adds the operator's [`TOOL_ENV_PASSTHROUGH`] names to it, a global
+    /// grant that readmits withheld, registered and flag-file names to every
+    /// tool child, `shell_exec`'s shell included.
     pub fn toolchain_withholding<I, K, V>(parent: I, readmit: &[&str], withhold: &[&str]) -> Self
     where
         I: IntoIterator<Item = (K, V)>,

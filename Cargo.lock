@@ -1207,6 +1207,8 @@ dependencies = [
 name = "arkavo-git"
 version = "0.99.5"
 dependencies = [
+ "arkavo-process-env",
+ "arkavo-test-macros",
  "git2",
  "tempfile",
  "thiserror 2.0.18",
@@ -1662,8 +1664,11 @@ name = "arkavo-mcp-workspace"
 version = "0.99.5"
 dependencies = [
  "arkavo-mcp",
+ "arkavo-process-env",
+ "arkavo-test-macros",
  "async-trait",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
 ]

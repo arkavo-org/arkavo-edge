@@ -1,10 +1,18 @@
 use crate::{Result, WorkspaceError};
 use arkavo_mcp::{Tool, ToolSchema};
+use arkavo_process_env::ChildEnv;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+
+/// The container runtime under the tool environment: `docker`/`podman`
+/// need none of the agent's provider keys, and nothing they start may
+/// inherit them.
+fn runtime_command(runtime: &str) -> std::process::Command {
+    ChildEnv::tool_from_current(&[]).command(runtime)
+}
 
 pub struct WorkspaceTool {
     schema: ToolSchema,
@@ -75,7 +83,7 @@ impl WorkspaceTool {
     }
 
     fn detect_runtime() -> Result<String> {
-        if std::process::Command::new("docker")
+        if runtime_command("docker")
             .arg("--version")
             .output()
             .map(|o| o.status.success())
@@ -84,7 +92,7 @@ impl WorkspaceTool {
             return Ok("docker".to_string());
         }
 
-        if std::process::Command::new("podman")
+        if runtime_command("podman")
             .arg("--version")
             .output()
             .map(|o| o.status.success())
@@ -117,7 +125,7 @@ impl WorkspaceTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let mut cmd = Command::new(&runtime);
+        let mut cmd = Command::from(runtime_command(&runtime));
         cmd.arg("run")
             .arg("-d")
             .arg("--name")
@@ -182,7 +190,7 @@ impl WorkspaceTool {
 
         if let Some(repo_url) = params.get("repo_url").and_then(|v| v.as_str()) {
             let clone_cmd = format!("git clone {} /workspace", repo_url);
-            let mut exec = Command::new(&runtime);
+            let mut exec = Command::from(runtime_command(&runtime));
             exec.arg("exec")
                 .arg(workspace_id)
                 .arg("sh")
@@ -224,7 +232,7 @@ impl WorkspaceTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(300);
 
-        let mut cmd = Command::new(&runtime);
+        let mut cmd = Command::from(runtime_command(&runtime));
         cmd.arg("exec")
             .arg(workspace_id)
             .arg("sh")
@@ -288,7 +296,7 @@ impl WorkspaceTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| WorkspaceError::InvalidParams("Missing workspace_id".to_string()))?;
 
-        let output = Command::new(&runtime)
+        let output = Command::from(runtime_command(&runtime))
             .arg("rm")
             .arg("-f")
             .arg(workspace_id)
@@ -307,7 +315,7 @@ impl WorkspaceTool {
     async fn list_workspaces(&self) -> Result<String> {
         let runtime = Self::detect_runtime()?;
 
-        let output = Command::new(&runtime)
+        let output = Command::from(runtime_command(&runtime))
             .arg("ps")
             .arg("--filter")
             .arg("name=arkavo-workspace-")
@@ -382,5 +390,74 @@ mod tests {
     async fn test_detect_runtime() {
         let result = WorkspaceTool::detect_runtime();
         assert!(result.is_ok() || result.is_err());
+    }
+
+    /// Set only on the re-run test process; names the directory the probe
+    /// works in.
+    #[cfg(unix)]
+    const PROBE_DIR: &str = "ARKAVO_WORKSPACE_ENV_PROBE_DIR";
+    #[cfg(unix)]
+    const PLANTED: &str = "planted-provider-key";
+
+    /// The half of the regression test below that runs in the re-run
+    /// process, whose real environment holds a planted provider key: a fake
+    /// `docker` first on `PATH` records the environment the tool gave it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn docker_env_probe() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(dir) = std::env::var_os(PROBE_DIR).map(std::path::PathBuf::from) else {
+            return;
+        };
+        // Written here, not in the parent test process, so no other test's
+        // fork holds the file open when it is executed.
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).expect("bin dir");
+        let docker = bin.join("docker");
+        std::fs::write(&docker, "#!/bin/sh\nenv > docker-env.txt\n").expect("fake docker");
+        std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755))
+            .expect("make fake docker executable");
+        WorkspaceTool::new()
+            .execute(json!({ "action": "list" }))
+            .await
+            .expect("fake docker runs");
+    }
+
+    #[cfg(unix)]
+    #[arkavo_test_macros::spec("MCP-016")]
+    #[test]
+    fn workspace_runtime_never_sees_a_planted_provider_key() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = std::env::join_paths(std::iter::once(dir.path().join("bin")).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+        ))
+        .expect("PATH");
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "workspace::tests::docker_env_probe",
+                "--nocapture",
+            ])
+            .current_dir(dir.path())
+            .env_remove(arkavo_process_env::TOOL_ENV_PASSTHROUGH)
+            .env(PROBE_DIR, dir.path())
+            .env("PATH", path)
+            .env("OPENAI_API_KEY", PLANTED)
+            .env("ARKAVO_PROBE_SETTING", "kept")
+            .output()
+            .expect("re-run test binary");
+        let log = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && log.contains("1 passed"),
+            "{log}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let seen = std::fs::read_to_string(dir.path().join("docker-env.txt")).expect("docker ran");
+        assert!(
+            seen.lines().any(|l| l == "ARKAVO_PROBE_SETTING=kept"),
+            "{seen}"
+        );
+        assert!(!seen.contains(PLANTED), "{seen}");
     }
 }

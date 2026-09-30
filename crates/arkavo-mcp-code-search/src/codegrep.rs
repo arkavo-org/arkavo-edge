@@ -8,15 +8,12 @@ use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-/// Withheld from `rg` beyond the toolchain policy. Ripgrep reads further
-/// flags, `--pre` among them, from the file `RIPGREP_CONFIG_PATH` names, and
-/// the arguments built here must be the only flags it sees.
-const RG_WITHHELD: &[&str] = &["RIPGREP_CONFIG_PATH"];
-
 fn rg_command() -> std::process::Command {
     // The operator's environment minus credentials: rg needs none, and
-    // whatever it runs must not inherit the agent's keys.
-    ChildEnv::toolchain_withholding_from_current(&[], RG_WITHHELD).command("rg")
+    // whatever it runs must not inherit the agent's keys. The tool profile
+    // also withholds RIPGREP_CONFIG_PATH, so the arguments built here are
+    // the only flags rg sees.
+    ChildEnv::tool_from_current(&[]).command("rg")
 }
 
 pub struct CodeGrepTool {
@@ -361,8 +358,12 @@ mod tests {
         std::fs::write(&flag_file, "--replace=HIJACKED\n").unwrap();
         let searched = dir.path().join("f.txt");
         std::fs::write(&searched, "needle\n").unwrap();
+        // Neither variable may come from the developer's own environment:
+        // an inherited grant would readmit the flag file.
         let mut parent: Vec<(OsString, OsString)> = std::env::vars_os()
-            .filter(|(name, _)| name != "RIPGREP_CONFIG_PATH")
+            .filter(|(name, _)| {
+                name != "RIPGREP_CONFIG_PATH" && name != arkavo_process_env::TOOL_ENV_PASSTHROUGH
+            })
             .collect();
         parent.push((
             OsString::from("RIPGREP_CONFIG_PATH"),
@@ -381,7 +382,7 @@ mod tests {
 
         let hijacked = search(ChildEnv::toolchain(parent.clone(), &[]));
         assert!(hijacked.contains("HIJACKED"), "control: {hijacked}");
-        let seen = search(ChildEnv::toolchain_withholding(parent, &[], RG_WITHHELD));
+        let seen = search(ChildEnv::tool(parent, &[], &[]));
         assert_eq!(seen.trim_end(), "needle");
     }
 

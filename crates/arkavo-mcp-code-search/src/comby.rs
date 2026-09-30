@@ -11,7 +11,7 @@ use tokio::process::Command;
 fn comby_command() -> std::process::Command {
     // The operator's environment minus credentials: comby needs none, and
     // whatever it runs must not inherit the agent's keys.
-    ChildEnv::toolchain_from_current(&[]).command("comby")
+    ChildEnv::tool_from_current(&[]).command("comby")
 }
 
 pub struct CombyTool {

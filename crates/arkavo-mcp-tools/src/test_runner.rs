@@ -371,6 +371,36 @@ impl Tool for TestRunnerTool {
 mod tests {
     use super::*;
 
+    /// The half of the regression test below that runs in the re-run
+    /// process, whose real environment holds planted provider keys: a fake
+    /// `cargo` first on `PATH` records the environment `test_runner` gave it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cargo_env_probe() {
+        use crate::child::probe;
+        let Some(dir) = std::env::var_os(probe::PROBE_DIR).map(std::path::PathBuf::from) else {
+            return;
+        };
+        probe::fake_program(&dir, "cargo");
+        TestRunnerTool::new()
+            .execute(json!({ "framework": "cargo", "path": dir }))
+            .await
+            .expect("fake cargo runs");
+    }
+
+    #[cfg(unix)]
+    #[arkavo_test_macros::spec("MCP-016")]
+    #[test]
+    fn test_runner_child_never_sees_a_planted_provider_key() {
+        use crate::child::probe;
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        probe::rerun("test_runner::tests::cargo_env_probe", dir.path());
+        let seen =
+            std::fs::read_to_string(dir.path().join("cargo-env.txt")).expect("fake cargo ran");
+        assert!(seen.lines().any(|l| l == probe::KEPT_LINE), "{seen}");
+        assert!(!seen.contains(probe::PLANTED), "{seen}");
+    }
+
     #[tokio::test]
     async fn test_cargo_tests() {
         let tool = TestRunnerTool::new();

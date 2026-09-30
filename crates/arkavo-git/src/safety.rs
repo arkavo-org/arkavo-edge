@@ -1,7 +1,14 @@
 use crate::{GitError, Result};
+use arkavo_process_env::ChildEnv;
 use git2::{Oid, Repository, ResetType};
 use std::path::Path;
 use std::process::Command;
+
+/// `cargo` under the tool environment: the checks build the repository, and
+/// its build scripts and tests must not see the agent's provider keys.
+fn cargo_command() -> Command {
+    ChildEnv::tool_from_current(&[]).command("cargo")
+}
 
 /// A guard that ensures repository operations are atomic and can be rolled back
 pub struct RepoGuard<'a> {
@@ -34,7 +41,7 @@ impl<'a> RepoGuard<'a> {
     /// Add cargo fmt check validator
     pub fn with_fmt_check(self) -> Self {
         self.add_validator(|| {
-            let output = Command::new("cargo")
+            let output = cargo_command()
                 .args(["fmt", "--", "--check"])
                 .output()
                 .map_err(|e| GitError::PreCommitFailed(format!("Failed to run cargo fmt: {e}")))?;
@@ -51,7 +58,7 @@ impl<'a> RepoGuard<'a> {
     /// Add cargo clippy check validator
     pub fn with_clippy_check(self) -> Self {
         self.add_validator(|| {
-            let output = Command::new("cargo")
+            let output = cargo_command()
                 .args(["clippy", "--", "-D", "warnings"])
                 .output()
                 .map_err(|e| {
@@ -70,7 +77,7 @@ impl<'a> RepoGuard<'a> {
     /// Add cargo test check validator
     pub fn with_test_check(self) -> Self {
         self.add_validator(|| {
-            let output = Command::new("cargo")
+            let output = cargo_command()
                 .args(["test", "--quiet"])
                 .output()
                 .map_err(|e| GitError::PreCommitFailed(format!("Failed to run cargo test: {e}")))?;

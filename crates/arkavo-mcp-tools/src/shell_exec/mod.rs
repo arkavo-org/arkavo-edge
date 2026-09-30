@@ -1,4 +1,3 @@
-use crate::child::toolchain_env;
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use arkavo_process_env::ChildEnv;
@@ -167,7 +166,7 @@ impl ShellExecTool {
     ) -> Result<(bool, i32, String, String, u64)> {
         let start = Instant::now();
 
-        let mut command = shell_command(cmd, &toolchain_env(&[]));
+        let mut command = shell_command(cmd, &ChildEnv::tool_from_current(&[]));
         command.current_dir(cwd);
 
         if let Some(env) = env_vars {
@@ -378,7 +377,7 @@ impl Tool for ShellExecTool {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::child::toolchain_env_from;
+    use crate::child::probe;
     use arkavo_test_macros::spec;
     use std::ffi::OsString;
 
@@ -1027,7 +1026,7 @@ mod tests {
             ),
             (OsString::from("RUSTFLAGS"), OsString::from("-Dwarnings")),
         ];
-        let env = toolchain_env_from(parent, &[], &["CORP_LLM_LOGIN".to_owned()]);
+        let env = ChildEnv::tool(parent, &[], &["CORP_LLM_LOGIN"]);
         let dir = tempfile::TempDir::new().expect("temp dir");
         #[cfg(unix)]
         let dump = "env";
@@ -1045,6 +1044,39 @@ mod tests {
             "{seen}"
         );
         assert!(!seen.contains("planted-"), "{seen}");
+    }
+
+    /// The half of the regression test below that runs in the re-run
+    /// process, whose real environment holds planted provider keys: the
+    /// approved-command spawn path dumps the environment the shell got.
+    #[tokio::test]
+    async fn shell_env_probe() {
+        let Some(dir) = std::env::var_os(probe::PROBE_DIR).map(PathBuf::from) else {
+            return;
+        };
+        #[cfg(unix)]
+        let dump = "env";
+        #[cfg(windows)]
+        let dump = "set";
+        let (success, _, stdout, _, _) = ShellExecTool::with_root(&dir)
+            .execute_command(dump, &dir, 10, None, true)
+            .await
+            .expect("spawn shell");
+        assert!(success);
+        print!("{stdout}");
+    }
+
+    #[spec("MCP-016")]
+    #[test]
+    fn shell_child_never_sees_a_planted_provider_key() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let output = probe::rerun("shell_exec::tests::shell_env_probe", dir.path());
+        let seen = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            seen.lines().any(|l| l.trim_end() == probe::KEPT_LINE),
+            "{seen}"
+        );
+        assert!(!seen.contains(probe::PLANTED), "{seen}");
     }
 
     #[test]
