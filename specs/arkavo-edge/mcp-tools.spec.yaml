@@ -233,9 +233,11 @@ scenarios:
       - A segment containing $ (or % under cmd /C) is not auto-approved, because an expansion's value is not in the string and can print the agent's environment
       - On unix, a command containing a backslash is not auto-approved, and option and path checks see words with quotes removed; a word with a brace expansion is not auto-approved
       - No argument word, and no option value glued after an equals sign, after a colon or inside a short-option cluster, may start with / or ~ (or a drive letter or UNC prefix under cmd /C), contain a .. component, or put a glob (*, ?, [) in a component that starts with a dot; redirection targets are judged by MCP-015 instead
-      - Git is auto-approved only for read subcommands without -c or --output; git config only with a leading read action, and git remote only bare, as sole -v, or get-url
+      - Git is auto-approved only for read subcommands without -c or --output, and git remote only bare, as sole -v, or get-url; git config is never auto-approved, because --list and --get-regexp print credential-bearing values
+      - Options that open every name listed in a file (--files0-from for sort, wc and du; find -files0-from; file -f and --files-from) are not auto-approved
+      - A command containing whitespace other than space and tab (no-break space, ideographic space) is not auto-approved, because sh does not split words on it; under cmd /C a segment containing ^ is not auto-approved
       - env and printenv are not auto-approved, because they print the inherited environment
-    refs: [crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/shell_exec/args.rs, crates/arkavo-mcp-tools/src/shell_exec/redirect.rs]
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/shell_exec/args.rs, crates/arkavo-mcp-tools/src/shell_exec/git.rs, crates/arkavo-mcp-tools/src/shell_exec/redirect.rs]
     changed: "2026-09-29"
     edge_cases:
       - condition: A safe-listed reader given a path outside the working tree (cat ~/.ssh/id_rsa, stat /etc/passwd, cat ../x, grep --file=/etc/x, file -m a:/etc/x)
@@ -257,6 +259,7 @@ scenarios:
       - The whole call is refused with approval policy_denied, whatever the command's classification
       - Only LANG, LC_*, TZ, TERM, COLUMNS, LINES, NO_COLOR, FORCE_COLOR, CLICOLOR, CLICOLOR_FORCE, RUST_BACKTRACE, RUST_LOG and CI are accepted, matched case-insensitively
       - Every other name is refused, including PATH, LD_*, DYLD_*, GIT_*, HOME, PAGER, EDITOR and per-tool config, module-path and toolchain variables, because auto-approved version probes make per-tool hooks impossible to enumerate
+      - LANG and LC_* values containing / or a .. component, and TZ values that are absolute paths or contain a .. component, are refused
       - Listed variables are passed to the command
     refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs]
     changed: "2026-09-29"
@@ -271,6 +274,9 @@ scenarios:
       - A working_dir that resolves outside the root, directly or through a symlink, is refused with policy_denied
       - A redirection target must be a literal path that resolves inside the root, symlinks followed, or the call is not auto-approved
       - Relative redirection targets resolve against the command's working directory
-      - Descriptor duplication (2>&1) and /dev/null stay auto-approvable
+      - A < or > glued to a preceding word other than a bare descriptor number (-delete>x, echo hi>out) is not auto-approved, because the glued word would escape the option checks; 2>out and 1>>out are unaffected
+      - Option, base and path checks read the argument words with redirections and descriptor prefixes removed
+      - Descriptor duplication (2>&1) and /dev/null stay auto-approvable; NUL discards only under cmd /C, and is an ordinary, symlink-resolved file name on unix
+      - Under cmd /C a redirection to a reserved device name (CON, PRN, AUX, COM1-9, LPT1-9, with or without extension) is not auto-approved
     refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/shell_exec/redirect.rs, crates/arkavo-mcp-tools/src/shell_exec/workdir.rs]
     changed: "2026-09-29"

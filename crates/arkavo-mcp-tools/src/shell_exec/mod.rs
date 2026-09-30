@@ -11,6 +11,7 @@ use tokio::process::Command;
 mod args;
 mod blocklist;
 mod classifier;
+mod git;
 mod redirect;
 mod workdir;
 
@@ -37,6 +38,20 @@ const ALLOW_ENV_EXACT: &[&str] = &[
     "CI",
 ];
 const ALLOW_ENV_PREFIX: &[&str] = &["LC_"];
+
+/// Whether a locale or time-zone value points libc at a file. A locale name
+/// never contains `/`; a time zone may (`America/New_York`, resolved under
+/// the system zoneinfo directory), but not as an absolute path, which is
+/// read as given, or with a `..` component that climbs out of that directory.
+fn names_a_path(upper_key: &str, value: &str) -> bool {
+    let climbs = value.split('/').any(|component| component == "..");
+    match upper_key {
+        "TZ" => value.trim_start_matches(':').starts_with('/') || climbs,
+        "LANG" => value.contains('/'),
+        key if key.starts_with("LC_") => value.contains('/'),
+        _ => false,
+    }
+}
 
 /// Denial for a working directory the command may not start in.
 fn working_dir_denied(detail: &str) -> Value {
@@ -114,11 +129,12 @@ impl ShellExecTool {
         classifier::classify(command, &self.root, &self.root)
     }
 
-    /// Refuse an env map naming a variable outside the allowlist. Denying the
+    /// Refuse an env map naming a variable outside the allowlist, or giving
+    /// a locale or time-zone variable a value that names a path. Denying the
     /// whole call, instead of dropping the variable, keeps a loader or
     /// config override from riding on an auto-approved command.
     fn reject_unpermitted_env(&self, env: &HashMap<String, String>) -> Option<String> {
-        for key in env.keys() {
+        for (key, value) in env {
             let upper = key.to_ascii_uppercase();
             let allowed = ALLOW_ENV_EXACT.contains(&upper.as_str())
                 || ALLOW_ENV_PREFIX.iter().any(|p| upper.starts_with(p));
@@ -126,6 +142,9 @@ impl ShellExecTool {
                 return Some(format!(
                     "Environment variable '{key}' is not permitted; only locale, time zone, terminal display and logging variables may be set"
                 ));
+            }
+            if names_a_path(&upper, value) {
+                return Some(format!("Environment variable '{key}' may not name a path"));
             }
         }
         None
@@ -686,6 +705,7 @@ mod tests {
 
     /// Regression: `echo $VAR` was auto-approved and printed the variable. A
     /// listed name in the env map does not make an expansion approvable.
+    #[cfg(unix)]
     #[spec("MCP-013")]
     #[tokio::test]
     async fn test_execute_with_env() {
@@ -836,6 +856,41 @@ mod tests {
         for key in REFUSED_ENV_NAMES {
             let env = HashMap::from([(key.to_string(), "x".to_string())]);
             assert!(tool.reject_unpermitted_env(&env).is_some(), "{key:?}");
+        }
+    }
+
+    /// Regression: LANG, LC_* and TZ name files or directories libc opens, so
+    /// a path value reads from where the caller points it.
+    #[spec("MCP-014")]
+    #[test]
+    fn locale_and_timezone_values_cannot_name_paths() {
+        let tool = ShellExecTool::new();
+        let refused = [
+            ("LANG", "/tmp/planted"),
+            ("LANG", "../x"),
+            ("LANG", "a/b"),
+            ("LC_ALL", "/tmp/planted"),
+            ("LC_MESSAGES", "x/../y"),
+            ("TZ", "/tmp/planted"),
+            ("TZ", ":/tmp/planted"),
+            ("TZ", "../../etc/localtime"),
+            ("TZ", "America/../../x"),
+        ];
+        for (key, value) in refused {
+            let env = HashMap::from([(key.to_string(), value.to_string())]);
+            assert!(tool.reject_unpermitted_env(&env).is_some(), "{key}={value}");
+        }
+        let admitted = [
+            ("LANG", "en_US.UTF-8"),
+            ("LC_ALL", "C"),
+            ("TZ", "UTC"),
+            ("TZ", "America/New_York"),
+            ("TERM", "xterm-256color"),
+            ("RUST_LOG", "a/b=debug"),
+        ];
+        for (key, value) in admitted {
+            let env = HashMap::from([(key.to_string(), value.to_string())]);
+            assert_eq!(tool.reject_unpermitted_env(&env), None, "{key}={value}");
         }
     }
 

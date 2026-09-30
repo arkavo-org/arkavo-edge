@@ -3,14 +3,23 @@
 use std::path::Path;
 
 /// Descriptor targets that discard output; writing to them changes nothing.
+/// `NUL` is a device only under `cmd`; on unix it is an ordinary file name,
+/// and a symlink of that name must be resolved like any other target.
+#[cfg(windows)]
 const DISCARD_TARGETS: &[&str] = &["/dev/null", "NUL", "nul"];
+#[cfg(not(windows))]
+const DISCARD_TARGETS: &[&str] = &["/dev/null"];
 
-/// A redirection operator with the word it applies to: `span` covers both,
-/// in char offsets into the segment.
+/// A redirection operator with the word it applies to: `span` covers both
+/// and any descriptor number before the operator (`2` in `2>x`), in char
+/// offsets into the segment.
 struct Redirection {
     span: std::ops::Range<usize>,
     target: String,
     duplicates: bool,
+    /// The operator is attached to a preceding word that is not a bare
+    /// descriptor number (`-delete>x`).
+    glued: bool,
 }
 
 /// Every redirection in `seg`. The shell treats an unquoted `<` or `>` as a
@@ -40,6 +49,14 @@ fn redirections(chars: &[char]) -> Vec<Redirection> {
             continue;
         }
         let op = i;
+        // A descriptor number is part of the redirection; any other word
+        // touching the operator is not separable from it by whitespace, so
+        // the argument checks that compare whole words cannot see it.
+        let mut first = op;
+        while first > 0 && chars[first - 1].is_ascii_digit() {
+            first -= 1;
+        }
+        let glued = first > 0 && !chars[first - 1].is_whitespace();
         while i < chars.len() && matches!(chars[i], '<' | '>') {
             i += 1;
         }
@@ -55,20 +72,25 @@ fn redirections(chars: &[char]) -> Vec<Redirection> {
             i += 1;
         }
         found.push(Redirection {
-            span: op..i,
+            span: first..i,
             target: chars[start..i].iter().collect(),
             duplicates,
+            glued,
         });
     }
     found
 }
 
 /// Every file redirection in `seg` must name a literal path that resolves
-/// inside `root`, symlinks followed. A pure descriptor duplication (`2>&1`,
+/// inside `root`, symlinks followed, and stand apart from the word before it
+/// (`echo hi>out` and `find . -delete>x` are refused; `2>out` is not). A pure descriptor duplication (`2>&1`,
 /// `>&-`) names no file; `>&word` with any other word redirects to that file.
 pub(super) fn redirections_within_root(seg: &str, root: &Path, cwd: &Path) -> bool {
     let chars: Vec<char> = seg.chars().collect();
     redirections(&chars).iter().all(|r| {
+        if r.glued {
+            return false;
+        }
         let names_descriptor = r.target == "-"
             || (!r.target.is_empty() && r.target.chars().all(|d| d.is_ascii_digit()));
         (r.duplicates && names_descriptor) || literal_target_within_root(&r.target, root, cwd)
@@ -104,11 +126,34 @@ fn shell_expands(c: char) -> bool {
     ) || (c == '\\' && cfg!(not(windows)))
 }
 
+/// Names `cmd` opens as devices in any directory, with or without an
+/// extension (`aux.txt`), so a redirection to one never creates a file.
+fn is_reserved_device(target: &str) -> bool {
+    let name = target.rsplit(['/', '\\']).next().unwrap_or(target);
+    let stem = name
+        .split(['.', ':', ' '])
+        .next()
+        .unwrap_or(name)
+        .to_ascii_uppercase();
+    match stem.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
+        _ => {
+            let numbered = stem
+                .strip_prefix("COM")
+                .or_else(|| stem.strip_prefix("LPT"));
+            numbered.is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9']))
+        }
+    }
+}
+
 fn literal_target_within_root(target: &str, root: &Path, cwd: &Path) -> bool {
     if DISCARD_TARGETS.contains(&target) {
         return true;
     }
-    if target.is_empty() || target.chars().any(shell_expands) {
+    if target.is_empty()
+        || target.chars().any(shell_expands)
+        || (cfg!(windows) && is_reserved_device(target))
+    {
         return false;
     }
     // A relative target is opened relative to the directory the command runs
@@ -196,7 +241,7 @@ mod tests {
             without_redirections("cat /etc/passwd>out.txt 2>&1")
                 .split_whitespace()
                 .collect::<Vec<_>>(),
-            ["cat", "/etc/passwd", "2"]
+            ["cat", "/etc/passwd"]
         );
         assert_eq!(
             without_redirections("echo \"a > b\" > /abs/in/root")
@@ -242,5 +287,89 @@ mod tests {
             &root,
             &root
         ));
+    }
+
+    #[test]
+    fn a_word_glued_to_an_operator_is_refused_unless_it_is_a_descriptor() {
+        let (_dir, root) = workspace();
+        for seg in [
+            "echo hi>out",
+            "x>y",
+            "find . -delete>x",
+            "echo a2>x",
+            "ls<x",
+        ] {
+            assert!(!redirections_within_root(seg, &root, &root), "{seg}");
+        }
+        for seg in ["ls 2>x", "ls 1>>x", "ls 2>/dev/null", "ls 0<x", "> x ls"] {
+            assert!(redirections_within_root(seg, &root, &root), "{seg}");
+        }
+    }
+
+    #[test]
+    fn descriptor_prefix_is_removed_with_its_redirection() {
+        let words = |seg: &str| {
+            without_redirections(seg)
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(words("uniq f 2>&1"), ["uniq", "f"]);
+        assert_eq!(words("ls 2> out.txt -l"), ["ls", "-l"]);
+        assert_eq!(words("ls 12>x"), ["ls"]);
+        // A number that is a word of its own stays an argument.
+        assert_eq!(words("head -n 5 f 2>x"), ["head", "-n", "5", "f"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nul_is_an_ordinary_file_name_on_unix() {
+        use std::os::unix::fs::symlink;
+        let (_dir, root) = workspace();
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path().join("victim"), root.join("NUL")).unwrap();
+        assert!(!redirections_within_root("ls > NUL", &root, &root));
+        assert!(redirections_within_root("ls > /dev/null", &root, &root));
+    }
+
+    #[test]
+    fn reserved_device_names_are_recognised_with_or_without_extension() {
+        for name in [
+            "CON",
+            "con",
+            "PRN",
+            "AUX",
+            "COM1",
+            "com9",
+            "LPT1",
+            "lpt9",
+            "CON.txt",
+            "aux.log",
+            "sub/COM3",
+            "sub\\LPT2.x",
+            "CONIN$",
+            "CONOUT$",
+        ] {
+            assert!(is_reserved_device(name), "{name}");
+        }
+        for name in ["console", "COM0", "COM10", "LPT", "out.txt", "a/b", "NUL2"] {
+            assert!(!is_reserved_device(name), "{name}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn device_targets_are_refused_but_nul_discards_under_cmd() {
+        let (_dir, root) = workspace();
+        assert!(redirections_within_root("dir > NUL", &root, &root));
+        assert!(redirections_within_root("dir > nul", &root, &root));
+        for seg in [
+            "dir > CON",
+            "dir > prn.txt",
+            "dir > COM1",
+            "dir > sub\\LPT1",
+        ] {
+            assert!(!redirections_within_root(seg, &root, &root), "{seg}");
+        }
     }
 }

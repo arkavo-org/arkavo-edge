@@ -8,6 +8,7 @@
 
 use super::args::{arguments_stay_inside, long_option, option_words, short_option};
 use super::blocklist::{check_blocklist, check_injection};
+use super::git::git_read_only;
 use super::redirect::{redirections_within_root, without_redirections};
 use std::path::Path;
 
@@ -96,43 +97,16 @@ const EXEC_DENY: &[&str] = &[
 /// `find` predicates that execute or mutate. Their presence disqualifies the
 /// otherwise read-only `find`.
 const FIND_ACTIONS: &[&str] = &[
-    "-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf", "-fprint0", "-fls",
-];
-
-/// Git subcommand prefixes that only read. `starts_with` on the raw command is
-/// not enough (it also matched `git log --output=`), so the whole token stream
-/// must match one of these and carry no `-c`/`--output` argument.
-const GIT_READ_SUBCMDS: &[&str] = &[
-    "status",
-    "log",
-    "diff",
-    "branch",
-    "remote",
-    "show",
-    "describe",
-    "rev-parse",
-    "ls-files",
-    "ls-tree",
-    "cat-file",
-    "config",
-];
-
-/// `git branch` flags that only list. A bare name creates a branch, so every
-/// argument must be one of these.
-const GIT_BRANCH_READ_FLAGS: &[&str] = &[
-    "-a",
-    "-r",
-    "-v",
-    "-vv",
-    "-l",
-    "--list",
-    "--all",
-    "--remotes",
-    "--verbose",
-    "--show-current",
-    "--no-color",
-    "--merged",
-    "--no-merged",
+    "-exec",
+    "-execdir",
+    "-ok",
+    "-okdir",
+    "-delete",
+    "-fprint",
+    "-fprintf",
+    "-fprint0",
+    "-fls",
+    "-files0-from",
 ];
 
 /// Fixed package-manager and toolchain info commands (read-only), from the
@@ -180,6 +154,15 @@ pub(super) fn classify(command: &str, root: &Path, cwd: &Path) -> ApprovalResult
     // later `|`, and `-\exec` would pass as a harmless word. A command the
     // checks cannot read the way the shell does is not approved.
     if cfg!(not(windows)) && cmd_trimmed.contains('\\') {
+        return ApprovalResult::RequiresReview;
+    }
+    // sh splits words on space and tab only, so a no-break or ideographic
+    // space is part of a word here but a separator to the whitespace-based
+    // checks below.
+    if cmd_trimmed
+        .chars()
+        .any(|c| c.is_whitespace() && !matches!(c, ' ' | '\t'))
+    {
         return ApprovalResult::RequiresReview;
     }
     if all_segments_safe(cmd_trimmed, root, cwd) {
@@ -239,13 +222,18 @@ fn segment_safe(seg: &str, root: &Path, cwd: &Path) -> bool {
     // An expansion's value is not in the string: `$KEY` prints the agent's
     // environment and `/pr${X}oc` builds a path no check can read. `%` expands
     // the same way under `cmd /C`.
-    if seg.contains('$') || (cfg!(windows) && seg.contains('%')) {
+    // `^` escapes under `cmd /C` and is removed before the program sees it
+    // (`-del^ete`), which no string check here follows.
+    if seg.contains('$') || (cfg!(windows) && seg.contains(['%', '^'])) {
         return false;
     }
     // Arguments stay inside the working tree: no absolute or home path, no
     // `..`, no glob that can match `..` (this is what keeps `/proc/*/environ`
     // and `~/.ssh` out). Redirection targets were judged against the root.
-    if !arguments_stay_inside(&without_redirections(seg)) {
+    // Every check below reads the words the program receives, so it never
+    // sees a redirection or its target as a word.
+    let seg = &without_redirections(seg);
+    if !arguments_stay_inside(seg) {
         return false;
     }
     let Some(base_raw) = seg.split_whitespace().next() else {
@@ -283,9 +271,14 @@ fn segment_safe(seg: &str, root: &Path, cwd: &Path) -> bool {
 /// writes a file: ripgrep's `--pre`/`--pre-glob` preprocessors and
 /// `--hostname-bin`, `sort -o`/`--output`/`--compress-program`, `uniq`'s
 /// OUTPUT operand, `tree -o`/`-R`, `less`'s log files and `file -C`, which
-/// compiles `magic.mgc` into the working directory.
+/// compiles `magic.mgc` into the working directory. `--files0-from` (sort,
+/// wc, du) and `file -f` open every name listed in a file, so a planted list
+/// reads any path.
 fn runs_or_writes(base: &str, seg: &str) -> bool {
-    if !matches!(base, "rg" | "sort" | "uniq" | "tree" | "less" | "file") {
+    if !matches!(
+        base,
+        "rg" | "sort" | "uniq" | "tree" | "less" | "file" | "wc" | "du"
+    ) {
         return false;
     }
     let Some(words) = option_words(seg) else {
@@ -298,8 +291,10 @@ fn runs_or_writes(base: &str, seg: &str) -> bool {
                 || long_option(a, "--pre-glob")
                 || long_option(a, "--hostname-bin")
         }),
+        "wc" | "du" => args.iter().any(|a| long_option(a, "--files0-from")),
         "sort" => args.iter().any(|a| {
-            long_option(a, "--output")
+            long_option(a, "--files0-from")
+                || long_option(a, "--output")
                 || long_option(a, "--compress-program")
                 || short_option(a, &['o'])
         }),
@@ -310,9 +305,11 @@ fn runs_or_writes(base: &str, seg: &str) -> bool {
                 || long_option(a, "--LOG-FILE")
                 || short_option(a, &['o', 'O'])
         }),
-        "file" => args
-            .iter()
-            .any(|a| long_option(a, "--compile") || short_option(a, &['C'])),
+        "file" => args.iter().any(|a| {
+            long_option(a, "--compile")
+                || long_option(a, "--files-from")
+                || short_option(a, &['C', 'f'])
+        }),
         _ => false,
     }
 }
@@ -322,42 +319,6 @@ fn is_version_probe(seg: &str) -> bool {
     let words: Vec<String> = seg.split_whitespace().map(str::to_lowercase).collect();
     matches!(words.as_slice(), [tool, flag]
         if flag == "--version" && VERSION_PROBE_OK.contains(&tool.as_str()))
-}
-
-/// Read-only git: subcommand in GIT_READ_SUBCMDS, no top-level `-c` config
-/// override and no output-redirecting flag; `config`/`branch`/`remote` must
-/// stay in their read forms. The read flag must lead: `git config` takes a
-/// later `--get` as a value pattern, and `git remote -v` a subcommand.
-/// `git remote show` contacts the remote, so only the local listings pass.
-fn git_read_only(toks: &[String]) -> bool {
-    // toks[0] == "git"; a global option such as -C or --git-dir in toks[1] is
-    // not a read subcommand, so it is refused here too.
-    let Some(sub) = toks.get(1) else { return false };
-    let sub = sub.to_lowercase();
-    if !GIT_READ_SUBCMDS.contains(&sub.as_str()) {
-        return false;
-    }
-    if toks.iter().any(|t| {
-        let t = t.to_lowercase();
-        t == "-c" || t.starts_with("--output") || t.starts_with("-o=") || t == "--exec-path"
-    }) {
-        return false;
-    }
-    match sub.as_str() {
-        "branch" => toks[2..]
-            .iter()
-            .all(|t| GIT_BRANCH_READ_FLAGS.contains(&t.as_str())),
-        "remote" => match toks.get(2).map(|s| s.to_lowercase()).as_deref() {
-            None | Some("get-url") => true,
-            Some("-v") => toks.len() == 3,
-            _ => false,
-        },
-        "config" => matches!(
-            toks.get(2).map(String::as_str),
-            Some("--list" | "--get" | "--get-all" | "--get-regexp")
-        ),
-        _ => true,
-    }
 }
 
 /// Whether the segment is exactly one of the fixed info commands.
@@ -401,7 +362,11 @@ mod tests {
             ApprovalResult::AutoApproved
         );
         assert_eq!(at_root("echo hi > out.txt"), ApprovalResult::AutoApproved);
-        assert_eq!(at_root("echo hi>out.txt"), ApprovalResult::AutoApproved);
+        // Glued to a word the operator hides that word from option checks,
+        // so it goes to review even when the target is inside.
+        assert_eq!(at_root("echo hi>out.txt"), ApprovalResult::RequiresReview);
+        assert_eq!(at_root("echo hi 2>out.txt"), ApprovalResult::AutoApproved);
+        assert_eq!(at_root("echo hi 1>>out.txt"), ApprovalResult::AutoApproved);
         assert_eq!(at_root("cat < out.txt"), ApprovalResult::AutoApproved);
         assert_eq!(
             at_root("ls -la 2>&1 | grep foo"),
@@ -681,17 +646,11 @@ mod tests {
                 "{cmd} must not be auto-approved"
             );
         }
-        for cmd in [
-            "git remote -v",
-            "git config --get user.name",
-            "git config --list",
-        ] {
-            assert_eq!(
-                verdict(cmd),
-                ApprovalResult::AutoApproved,
-                "{cmd} stays auto-approved"
-            );
-        }
+        assert_eq!(
+            verdict("git remote -v"),
+            ApprovalResult::AutoApproved,
+            "git remote -v stays auto-approved"
+        );
     }
 
     /// Regression: `sh` drops a backslash and keeps the next character, so
@@ -913,5 +872,150 @@ mod tests {
             "make --version",
             "gcc --version",
         ]);
+    }
+
+    /// Regression: an operator glued to a word left the word unchanged for the
+    /// option checks, which compare a whole token: `-delete>x` is not
+    /// `-delete`, yet the shell runs `find . -delete` and redirects its
+    /// (empty) output into `x`.
+    #[spec("MCP-015")]
+    #[test]
+    fn glued_redirection_cannot_hide_an_option() {
+        let (_dir, root) = workspace();
+        for cmd in [
+            "find . -delete>x",
+            "find . -exec>x sh -c id {} +",
+            "find . -execdir>x id {} +",
+            "find . -ok>x rm {} +",
+            "find . -fprintf>out.txt fmt",
+            "find . -fls>x y",
+            "find . -delete>>x",
+            "find . -delete<x",
+            "sort -o>x f",
+            "echo hi\"a\">x",
+        ] {
+            assert_eq!(
+                classify(cmd, &root, &root),
+                ApprovalResult::RequiresReview,
+                "{cmd} must not be auto-approved"
+            );
+        }
+        // The spaced forms are judged by the option check itself.
+        for cmd in [
+            "find . -delete > x",
+            "find . -exec > x sh -c id {} +",
+            "find . -fls > x y",
+            "find . -delete 2>x",
+        ] {
+            assert_eq!(
+                classify(cmd, &root, &root),
+                ApprovalResult::RequiresReview,
+                "{cmd}"
+            );
+        }
+        assert_eq!(
+            classify("find . -name x > out.txt", &root, &root),
+            ApprovalResult::AutoApproved
+        );
+        assert_eq!(
+            classify("find . -name x 2>/dev/null", &root, &root),
+            ApprovalResult::AutoApproved
+        );
+        assert_eq!(
+            classify("ls -la 2>&1 | grep foo", &root, &root),
+            ApprovalResult::AutoApproved
+        );
+    }
+
+    /// Defence in depth: option checks see the words with redirections
+    /// removed, so a leading redirection cannot displace the base either.
+    #[spec("MCP-015")]
+    #[test]
+    fn option_checks_ignore_redirection_words() {
+        let (_dir, root) = workspace();
+        assert_eq!(
+            classify("> out.txt find . -delete", &root, &root),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(
+            classify("> out.txt sort -o x f", &root, &root),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(
+            classify("> out.txt git branch evil", &root, &root),
+            ApprovalResult::RequiresReview
+        );
+        assert_eq!(
+            classify("> out.txt ls", &root, &root),
+            ApprovalResult::AutoApproved
+        );
+    }
+
+    /// Regression: `--files0-from` makes sort, wc and du (and find's
+    /// `-files0-from`) open every NUL-separated name in a file, so a planted
+    /// list reads anything; `file -f` does the same with newline-separated
+    /// names.
+    #[spec("MCP-013")]
+    #[test]
+    fn name_list_options_are_not_auto_approved() {
+        for cmd in [
+            "sort --files0-from=list",
+            "sort --files0-from list",
+            "sort --files0 list",
+            "wc --files0-from=list",
+            "du --files0-from=list",
+            "find . -files0-from list",
+            "file -f list",
+            "file -bf list",
+            "file --files-from list",
+        ] {
+            assert_eq!(
+                verdict(cmd),
+                ApprovalResult::RequiresReview,
+                "{cmd} must not be auto-approved"
+            );
+        }
+        assert_eq!(verdict("wc -l notes.txt"), ApprovalResult::AutoApproved);
+        assert_eq!(verdict("du -sh ."), ApprovalResult::AutoApproved);
+        assert_eq!(verdict("file notes.txt"), ApprovalResult::AutoApproved);
+    }
+
+    /// Regression: `git config --list` and `--get-regexp` print every
+    /// configured value, including remote URLs carrying tokens and
+    /// `http.extraheader`.
+    #[spec("MCP-013")]
+    #[test]
+    fn git_config_is_never_auto_approved() {
+        for cmd in [
+            "git config --list",
+            "git config --get user.name",
+            "git config --get-regexp .",
+            "git config --get-all remote.origin.url",
+        ] {
+            assert_eq!(
+                verdict(cmd),
+                ApprovalResult::RequiresReview,
+                "{cmd} must not be auto-approved"
+            );
+        }
+    }
+
+    /// sh splits words on space and tab only; a no-break space or other
+    /// Unicode space is part of a word, which the whitespace-splitting checks
+    /// would treat as a separator.
+    #[spec("MCP-013")]
+    #[test]
+    fn non_ascii_whitespace_is_not_auto_approved() {
+        for space in ['\u{a0}', '\u{2003}', '\u{3000}', '\u{2028}'] {
+            let cmd = format!("find .{space}-delete");
+            assert_eq!(verdict(&cmd), ApprovalResult::RequiresReview, "{cmd:?}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[spec("MCP-013")]
+    #[test]
+    fn caret_is_not_auto_approved_under_cmd() {
+        assert_eq!(verdict("find . -del^ete"), ApprovalResult::RequiresReview);
     }
 }
