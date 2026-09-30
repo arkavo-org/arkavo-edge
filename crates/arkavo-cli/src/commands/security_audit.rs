@@ -373,7 +373,7 @@ fn check_tool_isolation() -> AuditResult {
     AuditResult {
         name: "Tool isolation".to_string(),
         status: AuditStatus::Warn,
-        message: "No tool execution path is sandboxed; shell_exec and other process-spawning tools run as the agent's OS user with its files, network and environment (command allow/block lists are string heuristics, not confinement)".to_string(),
+        message: "Credentials are withheld from MCP servers and tool subprocesses, but no tool execution path is confined; shell_exec and other process-spawning tools still run on the host as the agent's OS user with its files and unrestricted network until OS confinement exists (command allow/block lists are string heuristics, not confinement)".to_string(),
         category: "Tool Execution".to_string(),
     }
 }
@@ -439,6 +439,11 @@ mod tests {
         assert!(
             isolation.message.contains("shell_exec"),
             "message must name the unconfined tool path: {}",
+            isolation.message
+        );
+        assert!(
+            isolation.message.contains("unrestricted network"),
+            "message must not imply the environment restriction confines the network: {}",
             isolation.message
         );
         assert!(
