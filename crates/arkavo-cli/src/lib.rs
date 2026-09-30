@@ -170,7 +170,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         // Leading options with no subcommand run the default `agent` command, so
-        // `arkavo --trust` behaves like `arkavo agent run --trust`. (`-v`/`--version`
+        // `arkavo --bind 127.0.0.1` behaves like `arkavo agent run --bind 127.0.0.1`
+        // and `arkavo --trust` like `arkavo agent run --trust`. (`-v`/`--version`
         // and `-h`/`--help` are handled above / in main before reaching here.)
         flag if flag.starts_with('-') => commands::agent::execute(args),
         unknown => Err(unknown_command_message(unknown).into()),
@@ -222,7 +223,8 @@ Run 'arkavo <command> --help' for detailed options
 OPTIONS:
     -h, --help       Show help
     -v, --version    Show version
-    --trust          Run the agent on loopback only and show its authorization QR code (DID:key)",
+    --bind <ADDRESS> Listen on this IP address (127.0.0.1 keeps the agent on this machine)
+    --trust          Show the agent authorization QR code (DID:key) on startup",
         commands.join("\n")
     )
 }
@@ -323,15 +325,25 @@ mod tests {
         }
     }
 
+    /// Regression: the help said `--trust` runs the agent on loopback. It
+    /// only shows the QR code; `--bind` chooses the address.
     #[test]
-    fn usage_says_that_trust_keeps_the_agent_on_loopback() {
+    fn usage_lists_bind_and_says_what_trust_does() {
         let usage = usage_text();
-        let trust = usage
-            .lines()
-            .find(|line| line.trim_start().starts_with("--trust"))
-            .expect("--trust is listed");
-        assert!(trust.contains("loopback"), "{trust}");
+        let option = |name: &str| {
+            usage
+                .lines()
+                .find(|line| line.trim_start().starts_with(name))
+                .unwrap_or_else(|| panic!("{name} is listed"))
+                .to_string()
+        };
+        let trust = option("--trust");
         assert!(trust.contains("QR code"), "{trust}");
+        assert!(!trust.contains("loopback"), "{trust}");
+
+        let bind = option("--bind");
+        assert!(bind.contains("<ADDRESS>"), "{bind}");
+        assert!(bind.contains("127.0.0.1"), "{bind}");
     }
 
     /// Regression: the help advertised `pack` in builds that reject it.
