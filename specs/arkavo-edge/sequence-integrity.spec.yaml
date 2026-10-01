@@ -476,7 +476,7 @@ scenarios:
       - crates/arkavo-protocol/src/egress_destination.rs:131-150
       - crates/arkavo-protocol/src/egress_destination.rs:203-217
       - crates/arkavo-server/src/server/egress_guard.rs:179-235
-      - crates/arkavo-mcp-mesh/src/lib.rs:518-527
+      - crates/arkavo-mcp-mesh/src/lib.rs:533-543
     changed: "2026-09-30"
     edge_cases:
       - condition: The declared recipient is missing, blank or not a string
@@ -493,6 +493,13 @@ scenarios:
           extraction applies. Closing this needs either a trusted declaration
           channel for external servers or the dispatch gate's registry-level
           policy.
+      - condition: A pipeline sends a peer request through send_and_wait outside tool dispatch
+        expected: The request is evaluated against the same peer boundary before delivery
+        status: deferred
+        note: >-
+          The pipeline's library call does not pass the conductor's tool-call
+          guard. Universal mediation must cover this path before the tool
+          declaration can imply enforcement for every peer request.
       - condition: Peer identity is authenticated (CWT/DID-bound A2A)
         expected: An authenticated, policy-known peer may be treated as inside the boundary
         status: deferred
