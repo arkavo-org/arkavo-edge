@@ -963,6 +963,7 @@ pub fn get_tool_schemas() -> Vec<ToolSchema> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on to enter its runtime.
 mod tests {
     use super::*;
 
