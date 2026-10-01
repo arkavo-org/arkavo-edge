@@ -112,6 +112,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Required readiness gate regressions
+        run: python3 tests/ci_readiness_test.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
