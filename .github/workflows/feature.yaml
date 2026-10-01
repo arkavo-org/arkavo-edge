@@ -118,6 +118,10 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+      - name: Security CLI harness regressions
+        run: |
+          bash tests/security_cli_harness_test.sh
+          bash tests/security_cli_patterns_test.sh
 
   hardcoded-paths:
     name: No Hardcoded Paths
