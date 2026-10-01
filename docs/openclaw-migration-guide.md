@@ -96,7 +96,7 @@ and daily automation.
 What you get today that OpenClaw doesn't have:
 
 - **`model: ministral-3b`**: Running locally via Ollama. Zero cost. Zero latency to an API. Zero dependency on any vendor's terms of service.
-- **Loopback-only binding**: The A2A agent listener binds 127.0.0.1 unless you pass `--listen` or set `runtime.listen` in your SwarmKit kit, and the AG-UI gateway binds 127.0.0.1 unless you set `ARKAVO_AGUI_BIND`. Neither authenticates callers yet, so any local process can reach them; expose them only on a network you trust.
+- **Loopback-only binding**: The A2A agent listener binds 127.0.0.1 unless you pass `--bind` or set `runtime.listen` in your SwarmKit kit, and the AG-UI gateway binds 127.0.0.1 unless you set `ARKAVO_AGUI_BIND`. Neither authenticates callers yet, so any local process can reach them; expose them only on a network you trust.
 - **Single binary**: No Node.js, no npm, no dependency tree to audit or compromise.
 - **Preflight PII blocking**: Configurable via `preflight:` block in AGENTS.md YAML frontmatter. PII is caught before it reaches the model.
 - **Budget enforcement**: Configurable via `budget:` block in AGENTS.md YAML frontmatter. Per-session and per-day spending caps enforced automatically.

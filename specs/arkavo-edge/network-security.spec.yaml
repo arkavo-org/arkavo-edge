@@ -51,7 +51,7 @@ scenarios:
     name: Public binding requires explicit acknowledgment
     criticality: high
     wip: true
-    issue: "Partly implemented: a non-loopback A2A listen address comes only from --listen or a kit's runtime.listen, and startup prints a warning naming it (NET-002, NET-021). Nothing else is required: there is no acknowledgment step and no TLS requirement, and the A2A listener authenticates no caller at all, so there is no authentication to strengthen. arkavo-security's TlsSettings has no caller outside its crate, and the referenced http.rs lines configure client-side mTLS."
+    issue: "Partly implemented: a non-loopback A2A listen address comes only from --bind or a kit's runtime.listen, and startup prints a warning naming it (NET-002, NET-021). Nothing else is required: there is no acknowledgment step and no TLS requirement, and the A2A listener authenticates no caller at all, so there is no authentication to strengthen. arkavo-security's TlsSettings has no caller outside its crate, and the referenced http.rs lines configure client-side mTLS."
     given:
       - Administrator wants to expose agent publicly
       - Configuration is changed to bind to 0.0.0.0 or public IP
