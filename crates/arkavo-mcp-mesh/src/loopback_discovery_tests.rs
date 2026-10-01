@@ -40,6 +40,7 @@ fn announce_on_loopback(agent_id: &str, port: u16) -> ServiceDaemon {
 /// interfaces, so an agent on the same machine, listening on the default
 /// address, was never found.
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on to enter its runtime.
 async fn an_agent_listening_on_loopback_is_discovered() {
     let agent_id = format!("loopback-mesh-{}", std::process::id());
     let announcer = announce_on_loopback(&agent_id, 48_431);
@@ -56,4 +57,5 @@ async fn an_agent_listening_on_loopback_is_discovered() {
         Some("http://127.0.0.1:48431"),
         "discovered: {addresses:?}"
     );
+    drop(addresses);
 }
