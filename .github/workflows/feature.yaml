@@ -1793,7 +1793,7 @@ jobs:
     name: Release Readiness
     needs: [version-check, format, test-and-lint, cargo-deny, cargo-audit, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check, validate-specs, spec-coverage]
     runs-on: ubuntu-22.04
-    if: ${{ always() && !cancelled() }}
+    if: always()
     steps:
       - name: Check job results
         run: |
