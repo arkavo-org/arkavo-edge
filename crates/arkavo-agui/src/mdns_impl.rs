@@ -387,6 +387,4 @@ pub mod mdns {
     ) -> Result<(), Box<dyn std::error::Error>> {
         Err("mDNS feature not compiled in".into())
     }
-
-
 }
