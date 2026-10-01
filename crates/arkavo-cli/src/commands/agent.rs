@@ -183,7 +183,7 @@ EXAMPLES:
     arkavo agent --port 8343 -v            # Run on specific port with verbose
     arkavo agent -c team.swarmkit.yaml -n worker -p 8343  # Run one role of a multi-role kit
     arkavo agent --bind 127.0.0.1          # Stay on this machine
-    arkavo agent run --trust               # Show the QR code for another device"#;
+    arkavo agent run --bind 0.0.0.0 --trust # Expose the agent and show its QR code"#;
 
 /// Deprecated: `arkavo agent init` no longer writes AGENTS.md.
 ///
@@ -1787,8 +1787,7 @@ provenance:
     }
 
     /// `--trust` shows the QR code and changes nothing about where the
-    /// agent listens: the address in the code is one another device can
-    /// reach.
+    /// agent listens; reaching it from another device requires an explicit bind.
     #[test]
     fn a_trust_start_listens_where_a_default_start_does() {
         let dir = tempfile::tempdir().unwrap();
