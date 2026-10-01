@@ -26,6 +26,7 @@ thiserror = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 jsonrpsee = { workspace = true }
 
 [features]

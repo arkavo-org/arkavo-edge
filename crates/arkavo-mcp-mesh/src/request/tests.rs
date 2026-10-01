@@ -31,6 +31,7 @@ struct Script {
     states: Mutex<VecDeque<TaskGetResponse>>,
     received: Mutex<Vec<Message>>,
     polls: Mutex<usize>,
+    polled: tokio::sync::Notify,
 }
 
 struct ScriptedAgent {
@@ -46,6 +47,7 @@ impl ScriptedAgent {
             states: Mutex::new(states.into()),
             received: Mutex::new(Vec::new()),
             polls: Mutex::new(0),
+            polled: tokio::sync::Notify::new(),
         });
         let mut module = RpcModule::new(script.clone());
         module
@@ -73,6 +75,7 @@ impl ScriptedAgent {
                 let request: TaskGetRequest = params.one()?;
                 assert_eq!(request.task_id, TASK_ID, "polls the task it was given");
                 *script.polls.lock().expect("polls") += 1;
+                script.polled.notify_one();
                 let mut states = script.states.lock().expect("states");
                 let state = if states.len() > 1 {
                     states.pop_front()
@@ -387,11 +390,21 @@ async fn canceled_rejected_and_stalled_tasks_are_told_apart() {
 async fn a_task_that_does_not_finish_in_time_is_a_timeout_naming_the_task() {
     let agent = ScriptedAgent::start(OnSend::Accept, vec![state(TaskStatus::Working)]).await;
     let mesh = mesh_knowing(&[("copy", &agent.address)]).await;
-    let timeout = Duration::from_millis(700);
-
-    let started = std::time::Instant::now();
-    let err = ask(&mesh, "copy", message("Write.", None), timeout)
+    // The budget includes opening the task. Under parallel test load a short
+    // wall-clock budget can expire during HTTP setup, exercising a different
+    // timeout branch. Let the peer open and poll the task before advancing it.
+    let timeout = PATIENT;
+    let started = tokio::time::Instant::now();
+    let pending =
+        tokio::spawn(async move { ask(&mesh, "copy", message("Write.", None), timeout).await });
+    tokio::time::timeout(PATIENT, agent.script.polled.notified())
         .await
+        .expect("the task opened and was polled");
+    tokio::time::pause();
+    tokio::time::advance(timeout.saturating_sub(started.elapsed())).await;
+    let err = pending
+        .await
+        .expect("request completed without panicking")
         .expect_err("the task never finished");
     let waited = started.elapsed();
 
@@ -403,10 +416,7 @@ async fn a_task_that_does_not_finish_in_time_is_a_timeout_naming_the_task() {
             waited: timeout,
         }
     );
-    assert_eq!(
-        err.to_string(),
-        "agent \"copy\" did not answer within 700ms"
-    );
+    assert_eq!(err.to_string(), "agent \"copy\" did not answer within 20s");
     assert!(waited >= timeout, "returned after {waited:?}");
     assert!(
         waited < timeout + Duration::from_secs(5),
