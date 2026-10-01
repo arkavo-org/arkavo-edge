@@ -365,13 +365,8 @@ provenance:
     fn a_loopback_bind_is_audited_on_loopback() {
         let no_kit = tempfile::tempdir().unwrap();
         let dirs = [
-            (no_kit, "127.0.0.1", "127.0.0.1:0", "127.0.0.1:0"),
-            (
-                dir_with_kit(None),
-                "127.0.0.1",
-                "127.0.0.1:0",
-                "127.0.0.1:0",
-            ),
+            (no_kit, "[::1]", "[::1]:0", "127.0.0.1:0"),
+            (dir_with_kit(None), "[::1]", "[::1]:0", "127.0.0.1:0"),
             (
                 dir_with_kit(Some("0.0.0.0:8342")),
                 "127.0.0.1",

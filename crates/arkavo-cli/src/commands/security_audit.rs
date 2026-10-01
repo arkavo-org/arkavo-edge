@@ -457,12 +457,12 @@ mod tests {
     #[test]
     fn an_audit_of_a_loopback_bind_reports_loopback() {
         let dir = tempfile::tempdir().unwrap();
-        let loopback = crate::commands::agent::listen::parse_bind("127.0.0.1").unwrap();
+        let loopback = crate::commands::agent::listen::parse_bind("[::1]").unwrap();
         let report = AuditReport::run_at(dir.path(), Some(loopback));
 
         let bind = check(&report, "Bind address");
         assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
-        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
+        assert!(bind.message.contains("[::1]:0"), "{}", bind.message);
         assert!(bind.message.contains("--bind"), "{}", bind.message);
         assert_eq!(
             check(&report, "Authentication").status,
