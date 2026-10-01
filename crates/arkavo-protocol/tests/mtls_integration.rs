@@ -8,6 +8,7 @@ use arkavo_protocol::transport::{
 use arkavo_protocol::websocket::WebSocketTransport;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 use jsonrpsee::{core::async_trait, proc_macros::rpc};
+use std::fmt::Write as _;
 use std::fs;
 use std::net::SocketAddr;
 use tokio::time::{Duration, sleep};
@@ -339,10 +340,7 @@ async fn test_http_verify_cert_false_still_rejects_self_signed() {
     server.abort();
     let mut msg = String::new();
     for cause in err.chain() {
-        msg.push_str(&cause.to_string());
-        msg.push(' ');
-        msg.push_str(&format!("{cause:?}"));
-        msg.push(' ');
+        write!(msg, "{cause} {cause:?} ").unwrap();
     }
     assert!(
         is_certificate_verification_error(&msg),
@@ -419,31 +417,30 @@ fn certificate_fixtures_are_private_and_complete_under_concurrent_use() {
 
     let barrier = Arc::new(Barrier::new(8));
     std::thread::scope(|scope| {
-        let workers: Vec<_> = (0..8)
-            .map(|_| {
-                let barrier = Arc::clone(&barrier);
-                scope.spawn(move || {
-                    barrier.wait();
-                    let fixture = test_certs_dir();
-                    let path: &Path = fixture.as_ref();
-                    for name in ["ca", "server", "client", "invalid_client"] {
-                        let cert = CertificateDer::from_pem_file(path.join(format!("{name}.crt")))
-                            .expect("fixture certificate must be complete");
-                        let key = PrivateKeyDer::from_pem_file(path.join(format!("{name}.key")))
-                            .expect("fixture key must be complete");
-                        rustls::ServerConfig::builder_with_provider(Arc::new(
-                            rustls::crypto::aws_lc_rs::default_provider(),
-                        ))
-                        .with_safe_default_protocol_versions()
-                        .unwrap()
-                        .with_no_client_auth()
-                        .with_single_cert(vec![cert], key)
-                        .expect("fixture certificate must match its key");
-                    }
-                    fixture
-                })
-            })
-            .collect();
+        let mut workers = Vec::new();
+        for _ in 0..8 {
+            let barrier = Arc::clone(&barrier);
+            workers.push(scope.spawn(move || {
+                barrier.wait();
+                let fixture = test_certs_dir();
+                let path: &Path = fixture.as_ref();
+                for name in ["ca", "server", "client", "invalid_client"] {
+                    let cert = CertificateDer::from_pem_file(path.join(format!("{name}.crt")))
+                        .expect("fixture certificate must be complete");
+                    let key = PrivateKeyDer::from_pem_file(path.join(format!("{name}.key")))
+                        .expect("fixture key must be complete");
+                    rustls::ServerConfig::builder_with_provider(Arc::new(
+                        rustls::crypto::aws_lc_rs::default_provider(),
+                    ))
+                    .with_safe_default_protocol_versions()
+                    .unwrap()
+                    .with_no_client_auth()
+                    .with_single_cert(vec![cert], key)
+                    .expect("fixture certificate must match its key");
+                }
+                fixture
+            }));
+        }
         let fixtures: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
         let paths: BTreeSet<_> = fixtures
             .iter()
