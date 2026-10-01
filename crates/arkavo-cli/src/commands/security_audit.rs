@@ -438,20 +438,20 @@ mod tests {
             .unwrap_or_else(|| panic!("the {name} check always runs"))
     }
 
-    /// Regression: an audit run with no kit reported a loopback endpoint
-    /// while the agent it describes listens on every interface.
+    /// The audit and startup must agree on the built-in loopback default.
     #[test]
-    fn an_audit_with_no_kit_reports_the_default_on_every_interface() {
+    fn an_audit_with_no_kit_reports_the_loopback_default() {
         let dir = tempfile::tempdir().unwrap();
         let report = AuditReport::run_at(dir.path(), None);
 
-        assert!(report.summary.failures >= 3, "{}", report.to_text());
-        for name in ["Bind address", "Transport encryption", "Authentication"] {
-            let result = check(&report, name);
-            assert_eq!(result.status, AuditStatus::Fail, "{}", result.message);
-            assert!(result.message.contains("0.0.0.0:0"), "{}", result.message);
-        }
-        assert!(!report.to_text().contains("this machine only"));
+        let bind = check(&report, "Bind address");
+        assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
+        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
+        assert_eq!(
+            check(&report, "Transport encryption").status,
+            AuditStatus::Pass
+        );
+        assert_eq!(check(&report, "Authentication").status, AuditStatus::Warn);
     }
 
     #[test]

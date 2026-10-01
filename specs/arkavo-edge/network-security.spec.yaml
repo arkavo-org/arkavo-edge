@@ -45,7 +45,7 @@ scenarios:
       - condition: A SwarmKit kit that sets no runtime.listen
         expected: Binds 127.0.0.1 on a dynamic port, like the zero-config agent
       - condition: kit migrate-from-agents-md on an AGENTS.md that names no listen address
-        expected: Writes runtime.listen 127.0.0.1:0 into the kit
+        expected: Leaves runtime.listen unset, so the loopback default applies
     changed: "2026-09-29"
 
   - id: NET-003
@@ -283,15 +283,15 @@ scenarios:
     when: The agent's A2A listener binds and announces itself over mDNS
     then:
       - --bind replaces the kit's runtime.listen and the loopback default, and -p/--port replaces only its port
-      - A --bind value that is not an IPv4 address and port stops startup with a message naming the expected form
+      - A --bind value that is not an IPv4 or IPv6 address, with an optional port, stops startup with a message naming the expected form
       - A listen address other hosts can reach prints a startup warning naming it, with or without --verbose
       - mDNS advertises the address the listener accepts connections on, and the --trust QR code shows the same address
       - A loopback listener is announced on the loopback interface only, so agents on the same host discover it and other hosts do not
       - Every A2A mDNS browser (agent discovery, mesh tools, arkavo task and chat, the orchestrator, the AG-UI gateway) also listens on the loopback interface
     refs: [crates/arkavo-cli/src/commands/agent/listen.rs, crates/arkavo-cli/src/commands/agent.rs, crates/arkavo-cli/src/commands/mesh.rs, crates/arkavo-mcp-mesh/src/lib.rs, crates/arkavo-orchestrator/src/task_executor/mesh_strategy.rs, crates/arkavo-agui/src/mdns_impl.rs]
     edge_cases:
-      - condition: --bind given a hostname or an IPv6 literal
-        expected: Refused before startup; the A2A server splits the listen address on ':'
+      - condition: --bind given a hostname or a malformed IP literal
+        expected: Refused before startup; IPv4 and IPv6 literals are parsed without DNS resolution
       - condition: --bind given without a value
         expected: Refused before startup rather than silently keeping loopback
     changed: "2026-09-29"

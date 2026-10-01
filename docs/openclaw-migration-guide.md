@@ -41,7 +41,7 @@ OpenClaw and Arkavo use different terminology for similar concepts. This table h
 
 | OpenClaw concept | Arkavo Edge equivalent | Notes |
 |---|---|---|
-| Gateway (daemon on port 18789) | Arkavo agent process (ports 8340+) | Both are long-running processes. An Arkavo agent listens on every interface by default; `--bind 127.0.0.1` keeps it on loopback |
+| Gateway (daemon on port 18789) | Arkavo agent process (ports 8340+) | Both are long-running processes. An Arkavo agent listens on loopback by default; an explicit `--bind` or `runtime.listen` can expose it |
 | `SKILL.md` with YAML frontmatter | `AGENTS.md` with YAML frontmatter | Similar format. Arkavo agents combine capabilities (KAS, preflight, A2A) in one config |
 | `SOUL.md` (personality) | Agent purpose field + system prompt | Less separation in Arkavo; personality is part of agent config |
 | `MEMORY.md` (long-term memory) | SQLite-backed persistent memory | Arkavo persists learned adjustments to encrypted local storage; OpenClaw stored memory as plaintext Markdown |
