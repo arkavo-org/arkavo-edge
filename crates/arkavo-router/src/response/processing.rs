@@ -51,14 +51,19 @@ pub fn strip_think_blocks(content: &str) -> String {
     result
 }
 
-/// Strip `<tool>...</tool>` and `<tool_call>...</tool_call>` blocks from content
+/// Strip `<tool>...</tool>`, `<tool_call>...</tool_call>` and Gemma 4
+/// `<|tool_call>...<tool_call|>` blocks from content
 ///
 /// These blocks represent tool executions that have already been processed.
 /// Handles both closed and unclosed tool blocks.
 pub fn strip_tool_blocks(content: &str) -> String {
     let mut result = content.to_string();
 
-    for (open_tag, close_tag) in [("<tool_call>", "</tool_call>"), ("<tool>", "</tool>")] {
+    for (open_tag, close_tag) in [
+        ("<|tool_call>", "<tool_call|>"),
+        ("<tool_call>", "</tool_call>"),
+        ("<tool>", "</tool>"),
+    ] {
         while let Some(start) = result.find(open_tag) {
             if let Some(end) = result[start..].find(close_tag) {
                 let end_pos = start + end + close_tag.len();
@@ -198,6 +203,22 @@ mod tests {
         assert!(stripped.contains("before"));
         assert!(stripped.contains("between"));
         assert!(stripped.contains("after"));
+    }
+
+    // Regression: `arkavo chat` printed `<|tool_call>call:{}<tool_call|>`
+    // before the answer because Gemma 4's markers were not stripped and the
+    // chat session then removed only the tool name.
+    #[spec("ROUTER-012")]
+    #[test]
+    fn test_strip_gemma4_tool_call_blocks() {
+        let content = "<|tool_call>call:get_agent_time{}<tool_call|>";
+        assert_eq!(strip_tool_blocks(content), "");
+
+        let content = "Checking.<|tool_call>call:get_agent_time{}<tool_call|>Done.";
+        assert_eq!(strip_tool_blocks(content), "Checking.Done.");
+
+        let content = "Checking.<|tool_call>call:get_agent_time{";
+        assert_eq!(strip_tool_blocks(content), "Checking.");
     }
 
     #[test]
