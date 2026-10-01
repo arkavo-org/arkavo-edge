@@ -248,12 +248,8 @@ mod tests {
     // it reports unhealthy commands (an unhealthy verdict may carry no message).
     // Never receiving the summary fails the test rather than passing silently.
     #[tokio::test]
+    #[ignore = "requires a local model that produces structured timeout analyses"]
     async fn handler_emits_summary_consistent_with_notifications() {
-        // Skip in CI - requires model loading
-        if std::env::var("CI").is_ok() {
-            return;
-        }
-
         let (event_tx, mut event_rx) = mpsc::channel(10);
         let (batch_tx, batch_rx) = mpsc::channel(10);
 
