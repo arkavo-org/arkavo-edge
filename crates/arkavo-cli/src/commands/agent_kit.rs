@@ -800,7 +800,7 @@ provenance:
         .to_string()
     }
 
-    #[spec("SK-105")]
+    #[arkavo_test_macros::spec("SK-105")]
     #[test]
     fn kit_mcp_server_environment_reaches_the_agent_config() {
         let server = RuntimeMcpServer {
