@@ -656,11 +656,32 @@ provenance:
     #[test]
     fn swarmkit_check_warns_with_migrate_hint_when_only_agents_md_present() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("AGENTS.md"), "# AGENTS.md\n").unwrap();
+        std::fs::write(
+            dir.path().join("AGENTS.md"),
+            "# AGENTS.md\n\n## hello-agent\n\npurpose: Says hello\n",
+        )
+        .unwrap();
 
         let result = check_swarmkit_manifest_at(dir.path());
         assert_eq!(result.status, AuditStatus::Warn);
         assert!(result.message.contains("migrate-from-agents-md"));
+    }
+
+    #[test]
+    fn swarmkit_check_gives_no_migrate_hint_for_a_coding_agent_guide() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("AGENTS.md"),
+            "# Project Guidelines\n\n## Core Rules\n- Run cargo fmt.\n",
+        )
+        .unwrap();
+
+        let result = check_swarmkit_manifest_at(dir.path());
+        assert!(
+            !result.message.contains("migrate-from-agents-md"),
+            "{}",
+            result.message
+        );
     }
 
     #[test]
