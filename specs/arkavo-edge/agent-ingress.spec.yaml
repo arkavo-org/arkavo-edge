@@ -1,0 +1,324 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Agent Ingress, Discovery and Enrollment
+module: arkavo-server, arkavo-cli, arkavo-registration, arkavo-gossip
+version: 0.100.2
+
+# Design: docs/swarm-trust-model.md, "Agent ingress, discovery and enrollment".
+# Every scenario is work in progress; refs name the code at 9f5faf03 that the
+# scenario changes. The workload key is the agent key #728 adds.
+
+invariants:
+  - "The transport and discovery are untrusted: no bind address, announcement or connection grants anything"
+  - "Apart from public requests (agent_card, health), every agent-to-agent and phone-to-agent message is a signed, sealed envelope, verified before its body is unwrapped"
+  - "A non-member may send only public requests, and a pairing envelope while a pairing window is open"
+  - "One workload key per agent: every channel names the same persistent did:key, and every other key is accepted only through a statement it signs"
+  - "Trust has three roots before any authority exists: the workload key, the OS user that started the agent, and the terminal screen"
+  - "Only the enrolled owner key issues membership, and that key is outside the worker's reach"
+  - "Membership makes an agent Unassessed; promotion and demotion follow the states under State overrides score"
+
+scenarios:
+  - id: INGRESS-001
+    name: Foreign Origin refused
+    criticality: critical
+    wip: true
+    given:
+      - An agent listening on any address, loopback included
+    when: A WebSocket upgrade arrives with an Origin that is not the agent's own
+    then:
+      - The upgrade is refused before any JSON-RPC method is dispatched
+      - No method result reaches the connecting page
+    edge_cases:
+      - condition: "Upgrade with Origin https://evil.example to a loopback agent (the 2026-10-02 observation)"
+        expected: Refused; the forged-Origin client is the regression test
+      - condition: Upgrade with no Origin header
+        expected: Treated as a non-browser remote caller (INGRESS-002), never as the operator
+    refs:
+      - crates/arkavo-server/src/server/a2a_server.rs:990-996
+      - docs/swarm-trust-model.md
+    changed: "2026-10-02"
+
+  - id: INGRESS-002
+    name: Non-member reaches public requests and pairing only
+    criticality: critical
+    wip: true
+    given:
+      - Envelopes are in place
+      - A caller that is not a verified, enrolled member
+    when: It sends anything over the network
+    then:
+      - Plain agent_card (public fields) and health requests are answered
+      - A pairing envelope is accepted only while a pairing window is open
+      - A member envelope from it is refused before its body is unwrapped
+    edge_cases:
+      - condition: "message/send, agent.config.update or kas.rewrap from a non-member"
+        expected: Refused with no side effect
+      - condition: Before envelopes exist (the stopgap)
+        expected: "Whether remote callers are limited to public requests is an open decision: doing so also stops cross-host gossip/message"
+    refs:
+      - crates/arkavo-server/src/server/mod.rs:240-310
+    changed: "2026-10-02"
+
+  - id: INGRESS-003
+    name: Operator socket admits only the owning OS user
+    criticality: high
+    wip: true
+    given:
+      - An agent started by an OS user
+    when: The operator connects to control the agent
+    then:
+      - The channel is a Unix domain socket created 0600 in the user's runtime directory, or a named pipe whose ACL admits only that user on Windows
+      - Loopback TCP is never an operator channel
+      - The operator gains control of the agent and no data authority
+    edge_cases:
+      - condition: Another local account opens the socket
+        expected: Refused by the kernel
+    refs:
+      - docs/swarm-trust-model.md
+    changed: "2026-10-02"
+
+  - id: INGRESS-004
+    name: Gossip key registration cannot replace a bound key
+    criticality: critical
+    wip: true
+    given:
+      - A peer whose gossip key is already registered
+      - agent/exchangeKeys still exists
+    when: A caller registers a different key for that peer
+    then:
+      - The registration is refused and the bound key is unchanged
+      - A new registration proves possession of its key over a server nonce
+      - Keys registered this way count toward neither quorum nor peer count
+    refs:
+      - crates/arkavo-server/src/server/mod.rs:846-880
+      - crates/arkavo-gossip/src/verification.rs:30-32
+      - crates/arkavo-gossip/src/protocol.rs:359-362
+    changed: "2026-10-02"
+
+  - id: INGRESS-005
+    name: One persistent workload identity across channels and restarts
+    criticality: critical
+    wip: true
+    given:
+      - An agent with a stored workload key
+    when: The agent restarts
+    then:
+      - Gossip, the agent card, trust scores, delegation and quarantine name the same did:key before and after
+      - No key generated per start is an identity
+      - Trust-score subject is the workload did:key, not the agent name
+    refs:
+      - crates/arkavo-cli/src/commands/agent.rs:479
+      - crates/arkavo-cli/src/commands/agent.rs:509
+      - crates/arkavo-server/src/server/a2a_server.rs:1198
+      - crates/arkavo-config-encryption/src/lib.rs:175
+      - crates/arkavo-server/src/server/trust_sync.rs:63
+      - crates/arkavo-server/src/server/trust_init.rs:57
+    changed: "2026-10-02"
+
+  - id: INGRESS-006
+    name: Subordinate key accepted only through a current key statement
+    criticality: critical
+    wip: true
+    given:
+      - A TDF or iroh key the agent uses
+    when: A peer is asked to use that key
+    then:
+      - The peer requires a statement signed by the workload key naming purpose, key, validity window and generation
+      - A statement with a lower generation than one already seen is refused
+      - The workload key itself is never used as a TLS or TDF key
+    edge_cases:
+      - condition: Statement signed after the workload's quarantine generation
+        expected: Refused; quarantine covers every key the workload signs
+      - condition: Statement past its validity window
+        expected: Refused
+    refs:
+      - docs/swarm-trust-model.md
+    changed: "2026-10-02"
+
+  - id: INGRESS-007
+    name: Minimal announcement with no DID before enrollment
+    criticality: high
+    wip: true
+    given:
+      - An agent announcing _a2a._tcp over mDNS
+    when: Its TXT record is built
+    then:
+      - It carries version, and after enrollment the workload did:key and its TDF key statement digest
+      - It carries no model, purpose, capabilities or mcp_tools
+      - Before enrollment it carries no DID
+    refs:
+      - crates/arkavo-cli/src/commands/agent/advertise.rs:45-76
+    changed: "2026-10-02"
+
+  - id: INGRESS-008
+    name: Forged announcement or substituted key costs availability only
+    criticality: high
+    wip: true
+    given:
+      - A sender that expects a recipient's did:key
+    when: A spoofed record, swapped address or substituted TDF key is presented
+    then:
+      - The substituted key fails statement verification and nothing is sealed to it
+      - A message sent to a wrong address cannot be opened there
+    refs:
+      - docs/swarm-trust-model.md
+    changed: "2026-10-02"
+
+  - id: INGRESS-009
+    name: Envelope verified before its body is unwrapped
+    criticality: critical
+    wip: true
+    given:
+      - A member or pairing envelope arriving over plain ws or a relay
+    when: The receiver processes it
+    then:
+      - Size is bounded before parsing
+      - The COSE_Sign1 signature verifies against the iss did:key
+      - aud names this agent or its swarm, exp has not passed, iat is within the clock bound and the nonce is unseen
+      - Sender standing (membership, state, deny latch) is established before the body is unwrapped; a member envelope from a non-member is refused there
+      - The admitted call carries a TaskSecurityContext built from the verified sender
+    edge_cases:
+      - condition: Bad signature
+        expected: Refused before unwrap
+      - condition: Wrong audience
+        expected: Refused before unwrap
+      - condition: Expired or iat outside the clock bound
+        expected: Refused before unwrap
+      - condition: Nonce replayed within the window
+        expected: Refused before unwrap
+      - condition: Oversized envelope
+        expected: Refused before parsing
+      - condition: Pairing envelope while no pairing window is open
+        expected: Refused before unwrap
+      - condition: Pairing envelope whose body holds anything but the pairing exchange
+        expected: Refused after unwrap, with no side effect
+    refs:
+      - crates/arkavo-server/src/server/handlers/messaging.rs
+      - docs/swarm-trust-model.md
+    changed: "2026-10-02"
+
+  - id: INGRESS-010
+    name: Re-signed ciphertext refused
+    criticality: critical
+    wip: true
+    given:
+      - An envelope whose sealed body repeats iss and nonce
+    when: A third party re-signs the ciphertext under its own key
+    then:
+      - The inner iss or nonce differs from the signed outer values and the message is refused
+    refs:
+      - docs/swarm-trust-model.md
+    changed: "2026-10-02"
+
+  - id: INGRESS-011
+    name: Reply sealed to the requester
+    criticality: high
+    wip: true
+    given:
+      - An admitted request whose stmt names the requester's TDF key statement
+    when: The agent replies
+    then:
+      - The reply is an envelope signed by the responder, addressed to the requester and sealed to that key
+      - No method result crosses the wire in plaintext
+    refs:
+      - docs/swarm-trust-model.md
+    changed: "2026-10-02"
+
+  - id: INGRESS-012
+    name: Pairing enrolls the owner with a single-use secret
+    criticality: critical
+    wip: true
+    given:
+      - An agent run with --trust showing a QR code with its did:key, TDF key statement digest and a 128-bit secret
+      - Showing the code opened a pairing window of fixed length (five minutes by default)
+    when: A phone sends a pairing envelope signed by its enrollment key
+    then:
+      - The phone verifies the key statement against the digest and DID before sending
+      - The secret proof travels only in the sealed body
+      - The agent records the phone's enrollment key as the owner key, persists it with the workload and consumes the secret
+      - The window closes at first use
+    edge_cases:
+      - condition: The same secret presented again
+        expected: Refused
+      - condition: The secret presented after its window closes, though --trust is still running
+        expected: Refused
+      - condition: The code shown again
+        expected: A new secret and a new window; the old secret is void
+      - condition: Terminal text, scrollback and logs
+        expected: The secret never appears as text
+      - condition: Traffic captured on the link
+        expected: Reveals neither the secret nor the enrollment key
+      - condition: Link emitted before arkavo-ios accepts the new parameters
+        expected: Not emitted; the app refuses unknown parameters
+    refs:
+      - crates/arkavo-registration/src/lib.rs
+      - crates/arkavo-registration/src/qr.rs
+    changed: "2026-10-02"
+
+  - id: INGRESS-013
+    name: Delegation by another account gives no control
+    criticality: high
+    wip: true
+    given:
+      - An enrolled agent whose did:key another account authorized first at authnz-rs
+    when: The agent obtains a token for that delegation
+    then:
+      - The delegation has no effect on the agent unless it ties to the enrolled owner
+      - The documented recovery from a blocked owner delegation is a new workload key
+    refs:
+      - docs/swarm-trust-model.md
+    changed: "2026-10-02"
+
+  - id: INGRESS-014
+    name: Membership signed by the owner key; new member Unassessed
+    criticality: critical
+    wip: true
+    given:
+      - An owner key from enrollment, held outside the worker's storage
+    when: A workload joins a swarm
+    then:
+      - Its membership statement names workload did:key, swarm, validity window and generation, signed by the owner key
+      - Members holding statements from the same owner key accept it as a member
+      - It starts Unassessed; its gossip observations carry no weight until appraised
+    edge_cases:
+      - condition: A worker process tries to read the owner key
+        expected: Not reachable from the worker's OS user or storage
+      - condition: Membership statement from an unknown owner key
+        expected: Sender treated as a non-member (INGRESS-002)
+    refs:
+      - docs/swarm-trust-model.md
+    changed: "2026-10-02"
+
+  - id: INGRESS-015
+    name: Gossip keys come from membership and observers count once
+    criticality: critical
+    wip: true
+    given:
+      - Gossip between members
+    when: A gossip message, vote or observation arrives
+    then:
+      - The sender's key comes from its membership statement, never from a registration call
+      - Each member workload's observation counts once
+      - Quorum and peer counts are computed over members
+      - A Guardian incident is applied only after the reporter's authority and subject binding are checked
+    refs:
+      - crates/arkavo-gossip/src/protocol.rs:359-362
+      - crates/arkavo-gossip/src/verification.rs:30-32
+      - crates/arkavo-server/src/server/mod.rs:846-880
+    changed: "2026-10-02"
+
+  - id: INGRESS-016
+    name: Agent KAS releases on a verified caller and current state
+    criticality: critical
+    wip: true
+    given:
+      - A rewrap request arriving as an envelope
+    when: The agent KAS decides
+    then:
+      - The caller is the verified envelope sender, not a placeholder
+      - Membership, state and the local deny latch are checked before policy
+      - An Unassessed member gets keys under public policy only; a Suspended or Quarantined one gets nothing
+      - A state change applies from the next request; a released key is reused only within the status lease
+    refs:
+      - crates/arkavo-server/src/server/mod.rs:1051-1065
+    changed: "2026-10-02"
