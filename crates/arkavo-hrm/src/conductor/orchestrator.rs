@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_context::ContextSummarizer;
 
 /// Default minimum context size (in characters) required to trigger offloading.
@@ -36,7 +36,7 @@ pub struct Conductor<S: TaskStore> {
     /// Minimum context size (in characters) to trigger offloading
     min_offload_chars: usize,
     /// Context summarizer for generating descriptive summaries before offloading
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     context_summarizer: Option<ContextSummarizer>,
 }
 
@@ -49,7 +49,7 @@ impl<S: TaskStore> Conductor<S> {
             context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
             min_offload_chars: DEFAULT_MIN_OFFLOAD_CHARS,
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            #[cfg(feature = "llama-cpp")]
             context_summarizer: None,
         }
     }
@@ -62,13 +62,13 @@ impl<S: TaskStore> Conductor<S> {
             context_ledger: None,
             default_context_strategy: ContextStrategy::ArtifactReference,
             min_offload_chars: DEFAULT_MIN_OFFLOAD_CHARS,
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            #[cfg(feature = "llama-cpp")]
             context_summarizer: None,
         }
     }
 
     /// Enable context summarization using a local LLM model
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub async fn with_summarizer(mut self, model_path: String) -> Result<Self> {
         let summarizer = ContextSummarizer::new(model_path)
             .await
@@ -140,7 +140,7 @@ impl<S: TaskStore> Conductor<S> {
     }
 
     /// Generate a descriptive summary of context using the local summarizer.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     async fn generate_summary(&self, content: &str) -> Result<String> {
         self.context_summarizer
             .as_ref()
@@ -151,7 +151,7 @@ impl<S: TaskStore> Conductor<S> {
     }
 
     /// Stub for when llama-cpp feature is disabled.
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     async fn generate_summary(&self, _content: &str) -> Result<String> {
         Err(Error::Context(
             "Context summarization requires llama-cpp feature".to_string(),

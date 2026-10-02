@@ -200,7 +200,7 @@ async fn test_context_restore_tool_with_storage() {
 
 /// Tests auto-summarization when no explicit summary is provided.
 /// Requires a local model to be available (llama-cpp feature enabled).
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 #[ignore] // Requires local model - run with: cargo test --features llama-cpp -- --ignored
 async fn test_auto_summarization() {

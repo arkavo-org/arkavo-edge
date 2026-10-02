@@ -4,35 +4,35 @@
 //! under the 400-line implementation guideline. They are functionally
 //! identical to the original code; only the file boundary moved.
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use crate::provider::InferenceTiming;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use crate::{Error, Result, StreamResponse};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::ModelFormat;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::speculative::SpeculativeContext;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::{
     DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_init_with_tokens,
     batch_init_with_tokens_seq, create_sampler_chain, create_sampler_chain_with_dry, decode_batch,
     perf_context, token_to_bytes, tokenize_with_model,
 };
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::time::Instant;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use tokio::sync::mpsc::UnboundedSender;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use super::{
     ContextReuseOptions, StreamingConfig, classify_decode_error, detect_self_prompting,
     extract_valid_utf8, generation_budget, process_input_tokens, send_metrics, validate_logits,
 };
 
 /// Outcome of emitting a single token through the shared stream/stop pipeline.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub(super) struct EmitOutcome {
     /// True if a stop condition (self-prompting) was detected after this token.
     pub(super) stopped: bool,
@@ -45,7 +45,7 @@ pub(super) struct EmitOutcome {
 ///
 /// Returns `Ok(EmitOutcome { stopped: true })` when self-prompting is
 /// detected (caller should break the generation loop).
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub(super) fn emit_token(
     vocab: *const arkavo_llama_cpp::ffi::llama_vocab,
     token: i32,
@@ -113,7 +113,7 @@ pub(super) fn emit_token(
 ///
 /// Only engaged when grammar is None and additional_stops is empty —
 /// `generate_tokens_pooled` enforces that gate.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub(super) async fn generate_tokens_pooled_with_spec(
     pooled_ctx: std::sync::Arc<std::sync::Mutex<LlamaContext>>,
     model: Arc<LlamaModel>,
@@ -428,7 +428,7 @@ pub(super) async fn generate_tokens_pooled_with_spec(
 ///
 /// Only engaged when grammar is None and additional_stops is empty —
 /// `generate_tokens_with_context` enforces that gate.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub(super) async fn generate_tokens_with_spec(
     model: Arc<LlamaModel>,
     prompt_bytes: Vec<u8>,

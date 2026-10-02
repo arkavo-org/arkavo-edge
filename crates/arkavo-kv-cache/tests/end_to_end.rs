@@ -12,7 +12,7 @@
 //! seq_cp + offset decoding, model attention to composed context, and
 //! unload/compaction correctness.
 
-#![cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#![cfg(feature = "llama-cpp")]
 
 use arkavo_kv_cache::ContextManager;
 use arkavo_llama_cpp::{

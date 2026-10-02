@@ -143,15 +143,7 @@ fn apply_patches(vendor_dir: &std::path::Path, patches_dir: &std::path::Path) {
 }
 
 fn main() {
-    // Skip building for musl targets - llama.cpp doesn't work well with musl
     let target = env::var("TARGET").unwrap_or_default();
-    if target.contains("musl") {
-        println!("cargo:warning=Skipping llama.cpp build for musl target");
-        // Create dummy bindings for musl
-        let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-        std::fs::write(out_path.join("bindings.rs"), "// Dummy bindings for musl\n").unwrap();
-        return;
-    }
     // Track only key files that indicate real source changes
     // Avoid tracking directories as CMake build artifacts trigger false rebuilds
     println!("cargo:rerun-if-changed=build.rs");

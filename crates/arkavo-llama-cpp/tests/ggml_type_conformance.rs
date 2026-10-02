@@ -5,8 +5,6 @@
 //! agree with ggml itself: a wrong `type_size` silently mispacks tensor
 //! extents, and the mistake would only surface as corrupt weights.
 
-#![cfg(not(target_env = "musl"))]
-
 use arkavo_gguf_tdf::block_traits;
 use arkavo_llama_cpp::ffi;
 

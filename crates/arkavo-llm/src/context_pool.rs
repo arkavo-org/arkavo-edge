@@ -6,13 +6,13 @@
 //! - a caller that finds every context busy waits for one to be released
 //! - nothing outside the pool creates a context for a pooled model
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 mod slots;
 
 use std::collections::HashMap;
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 use std::collections::HashSet;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -78,13 +78,13 @@ impl PoolStats {
 }
 
 /// Stub implementation for non-llama-cpp builds
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub struct ContextPool {
     _pools: RwLock<HashSet<String>>,
     _default_max_contexts: usize,
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 impl ContextPool {
     pub fn new() -> Self {
         Self::with_max_contexts(default_max_contexts())
@@ -122,22 +122,22 @@ impl ContextPool {
     }
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 impl Default for ContextPool {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::{LlamaContext, LlamaModel};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use slots::{Claim, Slots};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Mutex;
 
 /// A pooled context with its associated model
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct PooledContext {
     pub context: Arc<Mutex<LlamaContext>>,
     pub model_name: String,
@@ -150,7 +150,7 @@ pub struct PooledContext {
     pub context_manager: Option<arkavo_kv_cache::ContextManager>,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl PooledContext {
     fn new(context: LlamaContext, model_name: String) -> Self {
         Self {
@@ -193,7 +193,7 @@ impl PooledContext {
 }
 
 /// Pool of contexts for a specific model
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 struct ModelContextPool {
     // Declared before `model` so idle contexts are freed before the model
     // they were created from.
@@ -201,7 +201,7 @@ struct ModelContextPool {
     model: Arc<LlamaModel>,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl ModelContextPool {
     fn new(model: Arc<LlamaModel>, max_contexts: usize) -> Self {
         Self {
@@ -296,13 +296,13 @@ impl ModelContextPool {
 }
 
 /// Manages pools of contexts for multiple models
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct ContextPool {
     pools: RwLock<HashMap<String, Arc<ModelContextPool>>>,
     default_max_contexts: usize,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl ContextPool {
     pub fn new() -> Self {
         Self::with_max_contexts(default_max_contexts())
@@ -425,7 +425,7 @@ impl ContextPool {
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl Default for ContextPool {
     fn default() -> Self {
         Self::new()
@@ -480,7 +480,7 @@ mod tests {
         assert_eq!(parse_positive(None), None);
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[tokio::test]
     async fn waiting_for_an_unregistered_model_fails_at_once() {
         let pool = ContextPool::with_max_contexts(1);

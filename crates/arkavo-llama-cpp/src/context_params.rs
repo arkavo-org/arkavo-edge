@@ -162,7 +162,6 @@ pub fn resolve_context_shape(
 /// request or rewind only the unaccepted tail of the batch they just decoded
 /// (speculative decoding), and cells are only recycled once they fall out of
 /// the window as measured before that batch, so both stay exact.
-#[cfg(not(target_env = "musl"))]
 pub fn single_sequence_params(
     shape: ContextShape,
     backend: Backend,
@@ -289,7 +288,6 @@ mod tests {
 
     /// Regression: llama.cpp defaults `swa_full` to true, which made every
     /// sliding-window layer allocate the whole context.
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn single_sequence_contexts_do_not_allocate_full_size_swa() {
         let shape = resolve_context_shape(131_072, None, DeviceClass::Standard, Backend::Gpu);
@@ -301,7 +299,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn backend_selects_offload_and_flash_attention() {
         let shape = resolve_context_shape(8_192, None, DeviceClass::Standard, Backend::Gpu);

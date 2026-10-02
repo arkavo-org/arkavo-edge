@@ -9,26 +9,6 @@ pub enum GpuStatus {
     Unavailable,
 }
 
-// For musl targets, provide stub implementations since llama.cpp doesn't work well with musl
-#[cfg(target_env = "musl")]
-mod stubs {
-    use super::GpuStatus;
-
-    pub fn init_llama_logging() {}
-    pub fn set_debug_logging(_enabled: bool) {}
-    pub fn test_minimal_init() -> Result<(), String> {
-        Err("llama.cpp is not supported on musl targets".to_string())
-    }
-    pub fn gpu_status() -> GpuStatus {
-        GpuStatus::Unavailable
-    }
-    pub fn reset_gpu_status() {}
-}
-
-#[cfg(target_env = "musl")]
-pub use stubs::*;
-
-#[cfg(not(target_env = "musl"))]
 pub use memory::LlamaMemory;
 
 // Context window sizing shared by the loader, the generation clamp and planners
@@ -38,38 +18,28 @@ pub use context_params::{
 };
 
 // Multimodal support module
-#[cfg(not(target_env = "musl"))]
 pub mod multimodal;
 
 // KV cache memory management
-#[cfg(not(target_env = "musl"))]
 pub mod memory;
 
 // Pooled sentence embeddings
-#[cfg(not(target_env = "musl"))]
 pub mod embedding;
 
 // Speculative decoding via arkavo_spec_wrapper
-#[cfg(not(target_env = "musl"))]
 pub mod speculative;
 
 // Cookie FILE* reader for llama_model_load_from_file_ptr (no llama.cpp patch)
-#[cfg(all(unix, not(target_env = "musl")))]
+#[cfg(unix)]
 mod callback;
 
-// Real implementation for non-musl targets
-#[cfg(not(target_env = "musl"))]
 pub use arkavo_llama_cpp_sys as ffi;
 
-#[cfg(not(target_env = "musl"))]
 use std::ffi::CString;
-#[cfg(not(target_env = "musl"))]
 use std::os::raw::{c_char, c_void};
-#[cfg(not(target_env = "musl"))]
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 // Global flag to control llama.cpp logging
-#[cfg(not(target_env = "musl"))]
 static LLAMA_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Model format for chat template selection
@@ -109,7 +79,6 @@ pub fn detect_model_format(model_name: &str) -> ModelFormat {
 
 // Global flag to track if GPU has failed (avoid retrying)
 // 0 = not tried, 1 = GPU works, 2 = GPU failed (use CPU)
-#[cfg(not(target_env = "musl"))]
 static GPU_STATUS: AtomicU32 = AtomicU32::new(0);
 
 /// Check if GPU acceleration is available for local inference
@@ -117,7 +86,6 @@ static GPU_STATUS: AtomicU32 = AtomicU32::new(0);
 /// Returns `Unknown` if no model has been loaded yet (GPU status not tested).
 /// Returns `Available` if GPU acceleration is working.
 /// Returns `Unavailable` if GPU failed and running in CPU-only mode.
-#[cfg(not(target_env = "musl"))]
 pub fn gpu_status() -> GpuStatus {
     match GPU_STATUS.load(Ordering::Relaxed) {
         0 => GpuStatus::Unknown,
@@ -128,7 +96,6 @@ pub fn gpu_status() -> GpuStatus {
 
 /// Reset GPU status to Unknown, allowing the next model/context creation
 /// to re-attempt GPU acceleration. Call this after a GPU fault recovery.
-#[cfg(not(target_env = "musl"))]
 pub fn reset_gpu_status() {
     GPU_STATUS.store(0, Ordering::Relaxed);
 }
@@ -141,7 +108,6 @@ pub fn reset_gpu_status() {
 /// auto-corrects at load. We can't fix those without re-converting the model and they are not
 /// actionable by the end user, so they are hidden unless `ARKAVO_DEBUG` enables debug logging.
 /// Genuine errors never match here and always surface.
-#[cfg(not(target_env = "musl"))]
 fn is_suppressed_log_line(text: &str) -> bool {
     // Progress dots printed during model load.
     if text == "." {
@@ -172,7 +138,6 @@ fn is_suppressed_log_line(text: &str) -> bool {
 }
 
 // Custom log callback that filters based on log level and our debug flag
-#[cfg(not(target_env = "musl"))]
 extern "C" fn llama_log_callback_filtered(
     level: ffi::ggml_log_level,
     text: *const c_char,
@@ -200,7 +165,6 @@ extern "C" fn llama_log_callback_filtered(
 }
 
 /// Initialize llama.cpp logging
-#[cfg(not(target_env = "musl"))]
 pub fn init_llama_logging() {
     // Logging disabled by default, can be enabled with set_debug_logging
     LLAMA_LOGGING_ENABLED.store(false, Ordering::Relaxed);
@@ -215,7 +179,6 @@ pub fn init_llama_logging() {
 }
 
 /// Enable or disable debug logging for llama.cpp
-#[cfg(not(target_env = "musl"))]
 pub fn set_debug_logging(enabled: bool) {
     LLAMA_LOGGING_ENABLED.store(enabled, Ordering::Relaxed);
     // Restore full "common" library verbosity in debug, quiet it otherwise.
@@ -223,7 +186,6 @@ pub fn set_debug_logging(enabled: bool) {
 }
 
 /// Quiet (or restore) llama.cpp's "common" library logging — see the C wrapper for details.
-#[cfg(not(target_env = "musl"))]
 fn set_common_log_quiet(quiet: bool) {
     // SAFETY: thin extern "C" setter over a global int threshold; no pointers involved.
     unsafe {
@@ -231,19 +193,15 @@ fn set_common_log_quiet(quiet: bool) {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
 pub struct LlamaModel {
     pub(crate) ptr: *mut ffi::llama_model,
     path: String,
 }
 
 // SAFETY: llama.cpp's model objects are thread-safe for read operations
-#[cfg(not(target_env = "musl"))]
 unsafe impl Send for LlamaModel {}
-#[cfg(not(target_env = "musl"))]
 unsafe impl Sync for LlamaModel {}
 
-#[cfg(not(target_env = "musl"))]
 impl LlamaModel {
     pub fn from_file(path: &str) -> Result<Self, String> {
         Self::from_file_with_options(path, true, false)
@@ -514,7 +472,6 @@ impl LlamaModel {
 }
 
 /// Result of llama_params_fit operation
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParamsFitStatus {
     /// Found allocations that are projected to fit
@@ -529,7 +486,6 @@ pub enum ParamsFitStatus {
 /// Returns optimal n_gpu_layers and n_ctx values that should fit in VRAM.
 ///
 /// This is useful for automatically configuring models on systems with limited GPU memory.
-#[cfg(not(target_env = "musl"))]
 pub fn params_fit(model_path: &str, n_ctx_min: u32) -> Result<(i32, u32), String> {
     // llama_params_fit is not exposed in current bindings; use a conservative fallback.
     // We return CPU-only (0 GPU layers) with at least the model's trained context.
@@ -537,7 +493,6 @@ pub fn params_fit(model_path: &str, n_ctx_min: u32) -> Result<(i32, u32), String
     Ok((0, model.get_trained_context_size().max(n_ctx_min)))
 }
 
-#[cfg(not(target_env = "musl"))]
 impl Drop for LlamaModel {
     fn drop(&mut self) {
         // SAFETY: Pointer was allocated by llama.cpp FFI and is guaranteed non-null after construction
@@ -549,25 +504,20 @@ impl Drop for LlamaModel {
 
 /// Contexts alive in this process. Each one owns a KV cache, so this is the
 /// figure to watch when private memory is higher than expected.
-#[cfg(not(target_env = "musl"))]
 static LIVE_CONTEXTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Number of llama.cpp contexts currently alive in this process.
-#[cfg(not(target_env = "musl"))]
 pub fn live_context_count() -> usize {
     LIVE_CONTEXTS.load(Ordering::Relaxed)
 }
 
-#[cfg(not(target_env = "musl"))]
 pub struct LlamaContext {
     pub(crate) ptr: *mut ffi::llama_context,
 }
 
 // SAFETY: llama.cpp contexts need to be protected by mutex for thread safety
-#[cfg(not(target_env = "musl"))]
 unsafe impl Send for LlamaContext {}
 
-#[cfg(not(target_env = "musl"))]
 impl LlamaContext {
     /// Take ownership of a context llama.cpp just created.
     pub(crate) fn from_raw(ptr: *mut ffi::llama_context) -> Self {
@@ -812,7 +762,6 @@ impl LlamaContext {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
 impl Drop for LlamaContext {
     fn drop(&mut self) {
         // SAFETY: Pointer was allocated by llama.cpp FFI and is guaranteed non-null after construction
@@ -841,7 +790,6 @@ const QWEN3_TEMPLATE: &str = "{% for message in messages %}{% if message['role']
 // Only call tools when explicitly needed - prefer direct answers for simple questions.
 const GLM4_TEMPLATE: &str = "[gMASK]<sop>{% for message in messages %}{% if message['role'] == 'system' %}<|system|>\n{{ message['content'] }}{% elif message['role'] == 'user' %}<|user|>\n{{ message['content'] }}{% elif message['role'] == 'assistant' %}<|assistant|>\n{{ message['content'] }}{% elif message['role'] == 'observation' %}<|observation|>{{ message['content'] }}{% endif %}{% endfor %}{% if add_generation_prompt %}<|assistant|>\n{% endif %}";
 
-#[cfg(not(target_env = "musl"))]
 pub fn apply_chat_template(
     messages: &[ffi::llama_chat_message],
     add_assistant: bool,
@@ -850,7 +798,6 @@ pub fn apply_chat_template(
     apply_chat_template_with_format(messages, add_assistant, ModelFormat::Gemma3)
 }
 
-#[cfg(not(target_env = "musl"))]
 pub fn apply_chat_template_with_format(
     messages: &[ffi::llama_chat_message],
     add_assistant: bool,
@@ -893,7 +840,6 @@ pub fn apply_chat_template_with_format(
 }
 
 /// Escape regex metacharacters in a string (matching sampling.cpp:210)
-#[cfg(not(target_env = "musl"))]
 fn regex_escape(s: &str) -> String {
     let mut escaped = String::with_capacity(s.len() * 2);
     for c in s.chars() {
@@ -906,7 +852,6 @@ fn regex_escape(s: &str) -> String {
 }
 
 /// Grammar trigger type from llama.cpp's template engine
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrammarTriggerType {
     Token = 0,
@@ -916,7 +861,6 @@ pub enum GrammarTriggerType {
 }
 
 /// A grammar trigger returned by the template engine
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone)]
 pub struct GrammarTrigger {
     pub trigger_type: GrammarTriggerType,
@@ -925,7 +869,6 @@ pub struct GrammarTrigger {
 }
 
 /// Tool choice for template application
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ToolChoice {
     #[default]
@@ -935,7 +878,6 @@ pub enum ToolChoice {
 }
 
 /// Result from applying a chat template via the Jinja engine
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone)]
 pub struct ChatResult {
     pub prompt: Vec<u8>,
@@ -953,7 +895,6 @@ pub struct ChatResult {
 }
 
 /// Parsed tool call from llama.cpp's native output parser
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone)]
 pub struct ParsedToolCall {
     pub name: String,
@@ -964,11 +905,9 @@ pub struct ParsedToolCall {
 /// Maximum tool calls accepted from a single inference.
 /// Gemma4's PEG grammar allows unlimited repetition; without a cap the model
 /// can enter a degenerate loop producing 100-200 identical calls.
-#[cfg(not(target_env = "musl"))]
 pub const MAX_TOOL_CALLS_PER_INFERENCE: usize = 10;
 
 /// Truncate a tool call vec to the per-inference cap.
-#[cfg(not(target_env = "musl"))]
 pub fn cap_tool_calls(calls: &mut Vec<ParsedToolCall>) {
     if calls.len() > MAX_TOOL_CALLS_PER_INFERENCE {
         eprintln!(
@@ -982,7 +921,6 @@ pub fn cap_tool_calls(calls: &mut Vec<ParsedToolCall>) {
 
 /// Parse model output using llama.cpp's built-in PEG parser.
 /// Supports Gemma 4, Mistral, Hermes, and other native tool-call formats.
-#[cfg(not(target_env = "musl"))]
 pub fn parse_tool_calls(
     output: &str,
     format: i32,
@@ -1059,7 +997,6 @@ pub fn parse_tool_calls(
 }
 
 /// Tool definition for template rendering
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone)]
 pub struct ChatTool {
     pub name: String,
@@ -1068,7 +1005,6 @@ pub struct ChatTool {
 }
 
 /// Inputs for chat template application
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone, Default)]
 pub struct ChatInputs {
     pub tools: Vec<ChatTool>,
@@ -1087,7 +1023,6 @@ pub struct ChatInputs {
 /// A tool call made by an assistant message, carried back into the chat
 /// template so templates that render from a structured list (e.g. Gemma 4)
 /// emit the prior call — and, by extension, the following tool responses.
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone, Default)]
 pub struct ChatToolCall {
     pub id: Option<String>,
@@ -1098,7 +1033,6 @@ pub struct ChatToolCall {
 
 /// Per-message metadata for Jinja template rendering (tool results and the
 /// assistant's own tool calls).
-#[cfg(not(target_env = "musl"))]
 #[derive(Debug, Clone, Default)]
 pub struct ChatMessageMeta {
     pub tool_call_id: Option<String>,
@@ -1107,17 +1041,13 @@ pub struct ChatMessageMeta {
 }
 
 /// Safe wrapper around llama.cpp's common_chat_templates (Jinja template engine)
-#[cfg(not(target_env = "musl"))]
 pub struct ChatTemplates {
     ptr: *mut ffi::arkavo_chat_templates,
 }
 
-#[cfg(not(target_env = "musl"))]
 unsafe impl Send for ChatTemplates {}
-#[cfg(not(target_env = "musl"))]
 unsafe impl Sync for ChatTemplates {}
 
-#[cfg(not(target_env = "musl"))]
 impl Drop for ChatTemplates {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
@@ -1126,7 +1056,6 @@ impl Drop for ChatTemplates {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
 impl ChatTemplates {
     /// Initialize chat templates from a loaded model's GGUF metadata
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -1387,7 +1316,6 @@ impl ChatTemplates {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn tokenize_with_model(
     vocab: *const ffi::llama_vocab,
@@ -1416,7 +1344,6 @@ pub fn tokenize_with_model(
     }
 }
 
-#[cfg(not(target_env = "musl"))]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn detokenize(
     vocab: *const ffi::llama_vocab,
@@ -1448,7 +1375,6 @@ pub fn detokenize(
 }
 
 /// Convert a token to raw bytes (may be incomplete UTF-8)
-#[cfg(not(target_env = "musl"))]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn token_to_bytes(
     vocab: *const ffi::llama_vocab,
@@ -1480,7 +1406,6 @@ pub fn token_to_bytes(
 /// Convert a token to a UTF-8 string piece
 /// Note: BPE tokens may represent incomplete UTF-8 sequences.
 /// Use `token_to_bytes` and buffer for streaming to handle this correctly.
-#[cfg(not(target_env = "musl"))]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn token_to_piece(
     vocab: *const ffi::llama_vocab,
@@ -1491,7 +1416,6 @@ pub fn token_to_piece(
     String::from_utf8(bytes).map_err(|e| format!("UTF-8 conversion error: {}", e))
 }
 
-#[cfg(not(target_env = "musl"))]
 pub fn batch_get_one(tokens: &[ffi::llama_token]) -> ffi::llama_batch {
     // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
     unsafe {
@@ -1502,7 +1426,6 @@ pub fn batch_get_one(tokens: &[ffi::llama_token]) -> ffi::llama_batch {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
 pub fn batch_get_one_with_logits(
     tokens: &[ffi::llama_token],
     request_logits_on_last: bool,
@@ -1526,7 +1449,6 @@ pub fn batch_get_one_with_logits(
     batch
 }
 
-#[cfg(not(target_env = "musl"))]
 pub fn batch_get_one_with_offset(
     tokens: &[ffi::llama_token],
     pos_offset: i32,
@@ -1562,7 +1484,6 @@ pub fn batch_get_one_with_offset(
 }
 
 /// Proper "llama way" batch creation with guaranteed allocation
-#[cfg(not(target_env = "musl"))]
 pub fn batch_init_with_tokens(
     tokens: &[ffi::llama_token],
     pos_offset: i32,
@@ -1603,7 +1524,6 @@ pub fn batch_init_with_tokens(
 
 /// Like `batch_init_with_tokens` but assigns all tokens to a specific `seq_id`.
 /// Used for multi-sequence inference where different sequences share a KV cache.
-#[cfg(not(target_env = "musl"))]
 pub fn batch_init_with_tokens_seq(
     tokens: &[ffi::llama_token],
     pos_offset: i32,
@@ -1645,7 +1565,6 @@ pub fn batch_init_with_tokens_seq(
 /// Used by speculative decoding to verify multiple candidate tokens in a
 /// single decode call (each position needs its own logits so the target
 /// sampler can be run against each).
-#[cfg(not(target_env = "musl"))]
 pub fn batch_init_with_tokens_all_logits(
     tokens: &[ffi::llama_token],
     pos_offset: i32,
@@ -1670,7 +1589,6 @@ pub fn batch_init_with_tokens_all_logits(
 }
 
 /// Free a batch created with batch_init_with_tokens
-#[cfg(not(target_env = "musl"))]
 pub fn batch_free(batch: &mut ffi::llama_batch) {
     // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
     unsafe {
@@ -1678,7 +1596,6 @@ pub fn batch_free(batch: &mut ffi::llama_batch) {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
 pub fn decode_batch(ctx: &LlamaContext, batch: ffi::llama_batch) -> Result<(), String> {
     // SAFETY: Batch/sampler pointers originate from llama.cpp allocation and remain valid for the struct's lifetime
     let result = unsafe { ffi::llama_decode(ctx.ptr, batch) };
@@ -1689,18 +1606,15 @@ pub fn decode_batch(ctx: &LlamaContext, batch: ffi::llama_batch) -> Result<(), S
     }
 }
 
-#[cfg(not(target_env = "musl"))]
 pub fn get_logits_ith(ctx: &LlamaContext, i: i32) -> *mut f32 {
     // SAFETY: Null return is checked immediately after this call
     unsafe { ffi::llama_get_logits_ith(ctx.ptr, i) }
 }
 
-#[cfg(not(target_env = "musl"))]
 pub struct LlamaSampler {
     ptr: *mut ffi::llama_sampler,
 }
 
-#[cfg(not(target_env = "musl"))]
 impl LlamaSampler {
     pub fn new_chain(no_perf: bool) -> Result<Self, String> {
         let chain_params = ffi::llama_sampler_chain_params { no_perf };
@@ -1912,7 +1826,6 @@ impl LlamaSampler {
     ///
     /// # Safety
     /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
-    #[cfg(not(target_env = "musl"))]
     pub unsafe fn add_grammar_lazy_with_triggers(
         &self,
         vocab: *const ffi::llama_vocab,
@@ -1992,10 +1905,8 @@ impl LlamaSampler {
 }
 
 // SAFETY: Access is serialized through Mutex in LlamaModel/LlamaContext
-#[cfg(not(target_env = "musl"))]
 unsafe impl Send for LlamaSampler {}
 
-#[cfg(not(target_env = "musl"))]
 impl Drop for LlamaSampler {
     fn drop(&mut self) {
         // Use exception-safe wrapper to prevent C++ exceptions from crossing FFI
@@ -2005,7 +1916,6 @@ impl Drop for LlamaSampler {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
 pub fn create_sampler_chain(
     temp: f32,
     top_p: f32,
@@ -2100,7 +2010,6 @@ impl DrySamplingConfig {
 ///
 /// # Safety
 /// The `vocab` pointer must be valid and point to a valid llama_vocab struct.
-#[cfg(not(target_env = "musl"))]
 pub unsafe fn create_sampler_chain_with_dry(
     temp: f32,
     top_p: f32,
@@ -2156,7 +2065,6 @@ pub unsafe fn create_sampler_chain_with_dry(
 }
 
 /// Performance metrics from llama_perf_context
-#[cfg(not(target_env = "musl"))]
 pub struct PerfMetrics {
     pub t_p_eval_ms: f64,
     pub t_eval_ms: f64,
@@ -2164,7 +2072,6 @@ pub struct PerfMetrics {
     pub n_eval: i32,
 }
 
-#[cfg(not(target_env = "musl"))]
 impl PerfMetrics {
     /// Tokens per second during generation (eval phase)
     pub fn tok_per_sec(&self) -> f64 {
@@ -2182,7 +2089,6 @@ impl PerfMetrics {
 }
 
 /// Get performance metrics from a context
-#[cfg(not(target_env = "musl"))]
 pub fn perf_context(ctx: &LlamaContext) -> PerfMetrics {
     let data = unsafe { ffi::llama_perf_context(ctx.ptr) };
     PerfMetrics {
@@ -2194,19 +2100,16 @@ pub fn perf_context(ctx: &LlamaContext) -> PerfMetrics {
 }
 
 /// Print performance metrics via llama.cpp's built-in logger
-#[cfg(not(target_env = "musl"))]
 pub fn perf_context_print(ctx: &LlamaContext) {
     unsafe { ffi::llama_perf_context_print(ctx.ptr) };
 }
 
 /// Reset performance counters on a context
-#[cfg(not(target_env = "musl"))]
 pub fn perf_context_reset(ctx: &mut LlamaContext) {
     unsafe { ffi::llama_perf_context_reset(ctx.ptr) };
 }
 
 /// Minimal FFI test harness to verify llama.cpp initialization
-#[cfg(not(target_env = "musl"))]
 pub fn test_minimal_init() -> Result<(), String> {
     // Test model params creation without backend init/cleanup
     // SAFETY: Null return is checked immediately after this call
@@ -2232,7 +2135,6 @@ mod tests {
     // terminal during a normal `arkavo chat`. They are unfixable on our side (llama.cpp
     // auto-corrects the token types at load), so they must be hidden unless debug logging is
     // on — but never suppress genuine load errors.
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn suppresses_unfixable_model_metadata_warnings() {
         assert!(is_suppressed_log_line(
@@ -2246,7 +2148,6 @@ mod tests {
         ));
     }
 
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn does_not_suppress_genuine_errors() {
         assert!(!is_suppressed_log_line(
@@ -2417,7 +2318,6 @@ mod tests {
     }
 
     #[spec("LLAMA-007")]
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn test_tool_choice_respected_defaults() {
         // ToolChoice drives whether the grammar forces, permits, or forbids tool calls.
@@ -2434,7 +2334,6 @@ mod tests {
     }
 
     #[spec("LLAMA-002")]
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn test_reset_gpu_status() {
         // Set to failed
@@ -2447,7 +2346,6 @@ mod tests {
     }
 
     #[spec("LLAMA-002")]
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn test_gpu_status_available_then_reset() {
         // After a successful GPU load the status is Available.
@@ -2459,7 +2357,6 @@ mod tests {
         assert_eq!(gpu_status(), GpuStatus::Unknown);
     }
 
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn parse_tool_calls_caps_at_max() {
         let mut calls: Vec<ParsedToolCall> = (0..50)
@@ -2474,7 +2371,6 @@ mod tests {
         assert_eq!(calls.len(), MAX_TOOL_CALLS_PER_INFERENCE);
     }
 
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn parse_tool_calls_preserves_small_batch() {
         let mut calls: Vec<ParsedToolCall> = (0..3)
@@ -2489,7 +2385,6 @@ mod tests {
         assert_eq!(calls.len(), 3);
     }
 
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn from_callback_rejects_zero_virtual_size() {
         let err = match LlamaModel::from_callback(0, |_offset, _buf| 0) {
@@ -2502,7 +2397,6 @@ mod tests {
         );
     }
 
-    #[cfg(not(target_env = "musl"))]
     #[test]
     fn from_callback_rejects_non_gguf_bytes() {
         let prev_gpu = GPU_STATUS.load(Ordering::Relaxed);

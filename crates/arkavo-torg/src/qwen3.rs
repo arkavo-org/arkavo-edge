@@ -22,7 +22,6 @@ impl Qwen3TokenMap {
     /// # Safety
     ///
     /// The `vocab` pointer must be valid and point to an initialized llama_vocab.
-    #[cfg(not(target_env = "musl"))]
     pub unsafe fn from_vocab(
         vocab: *const arkavo_llama_cpp::ffi::llama_vocab,
     ) -> Result<Self, TorgError> {

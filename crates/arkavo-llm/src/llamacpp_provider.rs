@@ -4,9 +4,9 @@ use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResp
 
 /// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
 type TemplateParseTuple = (i32, Option<String>, Option<String>);
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::multimodal::MtmdContext;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::{
     ChatInputs, ChatMessageMeta, ChatToolCall, LlamaModel, ModelFormat,
     apply_chat_template_with_format, detect_model_format, ffi, init_llama_logging,
@@ -14,12 +14,12 @@ use arkavo_llama_cpp::{
 };
 use async_trait::async_trait;
 use serde_json::Value;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::ffi::CString;
 use std::sync::Arc;
 use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use crate::llamacpp_streaming::{StreamingConfig, generate_tokens};
 use crate::mcp_converter::{LocalToolFormat, McpConverter};
 
@@ -42,16 +42,16 @@ pub struct SamplingConfig {
     /// Explicit thinking mode override from autoresearch tuning
     pub thinking_mode: Option<ThinkingMode>,
     /// Tool definitions for native template rendering (passed to Jinja engine)
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub chat_tools: Vec<arkavo_llama_cpp::ChatTool>,
     /// Tool choice for native template rendering
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub chat_tool_choice: arkavo_llama_cpp::ToolChoice,
     /// Chat format from llama.cpp Jinja template (for native output parsing)
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub chat_format: i32,
     /// Serialized PEG parser from Jinja template (for native output parsing)
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub chat_parser_str: Option<String>,
     /// Enable NGRAM self-speculative decoding for this provider. The router
     /// flips this per-request based on rolling accept-rate stats; default
@@ -72,13 +72,13 @@ impl Default for SamplingConfig {
             thinking_mode: None,
             grammar: None,
             grammar_triggers: None,
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            #[cfg(feature = "llama-cpp")]
             chat_tools: Vec::new(),
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            #[cfg(feature = "llama-cpp")]
             chat_tool_choice: arkavo_llama_cpp::ToolChoice::Auto,
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            #[cfg(feature = "llama-cpp")]
             chat_format: 0,
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            #[cfg(feature = "llama-cpp")]
             chat_parser_str: None,
             use_spec_decoding: false,
         }
@@ -92,7 +92,7 @@ type ConversationId = String;
 
 /// Check if a model name indicates a sub-1B parameter model.
 /// Sub-1B models lack capacity for useful chain-of-thought reasoning.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn is_small_model(name: &str) -> bool {
     let lower = name.to_lowercase();
     // Match sub-1B size indicators: "0.6b", "0.8b", "270m", "500m", etc.
@@ -102,7 +102,7 @@ fn is_small_model(name: &str) -> bool {
         || lower.contains("500m")
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct LlamaCppProvider {
     /// Model reference - either owned directly or accessed via registry
     model: Option<Arc<LlamaModel>>,
@@ -124,12 +124,12 @@ pub struct LlamaCppProvider {
     template_parse_info: std::sync::Mutex<Option<TemplateParseTuple>>,
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub struct LlamaCppProvider {
     name: String,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl LlamaCppProvider {
     pub fn new(model_name: String, model_path: String) -> Result<Self> {
         Self::new_with_config(model_name, model_path, None, SamplingConfig::default())
@@ -369,7 +369,7 @@ impl LlamaCppProvider {
     }
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 impl LlamaCppProvider {
     pub fn new(_model_name: String, _model_path: String) -> Result<Self> {
         Err(Error::Config(
@@ -417,7 +417,7 @@ impl LlamaCppProvider {
 /// stream and `None` is returned; `None` is also returned when the caller
 /// stopped listening while queued, so the context is not tied up decoding a
 /// prompt nobody will read.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 async fn lease_context(
     registry: &Arc<ModelRegistry>,
     model_name: &str,
@@ -441,7 +441,7 @@ async fn lease_context(
     Some((lease, context))
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl LlamaCppProvider {
     fn generate_streaming(
         &self,
@@ -982,7 +982,7 @@ impl LlamaCppProvider {
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[async_trait]
 impl Provider for LlamaCppProvider {
     async fn complete_with_options(
@@ -1383,19 +1383,19 @@ impl Provider for LlamaCppProvider {
 /// Returns `false` only if GPU has been tested and failed.
 ///
 /// This is used by the router to make hardware-aware model selection decisions.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub fn is_gpu_accelerated() -> bool {
     use arkavo_llama_cpp::{GpuStatus, gpu_status};
     matches!(gpu_status(), GpuStatus::Available | GpuStatus::Unknown)
 }
 
 /// Stub for when llama-cpp is disabled - always returns false
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub fn is_gpu_accelerated() -> bool {
     false
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 #[async_trait]
 impl Provider for LlamaCppProvider {
     async fn complete_with_options(
@@ -1439,11 +1439,11 @@ impl Provider for LlamaCppProvider {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     use super::is_small_model;
 
     #[test]
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     fn test_is_small_model() {
         assert!(is_small_model("qwen3.5-0.8b"));
         assert!(is_small_model("Qwen3-0.6B"));
@@ -1456,7 +1456,7 @@ mod tests {
         assert!(!is_small_model("glm-4.7-flash"));
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     mod chat_meta {
         use super::super::LlamaCppProvider;
         use crate::{Message, ToolCall};

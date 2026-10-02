@@ -117,7 +117,7 @@ pub async fn run_agent_loop(
     let mut consecutive_duplicate_prompts: u32 = 0;
 
     // Token estimator: use real tokenizer when llama.cpp is available
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     let estimator: Arc<dyn crate::server::token_estimator::TokenEstimator> = {
         match config.router.any_loaded_model() {
             Some(model) => Arc::new(crate::server::token_estimator::LlamaTokenEstimator::new(
@@ -126,7 +126,7 @@ pub async fn run_agent_loop(
             None => Arc::new(crate::server::token_estimator::MockEstimator),
         }
     };
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     let estimator: Arc<dyn crate::server::token_estimator::TokenEstimator> =
         Arc::new(crate::server::token_estimator::MockEstimator);
 

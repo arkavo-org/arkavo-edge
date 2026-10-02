@@ -5,13 +5,9 @@
 //! OAuth, or TDF-transport code: the caller performs the rewrap in the
 //! runtime it already owns and passes the resulting payload key in.
 
-#[cfg(not(target_env = "musl"))]
 use crate::{Error, Result};
-#[cfg(not(target_env = "musl"))]
 use arkavo_gguf_tdf::{GgufTdfArchive, PreResolvedKey};
-#[cfg(not(target_env = "musl"))]
 use arkavo_llama_cpp::LlamaModel;
-#[cfg(not(target_env = "musl"))]
 use std::path::Path;
 
 /// File extension identifying a protected model.
@@ -22,7 +18,6 @@ pub fn is_protected_model_path(path: &str) -> bool {
     path.to_lowercase().ends_with(PROTECTED_EXTENSION)
 }
 
-#[cfg(not(target_env = "musl"))]
 /// Whether `path` is an mmproj sidecar, which has no callback-capable load.
 fn is_mmproj(path: &str) -> bool {
     Path::new(path)
@@ -31,7 +26,6 @@ fn is_mmproj(path: &str) -> bool {
         .is_some_and(|n| n.to_lowercase().starts_with("mmproj-"))
 }
 
-#[cfg(not(target_env = "musl"))]
 /// Loads a protected model with an already-recovered payload key.
 ///
 /// The archive is opened and structurally validated, the header is decrypted
@@ -80,7 +74,7 @@ pub fn load_with_payload_key(model_path: &str, payload_key: [u8; 32]) -> Result<
     }
 }
 
-#[cfg(all(test, not(target_env = "musl")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -5,19 +5,19 @@
 
 #![allow(clippy::disallowed_methods)]
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llm::{ModelRegistry, MultiModelProvider, Provider, SamplingConfig};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_model_registry_creation() {
     let registry = ModelRegistry::new();
     assert!(registry.list_models().is_empty());
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_model_registry_load_and_get() {
     let registry = ModelRegistry::new();
@@ -27,7 +27,7 @@ async fn test_model_registry_load_and_get() {
     assert_eq!(registry.list_models().len(), 0);
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_model_registry_model_names() {
     let registry = ModelRegistry::new();
@@ -37,7 +37,7 @@ async fn test_model_registry_model_names() {
     assert!(names.is_empty());
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_model_registry_is_loaded() {
     let registry = ModelRegistry::new();
@@ -46,7 +46,7 @@ async fn test_model_registry_is_loaded() {
     assert!(!registry.is_loaded("any-model"));
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_model_registry_len_and_is_empty() {
     let registry = ModelRegistry::new();
@@ -55,7 +55,7 @@ async fn test_model_registry_len_and_is_empty() {
     assert!(registry.is_empty());
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_model_registry_unload_model() {
     let registry = ModelRegistry::new();
@@ -65,7 +65,7 @@ async fn test_model_registry_unload_model() {
 }
 
 /// Test that ModelRegistry is Send + Sync for concurrent access
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[test]
 fn test_model_registry_thread_safety() {
     fn assert_send_sync<T: Send + Sync>() {}
@@ -73,7 +73,7 @@ fn test_model_registry_thread_safety() {
 }
 
 /// Test Provider trait implementation for multi-model provider
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_multi_model_provider_creation() {
     let registry = Arc::new(ModelRegistry::new());

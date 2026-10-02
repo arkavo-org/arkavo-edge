@@ -6,7 +6,7 @@
 //!   ARKAVO_N_CTX=1024 ARKAVO_TEST_TEXT_MODEL=/path/to/model.gguf \
 //!     cargo test -p arkavo-llm --features llama-cpp --test context_override_test
 
-#![cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#![cfg(feature = "llama-cpp")]
 
 use arkavo_llm::llamacpp_provider::{LlamaCppProvider, SamplingConfig};
 use arkavo_llm::provider::Provider;

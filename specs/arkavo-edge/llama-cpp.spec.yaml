@@ -10,7 +10,6 @@ invariants:
   - Model format auto-detected from model name
   - Sampler chain order enforced (top_k -> top_p -> temp -> final)
   - Chat templates support tool calling and grammar constraints
-  - Musl targets get stub implementations (no FFI)
   - All FFI pointers validated for null before use
   - Context size scaled based on trained context length
 
@@ -134,19 +133,6 @@ scenarios:
       - Context size validated
       - ParamsFitStatus returned
     refs: [crates/arkavo-llama-cpp/src/lib.rs:333-365]
-    changed: "2026-03-19"
-
-  - id: LLAMA-009
-    name: Musl target stub behavior
-    criticality: medium
-    given:
-      - Binary compiled for musl target
-    when: Any llama function called
-    then:
-      - Stub returns error or no-op
-      - GpuStatus always Unavailable
-      - No FFI calls made
-    refs: [crates/arkavo-llama-cpp/src/lib.rs:13-29]
     changed: "2026-03-19"
 
   - id: LLAMA-010

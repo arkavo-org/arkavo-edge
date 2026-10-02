@@ -82,23 +82,19 @@ pub mod gguf_tdf;
 pub mod llamacpp_provider;
 #[cfg(feature = "llama-cpp")]
 mod llamacpp_streaming;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub use arkavo_llama_cpp::{LlamaModel, tokenize_with_model};
-#[cfg(all(feature = "llama-cpp", target_env = "musl"))]
-pub use context_pool::{ContextPool, PoolStats};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub use context_pool::{ContextPool, PoolStats, PooledContext};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub use conversation_context::{
     ConversationContext, ConversationContextManager, ConversationContextRef, ConversationId,
 };
 #[cfg(feature = "llama-cpp")]
 pub use llamacpp_provider::{LlamaCppProvider, SamplingConfig, is_gpu_accelerated};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub use model_registry::{ModelInfo, ModelRegistry};
-#[cfg(all(feature = "llama-cpp", target_env = "musl"))]
-pub use model_registry::{ModelInfo, ModelRegistry};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub use multi_model_provider::MultiModelProvider;
 pub use stream_adapter::LlmClientAdapter;
 pub use stream_model::{

@@ -95,7 +95,7 @@ impl ContextManager {
     ///   2. Shift to `[write_head, write_head + N)` via `seq_add`
     ///   3. Copy to learning seq via `seq_cp`
     ///   4. Clean up conversation seq
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn load(
         &mut self,
         ctx: &arkavo_llama_cpp::LlamaContext,
@@ -158,7 +158,7 @@ impl ContextManager {
     }
 
     /// Unload a named slot and compact remaining slots to fill the gap.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn unload(
         &mut self,
         ctx: &arkavo_llama_cpp::LlamaContext,
@@ -194,7 +194,7 @@ impl ContextManager {
 
     /// Copy the learning sequence to the conversation sequence.
     /// Returns the write_head as the offset where new conversation tokens start.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn begin_conversation(
         &self,
         ctx: &arkavo_llama_cpp::LlamaContext,
@@ -206,7 +206,7 @@ impl ContextManager {
     }
 
     /// Clear the conversation sequence, preserving the learning sequence.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn end_conversation(
         &self,
         ctx: &arkavo_llama_cpp::LlamaContext,
@@ -239,7 +239,7 @@ impl ContextManager {
     }
 
     /// Remove all slots and reset the write head.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn clear_all(&mut self, ctx: &arkavo_llama_cpp::LlamaContext) -> Result<(), ContextError> {
         let mem = ctx.get_memory();
         mem.seq_rm(self.seq_learning, -1, -1);
@@ -260,7 +260,7 @@ impl ContextManager {
     }
 }
 
-#[cfg(any(all(feature = "llama-cpp", not(target_env = "musl")), test))]
+#[cfg(any(feature = "llama-cpp", test))]
 fn hash_file(path: &str) -> Result<[u8; 32], String> {
     use sha2::{Digest, Sha256};
     let data = std::fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))?;

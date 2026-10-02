@@ -5,7 +5,7 @@
 //! enum in `ggml/include/ggml.h`.
 //!
 //! This is a pure-Rust table rather than an FFI call so the writer works on
-//! targets where llama-cpp is not built (Windows, musl). Wherever llama-cpp is
+//! targets where llama-cpp is not built (Windows). Wherever llama-cpp is
 //! available, `tests/ggml_conformance.rs` pins every entry against
 //! `ggml_blck_size` / `ggml_type_size`.
 

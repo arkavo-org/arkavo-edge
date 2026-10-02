@@ -9,19 +9,19 @@
 //! - Different models run concurrently, each on its own context
 //! - KV cache isolation: each context has its own cache for conversations
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::LlamaModel;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::multimodal::MtmdContext;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::collections::HashMap;
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 use std::collections::HashSet;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
 use std::sync::RwLock;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use crate::context_pool::{ContextPool, PooledContext};
 use crate::{Error, Result};
 
@@ -29,13 +29,13 @@ use crate::{Error, Result};
 ///
 /// Process-wide rather than per registry because the planner that needs the
 /// figure is handed a model name, not the registry that loaded it.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 static CONTEXT_LENGTHS: std::sync::LazyLock<RwLock<HashMap<String, u32>>> =
     std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// The context window a loaded model's contexts are created with, or `None`
 /// when no registry in this process has loaded a model under `name`.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub fn loaded_context_length(name: &str) -> Option<u32> {
     CONTEXT_LENGTHS
         .read()
@@ -44,7 +44,7 @@ pub fn loaded_context_length(name: &str) -> Option<u32> {
 }
 
 /// No model is ever loaded in a build without the local engine.
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub fn loaded_context_length(_name: &str) -> Option<u32> {
     None
 }
@@ -54,14 +54,14 @@ pub fn loaded_context_length(_name: &str) -> Option<u32> {
 /// Returning on drop rather than by an explicit call matters once the pool
 /// is a hard bound: a generation task that panics or is cancelled would
 /// otherwise keep the model's only context forever.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct ContextLease {
     registry: Arc<ModelRegistry>,
     model_name: String,
     context: Option<PooledContext>,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl ContextLease {
     /// The leased context, for the duration of one generation.
     pub fn context(&self) -> Option<Arc<std::sync::Mutex<arkavo_llama_cpp::LlamaContext>>> {
@@ -69,7 +69,7 @@ impl ContextLease {
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl Drop for ContextLease {
     fn drop(&mut self) {
         if let Some(context) = self.context.take()
@@ -87,26 +87,26 @@ impl Drop for ContextLease {
 /// The registry stores loaded models and uses a ContextPool for managing
 /// multiple contexts per model, enabling true concurrent inference.
 pub struct ModelRegistry {
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     models: RwLock<HashMap<String, Arc<LlamaModel>>>,
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     context_pool: ContextPool,
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     vision_contexts: RwLock<HashMap<String, Arc<MtmdContext>>>,
     // Stub fields for non-llama-cpp builds to maintain struct size consistency
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     models: RwLock<HashSet<String>>,
 }
 
 impl ModelRegistry {
     /// Create a new empty model registry with default pool settings
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn new() -> Self {
         Self::with_max_contexts(crate::context_pool::default_max_contexts())
     }
 
     /// Create a new model registry with custom max contexts per model
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn with_max_contexts(max_contexts: usize) -> Self {
         Self {
             models: RwLock::new(HashMap::new()),
@@ -116,7 +116,7 @@ impl ModelRegistry {
     }
 
     /// Create a new empty model registry (stub for non-llama-cpp builds)
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn new() -> Self {
         Self {
             models: RwLock::new(HashSet::new()),
@@ -131,7 +131,7 @@ impl ModelRegistry {
     ///
     /// # Errors
     /// Returns an error if the model fails to load from the given path
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn load(&self, name: &str, path: &str) -> Result<()> {
         // Double-check under read lock to avoid concurrent duplicate loads
         if self.is_loaded(name) {
@@ -157,7 +157,7 @@ impl ModelRegistry {
     /// KAS rewrap is asynchronous and this method is not, so the caller
     /// performs the round-trip in the runtime it already owns and passes the
     /// key in. Nothing here contacts a KAS or falls back to a plaintext model.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn load_protected(&self, name: &str, path: &str, payload_key: [u8; 32]) -> Result<()> {
         if self.is_loaded(name) {
             return Ok(());
@@ -167,7 +167,7 @@ impl ModelRegistry {
         self.register_loaded(name, model)
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     fn register_loaded(&self, name: &str, model: LlamaModel) -> Result<()> {
         let model_arc = Arc::new(model);
 
@@ -200,7 +200,7 @@ impl ModelRegistry {
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn load(&self, _name: &str, _path: &str) -> Result<()> {
         Err(Error::Config(
             "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
@@ -208,7 +208,7 @@ impl ModelRegistry {
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn load_protected(&self, _name: &str, _path: &str, _payload_key: [u8; 32]) -> Result<()> {
         Err(Error::Config(
             "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
@@ -218,7 +218,7 @@ impl ModelRegistry {
     /// Get a reference to a loaded model by name
     ///
     /// Returns None if the model is not loaded
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn get(&self, name: &str) -> Option<Arc<LlamaModel>> {
         self.models
             .read()
@@ -227,7 +227,7 @@ impl ModelRegistry {
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn get(&self, _name: &str) -> Option<()> {
         None
     }
@@ -236,20 +236,20 @@ impl ModelRegistry {
     ///
     /// Returns a PooledContext that can be used for inference. The context
     /// preserves its KV cache for multi-turn conversations.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn acquire_context(&self, name: &str) -> Result<PooledContext> {
         self.context_pool.acquire(name)
     }
 
     /// Acquire a fresh context with cleared KV cache (for new conversations)
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn acquire_fresh_context(&self, name: &str) -> Result<PooledContext> {
         self.context_pool.acquire_fresh(name)
     }
 
     /// Lease a fresh context, waiting up to `limit` for one to be released
     /// when every context for the model is in use.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub async fn lease_fresh_context(
         self: &Arc<Self>,
         name: &str,
@@ -264,7 +264,7 @@ impl ModelRegistry {
     }
 
     /// Get a cached vision context for a model, if one has been stored.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn get_vision_ctx(&self, name: &str) -> Option<Arc<MtmdContext>> {
         self.vision_contexts
             .read()
@@ -273,7 +273,7 @@ impl ModelRegistry {
     }
 
     /// Store a vision context for a model so subsequent provider creations skip the load.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn store_vision_ctx(&self, name: &str, ctx: Arc<MtmdContext>) {
         if let Ok(mut ctxs) = self.vision_contexts.write() {
             ctxs.insert(name.to_string(), ctx);
@@ -286,7 +286,7 @@ impl ModelRegistry {
     /// * `name` - Model name
     /// * `context` - The context to release
     /// * `clear_cache` - If true, clears KV cache before returning to pool
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn release_context(
         &self,
         name: &str,
@@ -297,13 +297,13 @@ impl ModelRegistry {
     }
 
     /// Get the context pool (for advanced use cases like ConversationContextManager)
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn context_pool(&self) -> &ContextPool {
         &self.context_pool
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn acquire_context(&self, name: &str) -> Result<()> {
         Err(Error::Config(format!(
             "Model '{name}' not found (llama-cpp not enabled)"
@@ -314,7 +314,7 @@ impl ModelRegistry {
     ///
     /// Returns true if a model was removed, false if it wasn't loaded
     pub fn unload_model(&self, name: &str) -> bool {
-        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+        #[cfg(feature = "llama-cpp")]
         {
             // Remove from models map (contexts will be cleaned up when pool is dropped)
             let removed = self
@@ -328,7 +328,7 @@ impl ModelRegistry {
             }
             removed
         }
-        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+        #[cfg(not(feature = "llama-cpp"))]
         {
             let _ = name;
             false
@@ -336,7 +336,7 @@ impl ModelRegistry {
     }
 
     /// Check if a model is currently loaded in the registry
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn is_loaded(&self, name: &str) -> bool {
         self.models
             .read()
@@ -346,7 +346,7 @@ impl ModelRegistry {
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn is_loaded(&self, name: &str) -> bool {
         self.models
             .read()
@@ -356,7 +356,7 @@ impl ModelRegistry {
     }
 
     /// Get a list of all loaded model names
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn model_names(&self) -> Vec<String> {
         self.models
             .read()
@@ -366,7 +366,7 @@ impl ModelRegistry {
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn model_names(&self) -> Vec<String> {
         self.models
             .read()
@@ -390,7 +390,7 @@ impl ModelRegistry {
     }
 
     /// List all models with their information
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn list_models(&self) -> Vec<ModelInfo> {
         self.models
             .read()
@@ -408,7 +408,7 @@ impl ModelRegistry {
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn list_models(&self) -> Vec<ModelInfo> {
         self.models
             .read()

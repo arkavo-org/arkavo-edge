@@ -7,12 +7,12 @@
 
 #![allow(clippy::disallowed_methods, clippy::uninlined_format_args)]
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llm::ModelRegistry;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_concurrent_model_access() {
     let registry = Arc::new(ModelRegistry::new());
@@ -37,7 +37,7 @@ async fn test_concurrent_model_access() {
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_model_registry_thread_safety_stress() {
     let registry = Arc::new(ModelRegistry::new());
@@ -61,14 +61,14 @@ async fn test_model_registry_thread_safety_stress() {
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[test]
 fn test_model_registry_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<ModelRegistry>();
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[test]
 fn test_pooled_context_send() {
     fn assert_send<T: Send>() {}
@@ -77,7 +77,7 @@ fn test_pooled_context_send() {
 }
 
 /// Test that ModelInfo can be cloned and sent across threads
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[test]
 fn test_model_info_clone_send() {
     fn assert_clone_send<T: Clone + Send>() {}
@@ -86,7 +86,7 @@ fn test_model_info_clone_send() {
 }
 
 /// Test multi-model provider thread safety
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[test]
 fn test_multi_model_provider_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}

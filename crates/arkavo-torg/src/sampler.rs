@@ -47,7 +47,6 @@ impl TorgLlamaSampler {
     /// This allocates a new vector on each call. For high-performance
     /// use cases, consider caching the result or using a more efficient
     /// representation.
-    #[cfg(not(target_env = "musl"))]
     pub fn get_logit_bias(&self) -> Vec<arkavo_llama_cpp::ffi::llama_logit_bias> {
         let mask = self.decoder.next_mask();
 

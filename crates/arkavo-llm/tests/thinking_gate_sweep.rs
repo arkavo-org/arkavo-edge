@@ -15,7 +15,7 @@
 //! Usage:
 //!   ARKAVO_BENCH_MODEL=/path/to/qwen3.5-0.8b.gguf cargo test -p arkavo-llm --test thinking_gate_sweep --features llama-cpp -- --nocapture
 
-#![cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#![cfg(feature = "llama-cpp")]
 #![allow(clippy::disallowed_methods)]
 
 use arkavo_llama_cpp::{

@@ -8,21 +8,21 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::time::{Duration, Instant};
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use crate::context_pool::{ContextPool, PooledContext};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use crate::{Error, Result};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
 
 /// Unique identifier for a conversation session
 pub type ConversationId = String;
 
 /// Tracks a context assigned to a specific conversation
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct ConversationContext {
     /// The pooled context for this conversation
     pub context: PooledContext,
@@ -34,7 +34,7 @@ pub struct ConversationContext {
     pub token_position: i32,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl ConversationContext {
     fn new(context: PooledContext, conversation_id: ConversationId) -> Self {
         Self {
@@ -57,14 +57,14 @@ impl ConversationContext {
 }
 
 /// Stub for non-llama-cpp builds
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub struct ConversationContext {
     pub conversation_id: ConversationId,
     pub token_position: i32,
 }
 
 /// Manages conversation-to-context mappings with automatic idle cleanup
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct ConversationContextManager {
     /// Active conversation contexts indexed by conversation ID
     active: RwLock<HashMap<ConversationId, ConversationContext>>,
@@ -74,7 +74,7 @@ pub struct ConversationContextManager {
     idle_timeout: Duration,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl ConversationContextManager {
     /// Create a new manager with the given context pool
     pub fn new(pool: Arc<ContextPool>) -> Self {
@@ -234,19 +234,19 @@ impl ConversationContextManager {
 }
 
 /// Reference to a conversation context (used for tracking if context is new)
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct ConversationContextRef {
     pub conversation_id: ConversationId,
     pub is_new: bool,
 }
 
 /// Stub implementation for non-llama-cpp builds
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub struct ConversationContextManager {
     _active: RwLock<HashMap<ConversationId, ConversationContext>>,
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 impl ConversationContextManager {
     pub fn active_count(&self) -> usize {
         0
@@ -257,7 +257,7 @@ impl ConversationContextManager {
     }
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub struct ConversationContextRef {
     pub conversation_id: ConversationId,
     pub is_new: bool,
@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(ctx_ref.conversation_id, "test");
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[test]
     fn test_manager_thread_safety() {
         fn assert_send_sync<T: Send + Sync>() {}

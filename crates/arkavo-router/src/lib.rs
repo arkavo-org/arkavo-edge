@@ -713,7 +713,7 @@ impl Router {
     /// Free KV-cache slots for a local model, read from the live context pool.
     /// Defaults to 1 ("assume placeable") when the pool has no entry or on
     /// builds without the local engine — an honest fallback, not a fake count.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     fn kv_slots_free(&self, model_name: &str) -> usize {
         self.model_registry
             .context_pool()
@@ -722,7 +722,7 @@ impl Router {
             .unwrap_or(1)
     }
 
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     fn kv_slots_free(&self, _model_name: &str) -> usize {
         1
     }
@@ -1668,7 +1668,7 @@ impl Router {
     /// Minimum context size across all currently-loaded local models.
     /// Returns conservative default (4096) if no models are loaded.
     /// Used by ConversationWindow to compute the history token budget.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn min_feasible_context_size(&self) -> usize {
         let models = self.model_registry.model_names();
         if models.is_empty() {
@@ -1686,14 +1686,14 @@ impl Router {
         if min_ctx == usize::MAX { 4096 } else { min_ctx }
     }
 
-    #[cfg(any(not(feature = "llama-cpp"), target_env = "musl"))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn min_feasible_context_size(&self) -> usize {
         4096
     }
 
     /// Get an Arc<LlamaModel> from any loaded model for token estimation.
     /// Returns None if no models are loaded.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn any_loaded_model(&self) -> Option<std::sync::Arc<arkavo_llm::LlamaModel>> {
         let names = self.model_registry.model_names();
         names.first().and_then(|name| self.model_registry.get(name))
