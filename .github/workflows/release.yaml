@@ -70,7 +70,6 @@ jobs:
 
             #### Linux
             - **x86_64 full featured** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
-            - **x86_64 static/slim** (musl, utility commands only, no local inference backend): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
             - **ARM64/Raspberry Pi 5** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-aarch64-linux.tar.gz
             - **Debian package** (x86_64, full featured): arkavo_${{ steps.version.outputs.version }}_amd64.deb
 
@@ -81,7 +80,7 @@ jobs:
             #### Windows
             - **x86_64** (utility commands only, no local inference backend): arkavo-${{ steps.version.outputs.version }}-x86_64-windows.zip
 
-            Choose the glibc build for desktop Linux with both local and remote LLM support. ARM64 build is optimized for Raspberry Pi 5 (16GB) - see [deployment guide](https://github.com/arkavo-org/arkavo-edge/blob/main/docs/raspberry-pi-deployment.md). The musl and Windows builds are compiled without a local inference backend: utility commands such as `arkavo kit` run, while `arkavo agent`, `chat`, `task`, and `ui` require a local backend and exit with an error. iOS testing capabilities are available on macOS only.
+            Choose the glibc build for desktop Linux with both local and remote LLM support. ARM64 build is optimized for Raspberry Pi 5 (16GB) - see [deployment guide](https://github.com/arkavo-org/arkavo-edge/blob/main/docs/raspberry-pi-deployment.md). The Windows build is compiled without a local inference backend: utility commands such as `arkavo kit` run, while `arkavo agent`, `chat`, `task`, and `ui` require a local backend and exit with an error. For containers and Kubernetes, use the glibc build or the repository's `Dockerfile`. iOS testing capabilities are available on macOS only.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -94,13 +93,7 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            features: default
             artifact_suffix: x86_64-linux
-            needs_musl: false
-          - target: x86_64-unknown-linux-musl
-            features: memory,mdns,mcp-tools
-            artifact_suffix: x86_64-linux-musl
-            needs_musl: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -129,30 +122,12 @@ jobs:
           sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
 
       - name: Install dependencies for glibc build
-        if: matrix.needs_musl == false
         run: |
           sudo apt-get update
           sudo apt-get install -y libavahi-client-dev libavahi-common-dev
 
-      - name: Install musl tools and dependencies
-        if: matrix.needs_musl == true
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools musl-dev
-
       - name: Build
-        env:
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          CXX_x86_64_unknown_linux_musl: musl-g++
-          AR_x86_64_unknown_linux_musl: ar
-          CXXFLAGS_x86_64_unknown_linux_musl: "-static"
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            cargo build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }}
-          fi
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare binary
         run: |
@@ -816,9 +791,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - container: alpine:latest
-            binary: arkavo-${{ needs.release.outputs.version }}-x86_64-linux-musl.tar.gz
-            test_deb: false
           - container: ubuntu:latest
             binary: arkavo-${{ needs.release.outputs.version }}-x86_64-linux.tar.gz
             test_deb: true
@@ -830,13 +802,8 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          if [[ "${{ matrix.container }}" == alpine* ]]; then
-            apk add --no-cache curl ca-certificates
-          else
-            apt-get update
-            apt-get install -y curl ca-certificates
-            # No runtime dependencies needed - pure Rust implementation
-          fi
+          apt-get update
+          apt-get install -y curl ca-certificates
 
       - name: Download and test tar.gz binary
         run: |

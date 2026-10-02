@@ -606,10 +606,6 @@ jobs:
             os: ubuntu-22.04
             features: default
             artifact_name: arkavo-x86_64-linux
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-22.04
-            features: memory,mdns,mcp-tools
-            artifact_name: arkavo-x86_64-linux-musl
           # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
           - os: ubuntu-24.04-arm
             features: memory,mdns,llm-remote,mcp-tools,gemini,web-ui
@@ -675,23 +671,8 @@ jobs:
           shared-key: "v1-${{ runner.os }}"
           prefix-key: "build-${{ matrix.device || matrix.target }}"
 
-      - name: Install build tools
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
-            # Install musl tools for static build
-            # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-            sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-            sudo apt-get update
-            sudo apt-get install -y musl-tools musl-dev
-          fi
-
       - name: Build
         env:
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          CXX_x86_64_unknown_linux_musl: musl-g++
-          AR_x86_64_unknown_linux_musl: ar
-          CXXFLAGS_x86_64_unknown_linux_musl: "-static"
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
           # For glibc build, ensure static linking of OpenMP
           RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++ --cfg aes_armv8 --cfg polyval_armv8"
           SCCACHE_GHA_ENABLED: "true"
@@ -709,12 +690,9 @@ jobs:
             echo "Building for Arduino UNO Q (Cortex-A53 with llama.cpp CPU backend)"
             export ARKAVO_TARGET_DEVICE=uno-q
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
-          elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+          else
             # Full featured build with local LLM support (x86_64)
             cargo build --release --target ${{ matrix.target }} -p arkavo
-          else
-            # Static musl build for containers
-            cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
           fi
 
       - name: Prepare release artifact
@@ -991,20 +969,12 @@ jobs:
     strategy:
       matrix:
         container:
-          - alpine:latest
           - ubuntu:latest
           - ubuntu:22.04
     container:
       image: ${{ matrix.container }}
     steps:
-      - name: Download musl binary for Alpine
-        if: contains(matrix.container, 'alpine')
-        uses: actions/download-artifact@v4
-        with:
-          name: arkavo-x86_64-linux-musl
-
-      - name: Download glibc binary for Ubuntu
-        if: contains(matrix.container, 'ubuntu')
+      - name: Download glibc binary
         uses: actions/download-artifact@v4
         with:
           name: arkavo-x86_64-linux
@@ -1458,7 +1428,8 @@ jobs:
             exit 1
           fi
 
-  # Verify no OpenSSL dependency for musl builds
+  # rustls is the only TLS stack: one implementation to patch, and no system
+  # OpenSSL whose version drifts between the hosts a binary runs on.
   no-openssl-check:
     name: Verify No OpenSSL Dependency
     runs-on: ubuntu-22.04
@@ -1466,66 +1437,39 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install CMake and build dependencies
-        run: |
-          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          targets: x86_64-unknown-linux-gnu,aarch64-apple-darwin,x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
           prefix-key: "no-openssl"
 
-      - name: Check for OpenSSL in musl dependency tree
+      - name: Check shipped feature sets for OpenSSL and native-tls
         run: |
-          set +e  # Don't exit on error - we want to handle errors ourselves
-          echo "Checking musl target for OpenSSL dependencies..."
-
-          # Check only the arkavo binary with musl-specific features (memory,mdns,mcp-tools)
-          # This matches the actual musl build configuration and excludes features like
-          # claude-agent that are only used on glibc targets
-          MUSL_FEATURES="memory,mdns,mcp-tools"
-
-          # Check for openssl - if it's found in the tree (not the error message), fail
-          OPENSSL_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i openssl -p arkavo --no-default-features --features "$MUSL_FEATURES" 2>&1)
-          OPENSSL_EXIT=$?
-
-          if [ $OPENSSL_EXIT -ne 0 ] && ! echo "$OPENSSL_CHECK" | grep -q "did not match any packages"; then
-            echo "::error::cargo tree failed to check OpenSSL dependencies"
-            echo "$OPENSSL_CHECK"
-            exit 1
-          fi
-
-          if echo "$OPENSSL_CHECK" | grep -q "openssl v" ; then
-            echo "::error::Found OpenSSL dependency in musl build! This will cause cross-compilation failures."
-            echo "::error::Use rustls instead of native-tls for all TLS dependencies."
-            echo "$OPENSSL_CHECK"
-            exit 1
-          fi
-
-          # Check for native-tls - if it's found in the tree (not the error message), fail
-          NATIVE_TLS_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i native-tls -p arkavo --no-default-features --features "$MUSL_FEATURES" 2>&1)
-          NATIVE_TLS_EXIT=$?
-
-          if [ $NATIVE_TLS_EXIT -ne 0 ] && ! echo "$NATIVE_TLS_CHECK" | grep -q "did not match any packages"; then
-            echo "::error::cargo tree failed to check native-tls dependencies"
-            echo "$NATIVE_TLS_CHECK"
-            exit 1
-          fi
-
-          if echo "$NATIVE_TLS_CHECK" | grep -q "native-tls v" ; then
-            echo "::error::Found native-tls dependency in musl build! This will cause cross-compilation failures."
-            echo "::error::Configure reqwest and other HTTP clients with default-features = false, features = [\"rustls-tls\"]"
-            echo "$NATIVE_TLS_CHECK"
-            exit 1
-          fi
-
-          echo "✅ No OpenSSL or native-tls dependencies found in musl build (features: $MUSL_FEATURES)"
-          set -e  # Re-enable exit on error
+          # Every release target with default features, plus the container image's `cloud` set.
+          status=0
+          check() {
+            target=$1; shift
+            for crate in openssl native-tls; do
+              out=$(cargo tree --locked --target "$target" -e normal -i "$crate" -p arkavo "$@" 2>&1) || true
+              if echo "$out" | grep -q "^$crate v"; then
+                echo "::error::$crate is in the arkavo dependency tree for $target ($*). Use rustls."
+                echo "$out"
+                status=1
+              elif ! echo "$out" | grep -q "did not match any packages"; then
+                echo "::error::cargo tree failed for $target ($*)"
+                echo "$out"
+                status=1
+              fi
+            done
+          }
+          for target in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc; do
+            check "$target"
+          done
+          check x86_64-unknown-linux-gnu --no-default-features --features cloud
+          [ "$status" -eq 0 ] && echo "✅ No OpenSSL or native-tls in any shipped build"
+          exit "$status"
 
   # Behavior spec validation
   validate-specs:
