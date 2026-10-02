@@ -174,12 +174,63 @@ fn literal_target_within_root(target: &str, root: &Path, cwd: &Path) -> bool {
     // in, not the root; an absolute one replaces it.
     cwd.join(target)
         .to_str()
-        .is_some_and(|path| arkavo_validation::resolve_within_root(root, path).is_ok())
+        .and_then(|path| arkavo_validation::resolve_within_root(root, path).ok())
+        .is_some_and(|resolved| !names_git_control(&resolved))
+}
+
+/// Git reads these and runs what they configure: a write to `.git/config`
+/// (`core.fsmonitor`, `diff.external`) turns the next auto-approved
+/// `git status` or `git diff` into a launcher. Judged on the resolved path so
+/// a symlink into `.git` counts, and case-insensitively because macOS and
+/// Windows file systems are.
+fn names_git_control(resolved: &Path) -> bool {
+    resolved.components().any(|c| {
+        let name = c.as_os_str();
+        [".git", ".gitattributes", ".gitmodules"]
+            .iter()
+            .any(|control| name.eq_ignore_ascii_case(control))
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Regression: `echo 'fsmonitor = ./x.sh' >> .git/config` was auto-approved,
+    // and a following auto-approved `git status` then ran ./x.sh.
+    #[test]
+    fn git_control_files_are_not_auto_approved_targets() {
+        let (_dir, root) = workspace();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        for seg in [
+            "echo x >> .git/config",
+            "echo x > ./.git/hooks/pre-commit",
+            "echo x >> .GIT/config",
+            "echo x > .gitattributes",
+            "echo x > sub/.gitmodules",
+        ] {
+            assert!(!redirections_within_root(seg, &root, &root), "{seg}");
+        }
+        assert!(redirections_within_root(
+            "echo x > .gitignore",
+            &root,
+            &root
+        ));
+        assert!(redirections_within_root("echo x > notes.git", &root, &root));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_into_git_dir_is_not_an_auto_approved_target() {
+        let (_dir, root) = workspace();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::os::unix::fs::symlink(root.join(".git"), root.join("g")).unwrap();
+        assert!(!redirections_within_root(
+            "echo x >> g/config",
+            &root,
+            &root
+        ));
+    }
 
     fn workspace() -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
