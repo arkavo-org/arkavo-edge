@@ -7,8 +7,6 @@
 //! Uses models from HuggingFace hub cache (~/.cache/huggingface/hub)
 //! Override with: ARKAVO_TORG_MODEL_PATH=/path/to/model.gguf
 
-#![cfg(not(target_env = "musl"))]
-
 mod llm_harness;
 
 use std::collections::HashMap;

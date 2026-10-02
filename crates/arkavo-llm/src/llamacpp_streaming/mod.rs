@@ -6,12 +6,12 @@ use crate::gpu_fault::classify_gpu_fault;
 use crate::provider::InferenceTiming;
 use crate::{Error, Message, Result, StreamResponse, decode_image};
 use arkavo_llama_cpp::ModelFormat;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::multimodal::{
     MtmdBitmap, MtmdContext, default_media_marker, encode_chunk, get_output_embeddings,
     preprocess_image_for_clip, tokenize_with_images,
 };
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::{
     DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits,
     batch_get_one_with_offset, batch_init_with_tokens, batch_init_with_tokens_seq,
@@ -34,7 +34,7 @@ pub(crate) fn is_debug() -> bool {
 
 /// Extract valid UTF-8 from a byte buffer, leaving incomplete sequences for later.
 /// Returns the valid string and modifies the buffer in place to keep only incomplete bytes.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn extract_valid_utf8(buffer: &mut Vec<u8>) -> String {
     if buffer.is_empty() {
         return String::new();
@@ -71,7 +71,7 @@ fn extract_valid_utf8(buffer: &mut Vec<u8>) -> String {
 }
 
 /// Check if the buffer contains the start of an incomplete multi-byte UTF-8 sequence
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn is_incomplete_utf8_start(buffer: &[u8]) -> bool {
     if buffer.is_empty() {
         return false;
@@ -121,7 +121,7 @@ fn detect_self_prompting(accumulated: &str, format: ModelFormat) -> Option<usize
     None
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[derive(Debug, Clone)]
 pub(crate) struct StreamingConfig {
     pub temperature: f32,
@@ -150,7 +150,7 @@ pub(crate) struct StreamingConfig {
 }
 
 /// Options for context reuse in multi-turn conversations
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ContextReuseOptions {
     /// Starting position in KV cache (for resuming generation)
@@ -168,7 +168,7 @@ pub(crate) struct ContextReuseOptions {
     pub prior_tokens: Vec<i32>,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub(crate) async fn generate_tokens(
     model: Arc<LlamaModel>,
     prompt_bytes: Vec<u8>,
@@ -193,7 +193,7 @@ pub(crate) async fn generate_tokens(
 /// the gate enforced by `generate_tokens_with_context` for the non-pooled
 /// path. When spec is requested but the gate blocks it, the bypass reason
 /// is surfaced via `InferenceTiming.spec_bypassed`.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub(crate) async fn generate_tokens_pooled(
     pooled_ctx: std::sync::Arc<std::sync::Mutex<LlamaContext>>,
     model: Arc<LlamaModel>,
@@ -242,7 +242,7 @@ pub(crate) async fn generate_tokens_pooled(
 /// Original (pre-spec) pooled per-token generation loop, unmodified semantically.
 /// Kept as a separate function so the spec-decoding path can be added without
 /// changing the hot baseline.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 async fn generate_tokens_pooled_baseline(
     pooled_ctx: std::sync::Arc<std::sync::Mutex<LlamaContext>>,
     model: Arc<LlamaModel>,
@@ -514,7 +514,7 @@ async fn generate_tokens_pooled_baseline(
 /// set AND there is no grammar / additional stop sequences active — the
 /// non-spec path is byte-identical to the pre-spec implementation, so any
 /// caller that opts out of spec hits the exact same code as before.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub(crate) async fn generate_tokens_with_context(
     model: Arc<LlamaModel>,
     prompt_bytes: Vec<u8>,
@@ -571,7 +571,7 @@ pub(crate) async fn generate_tokens_with_context(
 /// Original (pre-spec) per-token generation loop, unmodified semantically.
 /// Kept as a separate function so the spec-decoding path can be added without
 /// changing a single token of the hot, well-tuned baseline.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 async fn generate_tokens_baseline(
     model: Arc<LlamaModel>,
     prompt_bytes: Vec<u8>,
@@ -877,7 +877,7 @@ async fn generate_tokens_baseline(
 }
 
 /// Classify a decode_batch error as either a GPU fault or a generic config error.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn classify_decode_error(context: &str, raw: &str) -> Error {
     if let Some(kind) = classify_gpu_fault(raw) {
         Error::GpuFault {
@@ -890,11 +890,11 @@ fn classify_decode_error(context: &str, raw: &str) -> Error {
 }
 
 /// Most tokens sent to one prompt decode call.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 const PROMPT_CHUNK_TOKENS: usize = 64;
 
 /// Output tokens never generated in one request, whatever the window.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 const MAX_GENERATED_TOKENS: u32 = 30_000;
 
 /// Tokens that may be generated after `occupied` tokens of prompt, in a
@@ -905,7 +905,7 @@ const MAX_GENERATED_TOKENS: u32 = 30_000;
 /// A prompt that leaves no room is refused here, before it is decoded:
 /// decoding it would fail with a bare llama.cpp status code that reads like
 /// a GPU fault.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn generation_budget(n_ctx: u32, occupied: u32, max_tokens: u32) -> Result<u32> {
     if occupied >= n_ctx {
         return Err(Error::Inference(format!(
@@ -919,12 +919,12 @@ fn generation_budget(n_ctx: u32, occupied: u32, max_tokens: u32) -> Result<u32> 
 /// Size of each prompt chunk for a context that accepts `batch_size` tokens
 /// per decode call. llama.cpp aborts on a larger batch, and a small
 /// `ARKAVO_N_CTX` or a constrained device gives a small batch.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn prompt_chunk_tokens(batch_size: u32) -> usize {
     PROMPT_CHUNK_TOKENS.min(batch_size as usize).max(1)
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> {
     if is_debug() {
         eprintln!(
@@ -966,7 +966,7 @@ fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> 
 /// Log-probability of `token` under `logits` (length n_vocab): the log-softmax
 /// value, computed stably as `logits[token] - logsumexp(logits)`. Returns
 /// `None` if the token is out of range or the distribution is degenerate.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn token_logprob(logits: &[f32], token: usize) -> Option<f32> {
     let chosen = *logits.get(token)?;
     if !chosen.is_finite() {
@@ -984,7 +984,7 @@ fn token_logprob(logits: &[f32], token: usize) -> Option<f32> {
     Some((f64::from(chosen) - logsumexp) as f32)
 }
 
-#[cfg(all(test, feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(all(test, feature = "llama-cpp"))]
 mod logprob_tests {
     use super::token_logprob;
 
@@ -1012,7 +1012,7 @@ mod logprob_tests {
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn validate_logits(ctx: &LlamaContext) -> Result<()> {
     let logits_ptr = ctx.get_logits_ith(-1);
     if logits_ptr.is_null() {
@@ -1023,7 +1023,7 @@ fn validate_logits(ctx: &LlamaContext) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 fn send_metrics(
     start_time: Instant,
     first_token_time: Option<Instant>,
@@ -1061,7 +1061,7 @@ fn send_metrics(
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub(crate) async fn generate_tokens_with_vision(
     model: Arc<LlamaModel>,
     mtmd_ctx: Arc<MtmdContext>,
@@ -1143,21 +1143,21 @@ mod tests {
     /// Regression: the clamp recomputed 16384 from the trained context, so
     /// with `ARKAVO_N_CTX=4096` generation ran past the allocated window and
     /// failed at decode.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[test]
     fn generation_stops_at_the_allocated_window() {
         assert_eq!(generation_budget(4_096, 3_000, 16_384).unwrap(), 1_096);
         assert_eq!(generation_budget(16_384, 3_000, 16_384).unwrap(), 13_384);
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[test]
     fn generation_is_bounded_by_the_request_and_the_hard_limit() {
         assert_eq!(generation_budget(16_384, 100, 256).unwrap(), 256);
         assert_eq!(generation_budget(131_072, 100, 100_000).unwrap(), 30_000);
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[test]
     fn a_prompt_that_fills_the_window_is_refused_before_decode() {
         for occupied in [4_096, 9_000] {
@@ -1173,7 +1173,7 @@ mod tests {
 
     /// Regression: prompts were always sent 64 tokens at a time, which
     /// aborts the process when the context accepts fewer per call.
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[test]
     fn prompt_chunks_fit_the_batch_the_context_accepts() {
         assert_eq!(prompt_chunk_tokens(2_048), 64);
@@ -1273,7 +1273,7 @@ mod tests {
         assert_eq!(pos, "Good response".len());
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[test]
     fn test_classify_decode_error_gpu_fault() {
         let err =
@@ -1282,14 +1282,14 @@ mod tests {
         assert!(err.to_string().contains("MetalKill"));
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[test]
     fn test_classify_decode_error_generic() {
         let err = super::classify_decode_error("token at pos 42", "some other error");
         assert!(matches!(err, crate::Error::Config(_)));
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[test]
     fn test_classify_decode_code_minus_one_is_config_error() {
         // Regression: code -1 ("invalid input batch") used to be classified

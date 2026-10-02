@@ -180,7 +180,7 @@ fn test_implementation_recommendations() {
     println!();
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_architecture_correctness_validation() {
     use arkavo_llm::ModelRegistry;

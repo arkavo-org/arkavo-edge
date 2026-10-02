@@ -234,7 +234,7 @@ impl super::Router {
             self.ensure_loaded(registry_name, &model_path).await?;
 
             // Pre-warm the context pool so the first inference avoids allocation latency
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            #[cfg(feature = "llama-cpp")]
             if let Ok(ctx) = self.model_registry.acquire_fresh_context(registry_name) {
                 let _ = self
                     .model_registry
@@ -263,8 +263,7 @@ impl super::Router {
 
         // Enable vision only for models that declare support (e.g., 27B, not 0.8B).
         // The MtmdContext is cached in the registry so the CLIP model is loaded once,
-        // not on every inference call. Vision is unavailable on musl targets.
-        #[cfg(not(target_env = "musl"))]
+        // not on every inference call.
         let provider = if model.supports_vision() {
             if let Some(cached_ctx) = self.model_registry.get_vision_ctx(registry_name) {
                 tracing::debug!(model = registry_name, "Using cached vision context");
@@ -318,7 +317,7 @@ impl super::Router {
             );
             self.ensure_loaded(&registry_name, &canonical).await?;
 
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            #[cfg(feature = "llama-cpp")]
             if let Ok(ctx) = self.model_registry.acquire_fresh_context(&registry_name) {
                 let _ = self
                     .model_registry

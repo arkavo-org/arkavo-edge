@@ -10,14 +10,14 @@ fn contains_word(text: &str, word: &str) -> bool {
         .any(|w| w == word)
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llm::Provider;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use tokio::sync::Mutex;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llm::LlamaCppProvider;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -323,26 +323,17 @@ pub fn classify_task_keywords(description: &str) -> TaskCategory {
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct TaskClassifier {
     provider: Option<Arc<Mutex<LlamaCppProvider>>>,
 }
 
-#[cfg(all(
-    not(all(feature = "llama-cpp", not(target_env = "musl"))),
-    feature = "llama-cpp"
-))]
-pub struct TaskClassifier;
-
-#[cfg(not(any(
-    all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llama-cpp"
-)))]
+#[cfg(not(feature = "llama-cpp"))]
 pub struct TaskClassifier {
     _phantom: std::marker::PhantomData<()>,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
         // Classification runs in every agent process on every routed task,
@@ -623,188 +614,7 @@ Confidence: [0-100]"#
     }
 }
 
-#[cfg(all(
-    not(all(feature = "llama-cpp", not(target_env = "musl"))),
-    feature = "llama-cpp"
-))]
-impl TaskClassifier {
-    pub async fn new() -> Result<Self> {
-        Ok(Self)
-    }
-
-    pub async fn classify(&self, task_description: &str) -> Result<Classification> {
-        if task_description.len() < 10 {
-            return Ok(Classification::new(
-                TaskCategory::General,
-                0.5,
-                "Task description too short for accurate classification".to_string(),
-            ));
-        }
-
-        let rule_based = self.try_rule_based_classification(task_description);
-        if rule_based.confidence > 0.85 {
-            return Ok(rule_based);
-        }
-
-        let llm_classification = self
-            .classify_with_llm(task_description)
-            .await
-            .unwrap_or(rule_based);
-
-        Ok(llm_classification)
-    }
-
-    pub async fn complete(&self, _messages: Vec<Message>) -> Result<String> {
-        Err(Error::Classification(
-            "LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string(),
-        ))
-    }
-
-    pub async fn complete_with_options(
-        &self,
-        _messages: Vec<Message>,
-        _max_tokens: Option<usize>,
-    ) -> Result<String> {
-        Err(Error::Classification(
-            "LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string(),
-        ))
-    }
-
-    fn try_rule_based_classification(&self, task: &str) -> Classification {
-        let task_lower = task.to_lowercase();
-
-        let (category, confidence, reasoning) = if task_lower.contains("react")
-            || task_lower.contains("vue")
-            || task_lower.contains("svelte")
-            || task_lower.contains("tailwind")
-            || task_lower.contains("component")
-            || task_lower.contains("frontend")
-            || contains_word(&task_lower, "ui")
-        {
-            (
-                TaskCategory::FrontendUI,
-                0.90,
-                "Keywords match frontend development".to_string(),
-            )
-        } else if contains_word(&task_lower, "api")
-            || task_lower.contains("endpoint")
-            || task_lower.contains("backend")
-            || task_lower.contains("database")
-            || contains_word(&task_lower, "auth")
-        {
-            (
-                TaskCategory::BackendAPI,
-                0.85,
-                "Keywords match backend development".to_string(),
-            )
-        } else if task_lower.contains("search")
-            || task_lower.contains("find")
-            || task_lower.contains("grep")
-            || task_lower.contains("locate")
-        {
-            (
-                TaskCategory::CodeSearch,
-                0.80,
-                "Keywords match code search".to_string(),
-            )
-        } else if task_lower.contains("security")
-            || task_lower.contains("vulnerability")
-            || task_lower.contains("audit")
-            || task_lower.contains("scan")
-        {
-            (
-                TaskCategory::SecurityScan,
-                0.85,
-                "Keywords match security analysis".to_string(),
-            )
-        } else if task_lower.contains("test")
-            || task_lower.contains("jest")
-            || task_lower.contains("pytest")
-            || task_lower.contains("unit")
-        {
-            (
-                TaskCategory::TestGeneration,
-                0.80,
-                "Keywords match test generation".to_string(),
-            )
-        } else if task_lower.contains("review")
-            || task_lower.contains("code quality")
-            || task_lower.contains("anti-pattern")
-            || task_lower.contains("complexity")
-            || task_lower.contains("error handling")
-        {
-            (
-                TaskCategory::CodeReview,
-                0.80,
-                "Keywords match code review".to_string(),
-            )
-        } else if task_lower.contains("document")
-            || task_lower.contains("readme")
-            || task_lower.contains("comment")
-            || task_lower.contains("docs")
-        {
-            (
-                TaskCategory::Documentation,
-                0.75,
-                "Keywords match documentation".to_string(),
-            )
-        } else if task_lower.contains("refactor")
-            || task_lower.contains("cleanup")
-            || task_lower.contains("optimize")
-        {
-            (
-                TaskCategory::Refactoring,
-                0.75,
-                "Keywords match refactoring".to_string(),
-            )
-        } else if task_lower.contains("screenshot")
-            || task_lower.contains("image")
-            || task_lower.contains("vision")
-            || task_lower.contains("analyze ui")
-            || task_lower.contains("ui from")
-        {
-            (
-                TaskCategory::VisionAnalysis,
-                0.90,
-                "Keywords match vision/screenshot analysis".to_string(),
-            )
-        } else if contains_word(&task_lower, "zone")
-            || task_lower.contains("defend")
-            || contains_word(&task_lower, "raid")
-            || task_lower.contains("harvest")
-            || contains_word(&task_lower, "craft")
-            || task_lower.contains("stockpile")
-            || task_lower.contains("simulation")
-            || task_lower.contains("environment")
-        {
-            (
-                TaskCategory::GameSimulation,
-                0.90,
-                "Keywords match game/simulation tasks".to_string(),
-            )
-        } else {
-            (
-                TaskCategory::General,
-                0.50,
-                "No strong keyword matches".to_string(),
-            )
-        };
-
-        Classification::with_complexity(category, confidence, reasoning, task)
-    }
-
-    async fn classify_with_llm(&self, _task: &str) -> Result<Classification> {
-        // LLM classification not available on musl target
-        Err(Error::Classification(
-            "LLM classification not available on musl target".to_string(),
-        ))
-    }
-}
-
-#[cfg(not(any(
-    all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llama-cpp"
-)))]
+#[cfg(not(feature = "llama-cpp"))]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
         Ok(Self {
@@ -854,7 +664,7 @@ mod tests {
         assert_eq!(classification.category, TaskCategory::BackendAPI);
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     #[tokio::test]
     async fn keyword_fallback_does_not_load_models() {
         let classifier = TaskClassifier::new_fallback().await.unwrap();
@@ -1002,10 +812,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(any(
-        all(feature = "llama-cpp", not(target_env = "musl")),
-        feature = "llama-cpp"
-    ))]
+    #[cfg(feature = "llama-cpp")]
     async fn test_rule_based_classification() {
         let classifier = TaskClassifier::new().await;
         if classifier.is_err() {

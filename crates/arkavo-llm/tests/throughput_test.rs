@@ -132,7 +132,7 @@ async fn test_concurrent_throughput_small_vs_large() {
     println!("   significant throughput improvement for mixed workloads.");
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_model_registry_concurrent_access() {
     use arkavo_llm::ModelRegistry;

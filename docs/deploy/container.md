@@ -52,10 +52,8 @@ The image ships the `cloud` feature: `memory,mdns,mcp-tools,llm-remote,web-ui`:
   set no longer pulls in `arkavo-llama-cpp-sys`: the build needs neither
   cmake nor `vendor/llama.cpp`.
 - `llm-remote` is **included** so the binary can talk to remote providers
-  (OpenAI-compatible, Gemini, Kimi, DeepSeek, xAI). This diverges deliberately
-  from the musl CI variant at `.github/workflows/feature.yaml:606`, which
-  builds with `memory,mdns,mcp-tools` only and therefore has no remote LLM
-  support. That variant targets fully offline/embedded use; provider access alone is insufficient to run the local agent harness.
+  (OpenAI-compatible, Gemini, Kimi, DeepSeek, xAI). Provider access alone is
+  insufficient to run the local agent harness.
 - `web-ui` compiles the AG-UI gateway (`arkavo ui`) into the binary, but this
   image still cannot serve it: `arkavo ui` is a harness command, and with no
   `llama-cpp`/`snpe` backend `startup_policy::validate_local_backend` refuses
@@ -155,6 +153,5 @@ Readiness: `GET /readyz` returns `200` while the health registry reports healthy
   binds `127.0.0.1` inside the container and the published port reaches
   nothing. Like the gateway, the agent listener does not authenticate
   callers, so publish it only to a network you trust.
-- glibc runtime only; a fully static musl container variant can be added
-  later on top of the existing musl CI build (`.github/workflows/feature.yaml`),
-  keeping in mind that variant currently lacks `llm-remote`.
+- glibc runtime only: Arkavo does not ship a musl build, so Alpine and other
+  musl-based base images cannot run the binary.

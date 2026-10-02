@@ -8,7 +8,7 @@
 //! One test function, because it counts the contexts alive in the process
 //! and a second test creating contexts in parallel would change the count.
 
-#![cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#![cfg(feature = "llama-cpp")]
 
 use arkavo_llama_cpp::live_context_count;
 use arkavo_llm::llamacpp_provider::{LlamaCppProvider, SamplingConfig};

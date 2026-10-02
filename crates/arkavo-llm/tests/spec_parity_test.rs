@@ -8,7 +8,7 @@
 //!   ARKAVO_TEST_MODEL=$HOME/.arkavo/models/qwen3.5-9b-q4_k_m.gguf \
 //!     cargo test -p arkavo-llm --test spec_parity_test -- --ignored --nocapture
 
-#![cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#![cfg(feature = "llama-cpp")]
 
 use arkavo_llm::llamacpp_provider::{LlamaCppProvider, SamplingConfig};
 use arkavo_llm::provider::Provider;

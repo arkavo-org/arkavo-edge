@@ -21,7 +21,7 @@ highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
 allow = []
-# CLAUDE.md mandates rustls everywhere (musl compatibility + CVE blast radius).
+# CLAUDE.md mandates rustls everywhere (one TLS stack to patch, no host OpenSSL).
 # These bans prevent any future dep change from silently re-introducing the
 # OpenSSL chain via reqwest/default-tls, ureq/native-tls, or fastembed defaults.
 deny = [

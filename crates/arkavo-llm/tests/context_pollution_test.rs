@@ -17,7 +17,7 @@ use std::time::Duration;
 /// Issue: When multiple requests use the same LlamaContext sequentially,
 /// the KV cache from the first request remains and can influence
 /// the second request's output.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_context_kv_cache_pollution_risk() {
     use arkavo_llm::ModelRegistry;
@@ -103,7 +103,7 @@ async fn test_context_isolation_requirements() {
 }
 
 /// Test: Verify current implementation has single context per model
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_current_architecture_limitations() {
     use arkavo_llm::ModelRegistry;

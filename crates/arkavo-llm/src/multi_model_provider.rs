@@ -8,23 +8,23 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use crate::{
     Message, ModelRegistry, Provider, ProviderResponse, Result, SamplingConfig, StreamResponse,
 };
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 use crate::{Error, Message, Provider, ProviderResponse, Result, StreamResponse};
 
 /// Type alias for conversation identifiers
 pub(crate) type ConversationId = String;
 
 /// Stub type for non-llama-cpp builds
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub struct ModelRegistry;
 
 /// Stub type for non-llama-cpp builds
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 #[derive(Clone, Default)]
 pub struct SamplingConfig;
 
@@ -33,14 +33,14 @@ pub struct SamplingConfig;
 /// Uses a ModelRegistry to access different models and can select
 /// which model to use based on request parameters or routing logic.
 pub struct MultiModelProvider {
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     registry: Arc<ModelRegistry>,
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     _registry: Arc<ModelRegistry>,
     default_model: String,
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     config: SamplingConfig,
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     _config: SamplingConfig,
     /// Optional conversation ID for context reuse across turns
     conversation_id: Option<ConversationId>,
@@ -48,7 +48,7 @@ pub struct MultiModelProvider {
 
 impl MultiModelProvider {
     /// Create a new multi-model provider
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn new(registry: Arc<ModelRegistry>, default_model: &str, config: SamplingConfig) -> Self {
         Self {
             registry,
@@ -59,7 +59,7 @@ impl MultiModelProvider {
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn new(
         _registry: Arc<ModelRegistry>,
         default_model: &str,
@@ -103,32 +103,32 @@ impl MultiModelProvider {
     }
 
     /// Check if a model is available in the registry
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn has_model(&self, name: &str) -> bool {
         self.registry.is_loaded(name)
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn has_model(&self, _name: &str) -> bool {
         false
     }
 
     /// Get list of available models
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     pub fn available_models(&self) -> Vec<String> {
         self.registry.model_names()
     }
 
     /// Stub for non-llama-cpp builds
-    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+    #[cfg(not(feature = "llama-cpp"))]
     pub fn available_models(&self) -> Vec<String> {
         Vec::new()
     }
 }
 
 /// Provider implementation for llama-cpp builds - delegates to LlamaCppProvider
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 #[async_trait]
 impl Provider for MultiModelProvider {
     async fn complete_with_options(
@@ -170,7 +170,7 @@ impl Provider for MultiModelProvider {
     }
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl MultiModelProvider {
     /// Create a LlamaCppProvider, optionally with conversation ID
     fn create_provider(&self) -> Result<crate::LlamaCppProvider> {
@@ -192,7 +192,7 @@ impl MultiModelProvider {
 }
 
 /// Stub Provider implementation for non-llama-cpp builds
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 #[async_trait]
 impl Provider for MultiModelProvider {
     async fn complete_with_options(
@@ -239,15 +239,15 @@ impl Provider for MultiModelProvider {
 mod tests {
     use super::*;
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     use crate::ModelRegistry as RealModelRegistry;
 
     fn create_test_registry() -> Arc<ModelRegistry> {
-        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+        #[cfg(feature = "llama-cpp")]
         {
             Arc::new(RealModelRegistry::new())
         }
-        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+        #[cfg(not(feature = "llama-cpp"))]
         {
             Arc::new(ModelRegistry)
         }

@@ -1,25 +1,25 @@
 use crate::{Error, Result};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llm::LlamaCppProvider;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llm::{Message, Provider};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use tokio::sync::Mutex;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct ContextCompressor {
     provider: Arc<Mutex<LlamaCppProvider>>,
     model_name: String,
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub struct ContextCompressor {
     _phantom: std::marker::PhantomData<()>,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl ContextCompressor {
     pub async fn new(model_name: String, model_path: Option<String>) -> Result<Self> {
         let path = model_path.ok_or_else(|| Error::Model("model_path is required".to_string()))?;
@@ -89,7 +89,7 @@ impl ContextCompressor {
     }
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 impl ContextCompressor {
     pub async fn new(_model_name: String, _model_path: Option<String>) -> Result<Self> {
         Err(Error::Model(
@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     fn test_compression_prompt_format() {
         let compressor_result = tokio::runtime::Runtime::new().unwrap().block_on(async {
             ContextCompressor::new(

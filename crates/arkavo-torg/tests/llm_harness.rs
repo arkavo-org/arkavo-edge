@@ -3,7 +3,6 @@
 //! Provides model loading, prompt formatting, and constrained generation utilities.
 //! Supports multiple model families: Qwen3 and Ministral.
 
-#![cfg(not(target_env = "musl"))]
 #![allow(dead_code)] // Harness functions may not all be used in every test
 #![allow(unreachable_pub)] // Test module visibility doesn't matter
 #![allow(clippy::missing_panics_doc)] // Test harness doesn't need panic docs

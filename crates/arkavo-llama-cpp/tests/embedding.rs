@@ -1,4 +1,3 @@
-#![cfg(not(target_env = "musl"))]
 //! Embedding context against a real GGUF. Runs only when
 //! `ARKAVO_TEST_EMBED_MODEL` points at one, so an ordinary `cargo test` stays
 //! offline:

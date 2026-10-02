@@ -1,4 +1,3 @@
-#![cfg(not(target_env = "musl"))]
 //! Text contexts against a real GGUF, created without a full-size
 //! sliding-window cache. Runs only when `ARKAVO_TEST_TEXT_MODEL` points at a
 //! model, so an ordinary `cargo test` stays offline:

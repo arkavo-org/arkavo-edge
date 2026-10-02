@@ -81,7 +81,7 @@ The network and transport controls below (rustls-only TLS, SSRF egress filtering
 - **mDNS mesh** — Pure-Rust mDNS discovery and peer mesh with no dependency on system Avahi/Bonjour.
 - **Local inference** — Gemma 4 and Ministral models run on-device via llama.cpp; routing and inference do not require cloud access.
 - **DLP / PII scrubbing** — Pre-flight detection and redaction of sensitive patterns before data is sent to providers or logged.
-- **TLS without OpenSSL** — All TLS uses `rustls` for musl compatibility and a reduced attack surface.
+- **TLS without OpenSSL** — All TLS uses `rustls`: one TLS implementation to patch, and no dependency on a host OpenSSL whose version varies between machines.
 - **SSRF prevention** — Egress filtering blocks private and metadata IP ranges.
 - **Rate limiting** — Per-IP rate limits on HTTP endpoints.
 - **DNS rebinding protection** — Host validation on local servers.

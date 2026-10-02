@@ -1,28 +1,28 @@
 use crate::{Error, Result};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llm::LlamaCppProvider;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llm::{Message, Provider};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use tokio::sync::Mutex;
 
 /// Generates concise summaries of context content for the Context Ledger.
 ///
 /// Used to create descriptive pointers when offloading context, enabling
 /// agents to understand what archived content contains without restoring it.
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub struct ContextSummarizer {
     provider: Arc<Mutex<LlamaCppProvider>>,
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 pub struct ContextSummarizer {
     _phantom: std::marker::PhantomData<()>,
 }
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 impl ContextSummarizer {
     /// Create a new summarizer with the given model path.
     pub async fn new(model_path: String) -> Result<Self> {
@@ -95,7 +95,7 @@ Summary:"#
     }
 }
 
-#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
+#[cfg(not(feature = "llama-cpp"))]
 impl ContextSummarizer {
     pub async fn new(_model_path: String) -> Result<Self> {
         Err(Error::Model(
@@ -132,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     fn test_summary_prompt_format() {
         let summarizer_result = tokio::runtime::Runtime::new()
             .unwrap()
@@ -146,7 +146,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    #[cfg(feature = "llama-cpp")]
     fn test_clean_summary() {
         let summarizer_result = tokio::runtime::Runtime::new()
             .unwrap()

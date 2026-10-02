@@ -9,7 +9,7 @@ repository.workspace = true
 
 [features]
 default = ["oauth"]
-# OAuth support (requires native-tls compatible platform - not musl)
+# OAuth support
 oauth = []
 
 [dependencies]
