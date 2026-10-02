@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
 version: 0.93.0
-last_updated: 2026-09-05
+last_updated: 2026-10-02
 
 components:
   - name: astra
@@ -49,6 +49,18 @@ components:
       - Proof-of-possession key equals the attested hardware key
       - IdP-agnostic issuance via RFC 8693; no IdP-specific code in core
       - No silent bearer downgrade
+
+  - name: agent-ingress
+    file: agent-ingress.spec.yaml
+    module: arkavo_server
+    description: Signed, sealed agent envelopes, one workload key, minimal mDNS announcement, --trust enrollment and membership
+    criticality: critical
+    scenario_count: 16
+    invariants:
+      - Transport and discovery are untrusted
+      - Every message is a signed, sealed envelope verified before unwrap
+      - One persistent workload key; other keys only through signed statements
+      - Only the enrolled owner key issues membership
 
   - name: agent-credentials
     file: agent-credentials.spec.yaml
@@ -1023,9 +1035,9 @@ components:
       - Untrusted input is bounded before it is parsed, hashed, or buffered
 
 stats:
-  total_specs: 87
-  total_scenarios: 852
-  critical_scenarios: 273
+  total_specs: 88
+  total_scenarios: 868
+  critical_scenarios: 284
   coverage_areas:
     - authentication
     - authorization
