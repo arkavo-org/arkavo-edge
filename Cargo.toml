@@ -173,7 +173,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.100.1"
+version = "0.100.2"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -232,6 +232,7 @@ coset = "0.4"
 ciborium = "0.2"
 p256 = { version = "0.13", features = ["ecdsa"] }
 fast_qr = { version = "0.13", default-features = false }
+unicode-general-category = "1.1"
 hex = "0.4"
 
 # UI generation dependencies

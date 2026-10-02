@@ -2,7 +2,7 @@
 
 feature: Agent QR Registration and Authorization URLs
 module: arkavo_registration
-version: 0.67.1
+version: 0.67.2
 
 invariants:
   - Authorization URLs follow arkavo://agent/authorize scheme
@@ -30,6 +30,8 @@ scenarios:
         expected: Panic with unroutable address error
       - condition: Port is 0
         expected: Panic with unroutable port error
+      - condition: Agent name longer than 64 Unicode scalars, or holding a control or format character
+        expected: Name written without those characters and cut to 64 scalars, or left out when nothing printable remains, so the Arkavo app still accepts the link
 
   - id: QREG-002
     name: QR code from agent descriptor

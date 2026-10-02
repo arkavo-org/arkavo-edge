@@ -20,6 +20,27 @@ fn percent_encode(input: &str) -> String {
     encoded
 }
 
+/// Most Unicode scalars the Arkavo app accepts in a link's `name`.
+const LINK_NAME_MAX_CHARS: usize = 64;
+
+/// The agent name as the authorization link may carry it, or `None` when
+/// nothing printable is left.
+///
+/// The Arkavo app refuses the whole link, not just the name, when the name is
+/// longer than 64 scalars or holds a control or format character. The default
+/// name is `<hostname>-<folder>`, which easily runs past 64, so the name is
+/// shortened here rather than leave a QR code that scans to nothing. Without
+/// a name the app labels the agent itself; the DID stays the identity.
+fn link_name(name: &str) -> Option<String> {
+    use unicode_general_category::{GeneralCategory, get_general_category};
+    let kept: String = name
+        .chars()
+        .filter(|&c| !c.is_control() && get_general_category(c) != GeneralCategory::Format)
+        .take(LINK_NAME_MAX_CHARS)
+        .collect();
+    (!kept.trim().is_empty()).then_some(kept)
+}
+
 #[derive(Error, Debug)]
 pub enum RegistrationError {
     #[error("QR code generation failed: {0}")]
@@ -93,8 +114,8 @@ impl AgentDescriptor {
         let did = self.did_key.as_deref().unwrap_or("");
         let mut url = format!("arkavo://agent/authorize?did={}", percent_encode(did));
 
-        if let Some(name) = &self.name {
-            url.push_str(&format!("&name={}", percent_encode(name)));
+        if let Some(name) = self.name.as_deref().and_then(link_name) {
+            url.push_str(&format!("&name={}", percent_encode(&name)));
         }
 
         // Convert http:// endpoint to ws:// for WebSocket JSON-RPC connection
@@ -362,5 +383,71 @@ mod tests {
 
         // This should panic because port 0 is ephemeral
         let _ = descriptor.to_authorization_url();
+    }
+
+    fn link_name_param(name: &str) -> Option<String> {
+        let descriptor = AgentDescriptor::new(
+            AgentKeypair::generate().public_key(),
+            "http://127.0.0.1:8342".to_string(),
+            None,
+            "name".to_string(),
+        )
+        .with_name(name);
+        let url = descriptor.to_authorization_url();
+        let encoded = url.split('&').find_map(|pair| pair.strip_prefix("name="))?;
+        let mut bytes = Vec::new();
+        let mut rest = encoded.as_bytes();
+        while let Some((&b, tail)) = rest.split_first() {
+            if b == b'%' {
+                let hex = std::str::from_utf8(&tail[..2]).unwrap();
+                bytes.push(u8::from_str_radix(hex, 16).unwrap());
+                rest = &tail[2..];
+            } else {
+                bytes.push(b);
+                rest = tail;
+            }
+        }
+        Some(String::from_utf8(bytes).unwrap())
+    }
+
+    /// The default name is `<hostname>-<folder>`; past 64 scalars the Arkavo
+    /// app refused the whole link, so the QR code scanned to nothing.
+    #[spec("QREG-001")]
+    #[test]
+    fn test_authorization_url_shortens_a_long_name_to_64_scalars() {
+        let long =
+            "Pauls-Mac-Mini-M6-my-company-monorepo-with-a-rather-long-descriptive-folder-name";
+        let name = link_name_param(long).unwrap();
+        assert_eq!(name.chars().count(), 64);
+        assert!(long.starts_with(&name));
+
+        let wide = "é".repeat(80);
+        assert_eq!(link_name_param(&wide).unwrap(), "é".repeat(64));
+    }
+
+    #[spec("QREG-001")]
+    #[test]
+    fn test_authorization_url_keeps_a_name_within_the_limit_as_written() {
+        let exact = "a".repeat(64);
+        assert_eq!(link_name_param(&exact).unwrap(), exact);
+        assert_eq!(link_name_param("my agent").unwrap(), "my agent");
+    }
+
+    /// The app refuses a link whose name holds a control (Cc) or format (Cf)
+    /// character, bidirectional overrides included.
+    #[spec("QREG-001")]
+    #[test]
+    fn test_authorization_url_drops_control_and_format_characters_from_the_name() {
+        assert_eq!(
+            link_name_param("host\u{7}-\u{202E}evil\u{200B}\u{FEFF}-dir\n").unwrap(),
+            "host-evil-dir"
+        );
+    }
+
+    #[spec("QREG-001")]
+    #[test]
+    fn test_authorization_url_omits_a_name_with_nothing_printable() {
+        assert_eq!(link_name_param("\u{200B}\u{1}"), None);
+        assert_eq!(link_name_param("   "), None);
     }
 }

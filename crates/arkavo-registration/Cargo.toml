@@ -13,6 +13,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = { workspace = true }
 thiserror = { workspace = true }
+unicode-general-category = { workspace = true }
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
