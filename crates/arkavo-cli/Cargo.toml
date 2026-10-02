@@ -77,6 +77,7 @@ arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-proxy = { path = "../arkavo-mcp-proxy" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
+arkavo-process-env = { path = "../arkavo-process-env" }
 arkavo-fingerprint = { path = "../arkavo-fingerprint", optional = true }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-permit = { path = "../arkavo-permit" }

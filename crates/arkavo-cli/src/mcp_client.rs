@@ -1,11 +1,12 @@
 use arkavo_mcp_runtime::polling::{
     AdaptiveBackoff, PollConfig, PollResultParams, PollableEndpoint,
 };
+use arkavo_process_env::{ChildEnv, EnvSpec};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, oneshot, watch};
@@ -153,23 +154,22 @@ impl McpClient {
             (cmd, vec!["mcp".to_string()])
         };
 
-        Self::new_with_command(&cmd, &args)
+        // Nothing configures an environment for a server named by URL, so
+        // it gets the platform baseline only.
+        let env = ChildEnv::isolated_from_current(&EnvSpec::default());
+        Self::new_with_command(&cmd, &args, &env)
     }
 
     /// Create a new MCP client with explicit command and arguments
     pub fn new_with_command(
         cmd: &str,
         args: &[String],
+        env: &ChildEnv,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         log_mcp(&format!("Starting: {cmd} {}", args.join(" ")));
 
         // Start MCP server process
-        let mut child = Command::new(cmd)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+        let mut child = crate::mcp_spawner::spawn_stdio(cmd, args, env)
             .map_err(|e| format!("Failed to start MCP server '{cmd}': {e}"))?;
 
         let pid = child.id();

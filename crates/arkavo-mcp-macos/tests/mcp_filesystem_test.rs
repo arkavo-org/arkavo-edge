@@ -23,7 +23,7 @@ This is the system prompt for the AI agent.
     std::fs::write(&sample_path, sample_content).unwrap();
 
     // Test reading sample-doc.md using FileSystemKit
-    let kit = FileSystemKit::new();
+    let kit = FileSystemKit::with_root(temp_dir.path());
     let params = json!({
         "action": "read_file",
         "file_path": sample_path.to_str().unwrap()
@@ -47,7 +47,7 @@ async fn test_filesystem_kit_list_directory_with_sample_doc() {
     std::fs::write(temp_dir.path().join("README.md"), "Readme content").unwrap();
 
     // List directory using absolute path
-    let kit = FileSystemKit::new();
+    let kit = FileSystemKit::with_root(temp_dir.path());
     let params = json!({
         "action": "list_directory",
         "dir_path": temp_dir.path().to_str().unwrap()
@@ -80,7 +80,7 @@ async fn test_filesystem_kit_file_info_sample_doc() {
     std::fs::write(&sample_path, content).unwrap();
 
     // Get file info
-    let kit = FileSystemKit::new();
+    let kit = FileSystemKit::with_root(temp_dir.path());
     let params = json!({
         "action": "file_info",
         "file_path": sample_path.to_str().unwrap()

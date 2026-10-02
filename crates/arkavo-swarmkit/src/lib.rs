@@ -19,6 +19,7 @@ pub mod pipeline;
 pub mod pricing;
 pub mod role;
 pub mod runtime_config;
+mod runtime_mcp_env;
 pub mod skill_content;
 pub mod unenforced;
 pub mod validate;

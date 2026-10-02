@@ -10,7 +10,7 @@
 //! negative costs the disclosure the gate exists to prevent.
 
 use std::collections::BTreeSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -27,6 +27,8 @@ pub enum Destination {
     Workspace { path: PathBuf },
     /// A path outside it — a write here leaves the sandbox.
     ExternalPath { path: PathBuf },
+    /// Another agent, named by the argument a tool declared as its recipient.
+    Peer { agent_id: String },
     /// A destination-shaped value that could not be resolved either way.
     ///
     /// Distinct from finding nothing: something is going somewhere and the gate
@@ -36,12 +38,20 @@ pub enum Destination {
 
 impl Destination {
     /// Whether releasing here amounts to disclosure outside the boundary.
+    ///
+    /// A peer counts. `HttpTransport::check_egress` treats the peer it is
+    /// connected to as inside, on the premise that configuration named it. A
+    /// declared recipient is named by the model and resolved over
+    /// unauthenticated discovery, so nothing binds the identifier to a
+    /// principal the policy knows; that changes when peer identity is
+    /// authenticated, not before.
     pub fn is_external(&self) -> bool {
         matches!(
             self,
             Destination::External { .. }
                 | Destination::ExternalPath { .. }
                 | Destination::ExternalOutput
+                | Destination::Peer { .. }
         )
     }
 
@@ -56,6 +66,7 @@ impl Destination {
             Destination::External { .. } => "external-url",
             Destination::Workspace { .. } => "workspace-path",
             Destination::ExternalPath { .. } => "external-path",
+            Destination::Peer { .. } => "peer-agent",
             Destination::Unresolved { .. } => "unresolved",
         }
     }
@@ -68,6 +79,7 @@ impl Destination {
             Destination::External { url } => format!("external:{url}"),
             Destination::Workspace { path } => format!("workspace:{}", path.display()),
             Destination::ExternalPath { path } => format!("path:{}", path.display()),
+            Destination::Peer { agent_id } => format!("peer:{agent_id}"),
             Destination::Unresolved { hint } => format!("unresolved:{hint}"),
         }
     }
@@ -127,6 +139,10 @@ impl DestinationPolicy {
             Destination::Internal { url } | Destination::External { url } => {
                 host_of(url).is_some_and(|h| self.tdf_capable_hosts.contains(&normalize_host(&h)))
             }
+            // Delegation sends the task as text, and no peer declares that it
+            // consumes a TDF; a wrapped task would arrive as a blob the peer
+            // cannot open or would forward as opaque bytes.
+            Destination::Peer { .. } => false,
             Destination::Unresolved { .. } => false,
         }
     }
@@ -182,6 +198,22 @@ pub fn extract_destinations(params: &Value, policy: &DestinationPolicy) -> Vec<D
     let mut found = BTreeSet::new();
     walk(params, policy, &mut found);
     found.into_iter().collect()
+}
+
+/// The destination a tool declared by naming its recipient argument (SEQ-018).
+///
+/// Absent, blank or non-string is unresolved rather than no destination: the
+/// tool has said the call goes to a peer, so not knowing which one is a reason
+/// to hold, not to let the call through.
+pub fn peer_destination(params: &Value, recipient_param: &str) -> Destination {
+    match params.get(recipient_param).and_then(Value::as_str) {
+        Some(agent_id) if !agent_id.trim().is_empty() => Destination::Peer {
+            agent_id: agent_id.to_string(),
+        },
+        _ => Destination::Unresolved {
+            hint: "peer".to_string(),
+        },
+    }
 }
 
 fn walk(value: &Value, policy: &DestinationPolicy, found: &mut BTreeSet<Destination>) {
@@ -271,38 +303,14 @@ fn looks_like_relative_file(s: &str) -> bool {
 
 /// Resolve existing ancestors while permitting a new file or directory suffix.
 /// Unreadable or dangling symlink ancestors cannot establish containment.
+/// A relative path is anchored at the process working directory here, on the
+/// gate's side: the shared walker refuses to guess a base.
 fn resolve_path(path: &Path) -> std::io::Result<PathBuf> {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
+    if path.is_absolute() {
+        arkavo_validation::resolve_through_existing_ancestors(path)
     } else {
-        std::env::current_dir()?.join(path)
-    };
-    let mut out = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            Component::CurDir => {}
-            Component::Prefix(_) | Component::RootDir => out.push(component.as_os_str()),
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => {
-                out.push(other.as_os_str());
-                match std::fs::canonicalize(&out) {
-                    Ok(resolved) => out = resolved,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        // A dangling link exists even though canonicalization
-                        // reports NotFound; treating it as a new file is unsafe.
-                        match std::fs::symlink_metadata(&out) {
-                            Err(missing) if missing.kind() == std::io::ErrorKind::NotFound => {}
-                            _ => return Err(error),
-                        }
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-        }
+        arkavo_validation::resolve_through_existing_ancestors(&std::env::current_dir()?.join(path))
     }
-    Ok(out)
 }
 
 /// Host extraction is the validation crate's, deliberately: the gate must see
@@ -503,6 +511,36 @@ mod tests {
             url: "https://attacker.example/x".into()
         }));
         assert!(!policy.can_consume_tdf(&Destination::Unresolved { hint: "s3".into() }));
+    }
+
+    #[test]
+    fn a_declared_peer_is_external_and_cannot_take_a_wrap() {
+        let peer = peer_destination(&json!({"agent_id": "reviewer"}), "agent_id");
+
+        assert_eq!(
+            peer,
+            Destination::Peer {
+                agent_id: "reviewer".into()
+            }
+        );
+        assert!(peer.is_external());
+        assert_eq!(peer.class(), "peer-agent");
+        assert_eq!(peer.audit_detail(), "peer:reviewer");
+        // A host that happens to share the agent's name confers nothing.
+        assert!(!policy().tdf_capable_host("reviewer").can_consume_tdf(&peer));
+    }
+
+    #[test]
+    fn a_declared_recipient_that_is_absent_or_blank_is_unresolved() {
+        for params in [json!({}), json!({"agent_id": " "}), json!({"agent_id": 7})] {
+            assert_eq!(
+                peer_destination(&params, "agent_id"),
+                Destination::Unresolved {
+                    hint: "peer".into()
+                },
+                "{params}"
+            );
+        }
     }
 }
 

@@ -206,7 +206,7 @@ components:
     module: arkavo_mcp_tools
     description: MCP tool registry and execution
     criticality: critical
-    scenario_count: 10
+    scenario_count: 16
     invariants:
       - Tools registered before execution
       - Schemas define valid parameters
@@ -448,7 +448,7 @@ components:
     module: arkavo_mcp_code_search
     description: Code search and refactoring tools
     criticality: medium
-    scenario_count: 5
+    scenario_count: 6
     invariants:
       - Tools implement MCP Tool trait
       - CodeGrep uses regex patterns
@@ -495,7 +495,7 @@ components:
     module: arkavo_mcp_runtime
     description: MCP runtime implementation
     criticality: critical
-    scenario_count: 7
+    scenario_count: 8
     invariants:
       - JSON-RPC 2.0 protocol
       - Tool execution with timeout
@@ -587,7 +587,7 @@ components:
     module: arkavo_browser
     description: Browser automation and live injection
     criticality: medium
-    scenario_count: 6
+    scenario_count: 9
     invariants:
       - BrowserTool provides MCP automation
       - LiveInjector enables script injection
@@ -610,7 +610,7 @@ components:
     module: arkavo_swarmkit
     description: SwarmKit manifest, runtime, and AG-UI gateway integration
     criticality: high
-    scenario_count: 58
+    scenario_count: 59
     invariants:
       - kit.id equals BLAKE3 of canonical manifest
       - SwarmFlight builds one ArpRuntime per role at launch
@@ -754,7 +754,7 @@ components:
     module: arkavo_edge::security::network
     description: Network security and secure defaults
     criticality: critical
-    scenario_count: 17
+    scenario_count: 21
     invariants:
       - Localhost binding by default
       - Authentication always required
@@ -890,7 +890,7 @@ components:
     module: arkavo_sequence_integrity
     description: Agent behavioral sequence integrity and taint tracking
     criticality: critical
-    scenario_count: 17
+    scenario_count: 18
     invariants:
       - Every tool call is taint-tracked from data source to data sink
       - Action sequences are evaluated as directed graphs, not isolated calls
@@ -946,11 +946,22 @@ components:
     module: arkavo_validation
     description: Centralized input validation
     criticality: high
-    scenario_count: 7
+    scenario_count: 8
     invariants:
       - All external input validated
       - Validation errors descriptive
       - Schema-driven validation
+
+  - name: process-env
+    file: process-env.spec.yaml
+    module: arkavo_process_env
+    description: Environment policy for child processes started by the agent
+    criticality: critical
+    scenario_count: 3
+    invariants:
+      - Children never inherit the agent's environment
+      - Third-party code gets baseline plus declared names only
+      - Toolchains get the environment minus credentials
 
   - name: arp
     file: arp.spec.yaml
@@ -1004,7 +1015,7 @@ components:
     module: arkavo_dispatch_gate
     description: Permit-bound tool dispatch through the MCP proxy - authn, policy and budget stages over CWT permits
     criticality: critical
-    scenario_count: 11
+    scenario_count: 12
     invariants:
       - No tools/call reaches upstream without a trusted-issuer permit and a proof of possession
       - Per-permit state is keyed on the permit's signed identity, never its bytes
@@ -1012,9 +1023,9 @@ components:
       - Untrusted input is bounded before it is parsed, hashed, or buffered
 
 stats:
-  total_specs: 86
-  total_scenarios: 825
-  critical_scenarios: 255
+  total_specs: 87
+  total_scenarios: 852
+  critical_scenarios: 273
   coverage_areas:
     - authentication
     - authorization

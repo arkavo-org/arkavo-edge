@@ -16,6 +16,11 @@ permissions:
   contents: read
   pull-requests: write
 
+# Updating a stack's heads and bases can synchronize the same PR twice.
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -38,7 +43,7 @@ jobs:
         id: pr_version
         run: |
           VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d'"' -f2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "PR branch version: $VERSION"
 
       - name: Get main branch version
@@ -46,7 +51,7 @@ jobs:
         run: |
           git fetch origin main:main
           MAIN_VERSION=$(git show main:Cargo.toml | grep '^version =' | head -n 1 | cut -d'"' -f2)
-          echo "version=$MAIN_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$MAIN_VERSION" >> "$GITHUB_OUTPUT"
           echo "Main branch version: $MAIN_VERSION"
 
       - name: Compare versions
@@ -107,10 +112,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Required readiness gate regressions
+        run: python3 tests/ci_readiness_test.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+      - name: Security CLI harness regressions
+        run: |
+          bash tests/security_cli_harness_test.sh
+          bash tests/security_cli_patterns_test.sh
 
   hardcoded-paths:
     name: No Hardcoded Paths
@@ -238,6 +249,7 @@ jobs:
             cargo test --locked -p arkavo-llm --lib --no-default-features --features llm-remote
             cargo test --locked -p arkavo-llm --no-default-features --features llm-remote --test openai_responses
             cargo test --locked -p arkavo-memory --lib
+            cargo test --locked -p arkavo-mcp-runtime --lib
             cargo test --locked -p arkavo-memory --test mcp_integration_test
             cargo test --locked -p arkavo-memory --test sequence_integrity_test
             cargo test --locked -p arkavo-budget
@@ -258,6 +270,8 @@ jobs:
             cargo test --locked -p arkavo-titan
             cargo test --locked -p arkavo-events
             cargo test --locked -p arkavo-validation
+            cargo test --locked -p arkavo-process-env
+            cargo test --locked -p arkavo-swarmkit
           elif [ "${{ matrix.group }}" = "benches" ]; then
             # Compile-check benchmarks to prevent bitrot (no execution). The bench
             # profile is release-like, so this builds a second copy of the whole
@@ -269,6 +283,9 @@ jobs:
             cargo bench --locked -p arkavo-router --no-run --no-default-features --features llm-remote,gemini,openai
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo test --locked -p arkavo-mcp-tools
+            cargo test --locked -p arkavo-mcp-mesh
+            cargo test --locked -p arkavo-mcp-code-search --lib
+            cargo test --locked -p arkavo-browser --lib
           elif [ "${{ matrix.group }}" = "routing" ]; then
             cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini,openai
             cargo check --locked -p arkavo-router --no-default-features
@@ -307,7 +324,10 @@ jobs:
             cargo test --locked -p arkavo-knowledge-pack
             cargo test --locked -p arkavo-gguf-tdf --features knowledge-pack --lib --test knowledge_pack_test
             cargo test --locked -p arkavo-protocol --features taint --test sentinel_test --test taint_propagation_test --test egress_taint_test
+            cargo test --locked -p arkavo-protocol --features taint --lib egress_
             cargo test --locked -p arkavo-server --features taint,kas --lib egress_guard
+            # routines implies taint; metadata checks keep this caller covered.
+            cargo check --locked -p arkavo-server --features routines,kas --lib
             # ASTRA-004 analyzer regression. Shares the taint-featured
             # arkavo-server artifacts with the line above so this group does
             # not build the crate a second time.
@@ -364,8 +384,10 @@ jobs:
             cargo clippy --locked -p arkavo-titan --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-events --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-validation --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-process-env --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-code-search --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "routing" ]; then
             cargo clippy --locked -p arkavo-router --lib --bins --no-default-features --features llm-remote,gemini -- -D warnings
             cargo clippy --locked -p arkavo-dataflow --lib --bins -- -D warnings
@@ -537,7 +559,7 @@ jobs:
           echo "Kimi feature adds $NEW_DEPS new dependencies"
           
           # Fail if kimi adds too many dependencies (more than 20)
-          if [ $NEW_DEPS -gt 20 ]; then
+          if [ "$NEW_DEPS" -gt 20 ]; then
             echo "ERROR: Kimi feature adds too many dependencies ($NEW_DEPS > 20)!"
             exit 1
           fi
@@ -623,7 +645,7 @@ jobs:
 
           echo "DEBUG: matrix.device = '${{ matrix.device }}'"
           echo "DEBUG: matrix.target = '${{ matrix.target }}'"
-          echo "DEBUG: matrix.features = '${{ matrix.feature }}'"
+          echo "DEBUG: matrix.features = '${{ matrix.features }}'"
 
           if [ "${{ matrix.device }}" = "uno-q" ]; then
             echo "Installing dependencies for Arduino UNO Q (llama.cpp CPU-only)"
@@ -712,12 +734,14 @@ jobs:
             echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Arduino UNO Q build (Cortex-A53, CPU-only)" > release-package/features.txt
-            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
-            echo "Note: Vulkan/OpenCL/Hexagon NPU acceleration unavailable" >> release-package/features.txt
-            echo "See: docs/uno-q-hardware-acceleration-blockers.md" >> release-package/features.txt
-            echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
-            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
+            {
+              echo "Arduino UNO Q build (Cortex-A53, CPU-only)"
+              echo "llama.cpp with CPU backend (no GPU acceleration)"
+              echo "Note: Vulkan/OpenCL/Hexagon NPU acceleration unavailable"
+              echo "See: docs/uno-q-hardware-acceleration-blockers.md"
+              echo "SNPE runtime support for vision models (dynamic loading)"
+              echo "Features: ${{ matrix.features }}"
+            } > release-package/features.txt
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             echo "Full featured build (x86_64)" > release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
@@ -796,7 +820,7 @@ jobs:
           CARGO_BIN="${HOME}/.cargo/bin"
           if [ ! -d "$CARGO_BIN" ]; then
             # GitHub Actions might have cargo in a different location
-            CARGO_BIN=$(dirname $(which cargo))
+            CARGO_BIN=$(dirname "$(command -v cargo)")
           fi
 
           MINIMAL_PATH="/usr/bin:/bin:/usr/sbin:/sbin:${CARGO_BIN}"
@@ -987,8 +1011,10 @@ jobs:
 
       - name: Test binary
         run: |
-          chmod +x arkavo*
-          ./arkavo* --version
+          set -- ./arkavo*
+          test "$#" -eq 1
+          chmod +x "$1"
+          "$1" --version
 
   smoke-test-macos:
     name: Smoke Test macOS
@@ -1131,7 +1157,7 @@ jobs:
           DEP_COUNT=$(ldd arkavo-x86_64-linux | wc -l)
           echo "Shared library dependencies: $DEP_COUNT"
           
-          if [ $DEP_COUNT -gt 50 ]; then
+          if [ "$DEP_COUNT" -gt 50 ]; then
             echo "⚠️ Unusually high number of dependencies"
           fi
           
@@ -1410,7 +1436,7 @@ jobs:
             "/usr/local/bin"
             "/opt/homebrew"
             "$HOME/Library"
-            "~/.config"
+            \~/.config
           )
           
           for pattern in "${PATTERNS[@]}"; do

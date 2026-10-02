@@ -17,8 +17,10 @@ build = "build.rs"
 git2.workspace = true
 thiserror.workspace = true
 tempfile.workspace = true
+arkavo-process-env = { path = "../arkavo-process-env" }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [features]
 # Features section kept for future extensions

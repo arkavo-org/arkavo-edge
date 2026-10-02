@@ -1,9 +1,9 @@
+use crate::child::tool_command;
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::Path;
-use std::process::Command;
 
 pub struct FindBugsKit {
     schema: ToolSchema,
@@ -263,7 +263,7 @@ fn detect_language(path: &str) -> Result<String> {
     }
 
     // Check file extensions in directory
-    let output = Command::new("find")
+    let output = tool_command("find")
         .args([path, "-name", "*.rs", "-o", "-name", "*.swift"])
         .output()
         .map_err(|e| ToolError::Mcp(format!("Failed to detect language: {e}")))?;
@@ -283,7 +283,7 @@ fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::Value>
 
     // Run clippy for Rust analysis
     if bug_types.contains(&"all") || bug_types.iter().any(|&t| t != "all") {
-        let output = Command::new("cargo")
+        let output = tool_command("cargo")
             .args(["clippy", "--message-format=json"])
             .current_dir(path)
             .output()
@@ -315,7 +315,7 @@ fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::Value
     // Search for common Swift anti-patterns
     if bug_types.contains(&"all") || bug_types.contains(&"memory") {
         // Look for force unwrapping
-        let output = Command::new("grep")
+        let output = tool_command("grep")
             .args(["-rn", "--include=*.swift", r"!\s*[{.\[(]", path])
             .output()
             .map_err(|e| ToolError::Mcp(format!("Failed to search for patterns: {e}")))?;

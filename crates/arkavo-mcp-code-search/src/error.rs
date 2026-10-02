@@ -17,6 +17,9 @@ pub enum CodeSearchError {
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
 
+    #[error("Path outside the workspace: {0}")]
+    OutsideWorkspace(String),
+
     #[error("Tool error: {0}")]
     ToolError(String),
 }

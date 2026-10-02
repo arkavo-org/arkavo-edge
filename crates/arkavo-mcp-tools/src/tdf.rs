@@ -1,19 +1,27 @@
 //! TDF (Trusted Data Format) MCP tools for encryption and info operations.
 
+use crate::confine::{within_root, within_root_for_write};
 use crate::server::Tool;
 use arkavo_mcp::ToolSchema;
 use arkavo_tdf::{OpenTdfService, PolicyBuilder, TdfEncryptor, TdfManifest};
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::path::PathBuf;
 
 /// MCP tool for encrypting data using TDF format.
 pub struct TdfEncryptTool {
     schema: ToolSchema,
+    root: PathBuf,
 }
 
 impl TdfEncryptTool {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "tdf_encrypt".to_string(),
                 aliases: Some(vec!["encrypt_tdf".to_string()]),
@@ -88,8 +96,12 @@ impl Tool for TdfEncryptTool {
             .map(String::from)
             .unwrap_or_else(|| format!("{input_path}.tdf.json"));
 
-        // Read input file
-        let plaintext = tokio::fs::read(input_path)
+        // Both ends are confined before anything is read or written, so a
+        // refused output path never leaves a half-done encryption behind.
+        let input_file = within_root(&self.root, input_path)?;
+        let output_file = within_root_for_write(&self.root, &output_path)?;
+
+        let plaintext = tokio::fs::read(&input_file)
             .await
             .map_err(crate::ToolError::Io)?;
 
@@ -108,7 +120,7 @@ impl Tool for TdfEncryptTool {
 
         // Write output
         let json = serde_json::to_string_pretty(&manifest)?;
-        tokio::fs::write(&output_path, &json)
+        tokio::fs::write(&output_file, &json)
             .await
             .map_err(crate::ToolError::Io)?;
 
@@ -128,11 +140,17 @@ impl Tool for TdfEncryptTool {
 /// MCP tool for displaying TDF manifest information.
 pub struct TdfInfoTool {
     schema: ToolSchema,
+    root: PathBuf,
 }
 
 impl TdfInfoTool {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "tdf_info".to_string(),
                 aliases: Some(vec!["inspect_tdf".to_string()]),
@@ -171,8 +189,10 @@ impl Tool for TdfInfoTool {
             .as_str()
             .ok_or_else(|| crate::ToolError::InvalidParams("Missing input_path".to_string()))?;
 
+        let manifest_file = within_root(&self.root, input_path)?;
+
         // Read and parse manifest
-        let json_str = tokio::fs::read_to_string(input_path)
+        let json_str = tokio::fs::read_to_string(&manifest_file)
             .await
             .map_err(crate::ToolError::Io)?;
 
@@ -269,7 +289,7 @@ impl Tool for TdfHelpTool {
                     "description": "Encrypt a file with default policy",
                     "call": {
                         "tool": "tdf_encrypt",
-                        "params": { "input_path": "/path/to/secret.txt" }
+                        "params": { "input_path": "docs/secret.txt" }
                     }
                 },
                 {
@@ -277,7 +297,7 @@ impl Tool for TdfHelpTool {
                     "call": {
                         "tool": "tdf_encrypt",
                         "params": {
-                            "input_path": "/path/to/secret.txt",
+                            "input_path": "docs/secret.txt",
                             "namespace": "https://arkavo.net/attr/classification",
                             "values": ["top-secret", "nato"]
                         }
@@ -287,7 +307,7 @@ impl Tool for TdfHelpTool {
                     "description": "Inspect a TDF file",
                     "call": {
                         "tool": "tdf_info",
-                        "params": { "input_path": "/path/to/secret.txt.tdf.json" }
+                        "params": { "input_path": "docs/secret.txt.tdf.json" }
                     }
                 }
             ]
@@ -298,20 +318,28 @@ impl Tool for TdfHelpTool {
 // Iroh P2P transport tools (feature-gated)
 #[cfg(feature = "iroh")]
 mod iroh_tools {
+    use crate::confine::{within_root, within_root_for_write};
     use crate::server::Tool;
     use arkavo_mcp::ToolSchema;
     use arkavo_tdf_iroh::{IrohNode, IrohTicket, IrohTransport};
     use async_trait::async_trait;
     use serde_json::{Value, json};
+    use std::path::PathBuf;
 
     /// MCP tool for staging data to Iroh P2P network.
     pub struct TdfStageTool {
         schema: ToolSchema,
+        root: PathBuf,
     }
 
     impl TdfStageTool {
         pub fn new() -> Self {
+            Self::with_root(arkavo_validation::current_workspace_root())
+        }
+
+        pub fn with_root(root: impl Into<PathBuf>) -> Self {
             Self {
+                root: root.into(),
                 schema: ToolSchema {
                     name: "tdf_stage".to_string(),
                     aliases: Some(vec!["iroh_stage".to_string()]),
@@ -350,8 +378,10 @@ mod iroh_tools {
                 .as_str()
                 .ok_or_else(|| crate::ToolError::InvalidParams("Missing input_path".to_string()))?;
 
-            // Read file
-            let data = tokio::fs::read(input_path)
+            // Staging publishes the raw bytes to anyone holding the ticket, so
+            // the file must be inside the workspace before it is read.
+            let input_file = within_root(&self.root, input_path)?;
+            let data = tokio::fs::read(&input_file)
                 .await
                 .map_err(crate::ToolError::Io)?;
 
@@ -382,11 +412,17 @@ mod iroh_tools {
     /// MCP tool for fetching data from Iroh P2P network.
     pub struct TdfFetchTool {
         schema: ToolSchema,
+        root: PathBuf,
     }
 
     impl TdfFetchTool {
         pub fn new() -> Self {
+            Self::with_root(arkavo_validation::current_workspace_root())
+        }
+
+        pub fn with_root(root: impl Into<PathBuf>) -> Self {
             Self {
+                root: root.into(),
                 schema: ToolSchema {
                     name: "tdf_fetch".to_string(),
                     aliases: Some(vec!["iroh_fetch".to_string()]),
@@ -433,6 +469,10 @@ mod iroh_tools {
                 crate::ToolError::InvalidParams("Missing output_path".to_string())
             })?;
 
+            // Confine before the ticket is parsed or a node is created, so a
+            // refused path costs no network activity.
+            let output_file = within_root_for_write(&self.root, output_path)?;
+
             // Parse ticket
             let ticket: IrohTicket = ticket_str
                 .parse()
@@ -450,7 +490,7 @@ mod iroh_tools {
                 .map_err(|e| crate::ToolError::Execution(format!("Failed to fetch: {e}")))?;
 
             // Write to output
-            tokio::fs::write(output_path, &data)
+            tokio::fs::write(&output_file, &data)
                 .await
                 .map_err(crate::ToolError::Io)?;
 
@@ -474,6 +514,8 @@ pub use iroh_tools::{TdfFetchTool, TdfStageTool};
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use crate::ToolError;
+    use arkavo_test_macros::spec;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -522,7 +564,7 @@ mod tests {
             .unwrap();
 
         // Encrypt
-        let encrypt_tool = TdfEncryptTool::new();
+        let encrypt_tool = TdfEncryptTool::with_root(temp_dir.path());
         let result = encrypt_tool
             .execute(json!({
                 "input_path": input_path.to_str().unwrap(),
@@ -535,7 +577,7 @@ mod tests {
         assert!(result["payload_size"].as_u64().unwrap() > 0);
 
         // Info
-        let info_tool = TdfInfoTool::new();
+        let info_tool = TdfInfoTool::with_root(temp_dir.path());
         let info = info_tool
             .execute(json!({
                 "input_path": output_path.to_str().unwrap()
@@ -557,14 +599,81 @@ mod tests {
 
     #[tokio::test]
     async fn test_info_invalid_file() {
-        let tool = TdfInfoTool::new();
+        let temp_dir = TempDir::new().unwrap();
+        let tool = TdfInfoTool::with_root(temp_dir.path());
         let result = tool
             .execute(json!({
-                "input_path": "/nonexistent/file.tdf.json"
+                "input_path": "nonexistent/file.tdf.json"
             }))
             .await;
 
-        assert!(result.is_err());
+        assert!(matches!(result, Err(ToolError::Io(_))));
+    }
+
+    fn denied(result: crate::Result<Value>) -> bool {
+        matches!(result, Err(ToolError::PolicyDenied(_)))
+    }
+
+    #[spec("MCP-012")]
+    #[tokio::test]
+    async fn tdf_encrypt_refuses_paths_outside_the_workspace() {
+        let ws = TempDir::new().unwrap();
+        let elsewhere = TempDir::new().unwrap();
+        let secret = elsewhere.path().join("secret.txt");
+        std::fs::write(&secret, b"PRIVATE").unwrap();
+        let tool = TdfEncryptTool::with_root(ws.path());
+
+        assert!(denied(
+            tool.execute(json!({ "input_path": secret.to_str().unwrap() }))
+                .await
+        ));
+
+        std::fs::write(ws.path().join("in.txt"), b"data").unwrap();
+        let outside_out = elsewhere.path().join("out.tdf.json");
+        assert!(denied(
+            tool.execute(json!({
+                "input_path": "in.txt",
+                "output_path": outside_out.to_str().unwrap()
+            }))
+            .await
+        ));
+        assert!(!outside_out.exists());
+    }
+
+    #[spec("MCP-012")]
+    #[tokio::test]
+    async fn tdf_encrypt_refuses_an_output_path_inside_dot_git() {
+        let ws = TempDir::new().unwrap();
+        std::fs::create_dir_all(ws.path().join(".git/objects/info")).unwrap();
+        std::fs::write(ws.path().join("in.txt"), b"data").unwrap();
+        let tool = TdfEncryptTool::with_root(ws.path());
+        for target in [".git/objects/info/alternates", ".git/config"] {
+            assert!(denied(
+                tool.execute(json!({ "input_path": "in.txt", "output_path": target }))
+                    .await
+            ));
+            assert!(!ws.path().join(target).exists(), "{target}");
+        }
+        // A default output next to the input is still fine.
+        let ok = tool
+            .execute(json!({ "input_path": "in.txt" }))
+            .await
+            .unwrap();
+        assert!(ok["success"].as_bool().unwrap());
+    }
+
+    #[spec("MCP-012")]
+    #[tokio::test]
+    async fn tdf_info_refuses_a_manifest_outside_the_workspace() {
+        let ws = TempDir::new().unwrap();
+        let elsewhere = TempDir::new().unwrap();
+        let manifest = elsewhere.path().join("m.tdf.json");
+        std::fs::write(&manifest, b"{}").unwrap();
+        let tool = TdfInfoTool::with_root(ws.path());
+        assert!(denied(
+            tool.execute(json!({ "input_path": manifest.to_str().unwrap() }))
+                .await
+        ));
     }
 
     #[cfg(feature = "iroh")]
@@ -609,6 +718,51 @@ mod tests {
             let result = tool.execute(json!({})).await;
 
             assert!(result.is_err());
+        }
+
+        #[spec("MCP-012")]
+        #[tokio::test]
+        async fn tdf_stage_refuses_a_file_outside_the_workspace() {
+            let ws = TempDir::new().unwrap();
+            let elsewhere = TempDir::new().unwrap();
+            let secret = elsewhere.path().join("agent_keypair");
+            std::fs::write(&secret, b"PRIVATE").unwrap();
+            let tool = TdfStageTool::with_root(ws.path());
+            assert!(denied(
+                tool.execute(json!({ "input_path": secret.to_str().unwrap() }))
+                    .await
+            ));
+        }
+
+        #[spec("MCP-012")]
+        #[tokio::test]
+        async fn tdf_fetch_refuses_an_output_path_outside_the_workspace() {
+            let ws = TempDir::new().unwrap();
+            let elsewhere = TempDir::new().unwrap();
+            let target = elsewhere.path().join("fetched.bin");
+            let tool = TdfFetchTool::with_root(ws.path());
+            assert!(denied(
+                tool.execute(json!({
+                    "ticket": "not-a-ticket",
+                    "output_path": target.to_str().unwrap()
+                }))
+                .await
+            ));
+            assert!(!target.exists());
+        }
+
+        #[spec("MCP-012")]
+        #[tokio::test]
+        async fn tdf_fetch_refuses_an_output_path_inside_dot_git() {
+            let ws = TempDir::new().unwrap();
+            std::fs::create_dir_all(ws.path().join(".git/objects/info")).unwrap();
+            let tool = TdfFetchTool::with_root(ws.path());
+            let target = ".git/objects/info/alternates";
+            assert!(denied(
+                tool.execute(json!({ "ticket": "not-a-ticket", "output_path": target }))
+                    .await
+            ));
+            assert!(!ws.path().join(target).exists());
         }
 
         #[tokio::test]

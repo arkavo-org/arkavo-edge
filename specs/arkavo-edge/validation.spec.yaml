@@ -85,13 +85,15 @@ scenarios:
       - Cloud metadata IPs blocked (169.254.169.254)
       - Localhost blocked for external requests
       - Public IPs allowed
-    refs: [crates/arkavo-validation/src/url.rs]
-    changed: "2026-03-19"
+    refs: [crates/arkavo-validation/src/url.rs:54-147, crates/arkavo-validation/src/egress_policy.rs]
+    changed: "2026-09-29"
     edge_cases:
       - condition: DNS resolves to private IP
         expected: Blocked after resolution
       - condition: IPv6 mapped IPv4 private
         expected: Detected and blocked
+      - condition: NAT64 or IPv4-mapped form of a blocked IPv4 address
+        expected: Blocked
 
   - id: VAL-006
     name: Host validation
@@ -119,3 +121,24 @@ scenarios:
       - Boundary metadata preserved
     refs: [crates/arkavo-validation/src/external_content.rs]
     changed: "2026-03-19"
+
+  - id: VAL-008
+    name: Resolve a path within the workspace root
+    criticality: critical
+    given:
+      - A workspace root
+      - A path supplied by a tool caller, absolute or relative
+    when: resolve_within_root resolves it
+    then:
+      - Existing ancestors are canonicalised, so symlinks are followed before containment is checked
+      - A path inside the root resolves, including an absolute one and a new file under new directories
+      - A path outside the root, by absolute path, parent components or symlink, is refused with OutsideRoot
+      - A dangling symlink (ancestor or leaf), an empty path or a missing or empty root is refused
+      - Parent components are handled per component, so names such as weird..name are accepted
+    refs: [crates/arkavo-validation/src/path.rs]
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: Windows drive-relative path (C:foo)
+        expected: Refused
+      - condition: Windows UNC, device or other-drive path (\\host\share, \\.\pipe\x, \\?\GLOBALROOT\x)
+        expected: Refused before any filesystem call, so the host is never contacted

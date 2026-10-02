@@ -721,7 +721,13 @@ async fn execute_tool_calls(
         // the agent learns only that policy refused it.
         #[cfg(feature = "taint")]
         if let Some(guard) = egress
-            && let Err(message) = guard.check_call(&tool_call.tool_name, &args)
+            && let Err(message) = guard.check_tool_call(
+                &tool_call.tool_name,
+                &args,
+                registry_arc
+                    .get(&tool_call.tool_name)
+                    .and_then(|tool| tool.peer_recipient_param()),
+            )
         {
             tool_result_parts.push(format!("Tool {} (Denied): {message}", tool_call.tool_name));
             *total_step_idx += 1;
@@ -1673,6 +1679,54 @@ mod tests {
                 Some("ignored".to_string())
             ),
             Ok("here is the answer".to_string())
+        );
+    }
+}
+
+/// SEQ-003, SEQ-018: delegation through the conductor's 1:1 tool loop.
+#[cfg(all(test, feature = "taint"))]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
+mod egress_guard_peer {
+    use super::super::egress_guard_fixture::{Delegation, offline_router};
+    use super::*;
+
+    /// Regression: `send_task` takes an agent identifier and task text, and
+    /// neither has a URL's or a path's shape, so the guard found no
+    /// destination and a credential the session had read went to the peer.
+    #[arkavo_test_macros::spec("SEQ-003", "SEQ-018")]
+    #[tokio::test]
+    async fn a_credential_does_not_reach_a_peer_through_delegation() {
+        let delegation = Delegation::with_credential().await;
+        let mut rewards = Vec::new();
+        let mut step = 0usize;
+        let mut observations = Vec::new();
+
+        let parts = execute_tool_calls(
+            std::slice::from_ref(&delegation.call),
+            &delegation.registry,
+            &Arc::new(McpRegistry::new()),
+            &offline_router().await,
+            None,
+            None,
+            None,
+            None,
+            &mut rewards,
+            &mut step,
+            &[],
+            &mut observations,
+            None,
+            Some(&delegation.guard),
+        )
+        .await;
+
+        assert!(
+            !delegation.peer_was_reached(),
+            "the task reached the peer: {parts:?}"
+        );
+        assert!(parts[0].contains("(Denied)"), "{parts:?}");
+        assert!(
+            observations.is_empty(),
+            "a refused call must not run: {observations:?}"
         );
     }
 }

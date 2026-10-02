@@ -55,25 +55,38 @@ impl EgressFilter {
         self.blocked_ips
             .insert(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)));
 
-        self.blocked_ranges.push("10.0.0.0/8".parse().unwrap());
-        self.blocked_ranges.push("172.16.0.0/12".parse().unwrap());
-        self.blocked_ranges.push("192.168.0.0/16".parse().unwrap());
-        self.blocked_ranges.push("127.0.0.0/8".parse().unwrap());
-        self.blocked_ranges.push("169.254.0.0/16".parse().unwrap());
-        self.blocked_ranges.push("fc00::/7".parse().unwrap());
-        self.blocked_ranges.push("fe80::/10".parse().unwrap());
-        self.blocked_ranges.push("::1/128".parse().unwrap());
-        // IPv4-mapped IPv6 addresses (e.g. ::ffff:169.254.169.254)
-        self.blocked_ranges
-            .push("::ffff:10.0.0.0/104".parse().unwrap());
-        self.blocked_ranges
-            .push("::ffff:172.16.0.0/108".parse().unwrap());
-        self.blocked_ranges
-            .push("::ffff:192.168.0.0/112".parse().unwrap());
-        self.blocked_ranges
-            .push("::ffff:127.0.0.0/104".parse().unwrap());
-        self.blocked_ranges
-            .push("::ffff:169.254.0.0/112".parse().unwrap());
+        for range in [
+            // "This network". Linux and macOS deliver a connect to 0.0.0.0 to
+            // the local host, so it is loopback under another name.
+            "0.0.0.0/8",
+            "10.0.0.0/8",
+            // Carrier-grade NAT. Alibaba Cloud serves instance metadata at
+            // 100.100.100.200, inside this range.
+            "100.64.0.0/10",
+            "127.0.0.0/8",
+            "169.254.0.0/16",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            // Multicast, then the reserved block that ends in the limited
+            // broadcast address: neither names one public server.
+            "224.0.0.0/4",
+            "240.0.0.0/4",
+            // Unspecified, loopback and the deprecated IPv4-compatible block.
+            "::/96",
+            "fc00::/7",
+            "fe80::/10",
+            "ff00::/8",
+            // Teredo tunnels obfuscate the client's IPv4 address and can be
+            // relayed to any server, so no embedded host is judged; the
+            // range is refused whole.
+            "2001::/32",
+            // Local-use NAT64 prefixes place the IPv4 address at a length-
+            // dependent offset, so the range is refused rather than decoded.
+            "64:ff9b:1::/48",
+        ] {
+            self.blocked_ranges
+                .push(range.parse().expect("built-in range parses"));
+        }
     }
 
     pub fn allow(&mut self, url: impl Into<String>) {
@@ -103,6 +116,7 @@ impl EgressFilter {
     }
 
     fn is_ip_blocked(&self, ip: IpAddr) -> bool {
+        let ip = embedded_ipv4(ip);
         if self.blocked_ips.contains(&ip) {
             return true;
         }
@@ -117,11 +131,44 @@ impl EgressFilter {
     }
 }
 
-#[derive(Debug, Clone)]
+/// The IPv4 host an IPv6 address is delivered to, when it names one.
+///
+/// Mapped (`::ffff:a.b.c.d`), NAT64 (`64:ff9b::a.b.c.d`) and 6to4
+/// (`2002:aabb:ccdd::/48`) addresses reach the embedded IPv4 host. Judging that host against the IPv4 ranges, rather than
+/// mirroring each range in IPv6 form, leaves no range open because someone
+/// forgot to mirror it.
+fn embedded_ipv4(ip: IpAddr) -> IpAddr {
+    let IpAddr::V6(v6) = ip else {
+        return ip;
+    };
+    if let Some(v4) = v6.to_ipv4_mapped() {
+        return IpAddr::V4(v4);
+    }
+    let segments = v6.segments();
+    if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+        let [a, b] = segments[6].to_be_bytes();
+        let [c, d] = segments[7].to_be_bytes();
+        return IpAddr::V4(Ipv4Addr::new(a, b, c, d));
+    }
+    if segments[0] == 0x2002 {
+        let [a, b] = segments[1].to_be_bytes();
+        let [c, d] = segments[2].to_be_bytes();
+        return IpAddr::V4(Ipv4Addr::new(a, b, c, d));
+    }
+    ip
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EgressError {
     InvalidUrl,
     BlockedIp(IpAddr),
     BlockedDomain(String),
+    /// A host name that did not resolve, so where it leads cannot be judged.
+    Unresolved(String),
+    /// An `ARKAVO_EGRESS_ALLOW` entry that is not a bare http(s) origin.
+    InvalidAllowlistEntry(String),
+    /// The HTTP client could not be built.
+    Client(String),
 }
 
 impl std::fmt::Display for EgressError {
@@ -134,6 +181,17 @@ impl std::fmt::Display for EgressError {
             EgressError::BlockedDomain(domain) => {
                 write!(f, "SSRF attempt blocked: {domain} is in blocked list")
             }
+            EgressError::Unresolved(host) => {
+                write!(
+                    f,
+                    "egress refused: {host} did not resolve, so it cannot be judged"
+                )
+            }
+            EgressError::InvalidAllowlistEntry(entry) => write!(
+                f,
+                "egress allowlist entry {entry:?} is not an http(s) origin such as http://localhost:3000"
+            ),
+            EgressError::Client(reason) => write!(f, "egress client could not be built: {reason}"),
         }
     }
 }
@@ -405,6 +463,57 @@ mod tests {
         assert_eq!(filter.arp_connection_failure_threshold, Some(3));
         assert!(filter.arp_deny_on_tls_error);
         assert!(filter.arp_deny_on_suspicious_response);
+    }
+
+    /// Addresses that reach a private or local host without being written in
+    /// any of the original ranges' own notation.
+    #[spec("VAL-005", "NET-007")]
+    #[test]
+    fn test_ranges_outside_rfc1918_are_blocked() {
+        let filter = EgressFilter::new();
+        for ip in [
+            "100.100.100.200",
+            "0.0.0.0",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::",
+            "ff02::1",
+            "::ffff:100.64.0.1",
+            "::ffff:0.0.0.0",
+            "64:ff9b::a9fe:a9fe",
+            "64:ff9b::7f00:1",
+            "2002:a9fe:a9fe::",
+            "2002:7f00:1::1",
+            "2002:0a00:0001::1",
+            "64:ff9b:1::7f00:1",
+            "64:ff9b:1::808:808",
+            "2001:0::1",
+            "2001::4136:e378:8000:63bf:3fff:fdd2",
+        ] {
+            let ip: IpAddr = ip.parse().unwrap();
+            assert!(
+                filter.validate_resolved_ip(ip).is_err(),
+                "{ip} must be blocked"
+            );
+        }
+    }
+
+    #[spec("VAL-005", "NET-007")]
+    #[test]
+    fn test_public_addresses_stay_reachable() {
+        let filter = EgressFilter::new();
+        for ip in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "2606:4700:4700::1111",
+            "64:ff9b::808:808",
+            "2002:0808:0808::1",
+            "2001:db8::1",
+            "2001:4860:4860::8888",
+        ] {
+            let ip: IpAddr = ip.parse().unwrap();
+            assert!(filter.validate_resolved_ip(ip).is_ok(), "{ip} must pass");
+        }
     }
 
     #[test]

@@ -167,10 +167,11 @@ OPTIONS:
     --trust             Show the agent authorization QR code (DID:key) on startup
 
 NETWORK:
-    By default the agent listens on every interface and announces itself over mDNS,
-    so other devices on the local network can discover and reach it. The RPC
-    endpoint is not authenticated yet, so every start on an address other
-    machines can reach prints a notice: run the agent on networks you trust.
+    By default the agent listens on loopback and announces itself over mDNS
+    for discovery on this machine. The RPC endpoint is not authenticated yet.
+    To accept connections from other machines, choose an explicit address with
+    --bind 0.0.0.0 or runtime.listen. A network-reachable start prints a notice:
+    run the agent on networks you trust.
     --bind 127.0.0.1 keeps the agent on this machine, whatever the kit says;
     agents on the same machine still discover it. A kit can pin an address with
     runtime.listen, for example runtime.listen: "127.0.0.1:8342". --bind
@@ -182,7 +183,7 @@ EXAMPLES:
     arkavo agent --port 8343 -v            # Run on specific port with verbose
     arkavo agent -c team.swarmkit.yaml -n worker -p 8343  # Run one role of a multi-role kit
     arkavo agent --bind 127.0.0.1          # Stay on this machine
-    arkavo agent run --trust               # Show the QR code for another device"#;
+    arkavo agent run --bind 0.0.0.0 --trust # Expose the agent and show its QR code"#;
 
 /// Deprecated: `arkavo agent init` no longer writes AGENTS.md.
 ///
@@ -369,6 +370,9 @@ pub struct McpServerConfig {
     pub command: Option<String>,
     pub args: Vec<String>,
     pub url: Option<String>,
+    /// What the server process may see of the agent's environment beyond
+    /// the platform baseline.
+    pub env: arkavo_process_env::EnvSpec,
 }
 
 /// Check if a tool's input schema has required arguments
@@ -548,7 +552,10 @@ pub async fn start_agent_server(
             use crate::mcp_client::McpClient;
             use crate::mcp_integration::McpConnection;
 
-            match McpClient::new_with_command(command, &mcp_config.args) {
+            // Resolved per server: it sees the platform baseline and what its
+            // kit entry declared, never the agent's provider keys.
+            let child_env = arkavo_process_env::ChildEnv::isolated_from_current(&mcp_config.env);
+            match McpClient::new_with_command(command, &mcp_config.args, &child_env) {
                 Ok(mut client) => {
                     // Set server name for poll notifications
                     client.set_server_name(mcp_config.name.clone());
@@ -1614,8 +1621,8 @@ mod tests {
         assert!(err.contains("--bind"), "{err}");
     }
 
-    /// Regression: the help said the agent listens on 127.0.0.1 unless the
-    /// kit says otherwise, and later that `--trust` keeps it on loopback.
+    /// The help must match the loopback default and keep QR authorization
+    /// separate from the address selected by `--bind`.
     #[test]
     fn help_describes_the_network_default_and_the_bind_option() {
         let (options, network) = USAGE
@@ -1641,7 +1648,7 @@ mod tests {
         assert!(bind.contains("runtime.listen"), "{bind}");
         assert!(bind.contains("-p"), "{bind}");
 
-        assert!(network.contains("every interface"), "{network}");
+        assert!(network.contains("listens on loopback"), "{network}");
         assert!(network.contains("mDNS"), "{network}");
         assert!(network.contains("not authenticated"), "{network}");
         assert!(network.contains("notice"), "{network}");
@@ -1775,34 +1782,33 @@ provenance:
     }
 
     #[test]
-    fn a_start_with_no_kit_listens_on_every_interface() {
+    fn a_start_with_no_kit_listens_on_loopback() {
         let dir = tempfile::tempdir().unwrap();
         let (config, listen_addr, bind_notice) = resolve_start(&[], None, dir.path()).unwrap();
 
-        assert_eq!(listen_addr, "0.0.0.0:0".parse().unwrap());
-        assert_eq!(config.listen, "0.0.0.0:0");
+        assert_eq!(listen_addr, "127.0.0.1:0".parse().unwrap());
+        assert_eq!(config.listen, "127.0.0.1:0");
         assert!(config.mdns_enabled);
         assert_eq!(bind_notice, None);
     }
 
     /// `--trust` shows the QR code and changes nothing about where the
-    /// agent listens: the address in the code is one another device can
-    /// reach.
+    /// agent listens; reaching it from another device requires an explicit bind.
     #[test]
     fn a_trust_start_listens_where_a_default_start_does() {
         let dir = tempfile::tempdir().unwrap();
         let (config, listen_addr, bind_notice) =
             resolve_start(&["--trust"], None, dir.path()).unwrap();
 
-        assert_eq!(listen_addr, "0.0.0.0:0".parse().unwrap());
-        assert_eq!(config.listen, "0.0.0.0:0");
+        assert_eq!(listen_addr, "127.0.0.1:0".parse().unwrap());
+        assert_eq!(config.listen, "127.0.0.1:0");
         assert!(config.mdns_enabled);
         assert_eq!(bind_notice, None);
-        assert!(listen::exposure_warning(listen_addr).is_some());
+        assert!(listen::exposure_warning(listen_addr).is_none());
 
         let (_, with_port, _) =
             resolve_start(&["--trust", "-p", "8343"], None, dir.path()).unwrap();
-        assert_eq!(with_port, "0.0.0.0:8343".parse().unwrap());
+        assert_eq!(with_port, "127.0.0.1:8343".parse().unwrap());
     }
 
     #[test]
@@ -1823,7 +1829,7 @@ provenance:
     fn a_port_alone_never_changes_the_host() {
         let dir = tempfile::tempdir().unwrap();
         let (_, no_kit, _) = resolve_start(&["-p", "8343"], None, dir.path()).unwrap();
-        assert_eq!(no_kit, "0.0.0.0:8343".parse().unwrap());
+        assert_eq!(no_kit, "127.0.0.1:8343".parse().unwrap());
 
         let kit = write_kit_listening_on(dir.path(), "127.0.0.1:8342");
         let (_, with_kit, bind_notice) =

@@ -80,5 +80,6 @@ cc = "1.0"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 [lints]
 workspace = true

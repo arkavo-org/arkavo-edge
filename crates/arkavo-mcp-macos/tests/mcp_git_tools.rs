@@ -118,7 +118,12 @@ async fn test_git_commit_tool() {
     // Verify the commit was created
     let log = repo.reflog("HEAD").unwrap();
     let entry = log.get(0).unwrap();
-    assert!(entry.message().unwrap().contains("commit: Add test file"));
+    assert!(
+        entry
+            .message()
+            .unwrap()
+            .is_some_and(|m| m.contains("commit: Add test file"))
+    );
 }
 
 #[tokio::test]

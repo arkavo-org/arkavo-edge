@@ -305,39 +305,27 @@ provenance:
         ]
     }
 
-    /// Regression: with no kit the audit reported a loopback endpoint and
-    /// passed, while the agent it describes listens on every interface.
+    /// The audit must describe the same built-in loopback default as startup.
     #[test]
-    fn no_kit_is_audited_as_the_built_in_default_on_every_interface() {
+    fn no_kit_is_audited_as_the_built_in_loopback_default() {
         let dir = tempfile::tempdir().unwrap();
         let endpoint = effective_endpoint(dir.path(), None);
 
-        for check in endpoint_checks(&endpoint) {
-            assert_eq!(check.status, AuditStatus::Fail, "{}", check.message);
-            assert!(check.message.contains("0.0.0.0:0"), "{}", check.message);
-            assert!(
-                !check.message.contains("this machine only"),
-                "{}",
-                check.message
-            );
-        }
         let bind = check_bind(&endpoint);
+        assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
+        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
+        assert!(
+            bind.message.contains("this machine only"),
+            "{}",
+            bind.message
+        );
         assert!(
             bind.message.contains("built-in default, no kit found"),
             "{}",
             bind.message
         );
-        assert!(
-            bind.message.contains("reachable from the network"),
-            "{}",
-            bind.message
-        );
-        assert!(
-            bind.message.contains("--bind 127.0.0.1"),
-            "{}",
-            bind.message
-        );
-        assert!(!bind.message.contains("--trust"), "{}", bind.message);
+        assert_eq!(check_transport(&endpoint).status, AuditStatus::Pass);
+        assert_eq!(check_authentication(&endpoint).status, AuditStatus::Warn);
     }
 
     #[test]
@@ -345,8 +333,8 @@ provenance:
         let dir = dir_with_kit(None);
         let bind = check_bind(&effective_endpoint(dir.path(), None));
 
-        assert_eq!(bind.status, AuditStatus::Fail);
-        assert!(bind.message.contains("0.0.0.0:0"), "{}", bind.message);
+        assert_eq!(bind.status, AuditStatus::Pass);
+        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
         assert!(
             bind.message.contains("sets no runtime.listen"),
             "{}",
@@ -377,8 +365,8 @@ provenance:
     fn a_loopback_bind_is_audited_on_loopback() {
         let no_kit = tempfile::tempdir().unwrap();
         let dirs = [
-            (no_kit, "127.0.0.1", "127.0.0.1:0", "0.0.0.0:0"),
-            (dir_with_kit(None), "127.0.0.1", "127.0.0.1:0", "0.0.0.0:0"),
+            (no_kit, "[::1]", "[::1]:0", "127.0.0.1:0"),
+            (dir_with_kit(None), "[::1]", "[::1]:0", "127.0.0.1:0"),
             (
                 dir_with_kit(Some("0.0.0.0:8342")),
                 "127.0.0.1",

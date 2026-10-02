@@ -19,17 +19,18 @@
 //!   it has selected); `created_at` from the persistent device-keypair
 //!   file mtime; `peer_count` from gossip; anti-pattern weights from
 //!   the policy cache for the local agent's name.
-//! - **peer**: `verification: true` (we know they exist on the gossip
-//!   layer); other signals empty until per-peer attestation lands. The
-//!   panel renders an entry so operators can see the peer set even when
-//!   no scoring evidence exists yet.
+//! - **peer**: anti-pattern weights only. The panel renders an entry so
+//!   operators can see the peer set even when no scoring evidence exists.
+//! - **both**: VERIFICATION is `Unattested`. Nothing on this path checks a
+//!   DID proof or an attestation quote, so an evidence-free peer publishes
+//!   a composite of 0 rather than a score earned by appearing on the mesh.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use arkavo_router::Router;
 use arkavo_router::learning::AgentUtilityStats;
-use arkavo_trust::{AgentTrustInput, SharedTrustService};
+use arkavo_trust::{AgentTrustInput, AttestationStrength, SharedTrustService};
 use chrono::{DateTime, Utc};
 use tokio::task::JoinHandle;
 use tracing::debug;
@@ -106,7 +107,7 @@ async fn sync_once(
     // agents the local node sees on the mesh. We have no scoring
     // evidence about them yet (per-peer attestation/cross-agent
     // outcomes are a follow-up), so the AgentTrustInput is empty
-    // beyond the verification flag. The panel still renders an entry
+    // beyond anti-pattern weights. The panel still renders an entry
     // per peer so operators can see the peer set.
     let peer_ids = learning_bus.peer_ids().await;
     let peer_count = peer_ids.len();
@@ -183,11 +184,15 @@ fn build_input(
         success_rate,
         success_std_dev,
         observation_count,
-        // Peers are recognized via the same identity layer that gossip uses,
-        // so within the local provider's view they're "verified" in the sense
-        // MCP-T means: we trust the identifier resolves to a stable entity.
-        // Stronger identity attestation is a follow-up.
-        has_verified_did: true,
+        // Peer subjects are names learned from mDNS discovery; any key for
+        // them arrives later through `agent/exchangeKeys`, which accepts a
+        // caller-chosen peer_id without proof of possession, and no
+        // attestation verifier runs on this path. Report that absence through
+        // the attestation tier (HATT-008) so VERIFICATION is 0 with no
+        // evidence, and keep the deprecated flag consistent for any reader
+        // that still consults it.
+        has_verified_did: false,
+        attestation: Some(AttestationStrength::Unattested),
         created_at: ctx.created_at,
         security_anti_pattern_weight: Some(security_anti_pattern_weight),
         total_anti_pattern_weight: Some(total_anti_pattern_weight),
@@ -239,7 +244,32 @@ mod tests {
         );
         assert_eq!(input.success_rate, None);
         assert_eq!(input.observation_count, None);
-        assert!(input.has_verified_did);
+        assert!(!input.has_verified_did);
+        assert_eq!(input.attestation, Some(AttestationStrength::Unattested));
+    }
+
+    /// Regression: every gossip peer was published with a perfect composite
+    /// score. `has_verified_did: true` made VERIFICATION 1000 at confidence
+    /// 1.0, the only full-confidence dimension an evidence-free peer has, so
+    /// the composite equalled it. No DID or attestation is verified on this
+    /// path, so a peer with no evidence must score 0.
+    #[test]
+    fn evidence_free_peer_is_published_unverified() {
+        let input = build_input(
+            &[],
+            &[],
+            BuildContext {
+                created_at: None,
+                peer_count: None,
+            },
+        );
+        let score =
+            arkavo_trust::compute_trust_score(&input, "peer-a", "did:key:z6MkProvider", None, 3600);
+
+        let verification = &score.score.dimensions[arkavo_trust::dimensions::VERIFICATION];
+        assert_eq!(verification.value, 0);
+        assert_eq!(verification.evidence_count, 0);
+        assert_eq!(score.score.composite, 0);
     }
 
     #[test]

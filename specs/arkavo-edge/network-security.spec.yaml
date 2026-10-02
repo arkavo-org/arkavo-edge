@@ -11,7 +11,7 @@ invariants:
   - First-run setup requires credential configuration
   - Public exposure requires explicit opt-in with warnings
   - Host header must match expected values (anti-rebinding)
-  - Egress to private/metadata IPs is blocked by default
+  - HTTP requests made by built-in tools, and the initial URL of a browser_cdp navigate action, to private, loopback or metadata addresses are blocked by default; script the model runs through browser_cdp evaluate, Chrome's own redirects and subresources, and processes the agent starts are not covered (NET-019)
   - Setup tokens never appear in logs or stdout
 
 scenarios:
@@ -27,7 +27,7 @@ scenarios:
       - User is guided through mandatory security setup
       - Random strong API key is generated if user doesn't provide one
       - Agent functionality is locked until setup completes
-    refs: [crates/arkavo-security/src/auth.rs:40-125, crates/arkavo-cli/src/commands/security_audit.rs:190-208]
+    refs: [crates/arkavo-security/src/auth.rs:40-125, crates/arkavo-cli/src/commands/security_audit.rs:231-242]
 
   - id: NET-002
     name: Localhost-only binding by default
@@ -40,11 +40,19 @@ scenarios:
       - Agent binds ONLY to 127.0.0.1, not 0.0.0.0
       - External network access is impossible without explicit configuration
       - Warning is displayed if admin changes to public binding
-    refs: [crates/arkavo-protocol/src/config.rs:109-134, crates/arkavo-validation/src/url.rs:246-262]
+    refs: [crates/arkavo-cli/src/commands/agent/listen.rs, crates/arkavo-cli/src/commands/agent_kit.rs, crates/arkavo-protocol/src/config.rs:109-136, crates/arkavo-validation/src/url.rs:246-262]
+    edge_cases:
+      - condition: A SwarmKit kit that sets no runtime.listen
+        expected: Binds 127.0.0.1 on a dynamic port, like the zero-config agent
+      - condition: kit migrate-from-agents-md on an AGENTS.md that names no listen address
+        expected: Leaves runtime.listen unset, so the loopback default applies
+    changed: "2026-09-29"
 
   - id: NET-003
     name: Public binding requires explicit acknowledgment
     criticality: high
+    wip: true
+    issue: "Partly implemented: a non-loopback A2A listen address comes only from --bind or a kit's runtime.listen, and startup prints a warning naming it (NET-002, NET-021). Nothing else is required: there is no acknowledgment step and no TLS requirement, and the A2A listener authenticates no caller at all, so there is no authentication to strengthen. arkavo-security's TlsSettings has no caller outside its crate, and the referenced http.rs lines configure client-side mTLS."
     given:
       - Administrator wants to expose agent publicly
       - Configuration is changed to bind to 0.0.0.0 or public IP
@@ -54,7 +62,8 @@ scenarios:
       - TLS is REQUIRED for public binding
       - Authentication strength is validated
       - Warning banner is shown in logs
-    refs: [crates/arkavo-protocol/src/http.rs:79-94, crates/arkavo-security/src/security.rs:20-46, crates/arkavo-cli/src/commands/security_audit.rs:180-188]
+    refs: [crates/arkavo-protocol/src/http.rs:79-94, crates/arkavo-security/src/security.rs:20-46, crates/arkavo-cli/src/commands/security_audit.rs:181-229]
+    changed: "2026-09-29"
 
   - id: NET-004
     name: No localhost trust exemption
@@ -101,15 +110,26 @@ scenarios:
     name: Block cloud metadata and internal network access
     criticality: critical
     given:
-      - Agent attempts to fetch a URL via browsing or tool call
-      - URL resolves to private IP or cloud metadata endpoint
+      - A built-in tool requests a URL through EgressClient, or the browser_cdp navigate action is given one (only its initial URL is checked)
+      - URL names, or resolves to, a private, local or cloud metadata address
     when: Outbound connection is initiated
     then:
-      - Connection is BLOCKED by default
-      - Blocked ranges include 169.254.169.254, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8
-      - Explicit allowlist can override for known-safe internal services
-      - Log entry shows "SSRF attempt blocked"
-    refs: [crates/arkavo-validation/src/url.rs:1-118]
+      - An EgressClient request to such an address is BLOCKED by default, before a socket to it is opened
+      - Blocked ranges include 169.254.169.254, 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4, ::/96, fc00::/7, fe80::/10, ff00::/8, Teredo 2001::/32 and local-use NAT64 64:ff9b:1::/48, and the IPv4-mapped, NAT64 and 6to4 forms of every IPv4 range
+      - Every reqwest request made by arkavo-mcp-tools goes through EgressClient, and that crate cannot build a raw reqwest client (its clippy.toml); arkavo-browser's own code makes none
+      - Only an operator ARKAVO_EGRESS_ALLOW origin overrides a block (NET-018)
+      - The refusal reads "SSRF attempt blocked"
+    refs: [crates/arkavo-validation/src/url.rs:54-159, crates/arkavo-validation/src/egress_policy.rs:73-90, crates/arkavo-validation/src/egress_client.rs:67-92, crates/arkavo-mcp-tools/clippy.toml, crates/arkavo-browser/src/browser.rs]
+    changed: "2026-09-30"
+    edge_cases:
+      - condition: Decimal or hex IPv4 host (http://2130706433/, http://0x7f.1/)
+        expected: Normalised to 127.0.0.1 and blocked
+      - condition: Non-http(s) scheme
+        expected: Refused
+      - condition: Out-of-process egress (Chrome redirects, shell subprocesses, MCP servers)
+        expected: Not covered by EgressClient; NET-019 (wip)
+      - condition: Script the model runs through the browser_cdp evaluate action navigates or fetches
+        expected: Not covered; only the navigate action's initial URL is checked (BROWS-009), and the rest is NET-019 (wip)
 
   - id: NET-008
     name: Ephemeral setup token (secure first-run)
@@ -169,6 +189,8 @@ scenarios:
   - id: NET-012
     name: Security configuration audit on startup
     criticality: high
+    wip: true
+    issue: "Not implemented: no CLI command or startup hook calls security_audit::execute or AuditReport::run. Only the audit's unit tests run it, so nothing is audited at startup and no misconfiguration prevents startup."
     given:
       - Agent starts up
       - Configuration is loaded
@@ -177,7 +199,8 @@ scenarios:
       - Security configuration is audited
       - Insecure settings generate warnings
       - Critical misconfigurations prevent startup
-    refs: [crates/arkavo-cli/src/commands/security_audit.rs:45-83]
+    refs: [crates/arkavo-cli/src/commands/security_audit.rs:45-84]
+    changed: "2026-09-29"
 
   - id: NET-013
     name: Service fingerprint minimization
@@ -197,14 +220,19 @@ scenarios:
     name: DNS resolution validation before connection
     criticality: high
     given:
-      - Agent is about to connect to external URL
+      - A built-in tool is about to connect through EgressClient
       - URL contains hostname (not raw IP)
     when: DNS resolution occurs
     then:
-      - Resolved IP is checked BEFORE connection is made
-      - Time-of-check/time-of-use mitigated by re-checking at connect
-      - DNS rebinding during connection is blocked
-    refs: [crates/arkavo-validation/src/url.rs:112-117]
+      - The client's resolver checks every address DNS returns, and the connection uses only those addresses, so no second lookup can answer differently
+      - A mixed public/private answer is refused, not filtered
+      - IP-literal hosts, which skip the resolver, are checked from the URL before the request exists
+      - Every redirect hop is re-checked the same way
+    refs: [crates/arkavo-validation/src/egress_client.rs:31-58, crates/arkavo-validation/src/egress_policy.rs:92-131]
+    changed: "2026-09-30"
+    edge_cases:
+      - condition: The browser_cdp navigate action's initial URL is a hostname
+        expected: Resolved and judged before Chrome starts, but Chrome resolves again when it connects; that second lookup is NET-019 (wip)
 
   - id: NET-015
     name: Prompt injection attack prevention
@@ -230,6 +258,8 @@ scenarios:
   - id: NET-016
     name: Command injection via LLM output is prevented
     criticality: critical
+    wip: true
+    issue: "Not implemented: no command execution is confined. ToolSandbox (crates/arkavo-mcp-tools/src/sandbox.rs) has no caller and nothing constructs a TaskPolicyManager, so Obligation::Sandbox is never enforced. shell_exec runs allowlisted commands directly as the agent's OS user and refuses the rest; no path asks a user to confirm. 'Execution is sandboxed' belongs to the OS-confinement workstream. tests/security_cli_test.sh still checks that chat output is not executed."
     given:
       - LLM generates response to user query
       - Response may contain shell commands or code
@@ -239,12 +269,13 @@ scenarios:
       - User confirmation required before execution
       - Dangerous commands are flagged
       - Execution is sandboxed
-    refs: [crates/arkavo-mcp-tools/src/shell_exec.rs:10-93, crates/arkavo-mcp-tools/src/sandbox.rs:27-85]
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/sandbox.rs:27-85, crates/arkavo-cli/src/commands/security_audit.rs:359-371]
     edge_cases:
       - condition: LLM suggests "rm -rf /"
         expected: Blocked with warning, requires explicit confirmation
       - condition: LLM generates download script
         expected: Scanned for malicious content before execution
+    changed: "2026-09-29"
 
   - id: NET-017
     name: Egress audit logging
@@ -268,3 +299,69 @@ scenarios:
       - condition: TLS handshake failure
         expected: Log shows "TLS error" with certificate details
     changed: "2025-01-31"
+
+  - id: NET-018
+    name: Operator allowlist for private egress destinations
+    criticality: high
+    given:
+      - An agent legitimately needs a private destination, such as a dev server under test on localhost
+      - The operator sets ARKAVO_EGRESS_ALLOW on the machine running the agent
+    when: A tool requests a URL on that origin
+    then:
+      - Entries are bare http(s) origins; the exemption covers that host and port only
+      - A host is exempt in the form written (localhost and 127.0.0.1 are separate entries)
+      - A malformed entry makes every egress client fail to build, naming the entry
+      - Nothing an agent, manifest or peer supplies can add an entry
+      - HTTP(S)_PROXY is not honoured on this path, because a proxy resolves the target out of the policy's sight
+    refs: [crates/arkavo-validation/src/egress_policy.rs:15-71, crates/arkavo-validation/src/egress_policy.rs:133-185]
+    changed: "2026-09-29"
+
+  - id: NET-019
+    name: Egress from network stacks outside the agent's HTTP client
+    criticality: high
+    wip: true
+    issue: "Owned by the credential and egress broker workstream; EgressClient covers in-process reqwest only"
+    given:
+      - A tool hands the network to another process (Chrome via browser_cdp, sh via shell_exec, git and gh, an external MCP server)
+    when: That process connects
+    then:
+      - Its connections are judged by the same policy as EgressClient (NET-007, NET-014, NET-018)
+      - Chrome redirects, subresources and script-initiated fetches, including script the model runs through browser_cdp evaluate, are covered, not only the first navigate URL
+      - The DNS answer that process connects with is the one judged
+
+  - id: NET-021
+    name: The agent listener is exposed only by an explicit listen address
+    criticality: critical
+    given:
+      - An agent is started with --bind <address>, or with a SwarmKit kit that sets runtime.listen
+    when: The agent's A2A listener binds and announces itself over mDNS
+    then:
+      - --bind replaces the kit's runtime.listen and the loopback default, and -p/--port replaces only its port
+      - A --bind value that is not an IPv4 or IPv6 address, with an optional port, stops startup with a message naming the expected form
+      - A listen address other hosts can reach prints a startup warning naming it, with or without --verbose
+      - mDNS advertises the address the listener accepts connections on, and the --trust QR code shows the same address
+      - A loopback listener is announced on the loopback interface only, so agents on the same host discover it and other hosts do not
+      - Every A2A mDNS browser (agent discovery, mesh tools, arkavo task and chat, the orchestrator, the AG-UI gateway) also listens on the loopback interface
+    refs: [crates/arkavo-cli/src/commands/agent/listen.rs, crates/arkavo-cli/src/commands/agent.rs, crates/arkavo-cli/src/commands/mesh.rs, crates/arkavo-mcp-mesh/src/lib.rs, crates/arkavo-orchestrator/src/task_executor/mesh_strategy.rs, crates/arkavo-agui/src/mdns_impl.rs]
+    edge_cases:
+      - condition: --bind given a hostname or a malformed IP literal
+        expected: Refused before startup; IPv4 and IPv6 literals are parsed without DNS resolution
+      - condition: --bind given without a value
+        expected: Refused before startup rather than silently keeping loopback
+    changed: "2026-09-29"
+
+  - id: NET-020
+    name: Agent replies and mesh broadcasts pass the egress gate
+    criticality: high
+    wip: true
+    issue: "Not implemented: handlers/messaging.rs completes the requester's task with the full result and broadcasts it, or the error text, as TaskCompleted to every gossip peer without an egress check. The reply is owned by the Universal mediation conductor layer, the broadcast by Default-on egress; either needs an authenticated requester counted inside the boundary, or a wrap path, before a gate can do anything but refuse."
+    given:
+      - A specialist finishes a task handed to it over A2A
+    when: The result is returned to the requester or announced to peers
+    then:
+      - The reply is evaluated against the policy for the authenticated requester before release
+      - Task-completion notices carry no more than the requester may receive
+    refs:
+      - crates/arkavo-server/src/server/handlers/messaging.rs:378-484
+      - crates/arkavo-server/src/server/learning_bus.rs:495-503
+    changed: "2026-09-30"

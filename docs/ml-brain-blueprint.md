@@ -20,7 +20,7 @@ We do not build monolithic agents. Arkavo Edge is a secure, sovereign, and self-
 | Hippocampus | ~85% | arkavo-context, arkavo-tdf, arkavo-memory | PromptAdvisor persistence landed; federated retrieval pending |
 | Cortex | Complete | arkavo-mcp-tools, arkavo-code-search, arkavo-browser | All 6 MCP tools implemented |
 | Cerebellum | Complete | arkavo-llama-cpp, arkavo-llm | Ministral 3B/8B, Qwen3 0.6B |
-| Prefrontal Cortex | ~80% | arkavo-orchestrator, arkavo-workspace | GitHub webhook workflows; multi-goal planning evolving |
+| Prefrontal Cortex | ~80% | arkavo-orchestrator, arkavo-mcp-workspace | GitHub webhook workflows; multi-goal planning evolving |
 | Amygdala | Complete | arkavo-mcp-tools, arkavo-validation, arkavo-protocol | Preflight policy enforcement + budget governor added |
 | Consolidation | ~40% | arkavo-autolearn, arkavo-gossip, learning/ | PromptAdvisor cross-session learning in place; offline daemon pending |
 
@@ -35,7 +35,7 @@ While the codebase uses standard software terminology (routers, ledgers, orchest
 |                    PREFRONTAL CORTEX                         |
 |                arkavo-orchestrator                           |
 |  Executive planning, task breakdown, and goal management     |
-|  Ephemeral workspace isolation via workspace_container       |
+|  Opt-in container workspace (workspace_container)            |
 +---------------+--------------+------------------------------+
 |   THALAMUS    |  CEREBELLUM  |          AMYGDALA             |
 | arkavo-router | arkavo-llama | arkavo-mcp-tools (security)  |
@@ -119,9 +119,9 @@ Recommended edge models:
 
 The prefrontal cortex (PFC) manages executive functions: planning, maintaining multiple goal states, inhibition, and delegating sub-tasks.
 
-**Implementation:** The `arkavo-orchestrator` acts as the PFC. It sits above the mesh, polling external environments (GitHub webhooks), autonomously classifying requirements, breaking them into sub-tasks, and dispatching them to specialized agents. To ensure plans are executed safely, the orchestrator utilizes `workspace_container` to spawn isolated Docker/Podman environments with strict resource quotas -- effectively "inhibiting" agents from impacting the host OS.
+**Implementation:** The `arkavo-orchestrator` acts as the PFC. It sits above the mesh, polling external environments (GitHub webhooks), autonomously classifying requirements, breaking them into sub-tasks, and dispatching them to specialized agents. The `workspace_container` tool can run commands in isolated Docker/Podman containers with resource quotas when a model chooses it; the orchestrator does not route plan execution through it, and other tools run on the host with the agent's privileges.
 
-**Crates:** `arkavo-orchestrator` (GitHub webhook orchestration, agent assignment), `arkavo-workspace` (container isolation)
+**Crates:** `arkavo-orchestrator` (GitHub webhook orchestration, agent assignment), `arkavo-mcp-workspace` (opt-in container isolation via `workspace_container`)
 
 ## The Amygdala: Parallel Safety Circuits
 
@@ -133,7 +133,7 @@ The amygdala processes threats fast, operating concurrently with slower reasonin
 |------|----------|
 | `sec_semgrep` | SAST scanning via Semgrep |
 | `sbom_syft` | SBOM generation and dependency vulnerability checks via Syft |
-| Egress filter | IP-level SSRF prevention blocking metadata endpoints and private ranges |
+| Egress filter | IP-level SSRF prevention for metadata endpoints and private ranges, checked after DNS resolution and on every redirect, for built-in tool HTTP requests and the browser navigate action's initial URL in every build; script run through browser `evaluate`, Chrome's own redirects and subresources, and processes the agent starts are not covered |
 | Input validation | Unicode normalization, path traversal prevention, injection blocking |
 | Preflight moderation | TØR-G circuit evaluation blocks policy-violating requests before LLM inference |
 | Budget governor | Per-agent token and cost budgets with alerts at configurable thresholds |
@@ -141,7 +141,7 @@ The amygdala processes threats fast, operating concurrently with slower reasonin
 
 These tools can immediately flag or block unsafe code modifications before they are ever committed. Preflight moderation and budget enforcement act as **metabolic governors** -- the amygdala intervenes before resources are spent, not after.
 
-**Crates:** `arkavo-mcp-tools` (semgrep, syft wrappers), `arkavo-validation` (input sanitization), `arkavo-protocol` (egress filtering), `arkavo-budget` (cost tracking and enforcement)
+**Crates:** `arkavo-mcp-tools` (semgrep, syft wrappers), `arkavo-validation` (input sanitization, the egress client), `arkavo-protocol` (taint-aware egress, `taint` feature), `arkavo-budget` (cost tracking and enforcement)
 
 ---
 

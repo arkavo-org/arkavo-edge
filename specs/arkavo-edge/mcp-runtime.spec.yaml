@@ -125,3 +125,22 @@ scenarios:
       - Client errors propagated
     refs: [crates/arkavo-mcp-runtime/src/runtime.rs:60-100]
     changed: "2025-01-31"
+
+  - id: MCPR-008
+    name: A stdio MCP server starts with a resolved environment, not the agent's
+    criticality: critical
+    given:
+      - An MCP server started over stdio by the agent, the runtime client or arkavo ui
+      - The agent's environment holds provider API keys
+    when: The server process is spawned
+    then:
+      - The inherited environment is cleared before anything is set
+      - The server sees the platform baseline, its env_passthrough names with the agent's values, and its env values
+      - No other variable of the agent reaches it
+    refs:
+      - crates/arkavo-cli/src/mcp_spawner.rs
+      - crates/arkavo-cli/src/mcp_client.rs
+      - crates/arkavo-cli/src/commands/agent.rs
+      - crates/arkavo-mcp-runtime/src/transport/stdio.rs
+      - crates/arkavo-mcp-runtime/src/transport/mod.rs
+    changed: "2026-09-29"

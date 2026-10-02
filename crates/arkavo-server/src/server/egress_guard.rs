@@ -16,7 +16,9 @@
 use std::sync::Mutex;
 
 use arkavo_events::TaintRecord;
-use arkavo_protocol::egress_destination::{Destination, DestinationPolicy, extract_destinations};
+use arkavo_protocol::egress_destination::{
+    Destination, DestinationPolicy, extract_destinations, peer_destination,
+};
 use arkavo_protocol::egress_taint::{
     DenialReason, EgressDecision, EgressDisposition, EgressTaintGate, RequesterEntitlements,
 };
@@ -176,12 +178,26 @@ impl EgressGuard {
         }
     }
 
-    /// SEQ-003: decide whether a call may proceed.
+    /// SEQ-003, SEQ-018: decide whether a call may proceed.
+    ///
+    /// `peer_param` is the argument the tool declared as naming the agent it
+    /// delivers to (`Tool::peer_recipient_param`). An agent identifier has no
+    /// shape the extractor can recognize, so without the declaration a
+    /// delegation carries whatever the session holds to another agent
+    /// unevaluated.
     ///
     /// `Err` carries what the agent is told, which is the uniform message and
     /// nothing else — the reason goes to audit.
-    pub(super) fn check_call(&self, tool_name: &str, params: &Value) -> Result<(), String> {
-        let destinations = extract_destinations(params, self.gate.destinations());
+    pub(super) fn check_tool_call(
+        &self,
+        tool_name: &str,
+        params: &Value,
+        peer_param: Option<&str>,
+    ) -> Result<(), String> {
+        let mut destinations = extract_destinations(params, self.gate.destinations());
+        if let Some(recipient) = peer_param {
+            destinations.push(peer_destination(params, recipient));
+        }
         if destinations.is_empty() {
             return Ok(());
         }
@@ -208,6 +224,13 @@ impl EgressGuard {
                 .to_string());
         }
         Ok(())
+    }
+
+    /// Shape-only evaluation, for the tests that exercise extraction without
+    /// a tool's declaration.
+    #[cfg(test)]
+    pub(super) fn check_call(&self, tool_name: &str, params: &Value) -> Result<(), String> {
+        self.check_tool_call(tool_name, params, None)
     }
 
     /// SEQ-001: fold in text the session started with. The task a user or a
@@ -350,6 +373,7 @@ fn trace_event_type(disposition: &EgressDisposition) -> arkavo_arp::observabilit
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_protocol::egress_taint::{GENERIC_DENIAL, GENERIC_HOLD};
     use arkavo_test_macros::spec;
     use serde_json::json;
 
@@ -603,5 +627,59 @@ mod tests {
             refused.is_err(),
             "the bound must truncate the walk, not the inspection"
         );
+    }
+
+    /// SEQ-018: every source is at least Internal, and the gate releases
+    /// plaintext outside the boundary only for Public data, so every declared
+    /// peer send is refused whatever it carries. Entitlements change only the
+    /// audited reason. Pinned so that lifting it — authenticated peers counted
+    /// as inside the boundary, or a wrap path to peers that consume a TDF — is
+    /// a deliberate change to this test rather than a side effect.
+    #[spec("SEQ-018")]
+    #[test]
+    fn a_benign_peer_send_is_refused_while_peers_are_outside_the_boundary() {
+        let guard = guard();
+        guard.observe_input("task", "review the diff");
+
+        let refused = guard.check_tool_call(
+            "send_task",
+            &json!({"agent_id": "reviewer", "task": "review the diff"}),
+            Some("agent_id"),
+        );
+
+        assert_eq!(refused, Err(GENERIC_DENIAL.to_string()));
+    }
+
+    /// SEQ-018: the declaration is what gates the send. The same arguments
+    /// from a tool that declares nothing have no destination by shape.
+    #[spec("SEQ-018")]
+    #[test]
+    fn the_same_arguments_without_a_declaration_have_no_destination() {
+        let guard = guard();
+        guard.observe_input("task", "review the diff");
+
+        let allowed = guard.check_tool_call(
+            "send_task",
+            &json!({"agent_id": "reviewer", "task": "review the diff"}),
+            None,
+        );
+
+        assert!(allowed.is_ok());
+    }
+
+    /// SEQ-018 edge case: a tool that declares a recipient and omits it is
+    /// sending to a peer the gate cannot name, which holds rather than allows.
+    #[spec("SEQ-018")]
+    #[test]
+    fn a_declared_recipient_that_is_missing_is_held() {
+        let guard = guard();
+
+        let held = guard.check_tool_call(
+            "send_task",
+            &json!({"task": "review the diff"}),
+            Some("agent_id"),
+        );
+
+        assert_eq!(held, Err(GENERIC_HOLD.to_string()));
     }
 }

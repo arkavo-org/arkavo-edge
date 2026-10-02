@@ -953,3 +953,23 @@ scenarios:
       - crates/arkavo-cli/src/commands/kit/model_map.rs
       - crates/arkavo-cli/src/commands/agent_kit.rs
     changed: "2026-09-28"
+
+  - id: SK-105
+    name: A kit MCP server declares its environment, credentials by name only
+    criticality: high
+    given:
+      - A runtime.mcp_servers entry with optional env (map) and env_passthrough (names)
+    when: parse_yaml and validate run
+    then:
+      - env and env_passthrough deserialize and reach the agent's MCP server config
+      - A credential-shaped name under env is rejected in favour of env_passthrough
+      - An empty name, or one containing '=' or NUL, is rejected
+      - A loader, interpreter, git, shell or PATH variable name (LD_PRELOAD, NODE_OPTIONS, PYTHONPATH, GIT_SSH_COMMAND, PATH) is rejected in both env and env_passthrough, whatever its case
+      - A server declaring neither serializes as before, so kit.id hashes are unchanged
+      - Residual, env values are not screened for credential shapes, so a secret written as a literal is published with the kit
+      - Residual, env_passthrough can request any credential of the agent, including provider API keys; installing the kit is the consent until a broker removes provider keys from the agent
+    refs:
+      - crates/arkavo-swarmkit/src/runtime_config.rs
+      - crates/arkavo-cli/src/commands/agent_kit.rs
+      - crates/arkavo-process-env/src/hijack.rs
+    changed: "2026-09-29"

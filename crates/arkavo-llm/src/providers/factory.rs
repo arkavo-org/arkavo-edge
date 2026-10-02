@@ -175,6 +175,13 @@ impl ProviderFactoryRegistry {
 
     /// Create a provider instance from configuration
     pub async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
+        // Registered before dispatch so every factory's credential is
+        // withheld from tool subprocesses, a factory registered at runtime
+        // included; the built-in factories also register it themselves
+        // because they are public and are called directly.
+        if let Some(auth_ref) = config.auth_ref.as_deref() {
+            arkavo_process_env::withhold_name(auth_ref);
+        }
         let factory = self.get_factory(&config.provider_type).ok_or_else(|| {
             anyhow::anyhow!(
                 "No factory registered for provider type: {:?}",
@@ -197,6 +204,16 @@ impl Default for ProviderFactoryRegistry {
     }
 }
 
+/// The credential the operator configured under `auth_ref`.
+///
+/// The name is registered first so every tool subprocess withholds it: the
+/// operator chose it, so no naming convention would.
+#[cfg(any(feature = "llm-remote", feature = "deepseek"))]
+fn configured_credential(auth_ref: &str) -> std::result::Result<String, std::env::VarError> {
+    arkavo_process_env::withhold_name(auth_ref);
+    std::env::var(auth_ref)
+}
+
 /// Factory for creating OpenAI provider instances
 #[cfg(feature = "llm-remote")]
 pub struct OpenAIProviderFactory;
@@ -208,8 +225,8 @@ impl ProviderFactory for OpenAIProviderFactory {
         if config.default_model.as_deref() == Some("gpt-6-astra") {
             let api_key = config
                 .auth_ref
-                .as_ref()
-                .map(std::env::var)
+                .as_deref()
+                .map(configured_credential)
                 .transpose()
                 .map_err(|_| anyhow::anyhow!("OpenAI credential is missing"))?;
             let mut responses = super::OpenAIResponsesConfig {
@@ -231,7 +248,7 @@ impl ProviderFactory for OpenAIProviderFactory {
         // Get API key from auth manager if auth_ref is provided
         let api_key = if let Some(ref auth_ref) = config.auth_ref {
             // See #204: Re-enable AuthManager when available in arkavo-llm
-            std::env::var(auth_ref).map_err(|_| {
+            configured_credential(auth_ref).map_err(|_| {
                 anyhow::anyhow!(
                     "Credential '{}' not found in environment",
                     auth_ref.chars().take(8).collect::<String>() + "..."
@@ -316,7 +333,7 @@ impl ProviderFactory for AnthropicProviderFactory {
         // Get API key from auth manager if auth_ref is provided
         let api_key = if let Some(ref auth_ref) = config.auth_ref {
             // See #204: Re-enable AuthManager when available in arkavo-llm
-            std::env::var(auth_ref).map_err(|_| {
+            configured_credential(auth_ref).map_err(|_| {
                 anyhow::anyhow!(
                     "Credential '{}' not found in environment",
                     auth_ref.chars().take(8).collect::<String>() + "..."
@@ -382,7 +399,7 @@ impl ProviderFactory for DeepSeekProviderFactory {
         // Get API key from auth manager if auth_ref is provided
         let api_key = if let Some(ref auth_ref) = config.auth_ref {
             // See #204: Re-enable AuthManager when available in arkavo-llm
-            std::env::var(auth_ref).map_err(|_| {
+            configured_credential(auth_ref).map_err(|_| {
                 anyhow::anyhow!(
                     "Credential '{}' not found in environment",
                     auth_ref.chars().take(8).collect::<String>() + "..."
@@ -605,6 +622,76 @@ mod tests {
         };
 
         assert!(factory.validate_config(&config).await.is_ok());
+    }
+
+    /// An `auth_ref` may name any variable, so reading one must register
+    /// the name for tool subprocesses to withhold.
+    #[cfg(feature = "llm-remote")]
+    #[arkavo_test_macros::spec("PENV-002")]
+    #[tokio::test]
+    async fn reading_a_configured_credential_withholds_its_name() {
+        // The registry is process-global: no other test uses this name. It
+        // is unset, so the read fails; the name is registered all the same.
+        const AUTH_REF: &str = "ARKAVO_FACTORY_TEST_CONFIGURED_LOGIN";
+        let config = ProviderConfig {
+            provider_type: ProviderType::Anthropic,
+            base_url: "https://api.anthropic.com".to_string(),
+            auth_ref: Some(AUTH_REF.to_string()),
+            default_model: None,
+            timeout_secs: None,
+            max_retries: None,
+            initial_retry_delay_ms: None,
+            backoff_factor: None,
+            max_retry_delay_ms: None,
+            jitter_factor: None,
+            metadata: None,
+        };
+
+        assert!(
+            AnthropicProviderFactory
+                .create_provider(&config)
+                .await
+                .is_err()
+        );
+        assert!(
+            arkavo_process_env::withheld_names()
+                .iter()
+                .any(|name| name == AUTH_REF)
+        );
+    }
+
+    /// Every factory is covered: the name is registered before dispatch,
+    /// even for a provider type no factory serves.
+    #[arkavo_test_macros::spec("PENV-002")]
+    #[tokio::test]
+    async fn registry_withholds_the_auth_ref_before_dispatch() {
+        // The registry is process-global: no other test uses this name.
+        const AUTH_REF: &str = "ARKAVO_REGISTRY_TEST_CONFIGURED_LOGIN";
+        let config = ProviderConfig {
+            provider_type: ProviderType::Custom("unregistered-provider".to_string()),
+            base_url: String::new(),
+            auth_ref: Some(AUTH_REF.to_string()),
+            default_model: None,
+            timeout_secs: None,
+            max_retries: None,
+            initial_retry_delay_ms: None,
+            backoff_factor: None,
+            max_retry_delay_ms: None,
+            jitter_factor: None,
+            metadata: None,
+        };
+
+        assert!(
+            ProviderFactoryRegistry::new()
+                .create_provider(&config)
+                .await
+                .is_err()
+        );
+        assert!(
+            arkavo_process_env::withheld_names()
+                .iter()
+                .any(|name| name == AUTH_REF)
+        );
     }
 
     #[test]

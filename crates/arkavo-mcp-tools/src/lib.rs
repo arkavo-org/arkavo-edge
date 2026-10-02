@@ -1,8 +1,10 @@
 #![allow(clippy::uninlined_format_args)]
 
 pub mod browser;
+mod child;
 pub mod code_analysis;
 pub mod code_review;
+pub mod confine;
 pub mod context_control;
 pub mod context_tools;
 pub mod filesystem;
@@ -67,6 +69,9 @@ pub enum ToolError {
 
     #[error("Policy denied: {0}")]
     PolicyDenied(String),
+
+    #[error("{0}")]
+    Egress(#[from] arkavo_validation::EgressError),
 
     #[error("Other error: {0}")]
     Other(String),

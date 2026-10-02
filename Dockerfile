@@ -46,6 +46,9 @@ ENV ARKAVO_SKIP_FIRST_RUN=1
 # ARKAVO_AGUI_BIND=0.0.0.0 itself — see the opt-in in
 # docs/deploy/container.md and the compose/Kubernetes examples in
 # docs/deploy/self-host.md.
+# A local-enabled image that runs `arkavo agent` has the same need: its A2A
+# listener binds 127.0.0.1 unless given `--listen 0.0.0.0:<port>` or a kit
+# listen address.
 
 ENTRYPOINT ["arkavo"]
 CMD ["--help"]

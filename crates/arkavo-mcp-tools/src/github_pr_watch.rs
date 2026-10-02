@@ -98,7 +98,7 @@ impl Tool for GitHubPrWatchTool {
         let url = format!(
             "{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls?state=open&sort=updated&direction=desc&per_page=100"
         );
-        let resp = github_request(gh, gh.client.get(&url), "github_pr_watch").await?;
+        let resp = github_request(gh, gh.client.get(&url)?, "github_pr_watch").await?;
         let prs: Vec<GhPullRequest> = resp
             .json()
             .await

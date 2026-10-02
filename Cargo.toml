@@ -90,6 +90,7 @@ members = [
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
     "crates/arkavo-mcp-proxy",
+    "crates/arkavo-process-env",
     "crates/arkavo-shadow-consolidation",
     "crates/arkavo-lesson-synthesis",
     "crates/arkavo-routines",
@@ -163,6 +164,7 @@ default-members = [
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
     "crates/arkavo-mcp-proxy",
+    "crates/arkavo-process-env",
     "crates/arkavo-shadow-consolidation",
     ".cargo/xtask",
 ]
@@ -171,7 +173,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.99.0"
+version = "0.100.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -189,7 +191,7 @@ clap = { version = "4.5.40", features = ["derive", "color", "env"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 futures = "0.3.31"
-async-trait = "0.1.88"
+async-trait = "0.1.92"
 scopeguard = "1.2.0"
 tokio-util = "0.7.12"
 

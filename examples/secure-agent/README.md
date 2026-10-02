@@ -1,7 +1,7 @@
 # Secure Agent
 
 <!-- ARKAVO-CAPABILITY: network-security -->
-> **Specs**: [17 scenarios](../../specs/arkavo-edge/network-security.spec.yaml)
+> **Specs**: [18 scenarios](../../specs/arkavo-edge/network-security.spec.yaml)
 > **Browse**: `cargo xtask capabilities network-security`
 <!-- /ARKAVO-CAPABILITY -->
 

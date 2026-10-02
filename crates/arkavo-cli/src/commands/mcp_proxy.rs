@@ -4,13 +4,21 @@
 //! Configuration is flags only; the policy bundle hash pins which bundle
 //! the permits must cite, and `--issuer-key` lists the issuer public keys
 //! the dispatch gate trusts.
+//!
+//! The upstream sees a platform baseline of the proxy's environment plus what
+//! `--env` names: `--env NAME` passes the proxy's own value through (how a
+//! credential reaches it without landing in argv), `--env NAME=VALUE` sets
+//! one. Names that make a program load other code, such as `LD_PRELOAD` or
+//! `NODE_OPTIONS`, are refused, and so is a literal value for a
+//! credential-shaped name such as `OPENAI_API_KEY`: use the passthrough form.
 
 use arkavo_dispatch_gate::{DispatchGate, GateConfig, unix_now};
 use arkavo_mcp_proxy::{McpProxy, PermitPolicy, ProxyConfig};
 use arkavo_permit::{HashAlgorithm, PermitVerifier};
+use arkavo_process_env::{EnvRefusal, EnvSpec, screen_entry};
 use std::sync::Arc;
 
-const USAGE: &str = "usage: arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--issuer-key <hex> ...] [--hash sha256|blake3] -- <upstream command> [args...]";
+const USAGE: &str = "usage: arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--issuer-key <hex> ...] [--hash sha256|blake3] [--env NAME | --env NAME=VALUE ...] -- <upstream command> [args...]";
 
 const HELP: &str = "Permit-gated stdio MCP relay
 
@@ -37,6 +45,7 @@ pub struct ProxyArgs {
     pub trusted_issuers: Vec<PermitVerifier>,
     pub command: String,
     pub args: Vec<String>,
+    pub env: EnvSpec,
 }
 
 // `execute` may run from a context that already has a tokio runtime, so it
@@ -83,7 +92,10 @@ async fn run(parsed: ProxyArgs) -> Result<(), Box<dyn std::error::Error>> {
         clock: unix_now,
         trusted_issuers: parsed.trusted_issuers,
     });
-    let config = ProxyConfig::new(parsed.command, parsed.args);
+    let config = ProxyConfig {
+        env: parsed.env,
+        ..ProxyConfig::new(parsed.command, parsed.args)
+    };
     let proxy = McpProxy::spawn(config, Arc::new(PermitPolicy::new(gate)))?;
     let stdin = tokio::io::BufReader::new(tokio::io::stdin());
     let stdout = tokio::io::stdout();
@@ -98,6 +110,7 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
     let mut policy_bundle_hash = None;
     let mut hash = HashAlgorithm::Sha256;
     let mut trusted_issuers = Vec::new();
+    let mut env = EnvSpec::default();
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -123,6 +136,13 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
                     .ok_or_else(|| format!("unknown hash {value}"))?;
                 index += 2;
             }
+            "--env" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or("--env needs NAME or NAME=VALUE")?;
+                add_env(&mut env, value)?;
+                index += 2;
+            }
             "--" => {
                 let command = args
                     .get(index + 1)
@@ -140,12 +160,54 @@ fn parse(args: &[String]) -> Result<ProxyArgs, String> {
                     trusted_issuers,
                     command,
                     args: rest,
+                    env,
                 });
             }
-            other => return Err(format!("unknown flag {other}")),
+            other if other.starts_with("--env=") => {
+                return Err("--env takes NAME[=VALUE] as the next argument".into());
+            }
+            // Anything after an `=` may be a credential typed into the wrong
+            // flag, so only the flag's own name is reported. An argument
+            // that is not a flag may be a credential pasted bare, so it is
+            // not reported at all.
+            other if other.starts_with('-') => {
+                let flag = other.split('=').next().unwrap_or_default();
+                return Err(format!("unknown flag {flag}"));
+            }
+            _ => return Err("unexpected argument".into()),
         }
     }
     Err("missing `-- <upstream command>`".into())
+}
+
+/// `NAME` passes the proxy's own value through; `NAME=VALUE` sets one. The
+/// errors never repeat the flag, whose value may be a credential. A name that
+/// makes the upstream load other code is refused rather than dropped, so a
+/// launcher never runs without the variable its operator asked for. A
+/// credential-shaped name is accepted only as a passthrough: a literal would
+/// sit in argv, where any local user can read it. Naming one variable both
+/// ways is allowed and the literal wins, as in `ProxyConfig`.
+fn add_env(env: &mut EnvSpec, flag: &str) -> Result<(), String> {
+    let (name, value) = match flag.split_once('=') {
+        Some((name, value)) => (name, Some(value)),
+        None => (flag, None),
+    };
+    screen_entry(name, value.is_some()).map_err(|refusal| match refusal {
+        EnvRefusal::InvalidName => "--env needs a variable name before any '='".to_string(),
+        EnvRefusal::LoaderName(name) => {
+            format!("--env {name} would let the upstream load or run other code and is refused")
+        }
+        EnvRefusal::CredentialLiteral(name) => format!(
+            "--env {name}=... would put a credential on the command line; use --env {name} to pass the proxy's own value through"
+        ),
+    })?;
+    match value {
+        Some(value) => {
+            env.set.insert(name.to_string(), value.to_string());
+        }
+        None => env.passthrough.push(name.to_string()),
+    }
+    Ok(())
 }
 
 fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
@@ -253,6 +315,132 @@ mod tests {
         assert_eq!(parsed.command, "python3");
         assert_eq!(parsed.args, s(&["srv.py", "--flag"]));
         assert_eq!(parsed.trusted_issuers.len(), 1);
+    }
+
+    #[test]
+    fn env_flags_pass_names_through_and_set_values() {
+        let hex = "07".repeat(32);
+        let issuer_key = ed25519_issuer_key_hex();
+        let parsed = parse(&s(&[
+            "proxy",
+            "--policy-bundle-hash",
+            &hex,
+            "--issuer-key",
+            &issuer_key,
+            "--env",
+            "GITHUB_TOKEN",
+            "--env",
+            "LOG_LEVEL=debug",
+            "--",
+            "srv",
+        ]))
+        .unwrap();
+        assert_eq!(parsed.env.passthrough, s(&["GITHUB_TOKEN"]));
+        assert_eq!(
+            parsed.env.set.get("LOG_LEVEL").map(String::as_str),
+            Some("debug")
+        );
+    }
+
+    fn parse_with_env(flag: &str) -> Result<ProxyArgs, String> {
+        let hex = "07".repeat(32);
+        let issuer_key = ed25519_issuer_key_hex();
+        parse(&s(&[
+            "proxy",
+            "--policy-bundle-hash",
+            &hex,
+            "--issuer-key",
+            &issuer_key,
+            "--env",
+            flag,
+            "--",
+            "srv",
+        ]))
+    }
+
+    #[test]
+    fn env_flag_without_a_name_is_rejected() {
+        let err = parse_with_env("=ghp_literal").err().expect("rejected");
+        assert!(
+            !err.contains("ghp_literal"),
+            "error echoed the value: {err}"
+        );
+        assert!(parse_with_env("").is_err());
+    }
+
+    #[test]
+    fn env_flag_naming_a_loader_variable_is_refused_without_echoing_its_value() {
+        for flag in ["LD_PRELOAD=/tmp/evil.so", "NODE_OPTIONS", "path=/tmp/bin"] {
+            let err = parse_with_env(flag).err().expect("refused");
+            assert!(!err.contains("/tmp/"), "error echoed the value: {err}");
+        }
+    }
+
+    #[test]
+    fn env_flag_with_an_equals_is_refused_without_echoing_any_of_it() {
+        let hex = "07".repeat(32);
+        let issuer_key = ed25519_issuer_key_hex();
+        let err = parse(&s(&[
+            "proxy",
+            "--policy-bundle-hash",
+            &hex,
+            "--issuer-key",
+            &issuer_key,
+            "--env=OPENAI_API_KEY=sk-live-value",
+            "--",
+            "srv",
+        ]))
+        .err()
+        .expect("refused");
+        assert!(!err.contains("sk-live-value"), "{err}");
+        assert!(!err.contains("OPENAI_API_KEY"), "{err}");
+        assert!(err.contains("--env takes NAME[=VALUE]"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_flag_is_reported_without_the_value_after_its_equals() {
+        let err = parse(&s(&["proxy", "--token=sk-live-value"]))
+            .err()
+            .expect("refused");
+        assert!(err.contains("--token"), "{err}");
+        assert!(!err.contains("sk-live-value"), "{err}");
+    }
+
+    #[test]
+    fn a_bare_positional_is_not_echoed() {
+        let err = parse(&s(&["proxy", "sk-live-value"]))
+            .err()
+            .expect("refused");
+        assert!(!err.contains("sk-live-value"), "{err}");
+        assert!(err.contains("unexpected argument"), "{err}");
+    }
+
+    #[test]
+    fn env_flag_setting_a_credential_literal_points_to_passthrough() {
+        let err = parse_with_env("OPENAI_API_KEY=sk-live-value")
+            .err()
+            .expect("refused");
+        assert!(!err.contains("sk-live-value"), "{err}");
+        assert!(err.contains("--env OPENAI_API_KEY"), "{err}");
+        let passed = parse_with_env("OPENAI_API_KEY").unwrap();
+        assert_eq!(passed.env.passthrough, s(&["OPENAI_API_KEY"]));
+    }
+
+    #[test]
+    fn env_flag_without_an_argument_is_rejected() {
+        let hex = "07".repeat(32);
+        let issuer_key = ed25519_issuer_key_hex();
+        let err = parse(&s(&[
+            "proxy",
+            "--policy-bundle-hash",
+            &hex,
+            "--issuer-key",
+            &issuer_key,
+            "--env",
+        ]))
+        .err()
+        .expect("rejected");
+        assert!(err.contains("--env"), "{err}");
     }
 
     #[test]

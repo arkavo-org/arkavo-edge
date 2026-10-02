@@ -1,19 +1,35 @@
 use crate::{CodeSearchError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
+use arkavo_process_env::ChildEnv;
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
+fn comby_command() -> std::process::Command {
+    // The operator's environment minus credentials: comby needs none, and
+    // whatever it runs must not inherit the agent's keys.
+    ChildEnv::tool_from_current(&[]).command("comby")
+}
+
 pub struct CombyTool {
     schema: ToolSchema,
+    root: PathBuf,
 }
 
 impl CombyTool {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    /// Searches only inside `root`; a role that needs a wider root gets it
+    /// here, at construction, rather than through a default.
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self::validate_dependencies();
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "struct_find_replace".to_string(),
                 aliases: None,
@@ -66,7 +82,7 @@ impl CombyTool {
     }
 
     fn validate_dependencies() {
-        if std::process::Command::new("comby")
+        if comby_command()
             .arg("--version")
             .output()
             .map(|o| !o.status.success())
@@ -84,36 +100,55 @@ impl CombyTool {
             .ok_or_else(|| CodeSearchError::InvalidPattern("Missing match_template".to_string()))?;
 
         let rewrite_template = params.get("rewrite_template").and_then(|v| v.as_str());
-        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        // comby's parser reads any argument beginning with '-' as a flag, even
+        // after `--` (which it rejects as an unknown flag), so a template such
+        // as `-review`, or a value after `-matcher`, `-extensions` or
+        // `-exclude-dir`, would change what comby does. Refuse every
+        // caller-supplied argument of that shape before resolving or spawning.
+        let string_list = |key: &str| -> Vec<&str> {
+            params
+                .get(key)
+                .and_then(|v| v.as_array())
+                .map(|items| items.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default()
+        };
+        let language = params.get("language").and_then(|v| v.as_str());
+        let extensions = string_list("file_extensions");
+        let exclude_dirs = string_list("exclude_dirs");
+        let guarded = [
+            ("match_template", Some(match_template)),
+            ("rewrite_template", rewrite_template),
+            ("language", language),
+        ]
+        .into_iter()
+        .chain(extensions.iter().map(|v| ("file_extensions", Some(*v))))
+        .chain(exclude_dirs.iter().map(|v| ("exclude_dirs", Some(*v))));
+        for (name, value) in guarded {
+            if value.is_some_and(|v| v.starts_with('-')) {
+                return Err(CodeSearchError::InvalidPattern(format!(
+                    "comby {name} cannot begin with '-'"
+                )));
+            }
+        }
+
+        let requested = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let path = arkavo_validation::resolve_within_root(&self.root, requested)
+            .map_err(|e| CodeSearchError::OutsideWorkspace(e.to_string()))?;
         let in_place = params
             .get("in_place")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let mut cmd = Command::new("comby");
+        let mut cmd = Command::from(comby_command());
 
-        cmd.arg(match_template);
-
-        if let Some(rewrite) = rewrite_template {
-            cmd.arg(rewrite);
-        } else {
-            cmd.arg("");
-        }
-
-        cmd.arg(path);
-
-        if let Some(lang) = params.get("language").and_then(|v| v.as_str())
+        if let Some(lang) = language
             && lang != "auto"
         {
             cmd.arg("-matcher").arg(lang);
         }
 
-        if let Some(exts) = params.get("file_extensions").and_then(|v| v.as_array()) {
-            for ext in exts {
-                if let Some(e) = ext.as_str() {
-                    cmd.arg("-extensions").arg(e);
-                }
-            }
+        for ext in &extensions {
+            cmd.arg("-extensions").arg(ext);
         }
 
         if in_place {
@@ -126,13 +161,15 @@ impl CombyTool {
             cmd.arg("-match-only");
         }
 
-        if let Some(excludes) = params.get("exclude_dirs").and_then(|v| v.as_array()) {
-            for dir in excludes {
-                if let Some(d) = dir.as_str() {
-                    cmd.arg("-exclude-dir").arg(d);
-                }
-            }
+        for dir in &exclude_dirs {
+            cmd.arg("-exclude-dir").arg(dir);
         }
+
+        // Positionals last. Neither template begins with '-' and the confined
+        // path is absolute, so none of them can be read as a flag.
+        cmd.arg(match_template)
+            .arg(rewrite_template.unwrap_or(""))
+            .arg(&path);
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -226,32 +263,79 @@ impl Tool for CombyTool {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+    use tempfile::TempDir;
+    use tokio::fs;
 
+    /// comby reads any argument beginning with '-' as a flag and rejects `--`
+    /// as an unknown flag, so such a template is refused before comby runs.
+    #[spec("CS-006")]
     #[tokio::test]
-    async fn test_comby_search() {
-        let tool = CombyTool::new();
-        let params = json!({
-            "match_template": "fn :[name](:[args]) -> :[ret]",
-            "path": "src",
-            "language": "rust"
-        });
-
-        let result = tool.execute(params).await;
-        assert!(result.is_ok() || result.is_err());
+    async fn comby_leading_dash_template_is_refused_not_parsed_as_a_flag() {
+        let dir = TempDir::new().unwrap();
+        let tool = CombyTool::with_root(dir.path());
+        for params in [
+            json!({ "match_template": "-> :[x]", "path": dir.path().to_str().unwrap() }),
+            json!({
+                "match_template": "x",
+                "rewrite_template": "-editor=sh",
+                "path": dir.path().to_str().unwrap()
+            }),
+            json!({ "match_template": "x", "language": "-review" }),
+            json!({ "match_template": "x", "file_extensions": [".rs", "-editor=sh"] }),
+            json!({ "match_template": "x", "exclude_dirs": ["target", "-editor=sh"] }),
+        ] {
+            let err = tool.execute(params).await.unwrap_err();
+            assert!(
+                matches!(
+                    err.downcast_ref::<CodeSearchError>(),
+                    Some(CodeSearchError::InvalidPattern(_))
+                ),
+                "{err}"
+            );
+        }
     }
 
+    /// The reordered argv (flags first, then the templates and the confined
+    /// absolute path) is accepted by comby and still finds matches.
+    #[spec("CS-006")]
+    #[ignore = "requires comby on PATH"]
     #[tokio::test]
-    async fn test_comby_replace_preview() {
-        let tool = CombyTool::new();
-        let params = json!({
-            "match_template": "unwrap()",
-            "rewrite_template": "unwrap_or_default()",
-            "path": ".",
-            "language": "rust",
-            "in_place": false
-        });
+    async fn comby_searches_a_confined_file() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.rs"), "fn a() -> u8 { 1 }\n")
+            .await
+            .unwrap();
+        let tool = CombyTool::with_root(dir.path());
+        let result = tool
+            .execute(json!({
+                "match_template": "fn :[name]() -> :[ret] { :[body] }",
+                "path": "a.rs"
+            }))
+            .await
+            .expect("comby must accept the argv");
+        assert_eq!(result["count"], 1, "{result}");
+    }
 
-        let result = tool.execute(params).await;
-        assert!(result.is_ok() || result.is_err());
+    #[spec("CS-006")]
+    #[tokio::test]
+    async fn comby_path_outside_workspace_is_refused() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let tool = CombyTool::with_root(ws.path());
+        let err = tool
+            .execute(json!({
+                "match_template": "x",
+                "path": outside.path().to_str().unwrap()
+            }))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err.downcast_ref::<CodeSearchError>(),
+                Some(CodeSearchError::OutsideWorkspace(_))
+            ),
+            "{err}"
+        );
     }
 }

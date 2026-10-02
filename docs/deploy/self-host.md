@@ -324,6 +324,13 @@ The gateway does apply security headers and per-IP rate limiting
 (`arkavo_protocol::ip_rate_limit_middleware`), but those are not a substitute
 for authentication.
 
+The A2A agent listener (`arkavo agent`) binds loopback (`127.0.0.1`) the
+same way, unless you pass `--bind <ipv4>:<port>` or run a SwarmKit kit that
+sets `runtime.listen`. A container or pod that serves an agent to other hosts
+needs `--bind 0.0.0.0:<port>` and a published port, and the agent prints a
+startup warning naming the exposed address. It does not authenticate callers
+either, so the same rules apply: publish it only to trusted networks.
+
 ### Reverse Proxy Example (nginx)
 
 ```nginx
@@ -405,6 +412,10 @@ a bound listener does not mean the gateway is actually healthy.
   image](container.md) does not set this — it cannot run `ui` at all; see
   the compose/Kubernetes examples above) before checking proxy, firewall,
   and port-mapping configuration.
+- **Agent unreachable from other hosts or containers**: `arkavo agent` binds
+  loopback unless started with `--bind 0.0.0.0:<port>` or a kit that sets
+  `runtime.listen`. mDNS announces a loopback agent only to agents on the
+  same machine.
 - **Agent requests fail**: verify that the build supports local inference and
   that local models are provisioned. For cloud augmentation failures, verify
   provider credentials and cloud policy.

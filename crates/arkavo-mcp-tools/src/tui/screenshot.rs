@@ -1,10 +1,10 @@
+use crate::child::tool_command;
 use crate::server::Tool;
 use crate::{Result, ToolError};
 use arkavo_mcp::ToolSchema;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::process::Command;
 
 pub struct TuiScreenshotKit {
     schema: ToolSchema,
@@ -139,7 +139,7 @@ impl TuiScreenshotKit {
             .to_string()
         };
 
-        let output = Command::new("osascript")
+        let output = tool_command("osascript")
             .arg("-e")
             .arg(&script)
             .output()
@@ -174,7 +174,7 @@ impl TuiScreenshotKit {
         // Try to use xdotool and xclip to get terminal content
         // First, find the terminal window
         let window_id = if let Some(title) = &params.window_title {
-            let output = Command::new("xdotool")
+            let output = tool_command("xdotool")
                 .args(["search", "--name", title])
                 .output()
                 .map_err(|e| ToolError::Mcp(format!("Failed to find window: {}", e)))?;
@@ -186,7 +186,7 @@ impl TuiScreenshotKit {
             String::from_utf8_lossy(&output.stdout).trim().to_string()
         } else {
             // Get the active window
-            let output = Command::new("xdotool")
+            let output = tool_command("xdotool")
                 .args(["getactivewindow"])
                 .output()
                 .map_err(|e| ToolError::Mcp(format!("Failed to get active window: {}", e)))?;
@@ -199,7 +199,7 @@ impl TuiScreenshotKit {
         };
 
         // Select all and copy
-        Command::new("xdotool")
+        tool_command("xdotool")
             .args([
                 "windowfocus",
                 &window_id,
@@ -211,7 +211,7 @@ impl TuiScreenshotKit {
             .map_err(|e| ToolError::Mcp(format!("Failed to copy terminal content: {}", e)))?;
 
         // Get clipboard content
-        let output = Command::new("xclip")
+        let output = tool_command("xclip")
             .args(["-selection", "clipboard", "-o"])
             .output()
             .map_err(|e| ToolError::Mcp(format!("Failed to get clipboard: {}", e)))?;
@@ -239,7 +239,7 @@ impl TuiScreenshotKit {
         let temp_file = format!("/tmp/tui_screenshot_{}.png", std::process::id());
 
         // Use screencapture to capture window
-        let mut cmd = Command::new("screencapture");
+        let mut cmd = tool_command("screencapture");
         cmd.args(["-x", "-o"]); // No sound, no shadow
 
         if let Some(title) = &params.window_title {
@@ -280,14 +280,14 @@ impl TuiScreenshotKit {
 
         // Use import (ImageMagick) or scrot
         let window_id = if let Some(title) = &params.window_title {
-            let output = Command::new("xdotool")
+            let output = tool_command("xdotool")
                 .args(["search", "--name", title])
                 .output()
                 .map_err(|e| ToolError::Mcp(format!("Failed to find window: {}", e)))?;
 
             String::from_utf8_lossy(&output.stdout).trim().to_string()
         } else {
-            let output = Command::new("xdotool")
+            let output = tool_command("xdotool")
                 .args(["getactivewindow"])
                 .output()
                 .map_err(|e| ToolError::Mcp(format!("Failed to get active window: {}", e)))?;
@@ -296,7 +296,7 @@ impl TuiScreenshotKit {
         };
 
         // Capture with import
-        let output = Command::new("import")
+        let output = tool_command("import")
             .args(["-window", &window_id, &temp_file])
             .output()
             .map_err(|e| ToolError::Mcp(format!("Failed to capture screenshot: {}", e)))?;

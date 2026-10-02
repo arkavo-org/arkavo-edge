@@ -272,6 +272,10 @@ fn to_mcp_server_config(s: &RuntimeMcpServer) -> McpServerConfig {
         command: s.command.clone(),
         args: s.args.clone(),
         url: s.url.clone(),
+        env: arkavo_process_env::EnvSpec {
+            set: s.env.clone(),
+            passthrough: s.env_passthrough.clone(),
+        },
     }
 }
 
@@ -394,17 +398,17 @@ mod tests {
     }
 
     #[test]
-    fn a_kit_without_runtime_listen_listens_on_every_interface() {
+    fn a_kit_without_runtime_listen_listens_on_loopback() {
         let dir = tempdir();
         let path = dir.path().join("agent.swarmkit.yaml");
         fs::write(&path, minimal_kit_yaml()).unwrap();
 
         let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
         assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].listen, "0.0.0.0:0");
+        assert_eq!(configs[0].listen, "127.0.0.1:0");
 
         let with_port = resolve_agent_configs(Some(&path), None, Some(8343), dir.path()).unwrap();
-        assert_eq!(with_port[0].listen, "0.0.0.0:8343");
+        assert_eq!(with_port[0].listen, "127.0.0.1:8343");
     }
 
     /// A kit in `dir` whose `runtime.listen` is `listen`, or that has no
@@ -441,7 +445,7 @@ mod tests {
     fn without_bind_a_start_resolves_what_every_other_caller_gets() {
         let dir = tempdir();
         let no_kit = resolve_agent_configs_for_start(None, None, None, None, dir.path()).unwrap();
-        assert_eq!(no_kit.0[0].listen, "0.0.0.0:0");
+        assert_eq!(no_kit.0[0].listen, "127.0.0.1:0");
         assert_eq!(no_kit.1, None);
 
         let kit = write_kit(dir.path(), Some("10.0.0.140:8342"));
@@ -463,7 +467,7 @@ mod tests {
         let dir = tempdir();
         let no_kit =
             resolve_agent_configs_for_start(None, None, Some(8343), None, dir.path()).unwrap();
-        assert_eq!(no_kit.0[0].listen, "0.0.0.0:8343");
+        assert_eq!(no_kit.0[0].listen, "127.0.0.1:8343");
 
         for (kit_listen, listens_on) in [
             ("127.0.0.1:8342", "127.0.0.1:8343"),
@@ -794,5 +798,24 @@ provenance:
       signature: "AAA"
 "#
         .to_string()
+    }
+
+    #[arkavo_test_macros::spec("SK-105")]
+    #[test]
+    fn kit_mcp_server_environment_reaches_the_agent_config() {
+        let server = RuntimeMcpServer {
+            name: "github".into(),
+            command: Some("npx".into()),
+            args: vec![],
+            url: None,
+            env: [("LOG_LEVEL".to_string(), "debug".to_string())].into(),
+            env_passthrough: vec!["GITHUB_TOKEN".to_string()],
+        };
+        let config = to_mcp_server_config(&server);
+        assert_eq!(
+            config.env.set.get("LOG_LEVEL").map(String::as_str),
+            Some("debug")
+        );
+        assert_eq!(config.env.passthrough, vec!["GITHUB_TOKEN".to_string()]);
     }
 }

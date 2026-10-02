@@ -67,12 +67,18 @@ struct McpToolAdapter(Box<dyn arkavo_mcp::Tool>);
 #[async_trait]
 impl Tool for McpToolAdapter {
     async fn execute(&self, params: Value) -> crate::Result<Value> {
-        // arkavo_mcp::Tool type-erases its error to Box<dyn Error>, so no category survives to
-        // preserve here — map to the coarse Execution variant, as McpToolWrapper/mcp_bridge do.
-        self.0
-            .execute(params)
-            .await
-            .map_err(|e| crate::ToolError::Execution(e.to_string()))
+        // arkavo_mcp::Tool type-erases its error to Box<dyn Error>, so most categories do not
+        // survive — map to the coarse Execution variant, as McpToolWrapper/mcp_bridge do. A
+        // workspace refusal is the exception: it must stay a PolicyDenied like every other
+        // confined tool, so callers treat it as a denial and not a retryable failure.
+        self.0.execute(params).await.map_err(|e| {
+            match e.downcast_ref::<arkavo_mcp_code_search::CodeSearchError>() {
+                Some(arkavo_mcp_code_search::CodeSearchError::OutsideWorkspace(reason)) => {
+                    crate::ToolError::PolicyDenied(reason.clone())
+                }
+                _ => crate::ToolError::Execution(e.to_string()),
+            }
+        })
     }
 
     fn schema(&self) -> &ToolSchema {
@@ -374,7 +380,7 @@ impl ToolRegistry {
 
     /// Check if a binary is available in PATH
     fn is_binary_available(name: &str) -> bool {
-        std::process::Command::new(name)
+        crate::child::tool_command(name)
             .arg("--version")
             .output()
             .map(|o| o.status.success())
@@ -1089,5 +1095,40 @@ mod retain_granted_tests {
         reg.retain_granted(&granted);
         assert!(reg.get("does_not_exist").is_none());
         assert!(reg.list_tools().is_empty());
+    }
+}
+
+#[cfg(all(test, feature = "code-tools"))]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
+mod mcp_adapter_tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+    use serde_json::json;
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn syntax_tree_workspace_refusal_is_policy_denied() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let elsewhere = tempfile::TempDir::new().unwrap();
+        let file = elsewhere.path().join("secret.rs");
+        std::fs::write(&file, "fn secret() {}").unwrap();
+        let adapter = McpToolAdapter(Box::new(arkavo_mcp_code_search::TreeSitterTool::with_root(
+            ws.path(),
+        )));
+        let err = adapter
+            .execute(json!({ "file_path": file.to_str().unwrap(), "language": "rust" }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::ToolError::PolicyDenied(_)), "{err}");
+    }
+
+    #[tokio::test]
+    async fn other_code_tool_errors_stay_execution() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let adapter = McpToolAdapter(Box::new(arkavo_mcp_code_search::TreeSitterTool::with_root(
+            ws.path(),
+        )));
+        let err = adapter.execute(json!({})).await.unwrap_err();
+        assert!(matches!(err, crate::ToolError::Execution(_)), "{err}");
     }
 }

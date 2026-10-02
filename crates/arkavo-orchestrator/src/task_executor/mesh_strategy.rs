@@ -67,6 +67,13 @@ impl MeshTaskStrategy {
             operation: "create mDNS daemon".to_string(),
             details: e.to_string(),
         })?;
+        // Agents without --bind or runtime.listen bind loopback and are
+        // announced on the loopback interface only, which mdns-sd leaves off.
+        mdns.enable_interface(mdns_sd::IfKind::LoopbackV4)
+            .map_err(|e| Error::Discovery {
+                operation: "enable mDNS on loopback".to_string(),
+                details: e.to_string(),
+            })?;
         let receiver = mdns
             .browse("_a2a._tcp.local.")
             .map_err(|e| Error::Discovery {

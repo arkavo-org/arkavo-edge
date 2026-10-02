@@ -77,9 +77,11 @@ scenarios:
       - Task serialized
       - A2A message sent
       - Task ID returned
-    refs: [crates/arkavo-mcp-mesh/src/lib.rs:180-250]
-    changed: "2025-01-31"
+    refs: [crates/arkavo-mcp-mesh/src/lib.rs:432-658]
+    changed: "2026-09-30"
     edge_cases:
+      - condition: agent_id is within edit distance 2 of a known agent but matches none exactly
+        expected: The task is delivered to, addressed as, recorded under and reported as the matched agent's ID
       - condition: Agent unreachable
         expected: Transport error
       - condition: Task rejected

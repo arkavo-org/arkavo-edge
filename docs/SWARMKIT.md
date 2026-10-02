@@ -111,7 +111,7 @@ arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n auditor 
 
 Send a running role work with `arkavo chat --agent-id <role-id>` or `arkavo task --agent-id <role-id> '<task>'`.
 
-By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS, so roles on different devices find each other without configuration. The agent's RPC endpoint is not authenticated yet, so run it on networks you trust.
+By default an agent listens on loopback and announces itself over mDNS for discovery on this machine. To accept connections from other machines, choose an explicit `--bind` or `runtime.listen` address. The agent's RPC endpoint is not authenticated yet, so run it on networks you trust.
 
 `--bind 127.0.0.1` keeps an agent on this machine: it listens on loopback and is not announced on the network. A kit can pin an address with `runtime.listen`:
 

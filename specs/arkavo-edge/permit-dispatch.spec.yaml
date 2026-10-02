@@ -2,7 +2,7 @@
 
 feature: Permit-bound tool dispatch
 module: arkavo_dispatch_gate
-version: 0.92.0
+version: 0.98.5
 
 invariants:
   - A tools/call reaches the upstream server only with a permit from a trusted issuer and a proof of possession of that permit's cnf key
@@ -173,3 +173,25 @@ scenarios:
     refs:
       - crates/arkavo-mcp-proxy/src/refusals.rs
       - crates/arkavo-mcp-proxy/tests/stdio_passthrough.rs
+
+  - id: PDG-012
+    name: The proxy's upstream server starts with a resolved environment, not the proxy's
+    criticality: critical
+    given:
+      - arkavo mcp proxy started with optional --env NAME and --env NAME=VALUE flags
+    when: The upstream MCP server is spawned
+    then:
+      - The upstream sees the platform baseline, each --env NAME with the proxy's value, and each --env NAME=VALUE
+      - No other variable of the proxy's environment reaches it
+      - A malformed --env, in either the separate or the --env=... form, is refused without echoing any part of its value
+      - An --env naming a loader or hijack variable such as LD_PRELOAD or NODE_OPTIONS is refused
+      - An --env NAME=VALUE for a credential-shaped name is refused and points to the passthrough form
+      - The same three refusals apply to a ProxyConfig handed to McpProxy::spawn, which fails closed before starting the upstream
+      - A passthrough name the proxy does not hold is logged by name, never by value
+      - A name given both as passthrough and as a literal takes the literal
+    refs:
+      - crates/arkavo-mcp-proxy/src/env.rs
+      - crates/arkavo-mcp-proxy/src/upstream.rs
+      - crates/arkavo-mcp-proxy/src/proxy.rs
+      - crates/arkavo-cli/src/commands/mcp_proxy.rs
+    changed: "2026-09-29"

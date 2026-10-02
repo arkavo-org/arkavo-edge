@@ -14,6 +14,7 @@ arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["llm-remote"] }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-validation = { path = "../arkavo-validation" }
+arkavo-process-env = { path = "../arkavo-process-env" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 anyhow.workspace = true
 serde.workspace = true
@@ -35,6 +36,7 @@ rand.workspace = true
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

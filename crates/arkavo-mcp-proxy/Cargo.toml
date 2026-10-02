@@ -12,6 +12,7 @@ categories = ["development-tools"]
 [dependencies]
 arkavo-dispatch-gate = { path = "../arkavo-dispatch-gate" }
 arkavo-observability = { path = "../arkavo-observability" }
+arkavo-process-env = { path = "../arkavo-process-env" }
 async-trait.workspace = true
 base64.workspace = true
 serde_json.workspace = true
@@ -23,6 +24,7 @@ tracing.workspace = true
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-permit = { path = "../arkavo-permit" }
+tracing-subscriber.workspace = true
 # `test-util` pauses the clock in the tests whose subject is the order of a
 # lock, a write timeout and a retirement: on virtual time that order is fixed
 # by the deadlines rather than by how quickly a loaded runner schedules them.

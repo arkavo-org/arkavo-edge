@@ -1,10 +1,10 @@
+use crate::child::{async_tool_command, tool_command};
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 pub struct SemgrepTool {
     schema: ToolSchema,
@@ -60,7 +60,7 @@ impl SemgrepTool {
     }
 
     fn validate_dependencies() {
-        if std::process::Command::new("semgrep")
+        if tool_command("semgrep")
             .arg("--version")
             .output()
             .map(|o| !o.status.success())
@@ -79,7 +79,7 @@ impl SemgrepTool {
             .and_then(|v| v.as_str())
             .unwrap_or("auto");
 
-        let mut cmd = Command::new("semgrep");
+        let mut cmd = async_tool_command("semgrep");
 
         cmd.arg("scan");
         cmd.arg(path);

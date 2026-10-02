@@ -88,7 +88,7 @@ runtime:
 | `objective.goal` | Yes | The kit's overall purpose; the primary role's identity skill carries the same purpose in more detail |
 | `roles[].skills[].payload.instructions` | Yes | The role's system prompt / identity — what it does, shown to other agents |
 | `roles[].agent_provisioning.model` | No | LLM family/size/backend to provision (see Model Providers below); omit to accept the router default |
-| `runtime.listen` | No | Bind address (default: every interface, `0.0.0.0`, on a dynamic port). Set it, for example to `127.0.0.1:8342`, to pin the agent to an address |
+| `runtime.listen` | No | Bind address (default: loopback, `127.0.0.1`, on a dynamic port). Set it, for example to `127.0.0.1:8342`, to pin the agent to an address |
 | `runtime.mdns` | No | Enable mDNS discovery (default: true) |
 | `runtime.mcp_servers` + `roles[].mcp_tools` | No | MCP tool servers to connect, and per-role grants against them |
 

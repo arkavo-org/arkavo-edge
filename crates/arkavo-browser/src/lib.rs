@@ -1,5 +1,6 @@
 mod browser;
 mod error;
+mod launch;
 pub mod live_inject;
 
 pub use browser::BrowserTool;

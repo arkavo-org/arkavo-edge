@@ -4,8 +4,8 @@ use crate::framing::{self, Line, MAX_LINE_BYTES};
 use crate::meta::{credentials, strip_arkavo_meta};
 use crate::policy::{CallContext, Decision, ForwardOutcome, PolicyHook};
 use crate::upstream::{UpstreamConnection, UpstreamError};
+use arkavo_process_env::EnvSpec;
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufRead, AsyncWrite, AsyncWriteExt};
@@ -27,8 +27,12 @@ pub struct ProxyConfig {
     pub command: String,
     /// Arguments for the upstream command.
     pub args: Vec<String>,
-    /// Extra environment variables passed to the upstream process.
-    pub env: HashMap<String, String>,
+    /// What the upstream may see of the proxy's environment beyond the
+    /// platform baseline. Nothing else is inherited. [`McpProxy::spawn`]
+    /// refuses a malformed name, a loader or hijack name such as
+    /// `LD_PRELOAD`, and a credential-shaped name given as a literal in
+    /// `set` (a credential may only be listed in `passthrough`).
+    pub env: EnvSpec,
     /// Per-request timeout for upstream calls; `None` uses the default.
     pub request_timeout: Option<Duration>,
 }
@@ -39,14 +43,16 @@ impl ProxyConfig {
         Self {
             command: command.into(),
             args,
-            env: HashMap::new(),
+            env: EnvSpec::default(),
             request_timeout: None,
         }
     }
 
-    /// Add an environment variable for the upstream process.
+    /// Set an environment variable on the upstream process. A malformed,
+    /// loader or credential-literal name is refused by [`McpProxy::spawn`],
+    /// not here.
     pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.env.insert(key.into(), value.into());
+        self.env.set.insert(key.into(), value.into());
         self
     }
 
@@ -122,7 +128,7 @@ impl McpProxy {
         let upstream = UpstreamConnection::spawn(
             &config.command,
             &config.args,
-            &config.env,
+            &crate::env::resolve(&config.env)?,
             config.request_timeout,
         )?;
         Ok(Self { upstream, policy })

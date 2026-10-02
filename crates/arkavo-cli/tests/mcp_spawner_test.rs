@@ -17,6 +17,7 @@
 #[cfg(test)]
 mod tests {
     use arkavo_cli::mcp_spawner::McpProcessManager;
+    use arkavo_process_env::{ChildEnv, EnvSpec};
 
     #[test]
     fn test_process_manager_creation() {
@@ -34,6 +35,7 @@ mod tests {
             "test-server".to_string(),
             "this-command-does-not-exist-12345",
             &[],
+            &ChildEnv::isolated_from_current(&EnvSpec::default()),
         );
 
         assert!(result.is_err());
@@ -45,8 +47,12 @@ mod tests {
         let manager = McpProcessManager::new();
 
         // Use a simple command that exists on all platforms
-        let result =
-            manager.spawn_mcp_server("test-echo".to_string(), "echo", &["hello".to_string()]);
+        let result = manager.spawn_mcp_server(
+            "test-echo".to_string(),
+            "echo",
+            &["hello".to_string()],
+            &ChildEnv::isolated_from_current(&EnvSpec::default()),
+        );
 
         // This should succeed if echo command exists
         if result.is_ok() {

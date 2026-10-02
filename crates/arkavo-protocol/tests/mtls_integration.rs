@@ -8,37 +8,46 @@ use arkavo_protocol::transport::{
 use arkavo_protocol::websocket::WebSocketTransport;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 use jsonrpsee::{core::async_trait, proc_macros::rpc};
+use std::fmt::Write as _;
 use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::process::Command;
 use tokio::time::{Duration, sleep};
 
-fn test_certs_dir() -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/certs");
+fn test_certs_dir() -> tempfile::TempDir {
+    use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose};
 
-    // Create certs directory if it doesn't exist
-    fs::create_dir_all(&dir).expect("Failed to create certs directory");
+    // Each test owns its files until it finishes. A shared directory let one
+    // generator truncate a key while another test was parsing it.
+    let dir = tempfile::tempdir().expect("certificate fixture directory");
+    let mut ca_params = CertificateParams::default();
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+    ca_params
+        .distinguished_name
+        .push(DnType::CommonName, "Test CA");
+    let ca_key = KeyPair::generate().expect("CA key");
+    let ca = ca_params.self_signed(&ca_key).expect("CA certificate");
+    fs::write(dir.path().join("ca.crt"), ca.pem()).unwrap();
+    fs::write(dir.path().join("ca.key"), ca_key.serialize_pem()).unwrap();
 
-    // Check if certificates already exist
-    if !dir.join("ca.crt").exists() {
-        // Generate test certificates
-        let script_path =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/generate_test_certs.sh");
-
-        let output = Command::new("bash")
-            .arg(script_path)
-            .current_dir(&dir)
-            .output()
-            .expect("Failed to generate test certificates");
-
-        assert!(
-            output.status.success(),
-            "Failed to generate test certificates: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+    for name in ["server", "client", "invalid_client"] {
+        let names = if name == "server" {
+            vec!["localhost".into(), "127.0.0.1".into()]
+        } else {
+            Vec::new()
+        };
+        let mut params = CertificateParams::new(names).expect("certificate parameters");
+        params.distinguished_name.push(DnType::CommonName, name);
+        let key = KeyPair::generate().expect("fixture key");
+        let cert = if name == "invalid_client" {
+            params.self_signed(&key)
+        } else {
+            params.signed_by(&key, &ca, &ca_key)
+        }
+        .expect("fixture certificate");
+        fs::write(dir.path().join(format!("{name}.crt")), cert.pem()).unwrap();
+        fs::write(dir.path().join(format!("{name}.key")), key.serialize_pem()).unwrap();
     }
-
     dir
 }
 
@@ -74,7 +83,8 @@ async fn start_test_server() -> (ServerHandle, SocketAddr) {
 
 #[tokio::test]
 async fn test_http_mtls_with_valid_client_cert() {
-    let certs_dir = test_certs_dir();
+    let fixture = test_certs_dir();
+    let certs_dir = fixture.path();
 
     // Configure transport with mTLS
     let config = TransportConfig {
@@ -118,7 +128,8 @@ async fn test_http_mtls_with_valid_client_cert() {
 
 #[tokio::test]
 async fn test_websocket_mtls_configuration() {
-    let certs_dir = test_certs_dir();
+    let fixture = test_certs_dir();
+    let certs_dir = fixture.path();
 
     // Configure transport with mTLS
     let config = TransportConfig {
@@ -236,7 +247,8 @@ async fn test_invalid_cert_paths() {
 
 #[tokio::test]
 async fn test_ca_certificate_loading() {
-    let certs_dir = test_certs_dir();
+    let fixture = test_certs_dir();
+    let certs_dir = fixture.path();
 
     // Configure with CA certificate
     let config = TransportConfig {
@@ -274,7 +286,8 @@ async fn spawn_self_signed_tls_listener() -> (u16, tokio::task::JoinHandle<()>) 
 
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    let certs_dir = test_certs_dir();
+    let fixture = test_certs_dir();
+    let certs_dir = fixture.path();
     let cert_file = fs::File::open(certs_dir.join("server.crt")).expect("server.crt");
     let key_file = fs::File::open(certs_dir.join("server.key")).expect("server.key");
     let certs: Vec<CertificateDer> = CertificateDer::pem_reader_iter(cert_file)
@@ -327,10 +340,7 @@ async fn test_http_verify_cert_false_still_rejects_self_signed() {
     server.abort();
     let mut msg = String::new();
     for cause in err.chain() {
-        msg.push_str(&cause.to_string());
-        msg.push(' ');
-        msg.push_str(&format!("{cause:?}"));
-        msg.push(' ');
+        write!(msg, "{cause} {cause:?} ").unwrap();
     }
     assert!(
         is_certificate_verification_error(&msg),
@@ -371,7 +381,8 @@ async fn test_websocket_verify_cert_false_still_rejects_self_signed() {
 
 #[test]
 fn test_certificates_exist() {
-    let certs_dir = test_certs_dir();
+    let fixture = test_certs_dir();
+    let certs_dir = fixture.path();
 
     // Verify all test certificates were generated
     assert!(certs_dir.join("ca.crt").exists(), "CA certificate missing");
@@ -394,4 +405,54 @@ fn test_certificates_exist() {
         certs_dir.join("invalid_client.key").exists(),
         "Invalid client key missing"
     );
+}
+
+#[test]
+fn certificate_fixtures_are_private_and_complete_under_concurrent_use() {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use std::collections::BTreeSet;
+    use std::path::Path;
+    use std::sync::{Arc, Barrier};
+
+    let barrier = Arc::new(Barrier::new(8));
+    std::thread::scope(|scope| {
+        let mut workers = Vec::new();
+        for _ in 0..8 {
+            let barrier = Arc::clone(&barrier);
+            workers.push(scope.spawn(move || {
+                barrier.wait();
+                let fixture = test_certs_dir();
+                let path: &Path = fixture.as_ref();
+                for name in ["ca", "server", "client", "invalid_client"] {
+                    let cert = CertificateDer::from_pem_file(path.join(format!("{name}.crt")))
+                        .expect("fixture certificate must be complete");
+                    let key = PrivateKeyDer::from_pem_file(path.join(format!("{name}.key")))
+                        .expect("fixture key must be complete");
+                    rustls::ServerConfig::builder_with_provider(Arc::new(
+                        rustls::crypto::aws_lc_rs::default_provider(),
+                    ))
+                    .with_safe_default_protocol_versions()
+                    .unwrap()
+                    .with_no_client_auth()
+                    .with_single_cert(vec![cert], key)
+                    .expect("fixture certificate must match its key");
+                }
+                fixture
+            }));
+        }
+        let fixtures: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+        let paths: BTreeSet<_> = fixtures
+            .iter()
+            .map(|fixture| {
+                let path: &Path = fixture.as_ref();
+                path.to_path_buf()
+            })
+            .collect();
+        assert_eq!(
+            paths.len(),
+            fixtures.len(),
+            "fixtures must not share mutable files"
+        );
+    });
 }

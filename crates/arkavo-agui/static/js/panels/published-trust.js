@@ -158,8 +158,8 @@ function renderPublishedTrustSection() {
     }
 
     // Peer trust scores. Single table — one row per peer subject. Until
-    // per-peer attestation lands, peers carry only the verification
-    // signal; the table makes that explicit so the empty cells are
+    // an identity proof is checked, peers publish VERIFICATION as
+    // unattested; the table makes that explicit so the empty cells are
     // information, not omission.
     html += '<div class="section-title">Peer Trust Scores (' + snap.peers.length + ')</div>';
     if (snap.peers.length === 0) {

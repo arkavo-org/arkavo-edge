@@ -1,8 +1,8 @@
+use crate::child::gh_command;
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::process::Command;
 
 pub struct GitHubOrgReposTool {
     schema: ToolSchema,
@@ -49,7 +49,7 @@ impl Tool for GitHubOrgReposTool {
             .ok_or_else(|| ToolError::Mcp("Missing required parameter: org".to_string()))?;
         let limit = params["limit"].as_i64().unwrap_or(100);
 
-        let output = Command::new("gh")
+        let output = gh_command()
             .args([
                 "repo",
                 "list",
@@ -138,7 +138,7 @@ impl Tool for GitHubRelatedIssuesTool {
             ToolError::Mcp("Missing required parameter: issue_number".to_string())
         })?;
 
-        let output = Command::new("gh")
+        let output = gh_command()
             .args([
                 "issue",
                 "view",
@@ -278,7 +278,7 @@ impl Tool for GitHubCiStatusTool {
         let repo_full = format!("{}/{}", owner, repo);
 
         if let Some(pr_number) = params["pr_number"].as_i64() {
-            let output = Command::new("gh")
+            let output = gh_command()
                 .args([
                     "pr",
                     "checks",
@@ -324,7 +324,7 @@ impl Tool for GitHubCiStatusTool {
 
         args.extend(["--limit", "10"]);
 
-        let output = Command::new("gh")
+        let output = gh_command()
             .args(&args)
             .output()
             .map_err(|e| ToolError::Execution(format!("Failed to execute gh command: {e}")))?;
@@ -393,7 +393,7 @@ impl Tool for GitHubOrgOverviewTool {
             .as_str()
             .ok_or_else(|| ToolError::Mcp("Missing required parameter: org".to_string()))?;
 
-        let repos_output = Command::new("gh")
+        let repos_output = gh_command()
             .args([
                 "repo",
                 "list",
@@ -428,7 +428,7 @@ impl Tool for GitHubOrgOverviewTool {
             if let Some(repo_name) = repo["name"].as_str() {
                 let repo_full = format!("{}/{}", org, repo_name);
 
-                if let Ok(issues_output) = Command::new("gh")
+                if let Ok(issues_output) = gh_command()
                     .args([
                         "issue", "list", "--repo", &repo_full, "--state", "open", "--json",
                         "number",
@@ -440,7 +440,7 @@ impl Tool for GitHubOrgOverviewTool {
                     total_issues += issues.len();
                 }
 
-                if let Ok(prs_output) = Command::new("gh")
+                if let Ok(prs_output) = gh_command()
                     .args([
                         "pr", "list", "--repo", &repo_full, "--state", "open", "--json", "number",
                     ])

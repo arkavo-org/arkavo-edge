@@ -1,10 +1,10 @@
+use crate::child::{async_tool_command, tool_command};
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 pub struct OsvTool {
     schema: ToolSchema,
@@ -54,7 +54,7 @@ impl OsvTool {
     }
 
     fn validate_dependencies() {
-        if std::process::Command::new("osv-scanner")
+        if tool_command("osv-scanner")
             .arg("--version")
             .output()
             .map(|o| !o.status.success())
@@ -73,7 +73,7 @@ impl OsvTool {
             .and_then(|v| v.as_str())
             .unwrap_or("json");
 
-        let mut cmd = Command::new("osv-scanner");
+        let mut cmd = async_tool_command("osv-scanner");
 
         if let Some(lockfile) = params.get("lockfile").and_then(|v| v.as_str()) {
             cmd.arg("--lockfile").arg(lockfile);

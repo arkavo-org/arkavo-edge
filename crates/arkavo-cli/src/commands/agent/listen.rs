@@ -9,13 +9,11 @@
 use std::net::{IpAddr, SocketAddr};
 
 /// Listen address used when the kit has no `runtime.listen`, and for the
-/// zero-config default: every interface, on a port the OS picks.
+/// zero-config default: loopback, on a port the OS picks.
 ///
-/// An agent started with no configuration is meant to be found and reached
-/// by agents on other devices. The endpoint does not authenticate callers,
-/// so such a start prints [`exposure_warning`], and `--bind` moves the agent
-/// to an address of the operator's choosing ([`bind_listen`]).
-pub(crate) const DEFAULT_LISTEN: &str = "0.0.0.0:0";
+/// The endpoint does not authenticate callers, so exposing it to other
+/// machines requires an explicit `--bind` or `runtime.listen` address.
+pub(crate) const DEFAULT_LISTEN: &str = "127.0.0.1:0";
 
 /// A listen address for this machine only, on a port the OS picks. Shown to
 /// the operator as the value to pin in a kit.
@@ -153,6 +151,7 @@ pub(crate) fn parse_listen(listen: &str) -> Result<SocketAddr, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
@@ -190,11 +189,11 @@ mod tests {
     }
 
     #[test]
-    fn the_default_listen_address_is_every_interface() {
+    fn the_default_listen_address_is_loopback() {
         let default = parse_listen(DEFAULT_LISTEN).unwrap();
-        assert_eq!(default.ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        assert_eq!(default.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert_eq!(default.port(), 0);
-        assert!(exposure_warning(default).is_some());
+        assert_eq!(exposure_warning(default), None);
     }
 
     #[test]
@@ -213,6 +212,7 @@ mod tests {
         parse_bind(bind).unwrap()
     }
 
+    #[spec("NET-021")]
     #[test]
     fn a_bind_with_a_port_is_read_like_a_listen_address() {
         assert_eq!(
@@ -238,6 +238,7 @@ mod tests {
         );
     }
 
+    #[spec("NET-021")]
     #[test]
     fn a_bind_without_a_port_names_only_the_host() {
         assert_eq!(
@@ -266,6 +267,7 @@ mod tests {
         }
     }
 
+    #[spec("NET-021")]
     #[test]
     fn a_bind_that_is_not_an_ip_address_is_rejected() {
         for bad in [
@@ -288,6 +290,7 @@ mod tests {
         }
     }
 
+    #[spec("NET-021")]
     #[test]
     fn bind_moves_the_default_to_the_named_host_without_a_notice() {
         assert_eq!(
@@ -305,6 +308,7 @@ mod tests {
 
     /// The port of `resolved` is what `-p` or `runtime.listen` selected;
     /// `--bind` without a port keeps it.
+    #[spec("NET-021")]
     #[test]
     fn bind_without_a_port_keeps_the_selected_port() {
         assert_eq!(
@@ -317,6 +321,7 @@ mod tests {
         );
     }
 
+    #[spec("NET-021")]
     #[test]
     fn bind_with_a_port_uses_that_port() {
         assert_eq!(
@@ -329,6 +334,7 @@ mod tests {
         );
     }
 
+    #[spec("NET-021")]
     #[test]
     fn bind_overrides_an_address_from_the_kit_and_names_it() {
         for (kit_listen, bind_to, listens_on) in [
@@ -386,6 +392,7 @@ mod tests {
         assert_eq!(chosen.notice, None);
     }
 
+    #[spec("NET-021")]
     #[test]
     fn a_loopback_bind_is_never_warned_about() {
         for resolved in ["0.0.0.0:0", "[::]:9", "10.0.0.140:8342"] {
@@ -397,6 +404,7 @@ mod tests {
         }
     }
 
+    #[spec("NET-021")]
     #[test]
     fn a_network_bind_is_warned_about() {
         for bind_to in ["0.0.0.0", "[::]", "10.0.0.140:8342"] {
@@ -417,6 +425,7 @@ mod tests {
         assert!(is_loopback("::ffff:127.0.0.1".parse().unwrap()));
     }
 
+    #[spec("NET-021")]
     #[test]
     fn network_reachable_addresses_are_warned_about() {
         for exposed in [

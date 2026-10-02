@@ -1,54 +1,54 @@
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use arkavo_git::attribution::format_commit_message;
-use arkavo_git::safety::sanitize_repo_path;
 use arkavo_git::{DiffOptions, GitManager};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Safely open a repository with path sanitization
+/// Open the repository at `requested`, which must resolve inside `root`
+/// (MCP-011). An absolute path used to be trusted whenever it existed, which
+/// let a call open, read and commit to any repository on the host.
+///
+/// `open_repo` discovers upward, so a root with no `.git` of its own would
+/// open an enclosing repository (a monorepo parent, a dotfiles repo) and let
+/// add, commit and diff act outside the workspace. After opening, exactly this
+/// is checked: the working directory (or git directory, when bare), git
+/// directory and common directory all lie inside `root`; `objects/info/alternates`
+/// holds no entry; and `objects`, `objects/info`, `refs`, `HEAD`, `index`,
+/// `packed-refs` and `logs` under the git and common directories are not
+/// symlinks. A linked worktree therefore passes only when its main repository is
+/// inside the root too. The filesystem and TDF tools (`tdf_encrypt`,
+/// `tdf_fetch`) refuse to write any `.git` entry, so the workspace cannot forge
+/// these through this crate; other crafted-`.git`
+/// vectors remain a residual owned by OS confinement.
 fn safe_open_repo(
     git_manager: &GitManager,
-    requested_path: &str,
+    root: &Path,
+    requested: &str,
 ) -> Result<arkavo_git::Repository> {
-    let requested = Path::new(requested_path);
-
-    // If the path is absolute and exists, use it directly (for tests)
-    // Otherwise, treat it relative to current directory
-    let base_path = if requested.is_absolute() && requested.exists() {
-        requested.to_path_buf()
-    } else {
-        let current_dir = env::current_dir()
-            .map_err(|e| ToolError::Mcp(format!("Failed to get current directory: {e}")))?;
-        current_dir.join(requested)
-    };
-
-    // For absolute paths that exist (like temp directories in tests),
-    // we trust them. For relative paths, we sanitize.
-    let final_path = if requested.is_absolute() && requested.exists() {
-        base_path
-    } else {
-        let current_dir = env::current_dir()
-            .map_err(|e| ToolError::Mcp(format!("Failed to get current directory: {e}")))?;
-        sanitize_repo_path(&current_dir, &base_path)
-            .map_err(|e| ToolError::Mcp(format!("Path validation failed: {e}")))?
-    };
-
-    git_manager
-        .open_repo(&final_path)
-        .map_err(|e| ToolError::Mcp(format!("Failed to open repository: {e}")))
+    let path = crate::confine::within_root(root, requested)?;
+    let repo = git_manager
+        .open_repo(&path)
+        .map_err(|e| ToolError::Mcp(format!("Failed to open repository: {e}")))?;
+    crate::confine::require_repo_inside_root(root, &repo)?;
+    Ok(repo)
 }
 
 pub struct GitStatusKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitStatusKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_status".to_string(),
                 aliases: Some(vec!["status".to_string()]),
@@ -78,7 +78,7 @@ impl Default for GitStatusKit {
 impl Tool for GitStatusKit {
     async fn execute(&self, params: Value) -> Result<Value> {
         let path = params["path"].as_str().unwrap_or(".");
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
         let status = self
             .git_manager
             .status(&repo)
@@ -107,11 +107,17 @@ impl Tool for GitStatusKit {
 pub struct GitDiffKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitDiffKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_diff".to_string(),
                 aliases: Some(vec!["diff".to_string()]),
@@ -154,7 +160,7 @@ impl Tool for GitDiffKit {
         let staged = params["staged"].as_bool().unwrap_or(false);
         let cached = params["cached"].as_bool().unwrap_or(false);
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
         let diff_options = DiffOptions {
             staged,
             unstaged: !staged && !cached,
@@ -185,11 +191,17 @@ impl Tool for GitDiffKit {
 pub struct GitCommitKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitCommitKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_commit".to_string(),
                 aliases: Some(vec!["commit".to_string()]),
@@ -228,7 +240,7 @@ impl Tool for GitCommitKit {
             .as_str()
             .ok_or_else(|| ToolError::Mcp("Commit message is required".to_string()))?;
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
 
         // Check if there are any changes before staging
         let status_before = self
@@ -270,11 +282,17 @@ impl Tool for GitCommitKit {
 pub struct GitBranchKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitBranchKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_branch".to_string(),
                 aliases: Some(vec!["branch".to_string()]),
@@ -318,7 +336,7 @@ impl Tool for GitBranchKit {
             .as_str()
             .ok_or_else(|| ToolError::Mcp("Action is required".to_string()))?;
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
 
         match action {
             "list" => {
@@ -373,11 +391,17 @@ impl Tool for GitBranchKit {
 pub struct GitLogKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitLogKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_log".to_string(),
                 aliases: Some(vec!["log".to_string()]),
@@ -414,7 +438,7 @@ impl Tool for GitLogKit {
         let path = params["path"].as_str().unwrap_or(".");
         let limit = params["limit"].as_u64().unwrap_or(10) as usize;
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
 
         let mut revwalk = repo
             .revwalk()
@@ -456,11 +480,17 @@ impl Tool for GitLogKit {
 pub struct GitRemoteKit {
     schema: ToolSchema,
     git_manager: GitManager,
+    root: PathBuf,
 }
 
 impl GitRemoteKit {
     pub fn new() -> Self {
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "git_remote".to_string(),
                 aliases: Some(vec!["remote".to_string()]),
@@ -510,7 +540,7 @@ impl Tool for GitRemoteKit {
             .ok_or_else(|| ToolError::Mcp("Action is required".to_string()))?;
         let remote = params["remote"].as_str().unwrap_or("origin");
 
-        let repo = safe_open_repo(&self.git_manager, path)?;
+        let repo = safe_open_repo(&self.git_manager, &self.root, path)?;
 
         // Get current branch if not specified
         let branch = match params["branch"].as_str() {
@@ -588,6 +618,7 @@ impl Tool for GitRemoteKit {
 #[allow(clippy::disallowed_methods)] // tokio::test needs block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::fs;
     use tempfile::TempDir;
 
@@ -609,7 +640,7 @@ mod tests {
         fs::write(temp_dir.path().join("test.txt"), "Hello world").unwrap();
 
         // Test GitCommitKit
-        let commit_kit = GitCommitKit::new();
+        let commit_kit = GitCommitKit::with_root(temp_dir.path());
         let params = json!({
             "path": temp_dir.path().to_str().unwrap(),
             "message": "Add test file"
@@ -625,5 +656,291 @@ mod tests {
         assert!(message.contains("Add test file"));
         assert!(message.contains("🤖 Generated with [Arkavo Edge]"));
         assert!(message.contains("Co-Authored-By: Arkavo Edge <edge@arkavo.com>"));
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_refuses_a_repository_outside_the_workspace() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        GitManager::new().init_repo(outside.path()).unwrap();
+        let kit = GitStatusKit::with_root(ws.path());
+        let err = kit
+            .execute(json!({ "path": outside.path().to_str().unwrap() }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn every_git_kit_refuses_a_repository_outside_the_workspace() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        GitManager::new().init_repo(outside.path()).unwrap();
+        let path = outside.path().to_str().unwrap();
+        let root = ws.path();
+        let kits: Vec<(Box<dyn Tool>, Value)> = vec![
+            (
+                Box::new(GitDiffKit::with_root(root)),
+                json!({ "path": path }),
+            ),
+            (
+                Box::new(GitCommitKit::with_root(root)),
+                json!({ "path": path, "message": "x" }),
+            ),
+            (
+                Box::new(GitBranchKit::with_root(root)),
+                json!({ "path": path, "action": "list" }),
+            ),
+            (
+                Box::new(GitLogKit::with_root(root)),
+                json!({ "path": path }),
+            ),
+            (
+                Box::new(GitRemoteKit::with_root(root)),
+                json!({ "path": path, "action": "fetch" }),
+            ),
+        ];
+        for (kit, params) in kits {
+            let err = kit.execute(params).await.unwrap_err();
+            assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+        }
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_opens_the_workspace_repository_by_default_path() {
+        let ws = TempDir::new().unwrap();
+        let repo = git2::Repository::init(ws.path()).unwrap();
+        // Status needs a born branch; commit through git2 rather than a kit so
+        // a resolver regression can never make a test commit in a real checkout.
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+        let tree = repo
+            .find_tree(repo.index().unwrap().write_tree().unwrap())
+            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        // No "path" defaults to ".", which must resolve against the kit's root.
+        let status = GitStatusKit::with_root(ws.path())
+            .execute(json!({}))
+            .await
+            .unwrap();
+        assert!(status["branch"].is_string());
+    }
+
+    /// `outer` is a repository, `outer/ws` is a plain directory under it.
+    fn nested_workspace() -> (TempDir, PathBuf) {
+        let outer = TempDir::new().unwrap();
+        let repo = git2::Repository::init(outer.path()).unwrap();
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+        let tree = repo
+            .find_tree(repo.index().unwrap().write_tree().unwrap())
+            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        let ws = outer.path().join("ws");
+        fs::create_dir(&ws).unwrap();
+        fs::write(ws.join("note.txt"), "x").unwrap();
+        (outer, ws)
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_refuses_an_enclosing_repository_above_the_workspace() {
+        let (_outer, ws) = nested_workspace();
+        let err = GitStatusKit::with_root(&ws)
+            .execute(json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_commit_cannot_commit_into_an_enclosing_repository() {
+        let (outer, ws) = nested_workspace();
+        let repo = git2::Repository::open(outer.path()).unwrap();
+        let head_before = repo.head().unwrap().target().unwrap();
+        let err = GitCommitKit::with_root(&ws)
+            .execute(json!({ "message": "escape" }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+        assert_eq!(repo.head().unwrap().target().unwrap(), head_before);
+        assert!(repo.index().unwrap().is_empty(), "nothing may be staged");
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_works_in_a_linked_worktree_whose_main_repository_is_inside_the_root() {
+        let (outer, _ws) = nested_workspace();
+        let repo = git2::Repository::open(outer.path()).unwrap();
+        repo.worktree("wt", &outer.path().join("wt"), None).unwrap();
+        // Root is `outer`: the worktree's `.git` file points at `outer/.git`,
+        // which is inside it.
+        let status = GitStatusKit::with_root(outer.path())
+            .execute(json!({ "path": "wt" }))
+            .await
+            .unwrap();
+        assert!(status["branch"].is_string());
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_refuses_a_linked_worktree_whose_main_repository_is_outside_the_root() {
+        let (outer, _ws) = nested_workspace();
+        let repo = git2::Repository::open(outer.path()).unwrap();
+        let wt_dir = TempDir::new().unwrap();
+        let wt_path = wt_dir.path().join("wt");
+        repo.worktree("wt", &wt_path, None).unwrap();
+        // The workspace's working directory is inside the root but its refs
+        // and objects live in `outer/.git`, so the workspace is refused.
+        let err = GitStatusKit::with_root(&wt_path)
+            .execute(json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+    }
+
+    /// Lay out a bare-bones `root/.git` that a test then points at an outer
+    /// repository, the way a workspace-controlled repository could.
+    fn crafted_git_dir(root: &Path) -> PathBuf {
+        let git_dir = root.join(".git");
+        fs::create_dir_all(git_dir.join("objects/info")).unwrap();
+        fs::create_dir_all(git_dir.join("refs")).unwrap();
+        fs::write(git_dir.join("HEAD"), "ref: refs/heads/master\n").unwrap();
+        fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n",
+        )
+        .unwrap();
+        git_dir
+    }
+
+    fn ref_and_object_snapshot(outer: &Path) -> Vec<PathBuf> {
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            for entry in fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                out.push(path.clone());
+                if path.is_dir() {
+                    walk(&path, out);
+                }
+            }
+        }
+        let mut all = Vec::new();
+        walk(&outer.join(".git"), &mut all);
+        all.sort();
+        all
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_commit_refuses_a_workspace_git_dir_whose_commondir_is_an_outer_repository() {
+        let (outer, ws) = nested_workspace();
+        let git_dir = crafted_git_dir(&ws);
+        let outer_git = fs::canonicalize(outer.path().join(".git")).unwrap();
+        fs::write(git_dir.join("commondir"), outer_git.to_str().unwrap()).unwrap();
+        fs::write(
+            git_dir.join("gitdir"),
+            git_dir.join("index").to_str().unwrap(),
+        )
+        .unwrap();
+        let before = ref_and_object_snapshot(outer.path());
+        let head_before = git2::Repository::open(outer.path())
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+            .unwrap();
+
+        let err = GitCommitKit::with_root(&ws)
+            .execute(json!({ "message": "pwn" }))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ToolError::PolicyDenied(_)), "{err}");
+        assert_eq!(ref_and_object_snapshot(outer.path()), before);
+        let outer_repo = git2::Repository::open(outer.path()).unwrap();
+        assert_eq!(outer_repo.head().unwrap().target().unwrap(), head_before);
+        assert!(outer_repo.find_reference("refs/heads/pwn").is_err());
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_status_refuses_any_object_alternates_entry() {
+        let (outer, ws) = nested_workspace();
+        GitManager::new().init_repo(&ws).unwrap();
+        let outer_objects = fs::canonicalize(outer.path().join(".git/objects")).unwrap();
+        let alternates = ws.join(".git/objects/info/alternates");
+        fs::create_dir_all(alternates.parent().unwrap()).unwrap();
+        fs::create_dir_all(ws.join("ws-objects")).unwrap();
+
+        let outside_absolute = format!("{}\n", outer_objects.display());
+        for entry in [
+            outside_absolute.as_str(),
+            "../../../.git/objects\n",
+            "ws-objects\n",
+            "../../ws-objects\n",
+            "# shared\n../../ws-objects\n",
+        ] {
+            fs::write(&alternates, entry).unwrap();
+            let err = GitStatusKit::with_root(&ws)
+                .execute(json!({}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PolicyDenied(_)), "{entry}: {err}");
+        }
+
+        // A file with only blanks and comments names nothing and is accepted.
+        fs::write(&alternates, "\n# nothing\n").unwrap();
+        let status = GitStatusKit::with_root(&ws).execute(json!({})).await;
+        assert!(
+            !matches!(status, Err(ToolError::PolicyDenied(_))),
+            "{status:?}"
+        );
+    }
+
+    /// A repository inside the workspace whose `.git/<name>` is a symlink into
+    /// the outer repository's `.git/<name>`.
+    #[cfg(unix)]
+    fn workspace_with_symlinked_internal(name: &str) -> (TempDir, PathBuf) {
+        let (outer, ws) = nested_workspace();
+        GitManager::new().init_repo(&ws).unwrap();
+        let inner = ws.join(".git").join(name);
+        if inner.is_dir() {
+            fs::remove_dir_all(&inner).unwrap();
+        } else {
+            fs::remove_file(&inner).unwrap();
+        }
+        let target = fs::canonicalize(outer.path().join(".git").join(name)).unwrap();
+        std::os::unix::fs::symlink(target, &inner).unwrap();
+        (outer, ws)
+    }
+
+    #[cfg(unix)]
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn git_kits_refuse_symlinked_objects_and_refs_and_leave_the_outer_repository_alone() {
+        for name in ["objects", "refs"] {
+            let (outer, ws) = workspace_with_symlinked_internal(name);
+            let before = ref_and_object_snapshot(outer.path());
+
+            let err = GitStatusKit::with_root(&ws)
+                .execute(json!({}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PolicyDenied(_)), "{name}: {err}");
+            let err = GitCommitKit::with_root(&ws)
+                .execute(json!({ "message": "pwn" }))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PolicyDenied(_)), "{name}: {err}");
+
+            assert_eq!(ref_and_object_snapshot(outer.path()), before, "{name}");
+            let outer_repo = git2::Repository::open(outer.path()).unwrap();
+            assert!(outer_repo.find_reference("refs/heads/pwn").is_err());
+        }
     }
 }

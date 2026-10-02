@@ -82,6 +82,7 @@ impl AuditReport {
             check_swarmkit_manifest_at(cwd),
             check_api_keys_in_env(),
             check_shell_command_policy(),
+            check_tool_isolation(),
         ];
 
         let passed = results
@@ -363,6 +364,20 @@ fn check_shell_command_policy() -> AuditResult {
     )
 }
 
+/// A constant because tool dispatch (the conductor tool loop and the MCP
+/// registry) never consults a sandbox: `ToolSandbox` has no caller and nothing
+/// constructs a `TaskPolicyManager`, so there is no runtime state to inspect.
+/// Warn rather than Fail keeps this file's convention that Fail marks a
+/// misconfiguration the operator can correct.
+fn check_tool_isolation() -> AuditResult {
+    AuditResult {
+        name: "Tool isolation".to_string(),
+        status: AuditStatus::Warn,
+        message: "Credentials are withheld from MCP servers and tool subprocesses, and agent-path tool HTTP (web search, GitHub) and the browser navigate action's initial URL pass the egress filter; browser_cdp evaluate scripts can navigate or fetch, and those requests, Chrome redirects, subresources and DNS re-resolution are not filtered. No tool execution path is confined; shell_exec and other child processes still run on the host as the agent's OS user with its files and unrestricted network until OS confinement exists (command allow/block lists are string heuristics, not confinement)".to_string(),
+        category: "Tool Execution".to_string(),
+    }
+}
+
 /// Execute the security audit CLI command. `bind` audits the agent as
 /// started with `--bind`.
 pub fn execute(json_output: bool, bind: Option<BindAddress>) -> i32 {
@@ -408,6 +423,52 @@ mod tests {
         assert!(parsed.get("summary").is_some());
     }
 
+    /// Regression: the audit reported a hard-coded Pass named "Task policy
+    /// manager" although no tool call is confined. Nothing constructs a
+    /// `TaskPolicyManager` and `ToolSandbox` has no caller, so the report must
+    /// say tool execution is unconfined.
+    #[test]
+    fn audit_reports_tool_execution_as_unconfined() {
+        let report = AuditReport::run(None);
+        let isolation = report
+            .results
+            .iter()
+            .find(|r| r.name == "Tool isolation")
+            .expect("audit must report tool isolation");
+        assert_eq!(isolation.status, AuditStatus::Warn);
+        assert!(
+            isolation.message.contains("shell_exec"),
+            "message must name the unconfined tool path: {}",
+            isolation.message
+        );
+        assert!(
+            isolation.message.contains("unrestricted network"),
+            "message must not imply the environment restriction confines the network: {}",
+            isolation.message
+        );
+        assert!(
+            isolation.message.contains("navigate action's initial URL")
+                && isolation.message.contains("child processes"),
+            "message must scope the egress filter to tool HTTP and the navigate action: {}",
+            isolation.message
+        );
+        assert!(
+            isolation.message.contains("browser_cdp evaluate")
+                && isolation.message.contains(
+                    "Chrome redirects, subresources and DNS re-resolution are not filtered"
+                ),
+            "message must name the browser traffic outside the egress filter: {}",
+            isolation.message
+        );
+        assert!(
+            report
+                .results
+                .iter()
+                .all(|r| !(r.name == "Task policy manager" && r.status == AuditStatus::Pass)),
+            "no Pass may be reported for an unwired policy manager"
+        );
+    }
+
     /// Regression: the report passed bind, TLS, rate limiting and policy
     /// checks that looked at nothing. A kit that exposes the endpoint must
     /// now fail the audit as a whole.
@@ -438,31 +499,31 @@ mod tests {
             .unwrap_or_else(|| panic!("the {name} check always runs"))
     }
 
-    /// Regression: an audit run with no kit reported a loopback endpoint
-    /// while the agent it describes listens on every interface.
+    /// The audit and startup must agree on the built-in loopback default.
     #[test]
-    fn an_audit_with_no_kit_reports_the_default_on_every_interface() {
+    fn an_audit_with_no_kit_reports_the_loopback_default() {
         let dir = tempfile::tempdir().unwrap();
         let report = AuditReport::run_at(dir.path(), None);
 
-        assert!(report.summary.failures >= 3, "{}", report.to_text());
-        for name in ["Bind address", "Transport encryption", "Authentication"] {
-            let result = check(&report, name);
-            assert_eq!(result.status, AuditStatus::Fail, "{}", result.message);
-            assert!(result.message.contains("0.0.0.0:0"), "{}", result.message);
-        }
-        assert!(!report.to_text().contains("this machine only"));
+        let bind = check(&report, "Bind address");
+        assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
+        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
+        assert_eq!(
+            check(&report, "Transport encryption").status,
+            AuditStatus::Pass
+        );
+        assert_eq!(check(&report, "Authentication").status, AuditStatus::Warn);
     }
 
     #[test]
     fn an_audit_of_a_loopback_bind_reports_loopback() {
         let dir = tempfile::tempdir().unwrap();
-        let loopback = crate::commands::agent::listen::parse_bind("127.0.0.1").unwrap();
+        let loopback = crate::commands::agent::listen::parse_bind("[::1]").unwrap();
         let report = AuditReport::run_at(dir.path(), Some(loopback));
 
         let bind = check(&report, "Bind address");
         assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
-        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
+        assert!(bind.message.contains("[::1]:0"), "{}", bind.message);
         assert!(bind.message.contains("--bind"), "{}", bind.message);
         assert_eq!(
             check(&report, "Authentication").status,
@@ -595,11 +656,32 @@ provenance:
     #[test]
     fn swarmkit_check_warns_with_migrate_hint_when_only_agents_md_present() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("AGENTS.md"), "# AGENTS.md\n").unwrap();
+        std::fs::write(
+            dir.path().join("AGENTS.md"),
+            "# AGENTS.md\n\n## hello-agent\n\npurpose: Says hello\n",
+        )
+        .unwrap();
 
         let result = check_swarmkit_manifest_at(dir.path());
         assert_eq!(result.status, AuditStatus::Warn);
         assert!(result.message.contains("migrate-from-agents-md"));
+    }
+
+    #[test]
+    fn swarmkit_check_gives_no_migrate_hint_for_a_coding_agent_guide() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("AGENTS.md"),
+            "# Project Guidelines\n\n## Core Rules\n- Run cargo fmt.\n",
+        )
+        .unwrap();
+
+        let result = check_swarmkit_manifest_at(dir.path());
+        assert!(
+            !result.message.contains("migrate-from-agents-md"),
+            "{}",
+            result.message
+        );
     }
 
     #[test]

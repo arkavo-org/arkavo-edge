@@ -1,7 +1,7 @@
 //! Locate and load the primary SwarmKit config for a process.
 //!
-//! Product AGENTS.md is not read. If only AGENTS.md is present, callers get
-//! [`DiscoverError::AgentsMdUnsupported`] with a migrate hint.
+//! Product AGENTS.md is not read. If only a legacy Arkavo AGENTS.md is present,
+//! callers get [`DiscoverError::AgentsMdUnsupported`] with a migrate hint.
 
 use std::path::{Path, PathBuf};
 
@@ -103,17 +103,30 @@ pub fn discover_kit_path(cwd: &Path) -> Result<PathBuf, DiscoverError> {
         _ => {}
     }
 
-    // Do not load AGENTS.md — fail with a clear migration message when present.
-    for candidate in [
-        cwd.join(ARKAVO_DIR).join("AGENTS.md"),
-        cwd.join("AGENTS.md"),
-    ] {
-        if candidate.is_file() {
-            return Err(DiscoverError::AgentsMdUnsupported { path: candidate });
-        }
+    // Do not load AGENTS.md — fail with a clear migration message when it holds
+    // Arkavo agent configuration. `.arkavo/` is ours, so anything there is legacy
+    // config; a root AGENTS.md is usually instructions for coding agents, which
+    // must not turn every run in that repository into an error.
+    let legacy = cwd.join(ARKAVO_DIR).join("AGENTS.md");
+    if legacy.is_file() {
+        return Err(DiscoverError::AgentsMdUnsupported { path: legacy });
+    }
+    let root = cwd.join("AGENTS.md");
+    if std::fs::read_to_string(&root).is_ok_and(|content| declares_arkavo_agent(&content)) {
+        return Err(DiscoverError::AgentsMdUnsupported { path: root });
     }
 
     Err(DiscoverError::NotFound)
+}
+
+/// Whether an AGENTS.md uses one of the shapes the legacy Arkavo parser read:
+/// `---` frontmatter, a top-level `purpose:` key under a `## agent` section,
+/// or the `- **Name:**` field of an "Agent Identity" section.
+fn declares_arkavo_agent(content: &str) -> bool {
+    content.starts_with("---")
+        || content.lines().any(|line| {
+            line.starts_with("purpose:") || line.trim_start().starts_with("- **Name:**")
+        })
 }
 
 /// Load and validate the discovered kit, returning process-facing config.
@@ -253,6 +266,50 @@ provenance:
         let discovered = load_discovered_kit(&dir).unwrap();
         assert_eq!(discovered.config.kit_name, "hello");
         assert_eq!(discovered.config.primary_role().unwrap().role_id, "agent");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[arkavo_test_macros::spec("SK-102")]
+    #[test]
+    fn legacy_agents_md_in_arkavo_dir_is_rejected() {
+        let dir = tempfile_dir();
+        let arkavo = dir.join(".arkavo");
+        fs::create_dir_all(&arkavo).unwrap();
+        fs::write(arkavo.join("AGENTS.md"), "# Notes\n").unwrap();
+        let err = discover_kit_path(&dir).unwrap_err();
+        assert!(matches!(err, DiscoverError::AgentsMdUnsupported { .. }));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[arkavo_test_macros::spec("SK-102")]
+    #[test]
+    fn legacy_agents_md_frontmatter_and_identity_are_rejected() {
+        for content in ["---\nname: x\n---\n", "## Agent Identity\n- **Name:** x\n"] {
+            let dir = tempfile_dir();
+            fs::write(dir.join("AGENTS.md"), content).unwrap();
+            let err = discover_kit_path(&dir).unwrap_err();
+            assert!(
+                matches!(err, DiscoverError::AgentsMdUnsupported { .. }),
+                "{content:?}"
+            );
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    // Regression: `arkavo chat` in a repository whose AGENTS.md holds
+    // coding-agent guidelines logged "AGENTS.md is no longer supported" at
+    // ERROR on every run.
+    #[arkavo_test_macros::spec("SK-102")]
+    #[test]
+    fn coding_agent_guide_agents_md_is_not_config() {
+        let dir = tempfile_dir();
+        fs::write(
+            dir.join("AGENTS.md"),
+            "# Project Guidelines\n\n## Core Rules\n- **Style**: run cargo fmt.\n",
+        )
+        .unwrap();
+        let err = discover_kit_path(&dir).unwrap_err();
+        assert!(matches!(err, DiscoverError::NotFound), "{err:?}");
         let _ = fs::remove_dir_all(&dir);
     }
 

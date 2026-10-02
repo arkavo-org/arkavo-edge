@@ -1,11 +1,14 @@
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
+use arkavo_validation::EgressClient;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+const DUCKDUCKGO_HTML: &str = "https://html.duckduckgo.com/html/";
 
 fn percent_encode(input: &str) -> String {
     use std::fmt::Write;
@@ -61,6 +64,7 @@ struct CachedResults {
 /// Web search tool using DuckDuckGo HTML endpoint
 pub struct WebSearchTool {
     schema: ToolSchema,
+    endpoint: String,
     cache: Mutex<HashMap<String, CachedResults>>,
     rate_limit: Mutex<RateLimiter>,
 }
@@ -129,8 +133,19 @@ impl WebSearchTool {
                     "required": ["query"]
                 }),
             },
+            endpoint: DUCKDUCKGO_HTML.to_string(),
             cache: Mutex::new(HashMap::new()),
             rate_limit: Mutex::new(RateLimiter::new(30)),
+        }
+    }
+
+    /// Point the tool somewhere other than DuckDuckGo, so a test can aim it at
+    /// an address the egress policy has to refuse.
+    #[cfg(test)]
+    fn with_endpoint(endpoint: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            ..Self::new()
         }
     }
 
@@ -142,10 +157,7 @@ impl WebSearchTool {
             query.to_string()
         };
 
-        format!(
-            "https://html.duckduckgo.com/html/?q={}",
-            percent_encode(&full_query)
-        )
+        format!("{}?q={}", self.endpoint, percent_encode(&full_query))
     }
 
     /// Parse search results from DuckDuckGo HTML response
@@ -353,15 +365,13 @@ impl WebSearchTool {
         // Build URL and fetch
         let url = self.build_url(query, site_filter);
 
-        // Use a simple HTTP client approach with tokio
-        let client = reqwest::Client::builder()
+        let client = EgressClient::builder()
             .timeout(Duration::from_secs(10))
             .user_agent("Arkavo-Agent/1.0 (https://arkavo.com)")
-            .build()
-            .map_err(|e| ToolError::Mcp(format!("Failed to create HTTP client: {}", e)))?;
+            .build()?;
 
         let response = client
-            .get(&url)
+            .get(&url)?
             .send()
             .await
             .map_err(|e| ToolError::Mcp(format!("Search request failed: {}", e)))?;
@@ -519,6 +529,27 @@ mod tests {
         let cached = tool.get_cached("test:query");
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().len(), 1);
+    }
+
+    /// NET-007: the search request goes through the egress client, so an
+    /// endpoint on a blocked address is refused and never connected to.
+    #[tokio::test]
+    async fn test_search_never_reaches_a_loopback_endpoint() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let tool = WebSearchTool::with_endpoint(format!("http://127.0.0.1:{port}/html/"));
+
+        let err = tool
+            .execute(json!({"query": "rust async"}))
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("SSRF attempt blocked"), "{err}");
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "web_search connected to a loopback listener"
+        );
     }
 
     #[tokio::test]

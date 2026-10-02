@@ -9,7 +9,7 @@
 //! |--------------|---------|-------------|
 //! | CRI-001 | [specs/arkavo-edge/network-security.spec.yaml](NET-004) | NoOpAuthBackend removed - authentication always required |
 //! | CRI-002 | [specs/arkavo-edge/network-security.spec.yaml](CRI-002) | Token revocation and replay protection |
-//! | CRI-003 | [specs/arkavo-edge/network-security.spec.yaml](NET-007) | Egress filtering (SSRF prevention) |
+//! | CRI-003 | [specs/arkavo-edge/validation.spec.yaml](VAL-005) | Library-level egress URL filter (SSRF prevention) |
 //! | HIGH-001 | [specs/arkavo-edge/network-security.spec.yaml](HIGH-001) | Secure RNG for key generation |
 //! | HIGH-002 | [specs/arkavo-edge/network-security.spec.yaml](HIGH-002) | DID:key length validation |
 //! | HIGH-003 | [specs/arkavo-edge/network-security.spec.yaml](NET-010) | Rate limiting |
@@ -120,11 +120,11 @@ fn test_token_replay_protection() {
 
 // ============================================================================
 // CRI-003: Egress Filtering (SSRF Prevention)
-// Spec: NET-007 - Block cloud metadata and internal network access
+// Spec: VAL-005 - Egress filter blocks private IPs (library-level URL filter)
 // ============================================================================
 
 /// Test: AWS metadata endpoint is blocked (SSRF prevention)
-/// Spec: NET-007 - Block cloud metadata and internal network access
+/// Spec: VAL-005 - Egress filter blocks private IPs
 /// Vulnerability: CRI-003 - SSRF via cloud metadata endpoint
 #[test]
 fn test_ssrf_blocked_aws_metadata() {
@@ -140,14 +140,14 @@ fn test_ssrf_blocked_aws_metadata() {
         let result = check_egress_allowed(url);
         assert!(
             result.is_err(),
-            "SECURITY: SSRF to AWS metadata should be blocked: {} (NET-007)",
+            "SECURITY: SSRF to AWS metadata should be blocked: {} (VAL-005)",
             url
         );
     }
 }
 
 /// Test: Private IP ranges are blocked (SSRF prevention)
-/// Spec: NET-007 - Block private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8)
+/// Spec: VAL-005 - Block private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8)
 /// Vulnerability: CRI-003 - SSRF via private IPs
 #[test]
 fn test_ssrf_blocked_private_ips() {
@@ -165,14 +165,14 @@ fn test_ssrf_blocked_private_ips() {
         let result = check_egress_allowed(url);
         assert!(
             result.is_err(),
-            "SECURITY: SSRF to private IP should be blocked: {} (NET-007)",
+            "SECURITY: SSRF to private IP should be blocked: {} (VAL-005)",
             url
         );
     }
 }
 
 /// Test: Public IP access is allowed (sanity check)
-/// Spec: NET-007 - Public IPs allowed (allowlist override capability)
+/// Spec: VAL-005 - Public IPs allowed (allowlist override capability)
 #[test]
 fn test_egress_allowed_public_ips() {
     // SECURITY: Public IPs should be allowed (sanity check)

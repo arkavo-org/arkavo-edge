@@ -8,11 +8,19 @@ use crate::{Result, TestError};
 
 pub struct FileSystemKit {
     schema: ToolSchema,
+    root: PathBuf,
 }
 
 impl FileSystemKit {
     pub fn new() -> Self {
+        // Zero-config: an agent process runs with its workspace as its working
+        // directory, so that directory is the root, canonicalised once.
+        Self::with_root(arkavo_validation::current_workspace_root())
+    }
+
+    pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
+            root: root.into(),
             schema: ToolSchema {
                 name: "filesystem_tools".to_string(),
                 aliases: Some(vec!["filesystem".to_string(), "fs".to_string()]),
@@ -62,10 +70,24 @@ impl FileSystemKit {
     }
 
     fn validate_path(&self, path: &str) -> Result<PathBuf> {
-        let base = std::env::current_dir()
-            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {e}")))?;
-        arkavo_validation::validate_no_traversal(&base, path)
+        arkavo_validation::resolve_within_root(&self.root, path)
             .map_err(|e| TestError::Mcp(e.to_string()))
+    }
+
+    /// Mutations additionally refuse `.git` entries, which decide what git
+    /// tools open and write (MCP-011).
+    fn validate_mutation_path(&self, path: &str) -> Result<PathBuf> {
+        let resolved = self.validate_path(path)?;
+        if resolved
+            .components()
+            .any(|c| c.as_os_str().eq_ignore_ascii_case(".git"))
+        {
+            return Err(TestError::Mcp(format!(
+                "{} is inside a .git entry; file tools cannot modify it",
+                resolved.display()
+            )));
+        }
+        Ok(resolved)
     }
 }
 
@@ -212,7 +234,7 @@ impl Tool for FileSystemKit {
 
                 let overwrite = params["overwrite"].as_bool().unwrap_or(true);
 
-                let abs_path = self.validate_path(file_path)?;
+                let abs_path = self.validate_mutation_path(file_path)?;
 
                 // Check if file exists and overwrite is false
                 if abs_path.exists() && !overwrite {
@@ -249,7 +271,7 @@ impl Tool for FileSystemKit {
                     .as_str()
                     .ok_or_else(|| TestError::Mcp("Missing 'content' parameter".to_string()))?;
 
-                let abs_path = self.validate_path(file_path)?;
+                let abs_path = self.validate_mutation_path(file_path)?;
 
                 // Check if file exists
                 if !abs_path.exists() {
@@ -294,7 +316,7 @@ impl Tool for FileSystemKit {
 
                 let mode = params["mode"].as_str().unwrap_or("replace");
 
-                let abs_path = self.validate_path(file_path)?;
+                let abs_path = self.validate_mutation_path(file_path)?;
 
                 // Check if file exists
                 if !abs_path.exists() {
@@ -379,6 +401,7 @@ impl Tool for FileSystemKit {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use tempfile::TempDir;
     use tokio;
 
@@ -388,7 +411,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.txt");
         fs::write(&file_path, "Hello, World!").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "read_file",
             "file_path": file_path.to_str().unwrap()
@@ -401,10 +424,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_nonexistent_file() {
-        let kit = FileSystemKit::new();
+        let temp_dir = TempDir::new().unwrap();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "read_file",
-            "file_path": "/nonexistent/file.txt"
+            "file_path": "nonexistent/file.txt"
         });
 
         let result = kit.execute(params).await.unwrap();
@@ -419,7 +443,7 @@ mod tests {
         fs::write(temp_dir.path().join("file2.txt"), "content2").unwrap();
         fs::create_dir(temp_dir.path().join("subdir")).unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "list_directory",
             "dir_path": temp_dir.path().to_str().unwrap()
@@ -438,7 +462,7 @@ mod tests {
         let file_path = temp_dir.path().join("test.txt");
         fs::write(&file_path, "Hello").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "file_info",
             "file_path": file_path.to_str().unwrap()
@@ -456,7 +480,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("new_file.txt");
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "write_file",
             "file_path": file_path.to_str().unwrap(),
@@ -478,7 +502,7 @@ mod tests {
         let file_path = temp_dir.path().join("existing.txt");
         fs::write(&file_path, "Original content").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "write_file",
             "file_path": file_path.to_str().unwrap(),
@@ -501,7 +525,7 @@ mod tests {
         let file_path = temp_dir.path().join("append_test.txt");
         fs::write(&file_path, "Line 1\n").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "append_file",
             "file_path": file_path.to_str().unwrap(),
@@ -523,7 +547,7 @@ mod tests {
         let file_path = temp_dir.path().join("edit_test.txt");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "edit_file",
             "file_path": file_path.to_str().unwrap(),
@@ -547,7 +571,7 @@ mod tests {
         let file_path = temp_dir.path().join("insert_test.txt");
         fs::write(&file_path, "Line 1\nLine 3").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "edit_file",
             "file_path": file_path.to_str().unwrap(),
@@ -571,7 +595,7 @@ mod tests {
         let file_path = temp_dir.path().join("delete_test.txt");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "edit_file",
             "file_path": file_path.to_str().unwrap(),
@@ -595,7 +619,7 @@ mod tests {
         let file_path = temp_dir.path().join("range_test.txt");
         fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-        let kit = FileSystemKit::new();
+        let kit = FileSystemKit::with_root(temp_dir.path());
         let params = json!({
             "action": "edit_file",
             "file_path": file_path.to_str().unwrap(),
@@ -607,5 +631,96 @@ mod tests {
         let result = kit.execute(params).await.unwrap();
         assert_eq!(result["success"], false);
         assert!(result["error"].as_str().unwrap().contains("out of range"));
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn read_outside_workspace_is_denied() {
+        let ws = TempDir::new().unwrap();
+        let secret = TempDir::new().unwrap();
+        let secret_file = secret.path().join("agent_keypair");
+        fs::write(&secret_file, "PRIVATE").unwrap();
+        let kit = FileSystemKit::with_root(ws.path());
+        let out = kit
+            .execute(json!({
+                "action": "read_file",
+                "file_path": secret_file.to_str().unwrap()
+            }))
+            .await;
+        // The refusal must not echo the secret's contents.
+        let err = out.expect_err("absolute path outside the workspace must be refused");
+        assert!(matches!(err, TestError::Mcp(_)), "{err}");
+        assert!(!err.to_string().contains("PRIVATE"));
+    }
+
+    #[cfg(unix)]
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn symlink_out_of_workspace_is_refused() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join("loot.txt"), "SECRET").unwrap();
+        std::os::unix::fs::symlink(outside.path(), ws.path().join("escape")).unwrap();
+        let kit = FileSystemKit::with_root(ws.path());
+        let out = kit
+            .execute(json!({ "action": "read_file", "file_path": "escape/loot.txt" }))
+            .await;
+        let err = out.expect_err("a symlink out of the workspace must be refused");
+        assert!(matches!(err, TestError::Mcp(_)), "{err}");
+        assert!(!err.to_string().contains("SECRET"));
+    }
+
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn mutations_cannot_touch_git_entries_but_reads_and_other_writes_work() {
+        let ws = TempDir::new().unwrap();
+        fs::create_dir_all(ws.path().join(".git/objects/info")).unwrap();
+        fs::write(ws.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let kit = FileSystemKit::with_root(ws.path());
+
+        let attempts = [
+            json!({ "action": "write_file", "file_path": ".git/objects/info/alternates", "content": "/outer/objects" }),
+            json!({ "action": "append_file", "file_path": ".git/HEAD", "content": "x" }),
+            json!({ "action": "edit_file", "file_path": ".git/HEAD", "line_number": 1, "new_content": "x", "mode": "replace" }),
+            json!({ "action": "write_file", "file_path": ".git", "content": "gitdir: /outer/.git" }),
+        ];
+        for attempt in attempts {
+            let out = kit.execute(attempt.clone()).await;
+            assert!(matches!(out, Err(TestError::Mcp(_))), "{attempt}: {out:?}");
+        }
+        assert!(!ws.path().join(".git/objects/info/alternates").exists());
+        assert!(ws.path().join(".git").is_dir());
+        assert_eq!(
+            fs::read_to_string(ws.path().join(".git/HEAD")).unwrap(),
+            "ref: refs/heads/main\n"
+        );
+
+        // Reads stay allowed, and ordinary writes (even `.github`) still work.
+        let read = kit
+            .execute(json!({ "action": "read_file", "file_path": ".git/HEAD" }))
+            .await
+            .unwrap();
+        assert_eq!(read["success"], true);
+        let write = kit
+            .execute(
+                json!({ "action": "write_file", "file_path": ".github/ci.yml", "content": "a" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(write["success"], true);
+    }
+
+    #[cfg(unix)]
+    #[spec("MCP-011")]
+    #[tokio::test]
+    async fn a_symlink_to_git_internals_cannot_be_written_through() {
+        let ws = TempDir::new().unwrap();
+        fs::create_dir_all(ws.path().join(".git/objects")).unwrap();
+        std::os::unix::fs::symlink(ws.path().join(".git/objects"), ws.path().join("alias"))
+            .unwrap();
+        let out = FileSystemKit::with_root(ws.path())
+            .execute(json!({ "action": "write_file", "file_path": "alias/x", "content": "a" }))
+            .await;
+        assert!(matches!(out, Err(TestError::Mcp(_))), "{out:?}");
     }
 }

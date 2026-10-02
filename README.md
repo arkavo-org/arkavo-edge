@@ -44,11 +44,11 @@ arkavo
 arkavo ui
 ```
 
-That's it. No configuration files, no setup. Agents on the same machine and on other devices on the local network auto-discover via mDNS and form a mesh.
+That's it. No configuration files, no setup. Agents on the same machine auto-discover via mDNS and form a mesh.
 
-By default an agent is discoverable and reachable on the local network: it listens on every interface and announces itself over mDNS. Its RPC endpoint is not authenticated yet, so run it on networks you trust. The agent says so on stderr each time it starts this way.
+By default an agent listens on loopback and announces itself over mDNS for discovery on this machine. Its RPC endpoint is not authenticated yet. To accept connections from other machines, start it with `--bind 0.0.0.0:<port>` or set `runtime.listen` in its kit. A network-reachable start prints a warning; run it on networks you trust.
 
-To keep an agent on this machine, start it with `--bind 127.0.0.1`. It then listens on loopback and is not announced on the network; agents on the same machine still discover it.
+To keep an agent on this machine even when a kit asks for another address, start it with `--bind 127.0.0.1`. It then listens on loopback and is not announced on the network; agents on the same machine still discover it.
 
 ```bash
 arkavo --bind 127.0.0.1
@@ -119,7 +119,7 @@ Run `arkavo <command> --help` for the options of `agent`, `chat`, `task`, `ui`, 
 
 | Command | What it does |
 |---------|--------------|
-| `arkavo`, `arkavo agent` | Run an agent. `-c <kit>` names a SwarmKit manifest (default: discover `.arkavo/*.swarmkit.yaml` or `./*.swarmkit.yaml`), `-n <role-id>` selects a role of a multi-role kit (default: the first role), `-p <port>` sets the listen port (default: a random free port), `-v` prints startup messages, `--bind <address>` sets the listen address (`127.0.0.1` keeps the agent on this machine; a port may follow, as in `127.0.0.1:8343`), `--trust` shows the authorization QR code. Without `--bind` or a `runtime.listen` in the kit, the agent listens on every interface. |
+| `arkavo`, `arkavo agent` | Run an agent. `-c <kit>` names a SwarmKit manifest (default: discover `.arkavo/*.swarmkit.yaml` or `./*.swarmkit.yaml`), `-n <role-id>` selects a role of a multi-role kit (default: the first role), `-p <port>` sets the listen port (default: a random free port), `-v` prints startup messages, `--bind <address>` sets the listen address (`127.0.0.1` keeps the agent on this machine; a port may follow, as in `127.0.0.1:8343`), `--trust` shows the authorization QR code. Without `--bind` or a `runtime.listen` in the kit, the agent listens on loopback. |
 | `arkavo chat` | Interactive chat, or a one-shot query with `--prompt`. `--model <name or .gguf path>` picks the model; `--agent-id <id>` talks to a mesh agent. |
 | `arkavo task` | Plan and apply code changes: `arkavo task 'fix all warnings'`. `--local-only` and `--mesh-only` choose where the task runs, `--agent-id <id>` targets one agent. Without a task it commits existing changes (`-y`, `-m <message>`, `--push`, `--no-validate`). |
 | `arkavo ui` | Launch the web UI (default port 7700). |
@@ -218,7 +218,7 @@ For offensive-security reviewers: here's what is real today and what is still on
 | **ABAC / attribute release policies** | Library shipped, not wired into kit launch | Roles declare TDF Attribute Release Policies and kit validation checks them. The runtime library turns each one into a role-scoped OpenTDF policy (`role_policy()`), but the `arkavo ui` and `arkavo agent` launch paths do not call it yet. |
 | **SwarmKit policy isolation** | Shipped for kits loaded into the gateway | A kit loaded through `ARKAVO_SWARMKIT_PATH` gets one Agent Runtime Policy, policy cache, and decision trace per role. On the `arkavo agent -c <kit>` path a role's `isolation`, network egress, budget, and `mcp_tools` grant fields are parsed but not enforced: the process takes the role's id, model, and skill instructions, plus the kit-level `runtime` block. |
 | **DID:key identity** | Shipped | Agents are identified by `did:key` derived from an Ed25519 keypair; identity is stable per device. |
-| **mDNS mesh discovery** | Shipped | Pure-Rust mDNS with no system Avahi/Bonjour dependency; agents auto-discover and form a local mesh. By default an agent announces itself on the local network and listens on every interface. With `--bind 127.0.0.1` it listens on loopback and is announced on the loopback interface only. |
+| **mDNS mesh discovery** | Shipped | Pure-Rust mDNS with no system Avahi/Bonjour dependency; agents auto-discover and form a local mesh. By default an agent listens on loopback and announces itself on the loopback interface for discovery on this machine. An explicit `--bind` or `runtime.listen` can expose it to other machines. |
 | **Local inference** | Shipped | Gemma 4 and Ministral models run via llama.cpp on the local device; no cloud required for routing or inference. |
 | **DLP / PII preflight** | Shipped, off by default | Preflight policies run before any model inference and refuse a matching request, reporting the policy id and reason. They are active only when the kit declares `runtime.preflight`. Preflight blocks; it does not redact or rewrite the request. |
 | **PII leak regression tests** | Shipped | `tests/e2e_security_test.sh`, `tests/security_cli_test.sh`, `tests/dlp_pii_security_test.sh`. |
@@ -230,9 +230,12 @@ For offensive-security reviewers: here's what is real today and what is still on
 | **RPC endpoint authentication** | Not yet | The agent's RPC endpoint does not authenticate callers, and it is served without TLS. By default it is reachable from the local network, so run agents on networks you trust. `--bind 127.0.0.1`, or a loopback `runtime.listen` in the kit, keeps the endpoint on this machine. The methods that read and replace the kit are served only on a loopback endpoint. |
 | **SEP / TPM hardware attestation** | In crate, not crypto-bound | `arkavo-attestation` detects the Secure Enclave on Apple Silicon and reports a security state, but the evidence is platform metadata, not a Secure-Enclave-signed quote. TPM backend is not implemented. |
 | **Hardware-bound key storage** | Not yet | Device identity and agent keypairs are stored on disk with filesystem permissions; they are not yet stored in the Secure Enclave, Keychain (non-extractable), or a TPM. |
-| **Verifiable remote attestation** | Not yet | Trust scoring currently treats identity as verified once a DID:key is known; there is no remote verification of attestation evidence yet. |
+| **Verifiable remote attestation** | Not yet | No attestation evidence or DID proof is verified. Published trust scores report every subject as unattested (VERIFICATION 0), including the local agent's own score; gossip peers are identified by discovery names, not proven DIDs. |
+| **Tool execution confinement** | Not yet | `shell_exec` and other process-spawning tools run as the agent's OS user with its files, network and environment variables. Only `workspace_container` isolates execution, and only for commands the model chooses to run in a container. OS-level confinement is planned. |
+| **Outbound SSRF / egress filtering** | Tool HTTP and the browser navigate action's initial URL only | Requests built-in tools make (`web_search`, the GitHub API tools) go through `EgressClient`, which refuses loopback, private, CGNAT, multicast and cloud-metadata addresses after DNS resolution and on every redirect; `browser_cdp` refuses such a URL given to its `navigate` action before Chrome starts. `ARKAVO_EGRESS_ALLOW` exempts named origins. Not filtered: script the model runs through `browser_cdp` `evaluate` (it can navigate or fetch), Chrome's own redirects, subresources and DNS re-resolution, and processes the agent starts (`shell_exec`, `git`, `gh`, MCP servers). |
+| **Agent listener authentication** | Not yet | The A2A agent listener binds loopback (`127.0.0.1`) by default; `--bind <address>` or `runtime.listen` in a SwarmKit kit exposes it to other hosts, and the agent warns at startup when it does. It does not authenticate callers, so any local process, and any host that can reach an exposed listener, can send it tasks. The AG-UI gateway also binds loopback by default. |
 
-This split is intentional: encryption, access control, and identity are shipping now; hardware-bound trust roots are being built in the open.
+This split is intentional: encryption, access control, and identity are shipping now; hardware-bound trust roots, tool-execution confinement and egress filtering for processes the agent starts are being built in the open.
 
 ## Platform Support
 

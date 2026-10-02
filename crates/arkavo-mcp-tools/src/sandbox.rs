@@ -1,12 +1,11 @@
 //! Broader tool sandbox for MCP tool execution
 //!
-//! Triggered by `Obligation::Sandbox` from the Task Policy Manager.
 //! Uses platform-specific isolation: Docker when available, OS-level fallback.
 
+use crate::child::{async_tool_command, tool_command};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::process::Command;
 
 /// Sandbox execution environment for MCP tools.
 pub struct ToolSandbox {
@@ -85,7 +84,7 @@ impl ToolSandbox {
     }
 
     fn docker_available() -> bool {
-        std::process::Command::new("docker")
+        tool_command("docker")
             .arg("info")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -96,7 +95,7 @@ impl ToolSandbox {
 
     #[cfg(target_os = "macos")]
     fn os_sandbox_available() -> bool {
-        std::process::Command::new("sandbox-exec")
+        tool_command("sandbox-exec")
             .arg("-n")
             .arg("no-network")
             .arg("true")
@@ -109,7 +108,7 @@ impl ToolSandbox {
 
     #[cfg(target_os = "linux")]
     fn os_sandbox_available() -> bool {
-        std::process::Command::new("firejail")
+        tool_command("firejail")
             .arg("--version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -268,7 +267,7 @@ impl ToolSandbox {
     ) -> Result<SandboxResult, SandboxError> {
         let timeout = Duration::from_secs(self.config.timeout_secs);
 
-        let child = Command::new(program)
+        let child = async_tool_command(program)
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

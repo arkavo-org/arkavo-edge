@@ -102,3 +102,68 @@ scenarios:
       - Recovery suggestions included
     refs: [crates/arkavo-browser/src/error.rs:1-40]
     changed: "2025-01-31"
+
+  - id: BROWS-007
+    name: Chrome keeps its sandbox unless it cannot start with one
+    criticality: high
+    given:
+      - browser_cdp launching Chrome with any tool parameters
+    when: The launch configuration is built
+    then:
+      - The sandbox is on for macOS, Windows and non-root Linux, headless or not
+      - It is off only on Linux as root, or with ARKAVO_ALLOW_UNSANDBOXED_BROWSER=1, and a warning is logged
+      - Tool parameters never decide it
+    refs:
+      - crates/arkavo-browser/src/launch.rs
+      - crates/arkavo-browser/src/browser.rs
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: /proc/self/status unreadable
+        expected: Sandbox stays on
+
+  - id: BROWS-008
+    name: Chrome starts with the agent's credentials blanked
+    criticality: high
+    given:
+      - The agent's environment holds credential-shaped variables, or variables registered as holding a provider credential
+    when: browser_cdp launches Chrome
+    then:
+      - Each credential-shaped or registered variable is set to an empty value in Chrome's environment, under its own spelling
+      - Other variables are inherited unchanged
+      - A credential-like variable name that is not valid Unicode refuses the launch, naming the variable and never its value
+    refs:
+      - crates/arkavo-browser/src/launch.rs
+      - crates/arkavo-browser/src/browser.rs
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: ARKAVO_TOOL_ENV_PASSTHROUGH lists a credential
+        expected: Chrome is excluded from the grant and the credential is still blanked
+      - condition: A provider registered a credential under a name no convention recognises
+        expected: That name is blanked as well
+      - condition: A blanked credential is inspected in Chrome's environment
+        expected: The name is present with an empty value, because chromiumoxide cannot remove it
+      - condition: A non-Unicode variable name is not credential-like
+        expected: The launch proceeds and the variable is inherited
+
+  - id: BROWS-009
+    name: Refuse the navigate action's initial URL when it is blocked
+    criticality: high
+    given:
+      - browser_cdp navigate called with a URL
+    when: Before Chrome is launched
+    then:
+      - Non-http(s) schemes are refused as invalid parameters
+      - The URL is judged by EgressPolicy with its host resolved; a blocked destination is refused with "SSRF attempt blocked"
+      - Chrome is not launched for a refused navigation
+      - Only the navigate action's initial URL is checked; the residuals below are outside this scenario
+    refs: [crates/arkavo-browser/src/browser.rs]
+    changed: "2026-09-30"
+    edge_cases:
+      - condition: The evaluate action runs model-supplied script that navigates or fetches
+        expected: Not covered; the script reaches any address Chrome can. NET-019 (wip), owned by the credential and egress broker workstream
+      - condition: The page redirects, or loads a subresource, to a blocked address
+        expected: Not covered; NET-019 (wip), owned by the credential and egress broker workstream
+      - condition: Chrome resolves the host again when it connects, so a DNS answer can change after the check (rebinding)
+        expected: Not covered; NET-019 (wip), owned by the credential and egress broker workstream
+      - condition: A developer needs the agent to browse a local dev server that the policy refuses
+        expected: The operator sets ARKAVO_EGRESS_ALLOW to that origin (for example http://localhost:3000, NET-018); the refusal text does not name the setting, so a model cannot be steered to it

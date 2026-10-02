@@ -1,10 +1,10 @@
+use crate::child::async_tool_command;
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 pub struct TestRunnerTool {
     schema: ToolSchema,
@@ -118,7 +118,7 @@ impl TestRunnerTool {
 
         let mut cmd = match framework.as_str() {
             "cargo" => {
-                let mut c = Command::new("cargo");
+                let mut c = async_tool_command("cargo");
                 c.arg("test");
                 if verbose {
                     c.arg("--verbose");
@@ -130,7 +130,7 @@ impl TestRunnerTool {
             }
 
             "go" => {
-                let mut c = Command::new("go");
+                let mut c = async_tool_command("go");
                 c.arg("test");
                 if verbose {
                     c.arg("-v");
@@ -149,7 +149,7 @@ impl TestRunnerTool {
             }
 
             "pytest" => {
-                let mut c = Command::new("pytest");
+                let mut c = async_tool_command("pytest");
                 if verbose {
                     c.arg("-v");
                 }
@@ -167,7 +167,7 @@ impl TestRunnerTool {
             }
 
             "jest" => {
-                let mut c = Command::new("npx");
+                let mut c = async_tool_command("npx");
                 c.arg("jest");
                 if verbose {
                     c.arg("--verbose");
@@ -182,7 +182,7 @@ impl TestRunnerTool {
             }
 
             "xcodebuild" => {
-                let mut c = Command::new("xcodebuild");
+                let mut c = async_tool_command("xcodebuild");
                 c.arg("test");
                 c.arg("-scheme").arg("YourScheme");
                 c.arg("-destination")
@@ -371,15 +371,84 @@ impl Tool for TestRunnerTool {
 mod tests {
     use super::*;
 
+    /// The half of the regression test below that runs in the re-run
+    /// process, whose real environment holds planted provider keys: a fake
+    /// `cargo` first on `PATH` records the environment `test_runner` gave it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cargo_env_probe() {
+        use crate::child::probe;
+        let Some(dir) = std::env::var_os(probe::PROBE_DIR).map(std::path::PathBuf::from) else {
+            return;
+        };
+        probe::fake_program(&dir, "cargo");
+        TestRunnerTool::new()
+            .execute(json!({ "framework": "cargo", "path": dir }))
+            .await
+            .expect("fake cargo runs");
+    }
+
+    #[cfg(unix)]
+    #[arkavo_test_macros::spec("MCP-016")]
+    #[test]
+    fn test_runner_child_never_sees_a_planted_provider_key() {
+        use crate::child::probe;
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        probe::rerun("test_runner::tests::cargo_env_probe", dir.path());
+        let seen =
+            std::fs::read_to_string(dir.path().join("cargo-env.txt")).expect("fake cargo ran");
+        assert!(seen.lines().any(|l| l == probe::KEPT_LINE), "{seen}");
+        assert!(!seen.contains(probe::PLANTED), "{seen}");
+    }
+
     #[tokio::test]
     async fn test_cargo_tests() {
+        // Running this crate's suite here would invoke this test again.
+        // A standalone crate also gives the runner a result we can verify.
+        let project = tempfile::TempDir::new().expect("test project");
+        let manifest = project.path().join("Cargo.toml");
+        std::fs::write(
+            &manifest,
+            "[package]\nname = \"test-runner-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n",
+        )
+        .expect("fixture manifest");
+        std::fs::create_dir(project.path().join("src")).expect("fixture source directory");
+        std::fs::write(
+            project.path().join("src/lib.rs"),
+            "#[test]\nfn fixture_passes() { assert_eq!(2 + 2, 4); }\n\
+             #[test]\nfn excluded_failure() { panic!(\"pattern must exclude this test\"); }\n",
+        )
+        .expect("fixture tests");
         let tool = TestRunnerTool::new();
         let params = json!({
             "framework": "cargo",
-            "path": "."
+            "path": project.path(),
+            "pattern": "fixture_passes",
+            "extra_args": [
+                "--manifest-path", manifest,
+                "--target-dir", project.path().join("target"),
+                "--offline", "--lib"
+            ]
         });
 
-        let result = tool.execute(params).await;
-        assert!(result.is_ok() || result.is_err());
+        let output = tool
+            .execute_tests(&params)
+            .await
+            .expect("fixture cargo test runs");
+        assert!(
+            output.contains("test result: ok. 1 passed; 0 failed; 0 ignored;"),
+            "fixture did not pass with the requested filter: {output}"
+        );
+        let result = tool.parse_results("cargo", &output);
+        assert_eq!(
+            result,
+            json!({
+                "framework": "cargo",
+                "passed": 1,
+                "failed": 0,
+                "ignored": 0,
+                "total": 1
+            })
+        );
     }
 }

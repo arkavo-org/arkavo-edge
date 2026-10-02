@@ -188,7 +188,7 @@ fn gamma_sample(alpha: f64, rng: &mut Rng) -> f64 {
     let scale = 1.0 / (9.0 * shift).sqrt();
     loop {
         let normal = normal_sample(rng);
-        let candidate = (1.0 + scale * normal).powi(3);
+        let candidate = scale.mul_add(normal, 1.0).powi(3);
         if candidate <= 0.0 {
             continue;
         }

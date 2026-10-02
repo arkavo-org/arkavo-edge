@@ -8,7 +8,6 @@ invariants:
   - All tools must be registered before execution
   - Tool schemas define valid parameters
   - Registry supports progressive disclosure for small models
-  - Tool execution is sandboxed where possible
   - Results are validated against schema
 
 scenarios:
@@ -43,6 +42,8 @@ scenarios:
   - id: MCP-003
     name: Execute tool with parameters
     criticality: critical
+    wip: true
+    issue: "Not implemented on the production path: ToolRegistry hands params to each tool without validating them against its schema, and no tool executes in a sandbox. The tests previously tagged MCP-003 exercised a test-only calculator in crates/arkavo-mcp-tools/src/server.rs rather than the registry, so their tags were removed. Carries the former invariant 'Tool execution is sandboxed where possible'; sandboxed execution belongs to the OS-confinement workstream."
     given:
       - Tool registered
       - Valid parameters provided
@@ -53,6 +54,7 @@ scenarios:
       - Result returned as JSON
       - Errors captured and returned
     refs: [crates/arkavo-mcp-tools/src/server.rs]
+    changed: "2026-09-29"
 
   - id: MCP-004
     name: Filesystem tool operations
@@ -67,6 +69,10 @@ scenarios:
       - List operations enumerate files
       - Errors handled gracefully
     refs: [crates/arkavo-mcp-tools/src/filesystem.rs]
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: Path outside the workspace root
+        expected: Refused with PolicyDenied (MCP-011)
 
   - id: MCP-005
     name: Git tool operations
@@ -122,7 +128,15 @@ scenarios:
       - Timeout enforced
       - Output captured
       - Exit code returned
-    refs: [crates/arkavo-mcp-tools/src/shell_exec.rs]
+      - Every pipeline and chain segment is classified, not only the first word
+      - Exec-wrappers and interpreters are never auto-approved
+      - Caller environment map is restricted to an allowlist of locale, time zone, terminal display and logging variables
+      - Working directory and redirection targets are confined to the workspace root
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs]
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: Safe-listed env or find given another program to run (env curl …, find -exec …)
+        expected: RequiresReview
 
   - id: MCP-009
     name: Web search tool
@@ -136,7 +150,9 @@ scenarios:
       - Results formatted
       - Snippets extracted
       - URLs included
+      - Request made through EgressClient (NET-007)
     refs: [crates/arkavo-mcp-tools/src/web_search.rs]
+    changed: "2026-09-30"
 
   - id: MCP-010
     name: TDF encryption tool
@@ -159,3 +175,135 @@ scenarios:
       - condition: Tool not found in registry
         expected: Returns error with available tools list
     changed: "2025-01-31"
+
+  - id: MCP-011
+    name: Filesystem tool path confinement
+    criticality: critical
+    given:
+      - FileSystemKit rooted at the agent's workspace (the process working directory by default)
+      - A read, list, info, write, append or edit request
+    when: The requested path resolves outside the root, directly or through a symlink
+    then:
+      - The call is refused with PolicyDenied and nothing is read or written
+      - Absolute and relative paths inside the root keep working
+      - The arkavo-mcp-macos FileSystemKit and the arkavo-mcp-tools git tools apply the same boundary
+      - A git tool opens only a repository whose working directory, git directory and common directory are all inside the root, that has no object alternates, and whose core internals (objects, refs, HEAD, index, packed-refs, logs) are not symlinks, so a workspace without its own .git never falls through to an enclosing repository
+    refs: [crates/arkavo-mcp-tools/src/filesystem.rs, crates/arkavo-mcp-macos/src/mcp/filesystem_tools.rs, crates/arkavo-mcp-tools/src/git.rs]
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: Workspace is a subdirectory of a monorepo or other enclosing repository and has no .git of its own
+        expected: Git tools refuse with PolicyDenied; the workspace must be the repository root, or a linked worktree, to use them
+      - condition: Workspace is a linked worktree (.git is a file) whose main repository is inside the root
+        expected: Git tools work
+      - condition: Workspace is a linked worktree whose main repository is outside the root, or its .git names an outer repository through commondir
+        expected: Git tools refuse with PolicyDenied, because refs and objects would be written outside the root
+      - condition: The repository's objects/info/alternates holds any entry (absolute, relative or in-root)
+        expected: Git tools refuse with PolicyDenied ("repositories with object alternates are not supported inside the workspace"); a blank or comment-only file is accepted
+      - condition: objects, objects/info, refs, HEAD, index, packed-refs or logs under the git directory or common directory is a symlink
+        expected: Git tools refuse with PolicyDenied, because refs and objects would be written into another repository
+      - condition: A file-tool write, append or edit resolves to a path with a .git component (the directory or a file named .git)
+        expected: Refused with PolicyDenied (an error in arkavo-mcp-macos); reads of .git stay allowed
+      - condition: Any other crafted .git inside the workspace
+        expected: Not detected by these checks; a residual owned by OS confinement
+
+  - id: MCP-012
+    name: TDF tool path confinement
+    criticality: high
+    given:
+      - tdf_encrypt, tdf_info, tdf_stage or tdf_fetch called with a file path
+    when: The path resolves outside the workspace root
+    then:
+      - The call is refused with PolicyDenied before any file is read or written
+      - tdf_stage publishes nothing and tdf_fetch fetches nothing for a refused path
+    refs: [crates/arkavo-mcp-tools/src/tdf.rs]
+    changed: "2026-09-29"
+
+  - id: MCP-013
+    name: Shell command classification examines every segment
+    criticality: high
+    given:
+      - ShellExecTool enabled
+      - A command with a pipeline, chain, wrapper or background operator
+    when: The command is classified
+    then:
+      - Every pipeline segment must be a read-only command for the call to be auto-approved
+      - Exec wrappers and interpreters (env, xargs, nohup, sh, python, awk) are never auto-approved
+      - find with an action predicate (-exec, -execdir, -ok, -delete, -fprint) is not auto-approved
+      - Safe-listed bases lose approval when given options that run a program or write a file (rg --pre, sort -o, uniq OUTPUT, tree -o, less -o, file -C)
+      - Background '&', carriage return and other control characters are blocked as chaining
+      - The version shortcut is only `<tool> --version` for a fixed set of toolchain names (cargo, rustc, rustup, node, npm, python, python3, pip, go, java, javac, clang, gcc, make, cmake, git, docker, kubectl, deno, bun); -v and any other name are not probes, and a bare version operand is not a version flag
+      - A segment containing $ (or % under cmd /C) is not auto-approved, because an expansion's value is not in the string and can print the agent's environment
+      - On unix, a command containing a backslash is not auto-approved, and option and path checks see words with quotes removed; a word with a brace expansion is not auto-approved
+      - No argument word, and no option value glued after an equals sign, after a colon or inside a short-option cluster, may start with / or ~ (or a drive letter or UNC prefix under cmd /C), contain a .. component, or put a glob (*, ?, [) in a component that starts with a dot; redirection targets are judged by MCP-015 instead
+      - Git is auto-approved only for read subcommands without -c or --output, and git remote only bare (names); git config, git remote -v and git remote get-url are never auto-approved, because they print credential-bearing values (config values, remote URLs with embedded tokens)
+      - Options that open every name listed in a file (--files0-from for sort, wc and du; find -files0-from; file -f and --files-from) are not auto-approved
+      - A command containing whitespace other than space and tab (no-break space, ideographic space) is not auto-approved, because sh does not split words on it; under cmd /C a segment containing ^ is not auto-approved
+      - env and printenv are not auto-approved, because they print the inherited environment
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/shell_exec/args.rs, crates/arkavo-mcp-tools/src/shell_exec/git.rs, crates/arkavo-mcp-tools/src/shell_exec/redirect.rs]
+    changed: "2026-09-29"
+    edge_cases:
+      - condition: A safe-listed reader given a path outside the working tree (cat ~/.ssh/id_rsa, stat /etc/passwd, cat ../x, grep --file=/etc/x, file -m a:/etc/x)
+        expected: RequiresReview
+      - condition: A glob or expansion that can reach /proc/<pid>/environ (cat /pr?c/self/environ, cat /pr${X}oc/$PPID/environ, cat .*/secret)
+        expected: RequiresReview
+      - condition: git remote show with a remote name or URL
+        expected: RequiresReview, because it contacts the network
+      - condition: A symlink inside the working tree that points outside it, named by a relative argument
+        expected: Not detected by these string rules; a residual owned by OS confinement
+
+  - id: MCP-014
+    name: Shell command environment map is restricted to an allowlist
+    criticality: high
+    given:
+      - shell_exec called with an env map
+    when: The map names a variable outside the allowlist
+    then:
+      - The whole call is refused with approval policy_denied, whatever the command's classification
+      - Only LANG, LC_*, TZ, TERM, COLUMNS, LINES, NO_COLOR, FORCE_COLOR, CLICOLOR, CLICOLOR_FORCE, RUST_BACKTRACE, RUST_LOG and CI are accepted, matched case-insensitively
+      - Every other name is refused, including PATH, LD_*, DYLD_*, GIT_*, HOME, PAGER, EDITOR and per-tool config, module-path and toolchain variables, because auto-approved version probes make per-tool hooks impossible to enumerate
+      - LANG and LC_* values containing / or a .. component, and TZ values that are absolute paths or contain a .. component, are refused
+      - Listed variables are passed to the command
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs]
+    changed: "2026-09-29"
+
+  - id: MCP-015
+    name: Shell command paths are confined to the workspace root
+    criticality: high
+    given:
+      - ShellExecTool rooted at the workspace (the process working directory by default)
+    when: A call names a working_dir, or its command redirects input or output
+    then:
+      - A working_dir that resolves outside the root, directly or through a symlink, is refused with policy_denied
+      - A redirection target must be a literal path that resolves inside the root, symlinks followed, or the call is not auto-approved
+      - Relative redirection targets resolve against the command's working directory
+      - A < or > glued to a preceding word other than a bare descriptor number (-delete>x, echo hi>out) is not auto-approved, because the glued word would escape the option checks; 2>out and 1>>out are unaffected
+      - Option, base and path checks read the argument words with redirections and descriptor prefixes removed
+      - Descriptor duplication (2>&1) stays auto-approvable; on unix the only discard target is /dev/null (NUL is an ordinary file name, symlinks resolved), and under cmd /C the only one is NUL (a /dev/null target is an ordinary path and is refused)
+      - Under cmd /C only a single digit before an operator is a descriptor prefix; a longer digit run counts as a glued word and is refused
+      - Under cmd /C a redirection to a reserved device name (CON, PRN, AUX, COM1-9, LPT1-9, with or without extension) is not auto-approved
+    refs: [crates/arkavo-mcp-tools/src/shell_exec/mod.rs, crates/arkavo-mcp-tools/src/shell_exec/classifier.rs, crates/arkavo-mcp-tools/src/shell_exec/redirect.rs, crates/arkavo-mcp-tools/src/shell_exec/workdir.rs]
+    changed: "2026-09-29"
+
+  - id: MCP-016
+    name: Tool subprocesses keep the toolchain environment without the agent's credentials
+    criticality: critical
+    given:
+      - A built-in tool starts a program (shell, test runner, gh, scanners, sandbox, TUI, ripgrep, comby, the git remote fallback, workspace containers)
+    when: The subprocess is spawned
+    then:
+      - Credential-shaped variables are withheld, every credential the agent reads among them
+      - All other variables are kept, so the operator's build settings still apply
+      - gh and the git remote fallback additionally keep GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN when exported, so gh's git credential helper still authenticates
+      - Names the agent registered as configured credentials (a provider's auth_ref) are withheld even when they are not credential-shaped
+      - RIPGREP_CONFIG_PATH, LESS, LESSOPEN and LESSCLOSE are withheld, so rg and less take only the options on their command line and never a --pre, log file or preprocessor from the environment
+      - ARKAVO_TOOL_ENV_PASSTHROUGH is a global operator grant that wins over everything above - each listed name reaches every tool subprocess, shell_exec's shell included, whether it was withheld as credential-shaped, as a registered name or as a flag-file variable
+    refs:
+      - crates/arkavo-process-env/src/tool.rs
+      - crates/arkavo-mcp-tools/src/child.rs
+      - crates/arkavo-mcp-tools/src/shell_exec/mod.rs
+      - crates/arkavo-mcp-tools/src/test_runner.rs
+      - crates/arkavo-mcp-code-search/src/codegrep.rs
+      - crates/arkavo-mcp-code-search/src/comby.rs
+      - crates/arkavo-git/src/remote_fallback.rs
+      - crates/arkavo-mcp-workspace/src/workspace.rs
+    changed: "2026-09-29"

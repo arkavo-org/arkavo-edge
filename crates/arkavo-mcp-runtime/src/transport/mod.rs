@@ -6,6 +6,7 @@ pub use sse::SseTransport;
 pub use stdio::StdioTransport;
 pub use websocket::WebSocketTransport;
 
+use arkavo_process_env::{ChildEnv, EnvSpec};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -86,15 +87,17 @@ pub enum TransportError {
     Json(#[from] serde_json::Error),
 }
 
-/// Create a transport from configuration
-#[allow(clippy::implicit_hasher)]
+/// Create a transport from configuration. A Stdio server's environment is
+/// resolved from `env` and this process's environment; see
+/// [`ChildEnv::isolated`].
 pub async fn create_transport(
     config: TransportConfig,
-    env: HashMap<String, String>,
+    env: &EnvSpec,
 ) -> Result<Box<dyn Transport>, TransportError> {
     match config {
         TransportConfig::Stdio { command, args, cwd } => {
-            let transport = StdioTransport::new(command, args, cwd, env).await?;
+            let env = ChildEnv::isolated_from_current(env);
+            let transport = StdioTransport::new(command, args, cwd, &env).await?;
             Ok(Box::new(transport))
         }
         TransportConfig::Sse { url, headers } => {

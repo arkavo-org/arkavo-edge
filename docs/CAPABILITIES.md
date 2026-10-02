@@ -14,7 +14,7 @@ Interactive capability map for the Arkavo Edge platform.
 | **Multi-Agent Mesh** | ✅ Stable | [19](specs/arkavo-edge/protocol.spec.yaml) | [mesh](examples/mesh/) | ⭐⭐ Intermediate | `./mesh.sh start 3` |
 | **HRM Orchestration** | ✅ Stable | [6](specs/arkavo-edge/hrm.spec.yaml) | [family-travel-mesh](examples/family-travel-mesh/) | ⭐⭐⭐ Advanced | `./demo.sh family-travel-mesh` |
 | **Gossip Learning** | ✅ Stable | [8](specs/arkavo-edge/gossip-protocol.spec.yaml) | [fleet-immunity](examples/fleet-immunity/) | ⭐⭐⭐ Advanced | `./demo.sh fleet-immunity` |
-| **MCP Tools** | ✅ Stable | [10](specs/arkavo-edge/mcp-tools.spec.yaml) | [minecraft](examples/minecraft/) | ⭐⭐ Intermediate | See [RUNBOOK](examples/minecraft/RUNBOOK.md) |
+| **MCP Tools** | ✅ Stable | [16](specs/arkavo-edge/mcp-tools.spec.yaml) | [minecraft](examples/minecraft/) | ⭐⭐ Intermediate | See [RUNBOOK](examples/minecraft/RUNBOOK.md) |
 | **TDF Encryption** | ✅ Stable | [9](specs/arkavo-edge/tdf.spec.yaml) | — | ⭐⭐ Intermediate | `cargo test -p arkavo-tdf` |
 | **Preflight Policies** | ✅ Stable | [17](specs/arkavo-edge/router.spec.yaml) | [secure-agent](examples/secure-agent/) | ⭐⭐ Intermediate | `./demo.sh secure-agent` |
 | **SDLC Team** | ✅ Stable | [11](specs/arkavo-edge/orchestrator.spec.yaml) | [software-development-lifecycle](examples/software-development-lifecycle/) | ⭐⭐⭐⭐ Expert | `./launch.sh` in dir |
@@ -109,7 +109,7 @@ Full-stack implementations:
 |-----------|------|---------|-------------|
 | TDF | [9 scenarios](specs/arkavo-edge/tdf.spec.yaml) | — | Trusted Data Format encryption |
 | Registration | [12 scenarios](specs/arkavo-edge/registration.spec.yaml) | — | Device onboarding |
-| Network Security | [17 scenarios](specs/arkavo-edge/network-security.spec.yaml) | [secure-agent](examples/secure-agent/) | Secure defaults |
+| Network Security | [21 scenarios](specs/arkavo-edge/network-security.spec.yaml) | [secure-agent](examples/secure-agent/) | Listener, auth and egress hardening (several scenarios wip) |
 
 ### Intelligence
 | Component | Spec | Example | Description |

@@ -1,13 +1,13 @@
+use crate::child::gh_command;
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use arkavo_git::attribution::format_pr_body;
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::process::Command;
 
 /// Check if GitHub CLI is installed and authenticated
 fn check_gh_installed() -> Result<()> {
-    let output = Command::new("gh")
+    let output = gh_command()
         .arg("--version")
         .output()
         .map_err(|_| ToolError::Mcp("GitHub CLI (gh) is not installed".to_string()))?;
@@ -19,7 +19,7 @@ fn check_gh_installed() -> Result<()> {
     }
 
     // Check authentication status
-    let auth_output = Command::new("gh")
+    let auth_output = gh_command()
         .args(["auth", "status"])
         .output()
         .map_err(|e| ToolError::Mcp(format!("Failed to check auth status: {e}")))?;
@@ -37,7 +37,7 @@ fn check_gh_installed() -> Result<()> {
 fn execute_gh_command(args: &[String]) -> Result<String> {
     check_gh_installed()?;
 
-    let output = Command::new("gh")
+    let output = gh_command()
         .args(args)
         .output()
         .map_err(|e| ToolError::Mcp(format!("Failed to execute gh command: {e}")))?;

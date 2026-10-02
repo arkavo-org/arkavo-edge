@@ -1,6 +1,20 @@
+use arkavo_process_env::ChildEnv;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
+
+/// Start an MCP server over stdio with exactly `env` as its environment.
+///
+/// Every stdio MCP server this crate starts goes through here, so none of
+/// them inherits the agent's environment and the provider keys in it.
+pub fn spawn_stdio(command: &str, args: &[String], env: &ChildEnv) -> std::io::Result<Child> {
+    env.command(command)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+}
 
 /// Manages spawning and lifecycle of MCP server processes
 #[derive(Debug)]
@@ -49,6 +63,7 @@ impl McpProcessManager {
         name: String,
         command: &str,
         args: &[String],
+        env: &ChildEnv,
     ) -> Result<McpProcess, Box<dyn std::error::Error>> {
         // Validate that the command exists
         validate_command(command)?;
@@ -59,12 +74,7 @@ impl McpProcessManager {
         }
 
         // Start the process
-        let mut child = Command::new(command)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+        let mut child = spawn_stdio(command, args, env)
             .map_err(|e| format!("Failed to spawn MCP server '{command}': {e}"))?;
 
         // Take ownership of stdin and stdout
@@ -281,4 +291,67 @@ fn validate_command(command: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_process_env::EnvSpec;
+    use arkavo_test_macros::spec;
+    use std::ffi::OsString;
+    use std::io::Read;
+
+    /// Starts `env` (Unix) or `set` (Windows) the way an MCP server is
+    /// started and returns the `NAME=value` lines it printed.
+    fn server_sees(env: &ChildEnv) -> Vec<String> {
+        #[cfg(unix)]
+        let (command, args) = ("sh", ["-c".to_string(), "env".to_string()]);
+        #[cfg(windows)]
+        let (command, args) = ("cmd", ["/C".to_string(), "set".to_string()]);
+        let mut child = spawn_stdio(command, &args, env).expect("spawn environment dump");
+        drop(child.stdin.take());
+        let mut out = String::new();
+        child
+            .stdout
+            .take()
+            .expect("stdout")
+            .read_to_string(&mut out)
+            .expect("read environment dump");
+        child.wait().expect("environment dump exits");
+        out.lines()
+            .map(|line| line.trim_end_matches('\r').to_string())
+            .collect()
+    }
+
+    #[spec("MCPR-008")]
+    #[test]
+    fn mcp_server_sees_only_baseline_and_declared_environment() {
+        let spec = EnvSpec {
+            set: [("MCP_PROBE_CONFIGURED".to_string(), "yes".to_string())].into(),
+            passthrough: vec!["GITHUB_TOKEN".to_string()],
+        };
+        let parent = [
+            ("PATH", std::env::var_os("PATH").unwrap_or_default()),
+            ("OPENAI_API_KEY", OsString::from("planted-secret")),
+            ("GITHUB_TOKEN", OsString::from("declared-token")),
+        ];
+        let seen = server_sees(&ChildEnv::isolated(parent, &spec));
+
+        assert!(
+            seen.iter().any(|l| l == "MCP_PROBE_CONFIGURED=yes"),
+            "{seen:?}"
+        );
+        assert!(
+            seen.iter().any(|l| l == "GITHUB_TOKEN=declared-token"),
+            "{seen:?}"
+        );
+        assert!(
+            !seen.iter().any(|l| l.contains("planted-secret")),
+            "{seen:?}"
+        );
+        assert!(
+            !seen.iter().any(|l| l.starts_with("CARGO_MANIFEST_DIR=")),
+            "the agent's own environment leaked into the MCP server"
+        );
+    }
 }
