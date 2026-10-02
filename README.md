@@ -109,7 +109,7 @@ Four example kits: `campaign-kit`, `code-review-kit`, `vrm-production-kit`, `com
 - **SwarmKit** - Declarative multi-agent kits with per-role TDF attribute-release policies. Four example kits in `examples/` covering marketing, code review, creative, and regulated domains. See [docs/SWARMKIT.md](docs/SWARMKIT.md).
 - Multi-provider routing (OpenAI, Anthropic, Gemini, Kimi, DeepSeek, local models)
 - **Local edge models via llama.cpp** - Gemma 4 (E2B/E4B/12B) by default; Ministral 3B/8B (with vision) also supported
-- Cost-aware model selection (real per-token estimates on full macOS/Linux builds; the musl-slim and Windows binaries use an approximate estimator)
+- Cost-aware model selection (real per-token estimates on full macOS/Linux builds; the Windows binary uses an approximate estimator)
 - iOS simulator automation (macOS only)
 - Security scanning (Semgrep, OSV, SBOM)
 
@@ -243,12 +243,11 @@ This split is intentional: encryption, access control, and identity are shipping
 |----------|-------------|----------|
 | macOS    | ARM64 (Apple Silicon) | Full support including iOS testing, local/remote LLM, mDNS |
 | Linux    | x86_64, ARM64 | Full support with local/remote LLM, mDNS |
-| Linux (musl) | x86_64 | Static/slim binary with memory and mDNS support |
 | Windows  | x86_64 | Memory, remote LLM, and mDNS support (no iOS testing) |
 
 mDNS discovery uses pure Rust implementation (mdns-sd crate) with no system dependencies
 
-**Note:** The Linux (musl) and Windows builds are compiled without a local inference backend. `arkavo`, `arkavo agent`, `arkavo chat`, `arkavo task`, and `arkavo ui` require one and exit with an error on those builds; utility commands such as `arkavo kit` still run. A cloud API key does not replace the local backend.
+**Note:** The Windows build is compiled without a local inference backend. `arkavo`, `arkavo agent`, `arkavo chat`, `arkavo task`, and `arkavo ui` require one and exit with an error on that build; utility commands such as `arkavo kit` still run. A cloud API key does not replace the local backend.
 
 **Note:** iOS simulator automation and testing capabilities are only available on macOS.
 

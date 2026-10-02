@@ -71,7 +71,7 @@ cargo test -p arkavo-cli --lib mock_provider::
 ## Architecture & Tech Stack
 - **Cross-Platform**: macOS (arm64), Linux (x64/aarch64), Windows (x86_64).
 - **Security**:
-  - **NO OpenSSL**: Use `rustls` exclusively (musl compatibility).
+  - **NO OpenSSL**: Use `rustls` exclusively: one TLS stack to patch, and no dependency on the host's OpenSSL version.
   - **Secrets**: Never commit or write to docs any API keys.
 - **Tool Pattern**: Each crate exports its own LLM tools via `register_tools(registry)`. No central tool crate. Avoids circular dependencies.
 - **Windows Specifics**:

@@ -114,7 +114,7 @@ arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 # apply_kit pipeline (match -> TDF-wrap -> ship over Iroh -> dispatch).
 arkavo-orchestrator = { path = "../arkavo-orchestrator", optional = true }
 
-# Claude Agent SDK integration (optional, requires non-musl target for OAuth)
+# Claude Agent SDK integration (optional)
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
 
 # Demo dependencies

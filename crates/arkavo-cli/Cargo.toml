@@ -28,7 +28,7 @@ windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/win
 mcp-tools = ["dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
 # macOS-specific MCP integration (auto-enabled on macOS when mcp-tools is enabled)
 mcp-macos = ["dep:arkavo-mcp-macos"]
-# Claude Agent SDK integration (requires non-musl target for OAuth)
+# Claude Agent SDK integration
 claude-agent = ["dep:arkavo-mcp-claude", "arkavo-server/claude-agent"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
@@ -141,7 +141,7 @@ arkavo-mcp-mesh = { path = "../arkavo-mcp-mesh", optional = true }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
-# Claude Agent SDK integration (optional, requires non-musl target for OAuth)
+# Claude Agent SDK integration (optional)
 arkavo-mcp-claude = { path = "../arkavo-mcp-claude", optional = true }
 
 [dev-dependencies]
