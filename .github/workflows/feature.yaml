@@ -1439,7 +1439,7 @@ jobs:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-gnu,aarch64-apple-darwin,x86_64-pc-windows-msvc
+          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,aarch64-apple-darwin,x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
@@ -1447,7 +1447,8 @@ jobs:
 
       - name: Check shipped feature sets for OpenSSL and native-tls
         run: |
-          # Every release target with default features, plus the container image's `cloud` set.
+          # The feature set of every binary release.yaml builds, plus the container image's.
+          # A feature only one release turns on (cef-ui, windows-default) can pull TLS in.
           status=0
           check() {
             target=$1; shift
@@ -1464,9 +1465,11 @@ jobs:
               fi
             done
           }
-          for target in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc; do
-            check "$target"
-          done
+          check x86_64-unknown-linux-gnu
+          check aarch64-unknown-linux-gnu
+          check aarch64-apple-darwin
+          check aarch64-apple-darwin --features cef-ui
+          check x86_64-pc-windows-msvc --no-default-features --features windows-default
           check x86_64-unknown-linux-gnu --no-default-features --features cloud
           [ "$status" -eq 0 ] && echo "✅ No OpenSSL or native-tls in any shipped build"
           exit "$status"
