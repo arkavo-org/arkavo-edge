@@ -2,7 +2,7 @@
 
 feature: Agent QR Registration and Authorization URLs
 module: arkavo_registration
-version: 0.67.2
+version: 0.68.0
 
 invariants:
   - Authorization URLs follow arkavo://agent/authorize scheme
@@ -32,6 +32,8 @@ scenarios:
         expected: Panic with unroutable port error
       - condition: Agent name longer than 64 Unicode scalars, or holding a control or format character
         expected: Name written without those characters and cut to 64 scalars, or left out when nothing printable remains, so the Arkavo app still accepts the link
+      - condition: Endpoint is not an http:// URL (the first-run welcome has no listener)
+        expected: No rpc parameter, so the Arkavo app takes the Arkavo Network path instead of refusing the link
 
   - id: QREG-002
     name: QR code from agent descriptor
@@ -52,7 +54,8 @@ scenarios:
     criticality: high
     given:
       - AgentDescriptor created
-      - Entitlements specified
+      - Entitlements specified as attribute FQNs (e.g. https://arkavo.ai/attr/tdf/value/decrypt),
+        the vocabulary authnz-rs delegates from the approving person's entitlements
     when: with_entitlements() called
     then:
       - Entitlements URL-encoded in authorization URL

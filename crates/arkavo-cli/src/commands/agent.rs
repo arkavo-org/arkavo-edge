@@ -725,14 +725,20 @@ pub async fn start_agent_server(
     // via `--trust` (which surfaces only the QR, without the rest of the verbose output).
     if !quiet || trust {
         use arkavo_device_identity::get_or_create_device_id;
-        use arkavo_registration::{AgentDescriptor, qr::display_authorization_qr};
+        use arkavo_registration::{
+            AgentDescriptor, default_entitlements, load_or_create_agent_keypair,
+            qr::display_authorization_qr,
+        };
 
         // Get or create device ID (needed for system initialization)
         let _device_id =
             get_or_create_device_id().map_err(|e| format!("Failed to get device ID: {e}"))?;
 
-        // Reuse persisted device keypair loaded at startup (Phase 1 identity)
-        let public_key = device_keypair.public_key();
+        // The link names the agent's own identity, not the device's: what a
+        // person authorizes on the phone is this agent.
+        let public_key = load_or_create_agent_keypair()
+            .map_err(|e| format!("Failed to load the agent keypair: {e}"))?
+            .public_key();
 
         // Extract folder name (last part of agent name) for display
         let folder_id = config
@@ -742,7 +748,6 @@ pub async fn start_agent_server(
             .unwrap_or("unknown")
             .to_string();
 
-        // Create agent descriptor with DID:key and default entitlements
         let mdns_service = if config.mdns_enabled {
             Some(format!("{}._a2a._tcp.local.", config.name))
         } else {
@@ -751,10 +756,7 @@ pub async fn start_agent_server(
 
         let descriptor = AgentDescriptor::new(public_key, endpoint, mdns_service, folder_id)
             .with_name(&config.name)
-            .with_entitlements(vec![
-                "agent.capability.chat".to_string(),
-                "agent.capability.tools".to_string(),
-            ]);
+            .with_entitlements(default_entitlements());
 
         // Display authorization QR code with DID:key
         println!("\n{}", "=".repeat(60));

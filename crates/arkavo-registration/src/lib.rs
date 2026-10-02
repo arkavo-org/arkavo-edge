@@ -41,6 +41,35 @@ fn link_name(name: &str) -> Option<String> {
     (!kept.trim().is_empty()).then_some(kept)
 }
 
+/// Entitlements an agent asks for when its link is scanned. They are
+/// attribute FQNs because authnz-rs delegates from the person's own
+/// entitlements, which are FQNs; it refuses names the person does not hold,
+/// so the older `agent.capability.*` names could never be authorized.
+pub const DEFAULT_ENTITLEMENTS: &[&str] = &[
+    "https://arkavo.ai/attr/tdf/value/decrypt",
+    "https://arkavo.ai/attr/action/value/read",
+];
+
+/// [`DEFAULT_ENTITLEMENTS`] as the owned list a descriptor takes.
+pub fn default_entitlements() -> Vec<String> {
+    DEFAULT_ENTITLEMENTS.iter().map(|e| e.to_string()).collect()
+}
+
+/// The agent's own identity keypair, created and stored on first use.
+///
+/// This is the key the authorization link names. It is kept apart from the
+/// device keypair so that what a person authorizes is the agent, and so that
+/// replacing one identity never silently changes the other.
+pub fn load_or_create_agent_keypair() -> Result<AgentKeypair, RegistrationError> {
+    use arkavo_device_identity::keypair;
+    if let Some(bytes) = keypair::get_agent_keypair()? {
+        return Ok(AgentKeypair::from_bytes(&bytes)?);
+    }
+    let created = AgentKeypair::generate();
+    keypair::store_agent_keypair(&created.to_bytes())?;
+    Ok(created)
+}
+
 #[derive(Error, Debug)]
 pub enum RegistrationError {
     #[error("QR code generation failed: {0}")]
@@ -49,6 +78,8 @@ pub enum RegistrationError {
     InvalidPayload(String),
     #[error("Crypto error: {0}")]
     CryptoError(#[from] arkavo_crypto::CryptoError),
+    #[error("Identity storage error: {0}")]
+    Storage(#[from] arkavo_device_identity::DeviceIdentityError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,7 +122,9 @@ impl AgentDescriptor {
         self
     }
 
-    /// Set the entitlements (capabilities) for authorization.
+    /// Set the entitlements for authorization: attribute FQNs such as
+    /// [`DEFAULT_ENTITLEMENTS`], which authnz-rs delegates from the entitlements
+    /// the approving person holds.
     #[must_use]
     pub fn with_entitlements(mut self, entitlements: Vec<String>) -> Self {
         self.entitlements = entitlements;
@@ -104,13 +137,13 @@ impl AgentDescriptor {
     ///
     /// The `rpc` parameter provides the WebSocket JSON-RPC endpoint for the mobile
     /// client to connect and use `registration.challenge` / `registration.verify`.
+    /// It is written only for an `http://` endpoint: anything else names nothing
+    /// a client can dial (the first-run welcome has no listener yet), and the
+    /// Arkavo app refuses the whole link when `rpc` is not a `ws://host:port` URL.
     ///
     /// # Panics
     /// Panics if the endpoint contains an unroutable address (0.0.0.0) or ephemeral port (0).
     pub fn to_authorization_url(&self) -> String {
-        // Validate endpoint is routable before generating URL
-        self.validate_endpoint();
-
         let did = self.did_key.as_deref().unwrap_or("");
         let mut url = format!("arkavo://agent/authorize?did={}", percent_encode(did));
 
@@ -118,9 +151,13 @@ impl AgentDescriptor {
             url.push_str(&format!("&name={}", percent_encode(&name)));
         }
 
-        // Convert http:// endpoint to ws:// for WebSocket JSON-RPC connection
-        let ws_endpoint = self.endpoint.replacen("http://", "ws://", 1);
-        url.push_str(&format!("&rpc={}", percent_encode(&ws_endpoint)));
+        if let Some(authority) = self.endpoint.strip_prefix("http://") {
+            self.validate_endpoint();
+            url.push_str(&format!(
+                "&rpc={}",
+                percent_encode(&format!("ws://{authority}"))
+            ));
+        }
 
         if !self.entitlements.is_empty() {
             let entitlements_str = self.entitlements.join(",");
@@ -449,5 +486,41 @@ mod tests {
     fn test_authorization_url_omits_a_name_with_nothing_printable() {
         assert_eq!(link_name_param("\u{200B}\u{1}"), None);
         assert_eq!(link_name_param("   "), None);
+    }
+
+    /// The first-run welcome has no listener; an `rpc` that is not a
+    /// `ws://host:port` URL made the Arkavo app refuse the whole link.
+    #[spec("QREG-001")]
+    #[test]
+    fn test_authorization_url_leaves_out_rpc_without_an_http_endpoint() {
+        for endpoint in ["", "host._a2a._tcp.local."] {
+            let url = AgentDescriptor::new(
+                AgentKeypair::generate().public_key(),
+                endpoint.to_string(),
+                None,
+                "welcome".to_string(),
+            )
+            .with_entitlements(default_entitlements())
+            .to_authorization_url();
+            assert!(!url.contains("rpc="), "{url}");
+            assert!(url.contains("&entitlements="), "{url}");
+        }
+    }
+
+    /// authnz-rs refuses to delegate a name the person does not hold, and
+    /// accounts hold attribute FQNs, never `agent.capability.*`.
+    #[spec("QREG-003")]
+    #[test]
+    fn test_default_entitlements_are_attribute_fqns_the_app_accepts() {
+        let names = default_entitlements();
+        assert!((1..=16).contains(&names.len()));
+        for name in &names {
+            assert!(name.starts_with("https://arkavo.ai/attr/"), "{name}");
+            assert!(name.len() <= 256, "{name}");
+            assert!(!name.contains(','), "{name}");
+            assert!(!name.chars().any(|c| c.is_whitespace() || c.is_control()));
+        }
+        let unique: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(unique.len(), names.len());
     }
 }

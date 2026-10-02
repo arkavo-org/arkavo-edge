@@ -184,7 +184,7 @@ components:
     module: arkavo_device_identity
     description: Device ID management and secure storage
     criticality: high
-    scenario_count: 6
+    scenario_count: 7
     invariants:
       - Device ID unique per installation
       - Persists across restarts
@@ -1024,7 +1024,7 @@ components:
 
 stats:
   total_specs: 87
-  total_scenarios: 851
+  total_scenarios: 852
   critical_scenarios: 273
   coverage_areas:
     - authentication
