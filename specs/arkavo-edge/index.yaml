@@ -835,7 +835,7 @@ components:
     module: arkavo_llama_cpp
     description: Local LLM inference engine
     criticality: critical
-    scenario_count: 10
+    scenario_count: 9
     invariants:
       - Model loading validates GGUF format
       - GPU layers auto-detected
@@ -1024,7 +1024,7 @@ components:
 
 stats:
   total_specs: 87
-  total_scenarios: 852
+  total_scenarios: 851
   critical_scenarios: 273
   coverage_areas:
     - authentication
