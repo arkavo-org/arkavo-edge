@@ -230,7 +230,7 @@ impl ComplexityScorer {
         // Also factor in task description length (longer descriptions = more complex output)
         let length_factor = (task.len() as f64 / 100.0).min(3.0);
 
-        (base_estimate * (1.0 + length_factor * 0.2)) as u32
+        (base_estimate * length_factor.mul_add(0.2, 1.0)) as u32
     }
 
     fn calculate_category_spread(&self, task: &str) -> f32 {
