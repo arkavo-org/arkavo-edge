@@ -80,14 +80,14 @@ scenarios:
     changed: "2026-10-02"
 
   - id: INGRESS-004
-    name: Gossip keys bound only with proof and never replaced
+    name: Gossip keys bound only with proof and replaced only after the peer leaves
     criticality: critical
     given:
       - agent/exchangeKeys, the interim path until membership statements exist
     when: A caller binds a gossip key to a peer id
     then:
       - The caller signs its id, its key, the recipient's id and a fresh challenge; the recipient signs its id, its key and that challenge back, and each side binds the other's key only on a valid signature
-      - A key already bound to the id is never replaced; binding the same key again is a no-op
+      - A key bound to the id is not replaced while the peer is present; binding the same key again is a no-op
       - A peer's key is forgotten when mDNS reports the peer gone, and an agent sends that goodbye when it shuts down
       - Only votes from this agent or a peer discovery found count toward a patch or lesson quorum, on the vote and the delivery paths
     edge_cases:
@@ -101,12 +101,14 @@ scenarios:
         expected: Refused with a warning until the receiver restarts; the gossip key is new on every start (INGRESS-005)
       - condition: A host on the link spoofing mDNS announcements
         expected: Can still add a peer id and vote under it; membership (INGRESS-015) closes this
+      - condition: A host on the link sends a spoofed mDNS goodbye for a peer, or races a real restart
+        expected: "The receiver forgets the peer's key, and the host can bind its own key under that id with a valid proof: a takeover of the peer id. Goodbyes are unauthenticated; only a persistent workload key (INGRESS-005) closes this"
     refs:
       - crates/arkavo-gossip/src/key_exchange.rs
       - crates/arkavo-gossip/src/verification.rs:37-56
       - crates/arkavo-gossip/src/protocol.rs:163-179
       - crates/arkavo-server/src/server/mod.rs
-      - crates/arkavo-cli/src/commands/agent.rs:1305-1328
+      - crates/arkavo-cli/src/commands/agent/advertise.rs
     changed: "2026-10-04"
 
   - id: INGRESS-005

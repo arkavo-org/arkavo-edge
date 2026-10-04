@@ -1299,12 +1299,7 @@ fn broadcast_agent_mdns_sync(
 
         println!("mDNS service shutting down...");
 
-        // Announce the departure. Dropping the daemon sends no goodbye, so
-        // peers kept this agent and its gossip key, and refused the new key
-        // it came back with after a restart.
-        if let Ok(done) = mdns.unregister(&fullname) {
-            let _ = done.recv_timeout(Duration::from_secs(1));
-        }
+        advertise::announce_departure(&mdns, &fullname);
 
         // Wait for discovery thread to finish
         let _ = discovery_thread.join();

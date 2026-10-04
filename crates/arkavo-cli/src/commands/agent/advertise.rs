@@ -161,6 +161,17 @@ fn txt_properties(
     properties
 }
 
+/// Withdraws the agent's mDNS record, waiting up to a second for the daemon
+/// to send the goodbye. Dropping the daemon sends none, so peers kept the
+/// agent and its gossip key, and refused the new key it came back with after
+/// a restart.
+#[cfg(feature = "mdns")]
+pub(super) fn announce_departure(mdns: &mdns_sd::ServiceDaemon, fullname: &str) {
+    if let Ok(done) = mdns.unregister(fullname) {
+        let _ = done.recv_timeout(std::time::Duration::from_secs(1));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,5 +386,84 @@ mod record_tests {
         let addresses: Vec<_> = info.get_addresses().iter().copied().collect();
         assert_eq!(addresses, vec![bound.ip()]);
         assert_eq!(info.get_property_val_str("ip"), Some("10.0.0.140"));
+    }
+}
+
+#[cfg(all(test, feature = "mdns"))]
+mod departure_tests {
+    use super::*;
+    use mdns_sd::{IfKind, ServiceDaemon, ServiceEvent, ServiceInfo};
+    use std::net::Ipv4Addr;
+    use std::time::{Duration, Instant};
+
+    const SERVICE_TYPE: &str = "_a2a._tcp.local.";
+
+    /// A daemon on the loopback interfaces only, so nothing the test sends
+    /// leaves the machine.
+    fn loopback_daemon() -> ServiceDaemon {
+        let daemon = ServiceDaemon::new().expect("mDNS daemon");
+        daemon
+            .disable_interface(IfKind::All)
+            .expect("leave every interface");
+        daemon
+            .enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])
+            .expect("join the loopback interfaces");
+        daemon
+    }
+
+    fn wait_for(
+        events: &mdns_sd::Receiver<ServiceEvent>,
+        what: impl Fn(&ServiceEvent) -> bool,
+    ) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            match events.recv_timeout(left) {
+                Ok(event) if what(&event) => return true,
+                Ok(_) => {}
+                Err(_) => return false,
+            }
+        }
+        false
+    }
+
+    /// Regression: an agent that shut down cleanly sent no goodbye, so a
+    /// peer never saw it leave and refused the gossip key it restarted with.
+    #[test]
+    fn a_departing_agent_is_seen_to_leave() {
+        let agent_id = format!("departure-{}", std::process::id());
+        let agent = loopback_daemon();
+        let service = ServiceInfo::new(
+            SERVICE_TYPE,
+            &agent_id,
+            &format!("{agent_id}.local."),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            43_210,
+            HashMap::from([("agent_id".to_string(), agent_id.clone())]),
+        )
+        .expect("service info");
+        let fullname = service.get_fullname().to_string();
+        agent.register(service).expect("register the agent");
+
+        let peer = loopback_daemon();
+        let events = peer.browse(SERVICE_TYPE).expect("browse");
+        assert!(
+            wait_for(
+                &events,
+                |e| matches!(e, ServiceEvent::ServiceResolved(info) if info.get_fullname() == fullname)
+            ),
+            "the peer never saw the agent arrive"
+        );
+
+        announce_departure(&agent, &fullname);
+        assert!(
+            wait_for(
+                &events,
+                |e| matches!(e, ServiceEvent::ServiceRemoved(_, name) if *name == fullname)
+            ),
+            "the peer never saw the agent leave"
+        );
+
+        let _ = peer.shutdown();
+        let _ = agent.shutdown();
     }
 }

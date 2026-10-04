@@ -278,8 +278,8 @@ pub trait A2aRpc {
     ) -> RpcResult<Vec<arkavo_gossip::GossipMessage>>;
 
     /// Exchange gossip keys with a peer: each side proves it holds its key
-    /// (`arkavo_gossip::key_exchange`), and a key already bound to the peer is
-    /// never replaced.
+    /// (`arkavo_gossip::key_exchange`), and a key bound to the peer is not
+    /// replaced until the peer is seen to leave.
     #[method(name = "agent/exchangeKeys")]
     async fn exchange_keys(
         &self,
