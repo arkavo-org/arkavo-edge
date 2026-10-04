@@ -2,7 +2,7 @@
 
 feature: Network Security and Secure Defaults
 module: arkavo_security
-version: 1.0.0
+version: 1.0.1
 
 invariants:
   - An agent not announced over mDNS binds to localhost (127.0.0.1) only by default; an agent announced over mDNS binds every interface so the hosts it is announced to can reach it
@@ -106,7 +106,11 @@ scenarios:
       - For localhost binding, only "localhost", "127.0.0.1", "[::1]" accepted
       - Requests with external Host headers are dropped
       - Prevents browser-based DNS rebinding attacks
-    refs: [crates/arkavo-validation/src/url.rs:164-224]
+    refs: ["crates/arkavo-validation/src/url.rs:222-282", crates/arkavo-agui/src/gateway_origin.rs]
+    changed: "2026-10-04"
+    edge_cases:
+      - condition: Which listeners enforce it
+        expected: "The arkavo ui gateway (AGUI-021). The A2A agent listener checks no Host or Origin yet (INGRESS-001, wip)"
 
   - id: NET-007
     name: Block cloud metadata and internal network access

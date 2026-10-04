@@ -17,6 +17,7 @@ pub mod gateway_events;
 pub mod gateway_health;
 pub mod gateway_mdns;
 pub mod gateway_monitors;
+pub mod gateway_origin;
 pub mod gateway_proxy;
 pub mod gateway_routing;
 pub mod gateway_security;
