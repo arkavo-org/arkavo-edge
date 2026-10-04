@@ -1,6 +1,4 @@
 use arkavo_config_encryption::AgentCredential;
-#[cfg(feature = "mdns")]
-use arkavo_protocol::get_service_ip;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
@@ -167,15 +165,15 @@ OPTIONS:
     --trust             Show the agent authorization QR code (DID:key) on startup
 
 NETWORK:
-    By default the agent listens on loopback and announces itself over mDNS
-    for discovery on this machine. The RPC endpoint is not authenticated yet.
-    To accept connections from other machines, choose an explicit address with
-    --bind 0.0.0.0 or runtime.listen. A network-reachable start prints a notice:
-    run the agent on networks you trust.
+    By default the agent announces itself over mDNS and listens on every
+    interface, so the machines it is announced to can reach it. The RPC
+    endpoint is not authenticated yet. A network-reachable start prints a
+    notice: run the agent on networks you trust.
     --bind 127.0.0.1 keeps the agent on this machine, whatever the kit says;
-    agents on the same machine still discover it. A kit can pin an address with
-    runtime.listen, for example runtime.listen: "127.0.0.1:8342". --bind
-    overrides it, and says so.
+    an agent on loopback is not announced over mDNS. A kit with
+    runtime.mdns: false listens on loopback unless it names an address. A kit
+    can pin an address with runtime.listen, for example runtime.listen:
+    "127.0.0.1:8342". --bind overrides it, and says so.
 
 EXAMPLES:
     arkavo agent                           # Run with auto-discovery
@@ -183,7 +181,7 @@ EXAMPLES:
     arkavo agent --port 8343 -v            # Run on specific port with verbose
     arkavo agent -c team.swarmkit.yaml -n worker -p 8343  # Run one role of a multi-role kit
     arkavo agent --bind 127.0.0.1          # Stay on this machine
-    arkavo agent run --bind 0.0.0.0 --trust # Expose the agent and show its QR code"#;
+    arkavo agent run --trust               # Show the QR code that pairs a device"#;
 
 /// Deprecated: `arkavo agent init` no longer writes AGENTS.md.
 ///
@@ -351,7 +349,7 @@ impl Default for AgentConfig {
             purpose: String::new(),
             model: String::new(),
             mode: arkavo_protocol::agent_config::AgentMode::default(),
-            listen: listen::DEFAULT_LISTEN.to_string(),
+            listen: listen::default_listen(true).to_string(),
             mdns_enabled: true, // Zero-config discovery
             mcp_servers: Vec::new(),
             api_keys: std::collections::HashMap::new(),
@@ -710,6 +708,12 @@ pub async fn start_agent_server(
     if let Some(warning) = listen::exposure_warning(bound_addr) {
         eprintln!("{warning}");
     }
+    // Shown even in a quiet run for the same reason: the kit asked for the
+    // agent to be found on the network, and it will not be.
+    if let Some(notice) = advertise::mdns_off_notice(config.mdns_enabled, bound_addr) {
+        eprintln!("{notice}");
+    }
+    let mdns_announced = advertise::announced_over_mdns(config.mdns_enabled, bound_addr);
 
     // One address for everything handed to clients: the agent card, the
     // authorization URL and, below, the mDNS record.
@@ -748,7 +752,7 @@ pub async fn start_agent_server(
             .unwrap_or("unknown")
             .to_string();
 
-        let mdns_service = if config.mdns_enabled {
+        let mdns_service = if mdns_announced {
             Some(format!("{}._a2a._tcp.local.", config.name))
         } else {
             None
@@ -773,7 +777,7 @@ pub async fn start_agent_server(
     let (peer_tx, mut peer_rx) = tokio::sync::mpsc::channel::<(String, bool, Option<String>)>(100);
 
     // Start mDNS broadcasting if enabled
-    let mdns_thread_handle = if config.mdns_enabled {
+    let mdns_thread_handle = if mdns_announced {
         let config_clone = config.clone();
         let shutdown_flag_clone = shutdown_flag.clone();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1166,24 +1170,10 @@ fn broadcast_agent_mdns_sync(
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
-        use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
         use std::thread;
         use std::time::Duration;
 
-        let port = bound_addr.port();
-        let service_ip =
-            advertise::advertised_addr(bound_addr, || std::net::IpAddr::V4(get_service_ip())).ip();
-
-        // Create mDNS daemon
-        let mdns = ServiceDaemon::new()?;
-
-        // mdns-sd leaves loopback interfaces out unless asked, and announces
-        // an address only on the interface whose network holds it. Without
-        // this a loopback address is announced nowhere, not even to this
-        // machine; with it the record still never leaves the machine. An
-        // agent on a network address needs it too: this daemon also browses,
-        // and an agent bound to loopback is announced on loopback only.
-        mdns.enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])?;
+        let mdns = advertise::mdns_daemon(bound_addr)?;
 
         // Start browsing for other agents
         let receiver = mdns.browse("_a2a._tcp.local.")?;
@@ -1266,24 +1256,13 @@ fn broadcast_agent_mdns_sync(
         // Capability tags are coarse routing labels; they are derived from
         // the purpose but do not carry any of its text.
         let capabilities = get_agent_capabilities(&config.name, &config.purpose);
-        let properties =
-            advertise::txt_properties(config, service_ip, public_key.as_deref(), &capabilities);
-
-        // Create service info
-        let service_type = "_a2a._tcp.local.";
-        let instance_name = config.name.clone();
-        let host_name = format!("{}.local.", config.name);
-
-        let service_info = ServiceInfo::new(
-            service_type,
-            &instance_name,
-            &host_name,
-            service_ip,
-            port,
-            properties,
+        let service_info = advertise::service_info(
+            config,
+            bound_addr,
+            local_ip,
+            public_key.as_deref(),
+            &capabilities,
         )?;
-
-        // Register the service
         mdns.register(service_info)?;
 
         // Signal that mDNS is ready
@@ -1623,8 +1602,9 @@ mod tests {
         assert!(err.contains("--bind"), "{err}");
     }
 
-    /// The help must match the loopback default and keep QR authorization
-    /// separate from the address selected by `--bind`.
+    /// The help must match the network default of an agent announced over
+    /// mDNS and keep QR authorization separate from the address selected by
+    /// `--bind`.
     #[test]
     fn help_describes_the_network_default_and_the_bind_option() {
         let (options, network) = USAGE
@@ -1650,8 +1630,9 @@ mod tests {
         assert!(bind.contains("runtime.listen"), "{bind}");
         assert!(bind.contains("-p"), "{bind}");
 
-        assert!(network.contains("listens on loopback"), "{network}");
-        assert!(network.contains("mDNS"), "{network}");
+        assert!(network.contains("listens on every"), "{network}");
+        assert!(network.contains("not announced over mDNS"), "{network}");
+        assert!(network.contains("runtime.mdns: false"), "{network}");
         assert!(network.contains("not authenticated"), "{network}");
         assert!(network.contains("notice"), "{network}");
         assert!(network.contains("--bind 127.0.0.1"), "{network}");
@@ -1783,34 +1764,36 @@ provenance:
         }
     }
 
+    /// Regression (#729): the zero-config agent was announced over mDNS
+    /// while listening on loopback, where no other machine could reach it.
     #[test]
-    fn a_start_with_no_kit_listens_on_loopback() {
+    fn a_start_with_no_kit_listens_on_the_network() {
         let dir = tempfile::tempdir().unwrap();
         let (config, listen_addr, bind_notice) = resolve_start(&[], None, dir.path()).unwrap();
 
-        assert_eq!(listen_addr, "127.0.0.1:0".parse().unwrap());
-        assert_eq!(config.listen, "127.0.0.1:0");
+        assert_eq!(listen_addr, "0.0.0.0:0".parse().unwrap());
+        assert_eq!(config.listen, "0.0.0.0:0");
         assert!(config.mdns_enabled);
         assert_eq!(bind_notice, None);
+        assert!(listen::exposure_warning(listen_addr).is_some());
     }
 
     /// `--trust` shows the QR code and changes nothing about where the
-    /// agent listens; reaching it from another device requires an explicit bind.
+    /// agent listens.
     #[test]
     fn a_trust_start_listens_where_a_default_start_does() {
         let dir = tempfile::tempdir().unwrap();
         let (config, listen_addr, bind_notice) =
             resolve_start(&["--trust"], None, dir.path()).unwrap();
 
-        assert_eq!(listen_addr, "127.0.0.1:0".parse().unwrap());
-        assert_eq!(config.listen, "127.0.0.1:0");
+        assert_eq!(listen_addr, "0.0.0.0:0".parse().unwrap());
+        assert_eq!(config.listen, "0.0.0.0:0");
         assert!(config.mdns_enabled);
         assert_eq!(bind_notice, None);
-        assert!(listen::exposure_warning(listen_addr).is_none());
 
         let (_, with_port, _) =
             resolve_start(&["--trust", "-p", "8343"], None, dir.path()).unwrap();
-        assert_eq!(with_port, "127.0.0.1:8343".parse().unwrap());
+        assert_eq!(with_port, "0.0.0.0:8343".parse().unwrap());
     }
 
     #[test]
@@ -1831,7 +1814,7 @@ provenance:
     fn a_port_alone_never_changes_the_host() {
         let dir = tempfile::tempdir().unwrap();
         let (_, no_kit, _) = resolve_start(&["-p", "8343"], None, dir.path()).unwrap();
-        assert_eq!(no_kit, "127.0.0.1:8343".parse().unwrap());
+        assert_eq!(no_kit, "0.0.0.0:8343".parse().unwrap());
 
         let kit = write_kit_listening_on(dir.path(), "127.0.0.1:8342");
         let (_, with_kit, bind_notice) =

@@ -111,9 +111,9 @@ arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n auditor 
 
 Send a running role work with `arkavo chat --agent-id <role-id>` or `arkavo task --agent-id <role-id> '<task>'`.
 
-By default an agent listens on loopback and announces itself over mDNS for discovery on this machine. To accept connections from other machines, choose an explicit `--bind` or `runtime.listen` address. The agent's RPC endpoint is not authenticated yet, so run it on networks you trust.
+By default an agent announces itself over mDNS and listens on every interface, so the machines it is announced to, this one included, can reach it. The agent's RPC endpoint is not authenticated yet, so run it on networks you trust. A kit with `runtime.mdns: false` listens on loopback unless it names an address.
 
-`--bind 127.0.0.1` keeps an agent on this machine: it listens on loopback and is not announced on the network. A kit can pin an address with `runtime.listen`:
+`--bind 127.0.0.1` keeps an agent on this machine: it listens on loopback and is not announced over mDNS, so other agents, `arkavo chat --agent-id` and `arkavo task --agent-id` cannot find it. A kit can pin an address with `runtime.listen`:
 
 ```yaml
 runtime:
@@ -172,7 +172,7 @@ The message metadata marks it as a step of a run:
 
 `step` and `attempt` count from 1. An agent that receives a message with a `pipeline` key in its metadata answers it on its own: outside its agent loop, with no conversation from earlier messages, and never as the start of a pipeline. If `timeout_ms` is set, the agent stops working on the step after that long and fails its task.
 
-The RPC endpoint does not authenticate callers, so the marker is not a credential: an agent accepts it from any caller that can reach the endpoint. By default that is the local network, so run a pipeline on a network you trust, or start its roles with `--bind 127.0.0.1` or a loopback `runtime.listen` when they all run on one machine.
+The RPC endpoint does not authenticate callers, so the marker is not a credential: an agent accepts it from any caller that can reach the endpoint. By default that is the local network, so run a pipeline on a network you trust. The entry role finds the other roles over mDNS, so a role on loopback, which is not announced, cannot take part.
 
 #### The critic's verdict
 

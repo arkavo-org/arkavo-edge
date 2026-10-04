@@ -499,20 +499,22 @@ mod tests {
             .unwrap_or_else(|| panic!("the {name} check always runs"))
     }
 
-    /// The audit and startup must agree on the built-in loopback default.
+    /// The audit and startup must agree on the built-in default: the
+    /// zero-config agent is announced over mDNS, so it listens on the
+    /// network.
     #[test]
-    fn an_audit_with_no_kit_reports_the_loopback_default() {
+    fn an_audit_with_no_kit_reports_the_network_default() {
         let dir = tempfile::tempdir().unwrap();
         let report = AuditReport::run_at(dir.path(), None);
 
         let bind = check(&report, "Bind address");
-        assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
-        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
+        assert_eq!(bind.status, AuditStatus::Fail, "{}", bind.message);
+        assert!(bind.message.contains("0.0.0.0:0"), "{}", bind.message);
         assert_eq!(
             check(&report, "Transport encryption").status,
-            AuditStatus::Pass
+            AuditStatus::Fail
         );
-        assert_eq!(check(&report, "Authentication").status, AuditStatus::Warn);
+        assert_eq!(check(&report, "Authentication").status, AuditStatus::Fail);
     }
 
     #[test]

@@ -8,16 +8,29 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-/// Listen address used when the kit has no `runtime.listen`, and for the
-/// zero-config default: loopback, on a port the OS picks.
+/// Listen address for an agent that announces itself over mDNS and names no
+/// address of its own: every interface, on a port the OS picks.
 ///
-/// The endpoint does not authenticate callers, so exposing it to other
-/// machines requires an explicit `--bind` or `runtime.listen` address.
-pub(crate) const DEFAULT_LISTEN: &str = "127.0.0.1:0";
+/// mDNS tells the other machines on the network where the agent is, and an
+/// agent they cannot reach has nothing worth announcing. The endpoint does
+/// not authenticate callers, so the start prints [`exposure_warning`].
+pub(crate) const NETWORK_LISTEN: &str = "0.0.0.0:0";
 
 /// A listen address for this machine only, on a port the OS picks. Shown to
 /// the operator as the value to pin in a kit.
 pub(crate) const LOOPBACK_LISTEN: &str = "127.0.0.1:0";
+
+/// Listen address used when neither the kit's `runtime.listen` nor `--bind`
+/// names one: the network when the agent announces itself over mDNS
+/// (`runtime.mdns`, on unless the kit turns it off), this machine when it
+/// does not.
+pub(crate) fn default_listen(mdns_enabled: bool) -> &'static str {
+    if mdns_enabled {
+        NETWORK_LISTEN
+    } else {
+        LOOPBACK_LISTEN
+    }
+}
 
 /// The `--bind` value that keeps an agent on this machine. Shown to the
 /// operator wherever loopback is the advice.
@@ -188,9 +201,21 @@ mod tests {
         );
     }
 
+    /// Regression (#729): an agent announced over mDNS listened on loopback,
+    /// so other machines were told about an agent they could not reach.
+    #[spec("NET-002")]
     #[test]
-    fn the_default_listen_address_is_loopback() {
-        let default = parse_listen(DEFAULT_LISTEN).unwrap();
+    fn an_agent_announced_over_mdns_listens_on_the_network_by_default() {
+        let default = parse_listen(default_listen(true)).unwrap();
+        assert!(default.ip().is_unspecified());
+        assert_eq!(default.port(), 0);
+        assert!(exposure_warning(default).is_some());
+    }
+
+    #[spec("NET-002")]
+    #[test]
+    fn an_agent_not_announced_over_mdns_listens_on_loopback_by_default() {
+        let default = parse_listen(default_listen(false)).unwrap();
         assert_eq!(default.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert_eq!(default.port(), 0);
         assert_eq!(exposure_warning(default), None);
@@ -294,14 +319,14 @@ mod tests {
     #[test]
     fn bind_moves_the_default_to_the_named_host_without_a_notice() {
         assert_eq!(
-            bind_listen(addr(DEFAULT_LISTEN), bind("127.0.0.1"), None),
+            bind_listen(addr(NETWORK_LISTEN), bind("127.0.0.1"), None),
             BindListen {
                 addr: addr("127.0.0.1:0"),
                 notice: None,
             }
         );
         assert_eq!(
-            bind_listen(addr(DEFAULT_LISTEN), bind("[::1]"), None).addr,
+            bind_listen(addr(NETWORK_LISTEN), bind("[::1]"), None).addr,
             addr("[::1]:0")
         );
     }
@@ -329,7 +354,7 @@ mod tests {
             addr("127.0.0.1:8342")
         );
         assert_eq!(
-            bind_listen(addr(DEFAULT_LISTEN), bind("[::1]:8342"), None).addr,
+            bind_listen(addr(NETWORK_LISTEN), bind("[::1]:8342"), None).addr,
             addr("[::1]:8342")
         );
     }

@@ -149,7 +149,7 @@ Add to `arkavo-swarmkit` (validated, optional fields so existing kits stay valid
 ```yaml
 runtime:
   mode: orchestrator | specialist   # default orchestrator for single-role kits
-  listen: "127.0.0.1:0"             # optional; the default is "127.0.0.1:0". -p changes the port, not the host
+  listen: "127.0.0.1:0"             # optional; the default is "0.0.0.0:0" with mdns on, "127.0.0.1:0" with it off. -p changes the port, not the host
   mdns: true
   cloud_policy: local_only | ask_before_cloud | cloud_within_cap
   max_cost_per_session: 1.0         # dollars; maps to BudgetYamlConfig
@@ -168,7 +168,7 @@ runtime:
       env_passthrough: [GITHUB_TOKEN]  # names only
 ```
 
-Without `runtime.listen` an agent listens on loopback (`127.0.0.1`, OS-assigned port) and announces itself over mDNS for discovery on this machine. Accepting connections from other machines requires an explicit `--bind` or `runtime.listen` address. The RPC endpoint is not authenticated yet, so run it on networks you trust. `--bind 127.0.0.1` keeps an agent on this machine: it listens on loopback, keeps the port that `-p` or `runtime.listen` selects, and is not announced on the network. A kit can pin an address with `runtime.listen`; `--bind` overrides it.
+Without `runtime.listen` an agent announced over mDNS (`runtime.mdns`, on unless the kit turns it off) listens on every interface (`0.0.0.0`, OS-assigned port), so the machines it is announced to can reach it; with `runtime.mdns: false` it listens on loopback (`127.0.0.1`). The RPC endpoint is not authenticated yet, so run it on networks you trust. `--bind 127.0.0.1` keeps an agent on this machine: it listens on loopback, keeps the port that `-p` or `runtime.listen` selects, and is not announced over mDNS. A kit can pin an address with `runtime.listen`; `--bind` overrides it.
 
 `arkavo kit migrate-from-agents-md` writes `runtime.listen` only when the AGENTS.md names a listen address other than the default. A file with no `listen` line migrates to a kit without `runtime.listen`, so the default applies.
 

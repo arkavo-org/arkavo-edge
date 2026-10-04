@@ -38,12 +38,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-// Runs on macOS only, the one platform this was verified on. Its loopback
-// interface carries multicast; on Linux `lo` usually lacks the MULTICAST
-// flag, and whether mDNS works over it there has not been established.
-#[cfg(all(test, feature = "mdns", target_os = "macos"))]
-mod loopback_discovery_tests;
-
 mod peer;
 mod request;
 
@@ -801,30 +795,14 @@ async fn fetch_budget_snapshot(
     }
 }
 
-/// An mDNS daemon that also listens on the loopback interfaces.
-///
-/// An agent started with `--bind 127.0.0.1`, or whose kit names a loopback
-/// address, listens on loopback, and the record of such an agent is
-/// announced on the loopback interface only. mdns-sd leaves that interface
-/// out unless asked, which hides every such agent from a browser on the
-/// same machine.
-#[cfg(feature = "mdns")]
-fn browsing_daemon() -> mdns_sd::Result<mdns_sd::ServiceDaemon> {
-    use mdns_sd::{IfKind, ServiceDaemon};
-
-    let daemon = ServiceDaemon::new()?;
-    daemon.enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])?;
-    Ok(daemon)
-}
-
 /// Discover agents via mDNS and register them
 #[cfg(feature = "mdns")]
 async fn discover_and_register_agents(
     state: &MeshToolsState,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use mdns_sd::ServiceEvent;
+    use mdns_sd::{ServiceDaemon, ServiceEvent};
 
-    let mdns = browsing_daemon()?;
+    let mdns = ServiceDaemon::new()?;
     let receiver = mdns.browse("_a2a._tcp.local.")?;
 
     let timeout = Duration::from_secs(3);
