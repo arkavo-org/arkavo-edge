@@ -140,11 +140,159 @@ The Arkavo authorization profile includes issuer, subject, current actor, audien
 
 Keep the formats distinct. The current `arkavo-cwt` `act` array names human principals and is an Arkavo convention; RFC 8693's JWT `act` is an object naming the current actor, with optional nested prior actors. Do not silently reinterpret the existing array. Version the profile and define an explicit exchange/mapping that preserves originator, current actor, and delegation restrictions.
 
-For HTTP, validate sender-constrained access tokens at the actual ingress using DPoP or mTLS. DPoP binds tokens to a key and method/URI proofs; it does not sign the request body. For queued or forwarded jobs, independently bind the task payload digest and scope to an authenticated job envelope. Iroh transport identity likewise needs an explicit binding to the authorized application principal.
+For HTTP, validate sender-constrained access tokens at the actual ingress using DPoP or mTLS. DPoP binds tokens to a key and method/URI proofs; it does not sign the request body. For queued or forwarded jobs, independently bind the task payload digest and scope to an authenticated job envelope. Iroh transport identity likewise needs an explicit binding to the authorized application principal. Agent-to-agent and phone-to-agent JSON-RPC uses the signed, sealed envelope under "Agent ingress, discovery and enrollment" instead of a transport-level mTLS decision.
 
 Admission produces an immutable `TaskSecurityContext` with authenticated identity, validated delegation, role binding, policy references, trust/evidence snapshot and feedback ceiling. Carry it explicitly through conductor spawns and downstream work; a task-local facade can ease integration, but must not be the only durable source. A missing context gets anonymous/no-uplift handling. Invalid credentials on a protected endpoint are rejected, not downgraded to anonymous. Intentional public anonymous operations must have their own public-only policy.
 
 Authenticate and authorize task reads, streams, cancellation, artifacts and push callbacks as well as task creation. A guessed task ID must not expose another principal's history. Carry a verified flight/tenant binding on the wire through a namespaced extension or token; the current role-to-DID lookup alone cannot disambiguate overlapping flights or replay after re-specialization. Migration may keep legacy public-only intake, but protected operations require the new context.
+
+## Agent ingress, discovery and enrollment
+
+**Status:** proposed, not implemented. Observations in this section are at `arkavo-edge` `9f5faf03` with #728 applied. Scenarios: `specs/arkavo-edge/agent-ingress.spec.yaml` (INGRESS-001 to INGRESS-016, all work in progress).
+
+An agent is an autonomous workload: it listens and announces where it is, and it must work before any identity server is reachable. This section decides how a caller reaches it, how it learns who the caller is, and how it comes to have an owner, so that "Decisions are intersections" has an authenticated actor to evaluate.
+
+### The transport is not the boundary
+
+On a test agent started on loopback, a WebSocket upgrade carrying `Origin: https://evil.example` was accepted and its JSON-RPC calls were dispatched (2026-10-02; the server installs no Origin or caller check, `crates/arkavo-server/src/server/a2a_server.rs:995-996`). A browser sends a page's Origin on a WebSocket upgrade but enforces nothing, so any page the user visits can drive a loopback agent, and mDNS publishes its port to the link. Loopback therefore stops other hosts but not the user's browser or other accounts on the same host, and binding to the network adds every host on the link.
+
+The agent is meant to be found, so the design does not hide the endpoint. It treats the transport and discovery as untrusted, as "Security boundary and assumptions" already treats network discovery, and carries authentication and confidentiality in each message.
+
+### Roots of trust before any authority
+
+On first launch there is no identity server to authenticate against, and nothing guarantees one will be reachable. Three roots exist without one:
+
+| Root | What it establishes | What it does not establish |
+|---|---|---|
+| The workload key | A self-certifying identity: the `did:key` is derived from the key, so no issuer is needed | Who owns the agent, or that it behaves |
+| The OS user that started the agent | The local operator, over a channel the kernel protects | Data authority; "no implicit uplift for a terminal operator" still holds |
+| The terminal screen | An out-of-band channel to whoever is physically present: what `--trust` displays | Anything about a party that never saw the screen |
+
+Everything else derives from these. Enrollment binds an owner to the workload key through the screen; membership, appraisal and the states under "State overrides score" then apply to that enrolled identity. Discovery never creates trust, as initial anchors are never invented by capability discovery.
+
+### One workload key
+
+"A workload is one key" does not hold at the baseline. On `main` one running agent presents five identities, and #728 adds a sixth, the agent key:
+
+| Identity | Used for | Lifetime |
+|---|---|---|
+| Name `<host>-<folder>` | Trust-score subject (`crates/arkavo-server/src/server/trust_sync.rs:63`) | Stable string, not a key |
+| Device key | MCP-T score signer and agent card DID (`trust_init.rs:76`, `crates/arkavo-cli/src/commands/agent.rs:509`); its file mtime is the tenure input (`trust_init.rs:57`) | Per OS user and host |
+| Agent key | The `--trust` link and authnz-rs delegation (#728; on `main` the link names the device key) | Per OS user and host |
+| Gossip key | Gossip signatures (`agent.rs:479`, `AgentKeypair::generate()`) | New on every start |
+| Iroh endpoint key | TDF blob transport (`a2a_server.rs:1198`, `IrohNode::memory()`) | New on every start |
+| TDF credential key | `AgentCredential` (`crates/arkavo-config-encryption/src/lib.rs:175`, `KeyPair::generate()`) | New on every start |
+
+Trust can only accrue to, and be withdrawn from, an identity that persists and that every channel names. The **workload key** is the persistent Ed25519 agent key that #728 adds, whose `did:key` the link and authnz-rs delegation name. It is the subject of trust scores, gossip, the agent card, delegation and quarantine, and it signs the scores the agent publishes as a provider.
+
+Every other key the agent uses is subordinate. The workload key signs a **key statement** for it: purpose (TDF key, iroh endpoint key), public key, validity window and a generation that only increases. A peer accepts a subordinate key only through a current statement. Subordinate keys rotate without changing the identity; a new workload key is a new identity. The workload key is never used directly as a TLS or TDF key, so a weakness in one protocol cannot yield signatures another accepts.
+
+The device key stays the host's identity for device attestation (phase 1 of `specs/arkavo-edge/trusted-agent.spec.yaml`). It is not a workload identity and signs nothing on a workload's behalf.
+
+### Discovery
+
+The agent announces itself with DNS-SD over multicast DNS ([RFC 6763](https://www.rfc-editor.org/rfc/rfc6763.html), [RFC 6762](https://www.rfc-editor.org/rfc/rfc6762.html)) as `_a2a._tcp`, the type the Arkavo app browses (arkavo-ios ADR-0037). An announcement says where to send a message, never who will receive it.
+
+- **The TXT record carries only what a stranger may know:** `version`, and after enrollment the workload `did:key` and the digest of its current TDF key statement. `model`, `purpose`, `capabilities` and `mcp_tools` (`crates/arkavo-cli/src/commands/agent/advertise.rs:45-76`) leave the record; members read them from the agent card in a sealed exchange.
+- **No DID before enrollment.** authnz-rs gives a DID to the first account that authorizes it and refuses later ones (`DelegationAlreadyExists`). Until the owner enrolls the agent, its DID appears only on the terminal screen.
+- **A forged announcement costs availability only.** A sender seals to the key statement of the DID it expects, so a spoofed record, a swapped address or a substituted TDF key yields a statement that fails verification or a message nobody else can open.
+
+### Sealed envelope
+
+The transport may be plain `ws` (ADR-0037 §4) or any relay and is never trusted. A transport handshake decides trust once, before the first call, and protects one hop. An envelope lets the receiver decide on each message with the sender's current standing, and stays sealed across gossip relays.
+
+Three kinds of traffic reach an agent, and the receiver tells them apart without unwrapping anything:
+
+| Kind | Carries | Accepted from |
+|---|---|---|
+| Public request | Plain JSON-RPC `agent_card` (public fields only) or `health`; unsigned, unsealed | Anyone; it reveals only what a stranger may know |
+| Pairing envelope (`typ: pair`) | The pairing exchange only, signed by the phone's enrollment key | A non-member, while a pairing window is open |
+| Member envelope (`typ: msg`) | Any other request, reply or gossip, signed by the sender's workload key | A verified member; refused from anyone else before unwrapping |
+
+```text
+Envelope = COSE_Sign1 (EdDSA) by the sender's key over {
+    typ:   "msg" or "pair"
+    iss:   sender did:key
+    aud:   recipient did:key, or a swarm the recipient belongs to (gossip)
+    iat, exp, nonce
+    stmt:  digest of the sender's TDF key statement, for the reply
+    body:  TDF( { iss, nonce, the complete JSON-RPC message } )
+}
+```
+
+The whole JSON-RPC message is sealed, so method names, task IDs and parameters are not on the wire; only `typ` says whether it is pairing. The sealed body repeats `iss` and `nonce`; a receiver that finds them different from the signed outer values refuses the message, so a ciphertext cannot be re-signed by someone else. The signature is COSE ([RFC 9052](https://www.rfc-editor.org/rfc/rfc9052.html)) outside the TDF because opentdf-rs 0.15 does not decode ZTDF assertions (`opentdf-0.15.0/src/tdf_cbor.rs:977`); Edge already signs COSE_Sign1 with EdDSA in `arkavo-permit`.
+
+A receiver processes an envelope in this order and stops at the first failure:
+
+1. Bound the size, then parse.
+2. Verify the signature against `iss`. A `did:key` carries its public key, so this needs no lookup.
+3. Check `aud` names this agent or a swarm it belongs to, `exp` has not passed, `iat` is within the clock bound, and the nonce has not been seen within the window.
+4. Establish the sender's standing: enrolled member or not, its state under "State overrides score", and the local deny latch. A member envelope from a non-member is refused here. A pairing envelope passes only while a pairing window is open.
+5. Only then unwrap the body, with the agent's own key for a message addressed to it or through key release for swarm-addressed data, and compare the inner `iss` and `nonce`. A pairing envelope whose body holds anything but the pairing exchange is refused.
+6. Admit the call with a `TaskSecurityContext` built from the verified sender.
+
+A reply is a member envelope from the responder, addressed to the requester and sealed to the key its `stmt` names; the reply to a pairing envelope is sealed to the phone's enrollment key.
+
+Cost: an Ed25519 verification is far below the 50 ms routing budget, and a message addressed to the agent unwraps with its own key without a network round trip. A key released through a KAS can be reused across messages only within the status lease (at most 5 s), which bounds how long a demotion can lag. A plaintext transport still exposes traffic patterns and lets an attacker drop, delay or reorder messages; that denial of service is accepted.
+
+### Public operations and the local operator
+
+A party that is not a verified member gets public requests, and the pairing exchange while a pairing window is open; its member envelopes are refused before their bodies are unwrapped. An enrolled member that is Unassessed reaches public-policy operations; protected operations follow "State overrides score". Its gossip observations are recorded but carry no weight until it is appraised.
+
+The operator reaches the agent through a Unix domain socket created 0600 in the user's runtime directory, or a named pipe whose ACL admits only that user on Windows. The kernel authenticates the OS user, so no envelope is needed. Loopback TCP is never an operator channel, and a WebSocket upgrade whose Origin is not the agent's own is refused. The operator controls the agent (start, stop, configure, enroll, revoke) and gets no data authority from this channel.
+
+### Enrollment: what `--trust` establishes
+
+`--trust` shows the DID today but cannot establish trust: the link holds no secret, and anyone who reaches the port is indistinguishable from the person who scanned it. Enrollment makes it a pairing ceremony.
+
+1. The terminal shows a QR code with the workload `did:key`, the digest of its TDF key statement and a single-use secret of 128 bits. Showing it opens a pairing window of fixed length (five minutes by default) that closes at first use; showing the code again issues a new secret. `--trust` is a flag on a long-running process, so the window is not the process lifetime. The secret is never printed as text, so it reaches neither scrollback nor logs.
+2. The phone obtains the key statement, checks it against the digest and the DID, and sends a pairing envelope, signed by its enrollment key, whose sealed body proves the secret. The body is sealed to a key the QR authenticated, so a listener on the link learns neither the secret nor anything the body carries.
+3. The agent records the phone's enrollment key as the owner key, persisted with the workload, and consumes the secret. Reusing it, or presenting it after the window closes, fails.
+
+The enrolled owner key then signs owner statements the agent accepts offline: membership, grants within the owner's policy, and recovery under "State overrides score".
+
+Linking to the identity server comes later and does not replace enrollment. When authnz-rs is reachable the agent obtains its own token, as the identity-plane end state describes, and gives a delegation effect only when it can tie that delegation to its enrolled owner. A delegation another account made first ("squatting") therefore gives no control of the agent; it can still block the owner's own delegation, and the recovery is a new workload key.
+
+### Membership: the chain of trust
+
+The owner key signs a **membership statement**: workload `did:key`, swarm, validity window and generation. Agents holding statements from the same owner key accept each other as members, and a new member is Unassessed until appraised. The chain runs owner key → membership statement → workload key → key statements → subordinate keys. Each link is a signed statement carried in or referenced by envelopes and checked on arrival, not in a handshake, so a newcomer can be reached and observed before it has earned anything.
+
+Only the owner key issues membership, so the key must stay out of the worker's reach. A compromised worker that could read it would mint identities and step around a quarantine keyed on one of them. The owner key therefore lives on the owner's device or with the Guardian and broker under a separate OS user ("Minimum Guardian deployment"), never in the worker's storage. Which one is an open decision below.
+
+### Gossip
+
+- **Gossip messages are envelopes from members.** A sender's key comes from its membership statement, never from a registration call. `agent/exchangeKeys` registers or replaces any peer's key without proof of possession (`crates/arkavo-server/src/server/mod.rs:846`; `crates/arkavo-gossip/src/verification.rs:31` overwrites), so anyone who reaches an agent can sign gossip as an existing peer. It is retired.
+- **Observations count once per member workload.** Because only the owner key issues membership, a compromised worker cannot mint observers. Quorum and peer counts use members, not the peer set any caller can grow (`crates/arkavo-gossip/src/protocol.rs:362`).
+- **Incidents travel as envelopes from an enrolled Guardian.** Gossip spreads them; each recipient checks the reporter's authority and the subject binding before applying containment, as "Enforcement and propagation" requires.
+
+### Key release
+
+The agent KAS decides today with a placeholder caller (`crates/arkavo-server/src/server/mod.rs:1056`, `caller_did = "did:key:z6MkUnknown"`). A rewrap request becomes an envelope, so the caller is the verified sender. The release checks its membership, its state and the local deny latch before policy: an Unassessed member gets keys under public policy only, and a Suspended or Quarantined one gets nothing. This is where promotion and demotion take effect for data: the next request after a state change is decided on the new state.
+
+### Threat tiers
+
+- **Honest worker.** Envelopes, enrollment and the operator socket stop link hosts, browsers and other local accounts from driving the agent or speaking as its peers.
+- **Compromised worker.** The worker holds its own workload key, so it can act as itself until contained. It cannot mint identities or memberships while the owner key is outside its boundary, and a quarantine of its workload covers every key statement it signed; a statement signed after the quarantine generation is refused.
+- **Compromised host.** Out of scope here, as under "Minimum Guardian deployment".
+
+### Fit with the deliveries
+
+- **Now, with no new cryptography:** refuse foreign Origins; add the operator socket; make `agent/exchangeKeys` refuse to replace a bound key, require proof of possession over a server nonce, and keep its registrations out of quorum and peer counts. Local callers (`arkavo-agui`'s agent connection, the `arkavo-mcp-runtime` WebSocket transport) move to the socket. Threat tier: honest worker; this stops browsers and key replacement, not a host on the link driving the agent.
+- **The stopgap's remote surface is a decision.** Answering remote callers with only public requests before envelopes exist closes the link-host hijack, but it also stops `gossip/message` and peer tasks between hosts, which rogue detection depends on; the socket cannot carry them. The alternative keeps `gossip/message` reachable, verified against bound keys, until member envelopes replace it.
+- **One workload key** belongs with "Agent credentials and quarantine", which already states that a workload is one key.
+- **Sealed envelopes and authenticated key release** are the authenticated A2A ingress of "Identity and policy contract".
+- **Enrollment and membership** precede the evidence of "Evidence-based uplift" (#696): an observation needs an attributable member.
+
+### Open decisions
+
+- **The stopgap's remote surface,** under "Fit with the deliveries": close the link-host hijack now and pause cross-host gossip, or keep gossip reachable until envelopes exist.
+- **What promotion means.** This model has appraisal informed by evidence promote an agent, and "scores cannot create authority". Raising access from scores alone would reverse that.
+- **Whether local enrollment is the owner's appraisal.** "Delivery and acceptance" makes the owner's authorization the first appraisal as a bootstrap concession. Enrollment could do the same offline, or leave the agent Unassessed until a Guardian appraises it.
+- **Where the owner key lives.** On the phone it is an identifier that arkavo-ios ADR-0037 §7 forbids sending ("no identifier of the account and no identifier of the device"). With the Guardian under a separate OS user, creating that user needs administrator rights once, against zero configuration.
+- **How the enrolled owner is tied to an authnz-rs account.** Until it is, the agent gives no server delegation effect.
+- **The link.** A secret in the link reverses arkavo-ios ADR-0034 §5, whose open questions anticipated a one-time value. The app refuses unknown link parameters, so the new fields ship in the app before Edge writes them.
+- **The `web-ui` feature** runs in a browser and cannot open the operator socket; how it authenticates is open.
+- **The message format.** NanoTDF suits messages but needs the in-mesh hardening under "Key access tiers" first.
 
 ## Evidence and trust scores
 
@@ -456,6 +604,11 @@ These are source observations at the baseline above, not results of a live deplo
 | [CWT profile](../crates/arkavo-cwt/src/claims.rs) and [verification](../crates/arkavo-cwt/src/verify.rs) | Custom actor array; verifier options permit skipping audience checking (#699) | Explicit profile mapping; require expected audience at protected boundaries |
 | [TDF policy conversion](../crates/arkavo-tdf/src/opentdf_impl.rs) | Invalid FQNs are filtered out during conversion (#700) | Reject malformed policy instead of dropping restrictions; add regression coverage |
 | [A2A KAS implementation](../crates/arkavo-tdf/src/a2a_handler.rs) | NanoTDF handling includes a simplified assumed ephemeral-key offset | Use validated profile parsing and cross-implementation vectors before trusting this as an alternative KAS path |
+| [Agent RPC ingress](../crates/arkavo-server/src/server/a2a_server.rs) | At `9f5faf03`: no Origin or caller check; a forged-Origin WebSocket upgrade to a loopback agent was accepted and dispatched | Refuse foreign Origins; public operations only for unverified senders; operator socket; sealed envelopes ("Agent ingress, discovery and enrollment") |
+| [Gossip key registration](../crates/arkavo-server/src/server/mod.rs) | At `9f5faf03`: `agent/exchangeKeys` registers or overwrites any peer's key with no proof of possession | Keys only from membership statements; until then refuse overwrites and require proof over a server nonce |
+| [Agent KAS caller](../crates/arkavo-server/src/server/mod.rs) | At `9f5faf03`: `kas.rewrap` passes the placeholder `did:key:z6MkUnknown` as caller | Caller is the verified envelope sender; membership, state and deny-latch checks before release |
+| [Workload identity](../crates/arkavo-cli/src/commands/agent.rs) | At `9f5faf03`: five identities per agent, six with #728's agent key; the gossip, iroh and TDF credential keys are new on every start | One persistent workload key; subordinate keys through signed key statements |
+| [mDNS announcement](../crates/arkavo-cli/src/commands/agent/advertise.rs) | At `9f5faf03`: TXT publishes `model`, `purpose`, `capabilities` and `mcp_tools` to the link | Minimal TXT; details in the agent card behind a sealed exchange |
 
 The checked-in lockfile uses `opentdf` **0.15.0**, also the [latest published Rust release observed](https://github.com/arkavo-org/opentdf-rs/releases/tag/0.15.0).
 
