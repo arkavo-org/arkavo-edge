@@ -17,6 +17,7 @@ pub mod context_message;
 mod error;
 pub mod evofabric_message;
 pub mod experiment_message;
+pub mod key_exchange;
 pub mod learning_message;
 mod lesson_consensus;
 mod lesson_handlers;

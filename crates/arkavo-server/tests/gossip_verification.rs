@@ -78,7 +78,8 @@ async fn a_lesson_with_a_forged_signature_is_never_applied() {
     let bus = bus();
     let peer = AgentKeypair::generate();
     bus.register_peer_key("peer-1".to_string(), peer.public_key().clone())
-        .await;
+        .await
+        .unwrap();
 
     bus.handle_gossip(lesson("peer-1", &AgentKeypair::generate()))
         .await;
@@ -98,7 +99,8 @@ async fn a_lesson_that_outruns_the_key_exchange_is_applied_once_verified() {
     assert_eq!(bus.cached_lesson_count().await, 0, "not before the key");
 
     bus.register_peer_key("peer-1".to_string(), peer.public_key().clone())
-        .await;
+        .await
+        .unwrap();
 
     tokio::time::timeout(Duration::from_secs(20), async {
         while bus.cached_lesson_count().await == 0 {
@@ -115,7 +117,8 @@ async fn a_verified_lesson_is_applied_at_once() {
     let bus = bus();
     let peer = AgentKeypair::generate();
     bus.register_peer_key("peer-1".to_string(), peer.public_key().clone())
-        .await;
+        .await
+        .unwrap();
 
     let responses = bus.handle_gossip(lesson("peer-1", &peer)).await;
 
@@ -130,7 +133,8 @@ async fn a_replayed_lesson_is_applied_once() {
     let bus = bus();
     let peer = AgentKeypair::generate();
     bus.register_peer_key("peer-1".to_string(), peer.public_key().clone())
-        .await;
+        .await
+        .unwrap();
     let announcement = lesson("peer-1", &peer);
 
     bus.handle_gossip(announcement.clone()).await;
@@ -146,7 +150,8 @@ async fn a_lesson_from_another_swarm_is_not_applied() {
     let bus = bus();
     let peer = AgentKeypair::generate();
     bus.register_peer_key("peer-1".to_string(), peer.public_key().clone())
-        .await;
+        .await
+        .unwrap();
     let mut announcement = LessonAnnouncement::new(
         uuid::Uuid::new_v4(),
         [7; 32],

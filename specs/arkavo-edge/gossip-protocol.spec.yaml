@@ -2,7 +2,7 @@
 
 feature: Gossip Protocol for Decentralized Propagation
 module: arkavo_gossip
-version: 0.57.2
+version: 0.57.3
 
 invariants:
   - All messages must have valid Ed25519 signatures
@@ -61,7 +61,12 @@ scenarios:
       - Votes tallied by patch hash
       - Consensus reached at 2/3 threshold
       - Status transitions Pending → Approved/Rejected
-    refs: [crates/arkavo-gossip/src/consensus.rs]
+      - Only votes from this agent or a discovered peer are tallied
+    refs: [crates/arkavo-gossip/src/consensus.rs, crates/arkavo-gossip/src/protocol.rs]
+    changed: "2026-10-04"
+    edge_cases:
+      - condition: Signed votes from ids no discovery found (keys registered by any caller)
+        expected: Not counted; before 0.100.3 they could approve a patch or lesson alone (INGRESS-004)
 
   - id: GOSSIP-005
     name: Anti-entropy synchronization

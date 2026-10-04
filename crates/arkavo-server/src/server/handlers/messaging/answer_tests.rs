@@ -152,7 +152,8 @@ async fn a_text_answer_is_the_result_of_the_task() {
         GossipConfig::default(),
     ));
     bus.add_peer("commander".to_string(), commander.public_key().clone())
-        .await;
+        .await
+        .unwrap();
     let mut gossiped = bus.subscribe_gossip_out();
 
     handle_message_send(

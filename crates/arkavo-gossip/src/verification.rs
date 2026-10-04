@@ -26,9 +26,33 @@ impl KeyRegistry {
         Self::default()
     }
 
-    /// Register a public key for an agent
-    pub fn register(&mut self, agent_id: String, pubkey: AgentPublicKey) {
-        self.keys.insert(agent_id, pubkey);
+    /// A registry holding one binding, typically the agent's own key.
+    #[must_use]
+    pub fn with_key(agent_id: String, pubkey: AgentPublicKey) -> Self {
+        let mut keys = HashMap::new();
+        keys.insert(agent_id, pubkey);
+        Self { keys }
+    }
+
+    /// Bind a public key to an agent. Binding the same key again is a no-op;
+    /// a different key for an id already bound is refused, because replacing
+    /// it would let the new key holder sign gossip as that agent.
+    pub fn register(&mut self, agent_id: String, pubkey: AgentPublicKey) -> GossipResult<()> {
+        match self.keys.get(&agent_id) {
+            Some(bound) if bound.to_bytes() != pubkey.to_bytes() => {
+                Err(GossipError::KeyConflict(agent_id))
+            }
+            Some(_) => Ok(()),
+            None => {
+                self.keys.insert(agent_id, pubkey);
+                Ok(())
+            }
+        }
+    }
+
+    /// Forget an agent's key, as when the agent leaves the network.
+    pub fn unregister(&mut self, agent_id: &str) {
+        self.keys.remove(agent_id);
     }
 
     /// Get the public key for an agent
@@ -254,7 +278,9 @@ mod tests {
         assert!(registry.is_empty());
 
         let keypair = create_keypair();
-        registry.register("agent-1".to_string(), keypair.public_key().clone());
+        registry
+            .register("agent-1".to_string(), keypair.public_key().clone())
+            .unwrap();
 
         assert!(!registry.is_empty());
         assert_eq!(registry.len(), 1);
@@ -266,7 +292,9 @@ mod tests {
     fn test_sign_and_verify_announcement() {
         let keypair = create_keypair();
         let mut registry = KeyRegistry::new();
-        registry.register("agent-1".to_string(), keypair.public_key().clone());
+        registry
+            .register("agent-1".to_string(), keypair.public_key().clone())
+            .unwrap();
 
         let mut announcement =
             PatchAnnouncement::new(Uuid::new_v4(), [0u8; 32], "agent-1".to_string(), vec![]);
@@ -282,7 +310,9 @@ mod tests {
     fn test_sign_and_verify_vote() {
         let keypair = create_keypair();
         let mut registry = KeyRegistry::new();
-        registry.register("voter-1".to_string(), keypair.public_key().clone());
+        registry
+            .register("voter-1".to_string(), keypair.public_key().clone())
+            .unwrap();
 
         let mut vote = PatchVote::new(Uuid::new_v4(), "voter-1".to_string(), true);
 
@@ -315,7 +345,9 @@ mod tests {
         let keypair2 = create_keypair();
 
         let mut registry = KeyRegistry::new();
-        registry.register("agent-1".to_string(), keypair1.public_key().clone());
+        registry
+            .register("agent-1".to_string(), keypair1.public_key().clone())
+            .unwrap();
 
         // Sign with different key
         let mut announcement =

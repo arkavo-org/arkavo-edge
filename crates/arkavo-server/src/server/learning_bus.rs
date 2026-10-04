@@ -226,9 +226,8 @@ impl LearningBus {
         // Create broadcast channel for lesson approvals
         let (lesson_approved_tx, _lesson_approved_rx) = broadcast::channel(64);
 
-        let mut key_registry = KeyRegistry::new();
         #[allow(clippy::redundant_clone)]
-        key_registry.register(agent_id.clone(), keypair.public_key().clone());
+        let key_registry = KeyRegistry::with_key(agent_id.clone(), keypair.public_key().clone());
 
         let mut gossip_protocol = GossipProtocol::new(
             agent_id.clone(),
@@ -390,10 +389,14 @@ impl LearningBus {
     }
 
     /// Add a peer to gossip protocol with their public key
-    pub async fn add_peer(&self, peer_id: String, public_key: arkavo_crypto::AgentPublicKey) {
+    pub async fn add_peer(
+        &self,
+        peer_id: String,
+        public_key: arkavo_crypto::AgentPublicKey,
+    ) -> arkavo_gossip::GossipResult<()> {
         let gossip = self.gossip.write().await;
         gossip.add_peer(peer_id.clone()).await;
-        gossip.register_key(peer_id, public_key).await;
+        gossip.register_key(peer_id, public_key).await
     }
 
     /// Add a peer to gossip protocol (local mDNS discovery, key exchange deferred)
@@ -507,15 +510,17 @@ impl LearningBus {
         self.peer_addresses.read().await.clone()
     }
 
-    /// Register a peer's public key for signature verification
+    /// Bind a peer's public key for signature verification. A different key
+    /// for a peer already bound is refused until the peer leaves.
     pub async fn register_peer_key(
         &self,
         peer_id: String,
         public_key: arkavo_crypto::AgentPublicKey,
-    ) {
+    ) -> arkavo_gossip::GossipResult<()> {
         let gossip = self.gossip.write().await;
-        gossip.register_key(peer_id.clone(), public_key).await;
+        gossip.register_key(peer_id.clone(), public_key).await?;
         tracing::info!("Registered public key for peer: {}", peer_id);
+        Ok(())
     }
 
     /// Get the number of connected peers
@@ -716,7 +721,8 @@ mod tests {
         );
 
         bus.add_peer("peer-1".to_string(), keypair.public_key().clone())
-            .await;
+            .await
+            .unwrap();
         assert_eq!(bus.peer_count().await, 1);
 
         bus.remove_peer("peer-1").await;

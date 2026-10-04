@@ -70,8 +70,7 @@ pub struct GossipNetworkBridge {
 impl GossipNetworkBridge {
     /// Create a new network bridge
     pub fn new(agent_id: String, keypair: AgentKeypair, config: NetworkConfig) -> Self {
-        let mut key_registry = KeyRegistry::new();
-        key_registry.register(agent_id.clone(), keypair.public_key().clone());
+        let key_registry = KeyRegistry::with_key(agent_id.clone(), keypair.public_key().clone());
 
         let protocol = GossipProtocol::new(
             agent_id.clone(),
@@ -118,9 +117,14 @@ impl GossipNetworkBridge {
         self.protocol.remove_peer(peer_id).await;
     }
 
-    /// Register a peer's public key for verification
-    pub async fn register_peer_key(&self, peer_id: String, pubkey: arkavo_crypto::AgentPublicKey) {
-        self.protocol.register_key(peer_id, pubkey).await;
+    /// Bind a peer's public key for verification; a different key for a
+    /// bound peer is refused.
+    pub async fn register_peer_key(
+        &self,
+        peer_id: String,
+        pubkey: arkavo_crypto::AgentPublicKey,
+    ) -> arkavo_gossip::GossipResult<()> {
+        self.protocol.register_key(peer_id, pubkey).await
     }
 
     /// Get the number of known peers
@@ -383,7 +387,8 @@ mod tests {
         // Register a peer's public key
         bridge
             .register_peer_key("peer-1".to_string(), peer_keypair.public_key().clone())
-            .await;
+            .await
+            .unwrap();
 
         // Verify peer was added
         bridge.add_peer("peer-1".to_string()).await;

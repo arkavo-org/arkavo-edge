@@ -2,11 +2,11 @@
 
 feature: Agent Ingress, Discovery and Enrollment
 module: arkavo-server, arkavo-cli, arkavo-registration, arkavo-gossip
-version: 0.100.2
+version: 0.100.3
 
 # Design: docs/swarm-trust-model.md, "Agent ingress, discovery and enrollment".
-# Every scenario is work in progress; refs name the code at 9f5faf03 that the
-# scenario changes. The workload key is the agent key #728 adds.
+# Scenarios marked wip are not implemented; their refs name the code at
+# 9f5faf03 that they change. INGRESS-001 and INGRESS-004 are implemented. The workload key is the agent key #728 adds.
 
 invariants:
   - "The transport and discovery are untrusted: no bind address, announcement or connection grants anything"
@@ -19,24 +19,26 @@ invariants:
 
 scenarios:
   - id: INGRESS-001
-    name: Foreign Origin refused
+    name: Web page requests refused at the agent listener
     criticality: critical
-    wip: true
     given:
       - An agent listening on any address, loopback included
-    when: A WebSocket upgrade arrives with an Origin that is not the agent's own
+    when: A request arrives carrying an Origin header, a WebSocket upgrade or a POST from a page in a browser
     then:
-      - The upgrade is refused before any JSON-RPC method is dispatched
-      - No method result reaches the connecting page
+      - The request is refused with 403 before any JSON-RPC method is dispatched; an agent serves no web pages, so every Origin is another site's
+      - A request without Origin (agents, the arkavo ui gateway, the CLI) is unaffected
     edge_cases:
-      - condition: "Upgrade with Origin https://evil.example to a loopback agent (the 2026-10-02 observation)"
-        expected: Refused; the forged-Origin client is the regression test
+      - condition: "Upgrade with Origin https://evil.example to a loopback agent (accepted with 101 on 2026-10-02)"
+        expected: "403"
+      - condition: Page on a DNS name pointed at the agent (rebinding)
+        expected: Its upgrades and POSTs carry Origin and are refused; the listener checks no Host, so a plain GET of agent_card or health still answers
       - condition: Upgrade with no Origin header
-        expected: Treated as a non-browser remote caller (INGRESS-002), never as the operator
+        expected: Admitted as a non-browser caller (what it may call is INGRESS-002)
     refs:
-      - crates/arkavo-server/src/server/a2a_server.rs:990-996
+      - crates/arkavo-server/src/server/browser_origin.rs
+      - crates/arkavo-server/src/server/a2a_server.rs:995-1003
       - docs/swarm-trust-model.md
-    changed: "2026-10-02"
+    changed: "2026-10-04"
 
   - id: INGRESS-002
     name: Non-member reaches public requests and pairing only
@@ -56,7 +58,7 @@ scenarios:
       - condition: Before envelopes exist (the stopgap)
         expected: "Whether remote callers are limited to public requests is an open decision: doing so also stops cross-host gossip/message"
     refs:
-      - crates/arkavo-server/src/server/mod.rs:240-310
+      - crates/arkavo-server/src/server/mod.rs:240-320
     changed: "2026-10-02"
 
   - id: INGRESS-003
@@ -78,22 +80,34 @@ scenarios:
     changed: "2026-10-02"
 
   - id: INGRESS-004
-    name: Gossip key registration cannot replace a bound key
+    name: Gossip keys bound only with proof and never replaced
     criticality: critical
-    wip: true
     given:
-      - A peer whose gossip key is already registered
-      - agent/exchangeKeys still exists
-    when: A caller registers a different key for that peer
+      - agent/exchangeKeys, the interim path until membership statements exist
+    when: A caller binds a gossip key to a peer id
     then:
-      - The registration is refused and the bound key is unchanged
-      - A new registration proves possession of its key over a server nonce
-      - Keys registered this way count toward neither quorum nor peer count
+      - The caller signs its id, its key, the recipient's id and a fresh challenge; the recipient signs its id, its key and that challenge back, and each side binds the other's key only on a valid signature
+      - A key already bound to the id is never replaced; binding the same key again is a no-op
+      - A peer's key is forgotten when mDNS reports the peer gone, and an agent sends that goodbye when it shuts down
+      - Only votes from this agent or a peer discovery found count toward a patch or lesson quorum, on the vote and the delivery paths
+    edge_cases:
+      - condition: "The old request {peer_id, public_key} without proof"
+        expected: "Refused, so agents from before 0.100.3 and after it stop exchanging keys on the same network"
+      - condition: Replayed request
+        expected: Re-asserts a key the replayer does not hold; harmless since bound keys are not replaced, so no nonce is stored
+      - condition: Peer restarted cleanly with a new gossip key
+        expected: Its goodbye unbinds the old key and the new one is accepted
+      - condition: Peer crashed and came back with a new gossip key
+        expected: Refused with a warning until the receiver restarts; the gossip key is new on every start (INGRESS-005)
+      - condition: A host on the link spoofing mDNS announcements
+        expected: Can still add a peer id and vote under it; membership (INGRESS-015) closes this
     refs:
-      - crates/arkavo-server/src/server/mod.rs:846-880
-      - crates/arkavo-gossip/src/verification.rs:30-32
-      - crates/arkavo-gossip/src/protocol.rs:359-362
-    changed: "2026-10-02"
+      - crates/arkavo-gossip/src/key_exchange.rs
+      - crates/arkavo-gossip/src/verification.rs:37-56
+      - crates/arkavo-gossip/src/protocol.rs:163-179
+      - crates/arkavo-server/src/server/mod.rs
+      - crates/arkavo-cli/src/commands/agent.rs:1305-1328
+    changed: "2026-10-04"
 
   - id: INGRESS-005
     name: One persistent workload identity across channels and restarts
@@ -302,9 +316,9 @@ scenarios:
       - Quorum and peer counts are computed over members
       - A Guardian incident is applied only after the reporter's authority and subject binding are checked
     refs:
-      - crates/arkavo-gossip/src/protocol.rs:359-362
-      - crates/arkavo-gossip/src/verification.rs:30-32
-      - crates/arkavo-server/src/server/mod.rs:846-880
+      - crates/arkavo-gossip/src/protocol.rs:377-380
+      - crates/arkavo-gossip/src/verification.rs:37-56
+      - crates/arkavo-server/src/server/mod.rs:859-928
     changed: "2026-10-02"
 
   - id: INGRESS-016
@@ -320,5 +334,5 @@ scenarios:
       - An Unassessed member gets keys under public policy only; a Suspended or Quarantined one gets nothing
       - A state change applies from the next request; a released key is reused only within the status lease
     refs:
-      - crates/arkavo-server/src/server/mod.rs:1051-1065
+      - crates/arkavo-server/src/server/mod.rs:1089-1115
     changed: "2026-10-02"

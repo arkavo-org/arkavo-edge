@@ -110,7 +110,7 @@ scenarios:
     changed: "2026-10-04"
     edge_cases:
       - condition: Which listeners enforce it
-        expected: "The arkavo ui gateway (AGUI-021). The A2A agent listener checks no Host or Origin yet (INGRESS-001, wip)"
+        expected: "The arkavo ui gateway (AGUI-021). The A2A agent listener refuses any request carrying Origin (INGRESS-001) but checks no Host"
 
   - id: NET-007
     name: Block cloud metadata and internal network access
