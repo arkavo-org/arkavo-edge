@@ -5,11 +5,11 @@ module: arkavo_security
 version: 1.0.0
 
 invariants:
-  - Agent binds to localhost (127.0.0.1) only by default
+  - An agent not announced over mDNS binds to localhost (127.0.0.1) only by default; an agent announced over mDNS binds every interface so the hosts it is announced to can reach it
   - Authentication is REQUIRED, not optional
   - No "skip auth for localhost" behavior
   - First-run setup requires credential configuration
-  - Public exposure requires explicit opt-in with warnings
+  - Public exposure prints a warning at every start
   - Host header must match expected values (anti-rebinding)
   - HTTP requests made by built-in tools, and the initial URL of a browser_cdp navigate action, to private, loopback or metadata addresses are blocked by default; script the model runs through browser_cdp evaluate, Chrome's own redirects and subresources, and processes the agent starts are not covered (NET-019)
   - Setup tokens never appear in logs or stdout
@@ -30,29 +30,31 @@ scenarios:
     refs: [crates/arkavo-security/src/auth.rs:40-125, crates/arkavo-cli/src/commands/security_audit.rs:231-242]
 
   - id: NET-002
-    name: Localhost-only binding by default
+    name: The default binding matches the mDNS announcement
     criticality: critical
     given:
       - Agent is started with default configuration
       - No explicit network binding is configured
     when: Agent binds to network interface
     then:
-      - Agent binds ONLY to 127.0.0.1, not 0.0.0.0
-      - External network access is impossible without explicit configuration
-      - Warning is displayed if admin changes to public binding
+      - An agent announced over mDNS (runtime.mdns, on unless the kit turns it off) binds 0.0.0.0, so the hosts it is announced to can reach it
+      - An agent whose kit sets runtime.mdns false binds ONLY to 127.0.0.1, not 0.0.0.0
+      - A start on an address other hosts can reach prints a warning naming it, with or without --verbose
     refs: [crates/arkavo-cli/src/commands/agent/listen.rs, crates/arkavo-cli/src/commands/agent_kit.rs, crates/arkavo-protocol/src/config.rs:109-136, crates/arkavo-validation/src/url.rs:246-262]
     edge_cases:
-      - condition: A SwarmKit kit that sets no runtime.listen
-        expected: Binds 127.0.0.1 on a dynamic port, like the zero-config agent
+      - condition: A SwarmKit kit that sets no runtime.listen and leaves runtime.mdns on
+        expected: Binds 0.0.0.0 on a dynamic port, like the zero-config agent
+      - condition: A SwarmKit kit that sets no runtime.listen and sets runtime.mdns false
+        expected: Binds 127.0.0.1 on a dynamic port
       - condition: kit migrate-from-agents-md on an AGENTS.md that names no listen address
-        expected: Leaves runtime.listen unset, so the loopback default applies
-    changed: "2026-09-29"
+        expected: Leaves runtime.listen unset, so the default for the kit's runtime.mdns applies
+    changed: "2026-10-04"
 
   - id: NET-003
     name: Public binding requires explicit acknowledgment
     criticality: high
     wip: true
-    issue: "Partly implemented: a non-loopback A2A listen address comes only from --bind or a kit's runtime.listen, and startup prints a warning naming it (NET-002, NET-021). Nothing else is required: there is no acknowledgment step and no TLS requirement, and the A2A listener authenticates no caller at all, so there is no authentication to strengthen. arkavo-security's TlsSettings has no caller outside its crate, and the referenced http.rs lines configure client-side mTLS."
+    issue: "Partly implemented: a non-loopback A2A listen address comes from --bind, a kit's runtime.listen, or the default of an agent announced over mDNS, and startup prints a warning naming it (NET-002, NET-021). Nothing else is required: there is no acknowledgment step and no TLS requirement, and the A2A listener authenticates no caller at all, so there is no authentication to strengthen. arkavo-security's TlsSettings has no caller outside its crate, and the referenced http.rs lines configure client-side mTLS."
     given:
       - Administrator wants to expose agent publicly
       - Configuration is changed to bind to 0.0.0.0 or public IP
@@ -330,25 +332,26 @@ scenarios:
       - The DNS answer that process connects with is the one judged
 
   - id: NET-021
-    name: The agent listener is exposed only by an explicit listen address
+    name: The agent listener and its mDNS announcement agree
     criticality: critical
     given:
-      - An agent is started with --bind <address>, or with a SwarmKit kit that sets runtime.listen
+      - An agent is started with --bind <address>, with a SwarmKit kit that sets runtime.listen, or announced over mDNS with neither
     when: The agent's A2A listener binds and announces itself over mDNS
     then:
-      - --bind replaces the kit's runtime.listen and the loopback default, and -p/--port replaces only its port
+      - --bind replaces the kit's runtime.listen and the default, and -p/--port replaces only its port
       - A --bind value that is not an IPv4 or IPv6 address, with an optional port, stops startup with a message naming the expected form
       - A listen address other hosts can reach prints a startup warning naming it, with or without --verbose
       - mDNS advertises the address the listener accepts connections on, and the --trust QR code shows the same address
-      - A loopback listener is announced on the loopback interface only, so agents on the same host discover it and other hosts do not
-      - Every A2A mDNS browser (agent discovery, mesh tools, arkavo task and chat, the orchestrator, the AG-UI gateway) also listens on the loopback interface
-    refs: [crates/arkavo-cli/src/commands/agent/listen.rs, crates/arkavo-cli/src/commands/agent.rs, crates/arkavo-cli/src/commands/mesh.rs, crates/arkavo-mcp-mesh/src/lib.rs, crates/arkavo-orchestrator/src/task_executor/mesh_strategy.rs, crates/arkavo-agui/src/mdns_impl.rs]
+      - A listener on every interface is announced on each interface with that interface's own IPv4 address, and the announcement follows addresses as they come and go
+      - A loopback listener is not announced over mDNS; when the kit asks for mDNS, startup says so with or without --verbose
+      - No A2A mDNS browser or announcer uses the loopback interface
+    refs: [crates/arkavo-cli/src/commands/agent/listen.rs, crates/arkavo-cli/src/commands/agent/advertise.rs, crates/arkavo-cli/src/commands/agent.rs, crates/arkavo-cli/src/commands/mesh.rs, crates/arkavo-mcp-mesh/src/lib.rs, crates/arkavo-orchestrator/src/task_executor/mesh_strategy.rs, crates/arkavo-agui/src/mdns_impl.rs]
     edge_cases:
       - condition: --bind given a hostname or a malformed IP literal
         expected: Refused before startup; IPv4 and IPv6 literals are parsed without DNS resolution
       - condition: --bind given without a value
-        expected: Refused before startup rather than silently keeping loopback
-    changed: "2026-09-29"
+        expected: Refused before startup rather than silently keeping the default
+    changed: "2026-10-04"
 
   - id: NET-020
     name: Agent replies and mesh broadcasts pass the egress gate

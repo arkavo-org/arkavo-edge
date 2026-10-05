@@ -14,7 +14,7 @@ use arkavo_swarmkit::DiscoverError;
 
 use super::{AuditResult, AuditStatus, result};
 use crate::commands::agent::listen::{
-    BindAddress, DEFAULT_LISTEN, LOOPBACK_BIND, LOOPBACK_LISTEN, bind_listen, is_loopback,
+    BindAddress, LOOPBACK_BIND, LOOPBACK_LISTEN, bind_listen, default_listen, is_loopback,
     parse_listen,
 };
 
@@ -32,8 +32,8 @@ pub(super) enum Endpoint {
 }
 
 /// Resolve the listen address the way `arkavo agent` does when started in
-/// `cwd`: the discovered kit's `runtime.listen`, else the built-in default,
-/// moved to the host (and port) `bind` names when the audit is told the
+/// `cwd`: the discovered kit's `runtime.listen`, else the built-in default
+/// for the kit's `runtime.mdns` (on for the zero-config agent), moved to the host (and port) `bind` names when the audit is told the
 /// agent is started with `--bind`.
 ///
 /// `--bind` exists only on the command line, so nothing in the directory
@@ -44,13 +44,17 @@ pub(super) fn effective_endpoint(cwd: &Path, bind: Option<BindAddress>) -> Endpo
         Ok(path) => match arkavo_swarmkit::load_kit_file(&path) {
             Ok(kit) => match kit.config.runtime.listen {
                 Some(listen) => (listen, format!("runtime.listen in {}", path.display())),
-                None => (
-                    DEFAULT_LISTEN.to_string(),
-                    format!(
-                        "built-in default, {} sets no runtime.listen",
-                        path.display()
-                    ),
-                ),
+                None => {
+                    let mdns = kit.config.runtime.mdns_or_default();
+                    (
+                        default_listen(mdns).to_string(),
+                        format!(
+                            "built-in default with runtime.mdns {}, {} sets no runtime.listen",
+                            if mdns { "on" } else { "off" },
+                            path.display()
+                        ),
+                    )
+                }
             },
             Err(e) => {
                 return Endpoint::Unknown {
@@ -59,7 +63,7 @@ pub(super) fn effective_endpoint(cwd: &Path, bind: Option<BindAddress>) -> Endpo
             }
         },
         Err(DiscoverError::NotFound | DiscoverError::AgentsMdUnsupported { .. }) => (
-            DEFAULT_LISTEN.to_string(),
+            default_listen(true).to_string(),
             "built-in default, no kit found".to_string(),
         ),
         Err(e) => {
@@ -284,15 +288,20 @@ provenance:
     /// A directory whose discovered kit has `listen` as its runtime.listen,
     /// or no runtime block at all.
     fn dir_with_kit(listen: Option<&str>) -> tempfile::TempDir {
+        match listen {
+            Some(listen) => dir_with_runtime(&format!("  listen: \"{listen}\"\n")),
+            None => {
+                let dir = tempfile::tempdir().unwrap();
+                std::fs::write(dir.path().join("agent.swarmkit.yaml"), KIT).unwrap();
+                dir
+            }
+        }
+    }
+
+    /// A directory whose discovered kit has a runtime block of `fields`.
+    fn dir_with_runtime(fields: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        let kit = match listen {
-            Some(listen) => KIT.replacen(
-                "kit:",
-                &format!("runtime:\n  listen: \"{listen}\"\nkit:"),
-                1,
-            ),
-            None => KIT.to_string(),
-        };
+        let kit = KIT.replacen("kit:", &format!("runtime:\n{fields}kit:"), 1);
         std::fs::write(dir.path().join("agent.swarmkit.yaml"), kit).unwrap();
         dir
     }
@@ -305,41 +314,58 @@ provenance:
         ]
     }
 
-    /// The audit must describe the same built-in loopback default as startup.
+    /// The audit must describe the same built-in default as startup: the
+    /// zero-config agent is announced over mDNS, so it listens on the
+    /// network.
     #[test]
-    fn no_kit_is_audited_as_the_built_in_loopback_default() {
+    fn no_kit_is_audited_as_the_built_in_network_default() {
         let dir = tempfile::tempdir().unwrap();
         let endpoint = effective_endpoint(dir.path(), None);
 
+        for check in endpoint_checks(&endpoint) {
+            assert_eq!(check.status, AuditStatus::Fail, "{}", check.message);
+            assert!(check.message.contains("0.0.0.0:0"), "{}", check.message);
+        }
         let bind = check_bind(&endpoint);
-        assert_eq!(bind.status, AuditStatus::Pass, "{}", bind.message);
-        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
-        assert!(
-            bind.message.contains("this machine only"),
-            "{}",
-            bind.message
-        );
         assert!(
             bind.message.contains("built-in default, no kit found"),
             "{}",
             bind.message
         );
-        assert_eq!(check_transport(&endpoint).status, AuditStatus::Pass);
-        assert_eq!(check_authentication(&endpoint).status, AuditStatus::Warn);
     }
 
     #[test]
-    fn a_kit_without_runtime_listen_is_audited_as_the_default() {
-        let dir = dir_with_kit(None);
-        let bind = check_bind(&effective_endpoint(dir.path(), None));
+    fn a_kit_without_runtime_listen_is_audited_as_the_default_for_its_mdns() {
+        for (dir, listens_on, status, mdns) in [
+            (dir_with_kit(None), "0.0.0.0:0", AuditStatus::Fail, "on"),
+            (
+                dir_with_runtime("  mdns: true\n"),
+                "0.0.0.0:0",
+                AuditStatus::Fail,
+                "on",
+            ),
+            (
+                dir_with_runtime("  mdns: false\n"),
+                "127.0.0.1:0",
+                AuditStatus::Pass,
+                "off",
+            ),
+        ] {
+            let bind = check_bind(&effective_endpoint(dir.path(), None));
 
-        assert_eq!(bind.status, AuditStatus::Pass);
-        assert!(bind.message.contains("127.0.0.1:0"), "{}", bind.message);
-        assert!(
-            bind.message.contains("sets no runtime.listen"),
-            "{}",
-            bind.message
-        );
+            assert_eq!(bind.status, status, "{}", bind.message);
+            assert!(bind.message.contains(listens_on), "{}", bind.message);
+            assert!(
+                bind.message.contains(&format!("runtime.mdns {mdns}")),
+                "{}",
+                bind.message
+            );
+            assert!(
+                bind.message.contains("sets no runtime.listen"),
+                "{}",
+                bind.message
+            );
+        }
     }
 
     /// Regression: the bind check passed with "Default bind is
@@ -365,8 +391,8 @@ provenance:
     fn a_loopback_bind_is_audited_on_loopback() {
         let no_kit = tempfile::tempdir().unwrap();
         let dirs = [
-            (no_kit, "[::1]", "[::1]:0", "127.0.0.1:0"),
-            (dir_with_kit(None), "[::1]", "[::1]:0", "127.0.0.1:0"),
+            (no_kit, "[::1]", "[::1]:0", "0.0.0.0:0"),
+            (dir_with_kit(None), "[::1]", "[::1]:0", "0.0.0.0:0"),
             (
                 dir_with_kit(Some("0.0.0.0:8342")),
                 "127.0.0.1",

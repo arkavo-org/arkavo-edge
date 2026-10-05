@@ -10,6 +10,7 @@ use std::net::{IpAddr, SocketAddr};
 
 #[cfg(feature = "mdns")]
 use super::AgentConfig;
+use super::listen::is_loopback;
 
 /// The address clients are told to connect to for an endpoint bound to
 /// `bound`.
@@ -20,18 +21,99 @@ use super::AgentConfig;
 /// wildcard bind answers on every interface and names none, and there
 /// `lan_ip` picks the address other machines can use.
 pub(super) fn advertised_addr(bound: SocketAddr, lan_ip: impl FnOnce() -> IpAddr) -> SocketAddr {
-    let bound_ip = bound.ip().to_canonical();
-    let ip = if bound_ip.is_unspecified() {
+    let ip = if is_wildcard(bound) {
         lan_ip()
     } else {
-        bound_ip
+        bound.ip().to_canonical()
     };
     SocketAddr::new(ip, bound.port())
+}
+
+/// Whether `bound` is a wildcard bind, which answers on every interface.
+fn is_wildcard(bound: SocketAddr) -> bool {
+    bound.ip().to_canonical().is_unspecified()
 }
 
 /// The `http://` URL of `addr`, with an IPv6 host in brackets.
 pub(super) fn endpoint_url(addr: SocketAddr) -> String {
     format!("http://{addr}")
+}
+
+/// Whether the agent announces itself over mDNS: when its kit asks for it
+/// and other machines can reach the endpoint.
+///
+/// mDNS tells the machines on the network where the agent is. An endpoint
+/// on loopback is not on the network, so there is nothing to announce.
+pub(super) fn announced_over_mdns(mdns_enabled: bool, bound: SocketAddr) -> bool {
+    mdns_enabled && !is_loopback(bound.ip())
+}
+
+/// The notice to show at startup when the kit asks for mDNS and the
+/// endpoint is on loopback, `None` otherwise. Without it the agent would
+/// be missing from discovery with nothing saying why.
+pub(super) fn mdns_off_notice(mdns_enabled: bool, bound: SocketAddr) -> Option<String> {
+    (mdns_enabled && is_loopback(bound.ip())).then(|| {
+        format!(
+            "Agent RPC endpoint {bound} is on this machine only, so the agent is not announced over mDNS.\n\
+             Start the agent with --bind 0.0.0.0 to be found on the network."
+        )
+    })
+}
+
+/// The mDNS daemon that announces the agent and browses for its peers.
+///
+/// mdns-sd leaves the loopback interfaces out, and they stay out: nothing
+/// on them is on the network. For a wildcard bind the daemon also keeps to
+/// IPv4, because every peer reader builds `http://{addr}:{port}` from the
+/// first address it resolves, which an IPv6 address does not survive. An
+/// endpoint bound to one address is announced with it, whatever its family.
+#[cfg(feature = "mdns")]
+pub(super) fn mdns_daemon(bound: SocketAddr) -> mdns_sd::Result<mdns_sd::ServiceDaemon> {
+    let daemon = mdns_sd::ServiceDaemon::new()?;
+    if is_wildcard(bound) {
+        daemon.disable_interface(mdns_sd::IfKind::IPv6)?;
+    }
+    Ok(daemon)
+}
+
+/// The mDNS record of an agent whose endpoint is bound to `bound`.
+///
+/// An endpoint bound to one address is announced with that address. A
+/// wildcard bind answers on every interface, so the record takes its
+/// addresses from the interfaces themselves: the daemon announces each one
+/// on the interface that holds it, and follows addresses as they come and
+/// go. A single address picked for the whole machine would be announced on
+/// that address's network alone. The TXT `ip` is the address
+/// [`advertised_addr`] gives, the one the authorization link names.
+#[cfg(feature = "mdns")]
+pub(super) fn service_info(
+    config: &AgentConfig,
+    bound: SocketAddr,
+    lan_ip: impl FnOnce() -> IpAddr,
+    public_key: Option<&str>,
+    capabilities: &[String],
+) -> mdns_sd::Result<mdns_sd::ServiceInfo> {
+    let advertised = advertised_addr(bound, lan_ip).ip();
+    let properties = txt_properties(config, advertised, public_key, capabilities);
+    let wildcard = is_wildcard(bound);
+    let addresses = if wildcard {
+        Vec::new()
+    } else {
+        vec![advertised]
+    };
+    let info = mdns_sd::ServiceInfo::new(
+        "_a2a._tcp.local.",
+        &config.name,
+        &format!("{}.local.", config.name),
+        addresses.as_slice(),
+        bound.port(),
+        properties,
+    )?;
+    Ok(if wildcard {
+        info.enable_addr_auto()
+    } else {
+        info
+    })
 }
 
 /// TXT record properties of the agent's mDNS service.
@@ -42,7 +124,7 @@ pub(super) fn endpoint_url(addr: SocketAddr) -> String {
 /// the role's skill instructions, the text the model runs under. A role with
 /// no description publishes no `purpose` at all.
 #[cfg(feature = "mdns")]
-pub(super) fn txt_properties(
+fn txt_properties(
     config: &AgentConfig,
     service_ip: IpAddr,
     public_key: Option<&str>,
@@ -152,10 +234,42 @@ mod tests {
             IpAddr::V6(Ipv6Addr::LOCALHOST)
         );
     }
+
+    /// Regression (#729): an agent on loopback was announced on the
+    /// loopback interface, where no other machine could see it.
+    #[test]
+    fn an_agent_on_loopback_is_not_announced() {
+        for bound in ["127.0.0.1:8431", "[::1]:8431", "[::ffff:127.0.0.1]:8431"] {
+            let bound: SocketAddr = bound.parse().unwrap();
+            assert!(!announced_over_mdns(true, bound), "{bound}");
+            let notice = mdns_off_notice(true, bound)
+                .unwrap_or_else(|| panic!("{bound}: the missing announcement must be said"));
+            assert!(notice.contains(&bound.to_string()), "{notice}");
+            assert!(notice.contains("--bind 0.0.0.0"), "{notice}");
+        }
+    }
+
+    #[test]
+    fn an_agent_on_the_network_is_announced_without_a_notice() {
+        for bound in ["0.0.0.0:8431", "[::]:8431", "10.0.0.140:8431"] {
+            let bound: SocketAddr = bound.parse().unwrap();
+            assert!(announced_over_mdns(true, bound), "{bound}");
+            assert_eq!(mdns_off_notice(true, bound), None, "{bound}");
+        }
+    }
+
+    #[test]
+    fn an_agent_with_mdns_off_is_neither_announced_nor_noticed() {
+        for bound in ["127.0.0.1:8431", "0.0.0.0:8431"] {
+            let bound: SocketAddr = bound.parse().unwrap();
+            assert!(!announced_over_mdns(false, bound), "{bound}");
+            assert_eq!(mdns_off_notice(false, bound), None, "{bound}");
+        }
+    }
 }
 
 #[cfg(all(test, feature = "mdns"))]
-mod txt_tests {
+mod record_tests {
     use super::*;
     use std::net::Ipv4Addr;
 
@@ -219,5 +333,47 @@ mod txt_tests {
         assert_eq!(properties["model"], "ministral-3b");
         assert_eq!(properties["public_key"], "key");
         assert_eq!(properties["capabilities"], "orchestration,code_review");
+    }
+
+    /// Regression (#729): a wildcard bind was announced with one address
+    /// picked from the machine's interfaces, so the record reached that
+    /// address's network only.
+    #[test]
+    fn a_wildcard_bind_is_announced_with_every_interface_address() {
+        for wildcard in ["0.0.0.0:8431", "[::]:8431"] {
+            let bound: SocketAddr = wildcard.parse().unwrap();
+            let info = service_info(
+                &kit_role(Some("Plans the work")),
+                bound,
+                || IpAddr::V4(Ipv4Addr::new(10, 0, 0, 140)),
+                None,
+                &[],
+            )
+            .unwrap();
+
+            assert!(info.is_addr_auto(), "{wildcard}");
+            assert!(info.get_addresses().is_empty(), "{wildcard}");
+            assert_eq!(info.get_port(), 8431);
+            assert_eq!(info.get_fullname(), "planner._a2a._tcp.local.");
+            assert_eq!(info.get_property_val_str("ip"), Some("10.0.0.140"));
+        }
+    }
+
+    #[test]
+    fn a_bind_to_one_address_is_announced_with_that_address() {
+        let bound: SocketAddr = "10.0.0.140:8431".parse().unwrap();
+        let info = service_info(
+            &kit_role(None),
+            bound,
+            || panic!("a bind to one address needs no LAN lookup"),
+            None,
+            &[],
+        )
+        .unwrap();
+
+        assert!(!info.is_addr_auto());
+        let addresses: Vec<_> = info.get_addresses().iter().copied().collect();
+        assert_eq!(addresses, vec![bound.ip()]);
+        assert_eq!(info.get_property_val_str("ip"), Some("10.0.0.140"));
     }
 }

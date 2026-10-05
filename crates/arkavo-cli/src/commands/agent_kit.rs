@@ -13,7 +13,7 @@ use arkavo_protocol::agent_config::AgentMode;
 use arkavo_swarmkit::runtime_config::RoleRuntimeView;
 use arkavo_swarmkit::{AgentRuntimeConfig, DiscoverError, RuntimeMcpServer, RuntimeMode};
 
-use super::agent::listen::{BindAddress, DEFAULT_LISTEN, bind_listen, parse_listen};
+use super::agent::listen::{BindAddress, bind_listen, default_listen, parse_listen};
 use super::agent::{AgentConfig, McpServerConfig, default_agent_name};
 use super::kit::kit_model_to_hint;
 
@@ -191,12 +191,12 @@ fn agent_configs_from_kit(
         None => runtime_config.roles.iter().collect(),
     };
 
+    let mdns_enabled = runtime_config.runtime.mdns_or_default();
     let listen = runtime_config
         .runtime
         .listen
         .clone()
-        .unwrap_or_else(|| DEFAULT_LISTEN.to_string());
-    let mdns_enabled = runtime_config.runtime.mdns_or_default();
+        .unwrap_or_else(|| default_listen(mdns_enabled).to_string());
     let mode = to_agent_mode(runtime_config.runtime.mode_or_default());
     let mcp_servers: Vec<McpServerConfig> = runtime_config
         .runtime
@@ -335,7 +335,7 @@ fn default_agent_config() -> AgentConfig {
         purpose: "A general-purpose AI agent".to_string(),
         model: String::new(),
         mode: AgentMode::default(),
-        listen: DEFAULT_LISTEN.to_string(),
+        listen: default_listen(true).to_string(),
         mdns_enabled: true,
         mcp_servers: Vec::new(),
         api_keys: std::collections::HashMap::new(),
@@ -362,7 +362,22 @@ mod tests {
         let dir = tempdir();
         let configs = resolve_agent_configs(None, None, None, dir.path()).unwrap();
         assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].listen, DEFAULT_LISTEN);
+        assert_eq!(configs[0].listen, "0.0.0.0:0");
+        assert!(configs[0].mdns_enabled);
+    }
+
+    #[test]
+    fn a_kit_with_mdns_off_listens_on_loopback_without_a_listen_address() {
+        let dir = tempdir();
+        let path = dir.path().join("agent.swarmkit.yaml");
+        fs::write(
+            &path,
+            minimal_kit_yaml().replacen("kit:", "runtime:\n  mdns: false\nkit:", 1),
+        )
+        .unwrap();
+        let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
+        assert_eq!(configs[0].listen, "127.0.0.1:0");
+        assert!(!configs[0].mdns_enabled);
     }
 
     #[test]
@@ -397,18 +412,29 @@ mod tests {
         }
     }
 
+    /// Regression (#729): a kit that announces its agent over mDNS and names
+    /// no address listened on loopback, so other machines were told about an
+    /// agent they could not reach.
     #[test]
-    fn a_kit_without_runtime_listen_listens_on_loopback() {
+    fn a_kit_without_runtime_listen_listens_on_the_network() {
         let dir = tempdir();
-        let path = dir.path().join("agent.swarmkit.yaml");
-        fs::write(&path, minimal_kit_yaml()).unwrap();
+        // `runtime.mdns` is on when the kit leaves it out.
+        for runtime in ["", "runtime:\n  mdns: true\n"] {
+            let path = dir.path().join("agent.swarmkit.yaml");
+            fs::write(
+                &path,
+                minimal_kit_yaml().replacen("kit:", &format!("{runtime}kit:"), 1),
+            )
+            .unwrap();
 
-        let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
-        assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].listen, "127.0.0.1:0");
+            let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
+            assert_eq!(configs.len(), 1);
+            assert_eq!(configs[0].listen, "0.0.0.0:0", "{runtime:?}");
 
-        let with_port = resolve_agent_configs(Some(&path), None, Some(8343), dir.path()).unwrap();
-        assert_eq!(with_port[0].listen, "127.0.0.1:8343");
+            let with_port =
+                resolve_agent_configs(Some(&path), None, Some(8343), dir.path()).unwrap();
+            assert_eq!(with_port[0].listen, "0.0.0.0:8343", "{runtime:?}");
+        }
     }
 
     /// A kit in `dir` whose `runtime.listen` is `listen`, or that has no
@@ -445,7 +471,7 @@ mod tests {
     fn without_bind_a_start_resolves_what_every_other_caller_gets() {
         let dir = tempdir();
         let no_kit = resolve_agent_configs_for_start(None, None, None, None, dir.path()).unwrap();
-        assert_eq!(no_kit.0[0].listen, "127.0.0.1:0");
+        assert_eq!(no_kit.0[0].listen, "0.0.0.0:0");
         assert_eq!(no_kit.1, None);
 
         let kit = write_kit(dir.path(), Some("10.0.0.140:8342"));
@@ -467,7 +493,7 @@ mod tests {
         let dir = tempdir();
         let no_kit =
             resolve_agent_configs_for_start(None, None, Some(8343), None, dir.path()).unwrap();
-        assert_eq!(no_kit.0[0].listen, "127.0.0.1:8343");
+        assert_eq!(no_kit.0[0].listen, "0.0.0.0:8343");
 
         for (kit_listen, listens_on) in [
             ("127.0.0.1:8342", "127.0.0.1:8343"),

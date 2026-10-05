@@ -119,11 +119,20 @@ mdns: false
 #[test]
 fn a_source_without_listen_migrates_without_runtime_listen() {
     let sources = [
-        "## quiet-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\n",
-        "---\nname: quiet-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\n---\n",
-        "## quiet-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\nmdns: false\n",
+        (
+            "## quiet-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\n",
+            "0.0.0.0:0",
+        ),
+        (
+            "---\nname: quiet-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\n---\n",
+            "0.0.0.0:0",
+        ),
+        (
+            "## quiet-agent\npurpose: \"Answers questions\"\nmodel: ministral-3b\nmdns: false\n",
+            "127.0.0.1:0",
+        ),
     ];
-    for source in sources {
+    for (source, default_listen) in sources {
         let dir = tempdir();
         let in_path = dir.path().join("AGENTS.md");
         fs::write(&in_path, source).unwrap();
@@ -138,7 +147,8 @@ fn a_source_without_listen_migrates_without_runtime_listen() {
         let runtime = manifest.runtime.expect("runtime block required");
         assert_eq!(runtime.listen, None, "{source:?}");
 
-        // With nothing pinned, the agent's own default applies.
+        // With nothing pinned, the agent's own default for its mDNS setting
+        // applies.
         let configs = arkavo_cli::commands::agent_kit::resolve_agent_configs(
             Some(&report.path),
             None,
@@ -146,7 +156,7 @@ fn a_source_without_listen_migrates_without_runtime_listen() {
             dir.path(),
         )
         .expect("migrated kit should resolve");
-        assert_eq!(configs[0].listen, "127.0.0.1:0", "{source:?}");
+        assert_eq!(configs[0].listen, default_listen, "{source:?}");
     }
 }
 

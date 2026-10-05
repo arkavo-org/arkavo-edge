@@ -3,16 +3,14 @@ use arkavo_protocol::agent_registry::AgentInfo;
 /// Discover agents on the mesh network using mDNS
 #[cfg(feature = "mdns")]
 pub fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> {
-    use mdns_sd::ServiceEvent;
+    use mdns_sd::{ServiceDaemon, ServiceEvent};
     use std::collections::HashMap;
     use std::time::Duration;
     use tracing::info;
 
     info!("Discovering mesh agents via mDNS...");
 
-    // A plain daemon skips the loopback interfaces, where an agent started
-    // with --bind 127.0.0.1 announces itself.
-    let mdns = arkavo_agui::mdns_impl::mdns::browsing_daemon()?;
+    let mdns = ServiceDaemon::new()?;
     let receiver = mdns.browse("_a2a._tcp.local.")?;
 
     let mut agents = Vec::new();
@@ -238,60 +236,5 @@ mod tests {
         // Without real mDNS services, should return empty or error gracefully
         let result = discover_mesh_agents();
         assert!(result.is_ok());
-    }
-
-    // Runs on macOS only, the one platform this was verified on. Its loopback
-    // interface carries multicast; on Linux `lo` usually lacks the MULTICAST
-    // flag, and whether mDNS works over it there has not been established.
-    /// Announces an agent bound to 127.0.0.1 on the loopback interfaces and
-    /// on no other, so the record can only reach a browser that listens
-    /// there and nothing the test publishes leaves the machine.
-    #[cfg(all(feature = "mdns", target_os = "macos"))]
-    fn announce_on_loopback(agent_id: &str, port: u16) -> mdns_sd::ServiceDaemon {
-        use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
-        use std::net::{IpAddr, Ipv4Addr};
-
-        let daemon = ServiceDaemon::new().expect("mDNS daemon");
-        daemon
-            .disable_interface(IfKind::All)
-            .expect("leave every interface");
-        daemon
-            .enable_interface(vec![IfKind::LoopbackV4, IfKind::LoopbackV6])
-            .expect("join the loopback interfaces");
-
-        let mut properties = std::collections::HashMap::new();
-        properties.insert("agent_id".to_string(), agent_id.to_string());
-        properties.insert("purpose".to_string(), "Plans the work".to_string());
-        let service = ServiceInfo::new(
-            "_a2a._tcp.local.",
-            agent_id,
-            &format!("{agent_id}.local."),
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            port,
-            properties,
-        )
-        .expect("service info");
-        daemon.register(service).expect("register the agent");
-        daemon
-    }
-
-    /// Regression: `arkavo chat --agent-id` and `arkavo task --mesh-only`
-    /// browsed with a daemon that skips loopback interfaces, so an agent on
-    /// the same machine, listening on the default address, was never found.
-    #[cfg(all(feature = "mdns", target_os = "macos"))]
-    #[test]
-    fn an_agent_listening_on_loopback_is_discovered() {
-        let agent_id = format!("loopback-cli-{}", std::process::id());
-        let announcer = announce_on_loopback(&agent_id, 48_432);
-
-        let agents = discover_mesh_agents().expect("discovery runs");
-        announcer.shutdown().ok();
-
-        let found = agents
-            .iter()
-            .find(|agent| agent.agent_id == agent_id)
-            .unwrap_or_else(|| panic!("{agent_id} not among {agents:?}"));
-        assert_eq!(found.address.as_deref(), Some("http://127.0.0.1:48432"));
-        assert_eq!(found.purpose, "Plans the work");
     }
 }

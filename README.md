@@ -44,11 +44,11 @@ arkavo
 arkavo ui
 ```
 
-That's it. No configuration files, no setup. Agents on the same machine auto-discover via mDNS and form a mesh.
+That's it. No configuration files, no setup. Agents on the local network auto-discover via mDNS and form a mesh.
 
-By default an agent listens on loopback and announces itself over mDNS for discovery on this machine. Its RPC endpoint is not authenticated yet. To accept connections from other machines, start it with `--bind 0.0.0.0:<port>` or set `runtime.listen` in its kit. A network-reachable start prints a warning; run it on networks you trust.
+By default an agent announces itself over mDNS and listens on every interface, so the machines it is announced to can reach it. Its RPC endpoint is not authenticated yet; a network-reachable start prints a warning, so run it on networks you trust. A kit with `runtime.mdns: false` listens on loopback unless it names an address.
 
-To keep an agent on this machine even when a kit asks for another address, start it with `--bind 127.0.0.1`. It then listens on loopback and is not announced on the network; agents on the same machine still discover it.
+To keep an agent on this machine even when a kit asks for another address, start it with `--bind 127.0.0.1`. It then listens on loopback and is not announced over mDNS. The methods that read and replace the kit, which the AG-UI's kit editor uses, are served only on a loopback endpoint.
 
 ```bash
 arkavo --bind 127.0.0.1
@@ -218,7 +218,7 @@ For offensive-security reviewers: here's what is real today and what is still on
 | **ABAC / attribute release policies** | Library shipped, not wired into kit launch | Roles declare TDF Attribute Release Policies and kit validation checks them. The runtime library turns each one into a role-scoped OpenTDF policy (`role_policy()`), but the `arkavo ui` and `arkavo agent` launch paths do not call it yet. |
 | **SwarmKit policy isolation** | Shipped for kits loaded into the gateway | A kit loaded through `ARKAVO_SWARMKIT_PATH` gets one Agent Runtime Policy, policy cache, and decision trace per role. On the `arkavo agent -c <kit>` path a role's `isolation`, network egress, budget, and `mcp_tools` grant fields are parsed but not enforced: the process takes the role's id, model, and skill instructions, plus the kit-level `runtime` block. |
 | **DID:key identity** | Shipped | Agents are identified by `did:key` derived from an Ed25519 keypair; identity is stable per device. |
-| **mDNS mesh discovery** | Shipped | Pure-Rust mDNS with no system Avahi/Bonjour dependency; agents auto-discover and form a local mesh. By default an agent listens on loopback and announces itself on the loopback interface for discovery on this machine. An explicit `--bind` or `runtime.listen` can expose it to other machines. |
+| **mDNS mesh discovery** | Shipped | Pure-Rust mDNS with no system Avahi/Bonjour dependency; agents auto-discover and form a local mesh. By default an agent listens on every interface and is announced on each one with that interface's own address. An agent on loopback is not announced. |
 | **Local inference** | Shipped | Gemma 4 and Ministral models run via llama.cpp on the local device; no cloud required for routing or inference. |
 | **DLP / PII preflight** | Shipped, off by default | Preflight policies run before any model inference and refuse a matching request, reporting the policy id and reason. They are active only when the kit declares `runtime.preflight`. Preflight blocks; it does not redact or rewrite the request. |
 | **PII leak regression tests** | Shipped | `tests/e2e_security_test.sh`, `tests/security_cli_test.sh`, `tests/dlp_pii_security_test.sh`. |
@@ -233,7 +233,7 @@ For offensive-security reviewers: here's what is real today and what is still on
 | **Verifiable remote attestation** | Not yet | No attestation evidence or DID proof is verified. Published trust scores report every subject as unattested (VERIFICATION 0), including the local agent's own score; gossip peers are identified by discovery names, not proven DIDs. |
 | **Tool execution confinement** | Not yet | `shell_exec` and other process-spawning tools run as the agent's OS user with its files, network and environment variables. Only `workspace_container` isolates execution, and only for commands the model chooses to run in a container. OS-level confinement is planned. |
 | **Outbound SSRF / egress filtering** | Tool HTTP and the browser navigate action's initial URL only | Requests built-in tools make (`web_search`, the GitHub API tools) go through `EgressClient`, which refuses loopback, private, CGNAT, multicast and cloud-metadata addresses after DNS resolution and on every redirect; `browser_cdp` refuses such a URL given to its `navigate` action before Chrome starts. `ARKAVO_EGRESS_ALLOW` exempts named origins. Not filtered: script the model runs through `browser_cdp` `evaluate` (it can navigate or fetch), Chrome's own redirects, subresources and DNS re-resolution, and processes the agent starts (`shell_exec`, `git`, `gh`, MCP servers). |
-| **Agent listener authentication** | Not yet | The A2A agent listener binds loopback (`127.0.0.1`) by default; `--bind <address>` or `runtime.listen` in a SwarmKit kit exposes it to other hosts, and the agent warns at startup when it does. It does not authenticate callers, so any local process, and any host that can reach an exposed listener, can send it tasks. The AG-UI gateway also binds loopback by default. |
+| **Agent listener authentication** | Not yet | The A2A agent listener binds every interface by default, because the agent is announced over mDNS; `--bind 127.0.0.1`, a loopback `runtime.listen` or `runtime.mdns: false` keeps it on this machine, and the agent warns at startup whenever it is exposed. It does not authenticate callers, so any local process, and any host that can reach an exposed listener, can send it tasks. The AG-UI gateway also binds loopback by default. |
 
 This split is intentional: encryption, access control, and identity are shipping now; hardware-bound trust roots, tool-execution confinement and egress filtering for processes the agent starts are being built in the open.
 

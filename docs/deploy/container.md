@@ -146,12 +146,13 @@ Readiness: `GET /readyz` returns `200` while the health registry reports healthy
   port beyond a trusted network, until gateway authentication lands.
 - No agent inference in this utility image: cloud credentials cannot replace
   the missing local backend. Use a local-enabled build and provision models.
-- **The agent listener binds loopback**: a local-enabled image that runs
-  `arkavo agent` must pass `--bind 0.0.0.0:<port>` (e.g.
-  `command: ["agent", "--bind", "0.0.0.0:8343"]`) or use a kit that sets
-  `runtime.listen`, then publish that port. Without either, the A2A listener
-  binds `127.0.0.1` inside the container and the published port reaches
-  nothing. Like the gateway, the agent listener does not authenticate
-  callers, so publish it only to a network you trust.
+- **The agent listener needs a fixed port**: a local-enabled image that runs
+  `arkavo agent` listens on every interface on a port the OS picks, so it
+  must pass `--bind 0.0.0.0:<port>` (e.g.
+  `command: ["agent", "--bind", "0.0.0.0:8343"]`), `-p <port>` or use a kit
+  that sets `runtime.listen`, then publish that port. A kit with
+  `runtime.mdns: false` binds `127.0.0.1` inside the container, where the
+  published port reaches nothing. Like the gateway, the agent listener does
+  not authenticate callers, so publish it only to a network you trust.
 - glibc runtime only: Arkavo does not ship a musl build, so Alpine and other
   musl-based base images cannot run the binary.
