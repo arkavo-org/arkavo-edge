@@ -66,7 +66,7 @@ scenarios:
     changed: "2026-10-04"
     edge_cases:
       - condition: Signed votes from ids no discovery found (keys registered by any caller)
-        expected: Not counted; before 0.100.3 they could approve a patch or lesson alone (INGRESS-004)
+        expected: Not counted; before 0.101.1 they could approve a patch or lesson alone (INGRESS-004)
 
   - id: GOSSIP-005
     name: Anti-entropy synchronization

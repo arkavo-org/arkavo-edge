@@ -2,7 +2,7 @@
 
 feature: Agent Ingress, Discovery and Enrollment
 module: arkavo-server, arkavo-cli, arkavo-registration, arkavo-gossip
-version: 0.100.3
+version: 0.101.1
 
 # Design: docs/swarm-trust-model.md, "Agent ingress, discovery and enrollment".
 # Scenarios marked wip are not implemented; their refs name the code at
@@ -92,7 +92,7 @@ scenarios:
       - Only votes from this agent or a peer discovery found count toward a patch or lesson quorum, on the vote and the delivery paths
     edge_cases:
       - condition: "The old request {peer_id, public_key} without proof"
-        expected: "Refused, so agents from before 0.100.3 and after it stop exchanging keys on the same network"
+        expected: "Refused, so agents from before 0.101.1 and after it stop exchanging keys on the same network"
       - condition: Replayed request
         expected: Re-asserts a key the replayer does not hold; harmless since bound keys are not replaced, so no nonce is stored
       - condition: Peer restarted cleanly with a new gossip key
