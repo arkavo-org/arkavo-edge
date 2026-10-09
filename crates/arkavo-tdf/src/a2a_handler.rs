@@ -507,9 +507,9 @@ mod tests {
         client: &KasEcKeypair,
         kas_public: &KasEcPublicKey,
     ) -> Vec<u8> {
-        use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
+        use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce, aead::Aead};
         let session = client.diffie_hellman(kas_public);
-        let mut key = [0u8; 32];
+        let mut key = Key::<Aes256Gcm>::default();
         Hkdf::<Sha256>::new(Some(&compute_nanotdf_salt(NanoTdfVersion::V12)), &session)
             .expand(b"", &mut key)
             .unwrap();
@@ -517,8 +517,7 @@ mod tests {
             .decode(entity_wrapped_key)
             .unwrap();
         let (nonce, ciphertext) = bytes.split_at(12);
-        Aes256Gcm::new_from_slice(&key)
-            .unwrap()
+        Aes256Gcm::new(&key)
             .decrypt(Nonce::from_slice(nonce), ciphertext)
             .unwrap()
     }
