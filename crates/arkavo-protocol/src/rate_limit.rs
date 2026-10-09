@@ -5,7 +5,7 @@ use jsonrpsee::types::ErrorObjectOwned;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::time::interval;
 use tracing::debug;
@@ -160,6 +160,9 @@ struct IpRateLimiterEntry {
 pub struct IpRateLimiter {
     limiters: Arc<dashmap::DashMap<IpAddr, IpRateLimiterEntry>>,
     access_queue: Arc<SegQueue<(IpAddr, Instant)>>,
+    /// Held while an entry is added. Without it, threads that each see the
+    /// table one below capacity all insert, and `max_ip_entries` is no bound.
+    admit: Mutex<()>,
     config: RateLimitConfig,
 }
 
@@ -169,6 +172,7 @@ impl IpRateLimiter {
         Self {
             limiters: Arc::new(dashmap::DashMap::new()),
             access_queue: Arc::new(SegQueue::new()),
+            admit: Mutex::new(()),
             config,
         }
     }
@@ -184,11 +188,6 @@ impl IpRateLimiter {
         }
 
         let now = Instant::now();
-
-        // Check if we need to perform eviction due to size limit
-        if self.limiters.len() >= self.config.max_ip_entries {
-            self.evict_lru_entries();
-        }
 
         // Check if entry exists and is not expired
         if let Some(mut entry) = self.limiters.get_mut(&ip) {
@@ -225,13 +224,25 @@ impl IpRateLimiter {
             NonZeroU32::new(self.config.burst_size).unwrap_or(NonZeroU32::new(10).unwrap()),
         );
 
-        let new_entry = IpRateLimiterEntry {
-            limiter: Arc::new(governor::RateLimiter::direct(quota)),
-            last_accessed: now,
+        let limiter = {
+            let _admit = self.admit.lock().unwrap_or_else(PoisonError::into_inner);
+            // A concurrent first request from this IP may have added it since
+            // the lookup above. Reuse that entry: replacing it would refund the
+            // tokens it has already spent.
+            if !self.limiters.contains_key(&ip) && self.limiters.len() >= self.config.max_ip_entries
+            {
+                self.evict_lru_entries();
+            }
+            let mut entry = self
+                .limiters
+                .entry(ip)
+                .or_insert_with(|| IpRateLimiterEntry {
+                    limiter: Arc::new(governor::RateLimiter::direct(quota)),
+                    last_accessed: now,
+                });
+            entry.last_accessed = now;
+            entry.limiter.clone()
         };
-
-        let limiter = new_entry.limiter.clone();
-        self.limiters.insert(ip, new_entry);
         self.access_queue.push((ip, now));
 
         match limiter.check() {

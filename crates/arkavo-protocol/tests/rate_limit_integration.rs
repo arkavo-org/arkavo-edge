@@ -1,8 +1,10 @@
 #![allow(clippy::disallowed_methods)]
 
 use arkavo_protocol::{IpRateLimiter, RateLimitConfig, spawn_cleanup_task};
+use arkavo_test_macros::spec;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
+use std::thread;
 use std::time::Duration;
 use tokio::time;
 
@@ -87,6 +89,52 @@ async fn test_eviction_stays_under_capacity_under_churn() {
     .await;
 
     assert!(result.is_ok(), "eviction churn deadlocked or timed out");
+}
+
+/// Regression test for the capacity check racing the insert.
+///
+/// Threads that each read the count one below capacity used to insert past it
+/// together, which the nightly `fuzz_rate_limit_concurrent` caught as
+/// "Entry count 51 exceeds max 50".
+#[spec("PROTO-007")]
+#[test]
+fn concurrent_first_requests_never_push_the_table_past_capacity() {
+    const MAX_IP_ENTRIES: usize = 50;
+    const THREADS: u8 = 8;
+
+    for round in 0..2000 {
+        let limiter = Arc::new(IpRateLimiter::new(RateLimitConfig {
+            max_requests_per_second: 100,
+            burst_size: 10,
+            enabled: true,
+            max_ip_entries: MAX_IP_ENTRIES,
+            ip_entry_ttl_seconds: 3600,
+        }));
+        for i in 0..MAX_IP_ENTRIES - 1 {
+            let _ = limiter.check_rate_limit(IpAddr::from([10, 0, 0, i as u8]));
+        }
+
+        let start = Arc::new(Barrier::new(THREADS.into()));
+        let handles: Vec<_> = (0..THREADS)
+            .map(|t| {
+                let limiter = limiter.clone();
+                let start = start.clone();
+                thread::spawn(move || {
+                    start.wait();
+                    let _ = limiter.check_rate_limit(IpAddr::from([192, 168, 0, t]));
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert!(
+            limiter.entry_count() <= MAX_IP_ENTRIES,
+            "round {round}: entry count {} exceeds max {MAX_IP_ENTRIES}",
+            limiter.entry_count()
+        );
+    }
 }
 
 #[tokio::test]
