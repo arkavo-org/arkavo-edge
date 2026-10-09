@@ -490,20 +490,34 @@ fn test_documentation_completeness() {
         "Should document key bindings"
     );
     assert!(
-        content.contains("## Testing Requirements"),
-        "Should document testing requirements"
+        content.contains("## TUI Testing Tools"),
+        "Should document testing tools"
     );
     assert!(
         content.contains("## Common Bug Patterns"),
         "Should document common bugs"
     );
     assert!(
-        content.contains("### Model Connection States"),
-        "Should document model states"
+        content.contains("## Testing Checklist"),
+        "Should list the pre-commit TUI checks"
     );
+
+    // The guide once pointed at a crate that no longer existed; keep the tool
+    // location it names real.
+    let tools_dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../arkavo-mcp-macos/src/mcp");
     assert!(
-        content.contains("### TUI Testing Tools"),
-        "Should document testing tools"
+        content.contains("crates/arkavo-mcp-macos/src/mcp/tui_*"),
+        "Should name where the TUI testing tools live"
+    );
+    let has_tui_tools = std::fs::read_dir(&tools_dir)
+        .expect("arkavo-mcp-macos MCP sources")
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name().to_string_lossy().starts_with("tui_"));
+    assert!(
+        has_tui_tools,
+        "TUI testing tools should exist at {}",
+        tools_dir.display()
     );
 
     println!("CLAUDE.md documentation is complete");
