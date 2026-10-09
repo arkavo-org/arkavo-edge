@@ -12,7 +12,13 @@ mod platform {
         true
     }
 
-    fn get_storage_path() -> Result<PathBuf> {
+    pub(super) fn get_storage_path() -> Result<PathBuf> {
+        if let Some(dir) = crate::test_storage_dir() {
+            fs::create_dir_all(&dir).map_err(|e| {
+                DeviceIdentityError::Storage(format!("Failed to create directory: {}", e))
+            })?;
+            return Ok(dir.join("device_id"));
+        }
         let mut path = dirs::home_dir().ok_or_else(|| {
             DeviceIdentityError::Storage("Could not determine home directory".to_string())
         })?;
@@ -195,7 +201,13 @@ mod platform {
     use std::fs;
     use std::path::PathBuf;
 
-    fn get_storage_path() -> Result<PathBuf> {
+    pub(super) fn get_storage_path() -> Result<PathBuf> {
+        if let Some(dir) = crate::test_storage_dir() {
+            fs::create_dir_all(&dir).map_err(|e| {
+                DeviceIdentityError::Storage(format!("Failed to create directory: {}", e))
+            })?;
+            return Ok(dir.join("device_id"));
+        }
         let mut path = dirs::data_local_dir().ok_or_else(|| {
             DeviceIdentityError::Storage("Could not determine local data directory".to_string())
         })?;
@@ -333,6 +345,23 @@ mod tests {
     // Mutex to serialize tests that access the system keychain
     static KEYCHAIN_MUTEX: Mutex<()> = Mutex::new(());
 
+    /// Regression: these tests deleted the developer's real device ID when
+    /// run under nextest, which runs each test in its own process.
+    #[test]
+    #[cfg(any(
+        target_os = "macos",
+        all(target_os = "linux", not(feature = "linux-keyring"))
+    ))]
+    fn tests_never_touch_the_real_device_id() {
+        let path = platform::get_storage_path().unwrap();
+        assert!(
+            path.starts_with(crate::test_storage_dir().unwrap()),
+            "{}",
+            path.display()
+        );
+        assert!(path.starts_with(std::env::temp_dir()), "{}", path.display());
+    }
+
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_get_or_create() {
@@ -372,7 +401,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(
+        target_os = "macos",
+        all(target_os = "linux", not(feature = "linux-keyring"))
+    ))]
     fn test_malformed_device_id() {
         use std::fs;
 
@@ -380,19 +412,9 @@ mod tests {
         let _ = delete();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        #[cfg(target_os = "macos")]
-        let storage_path = {
-            let mut path = dirs::home_dir().unwrap();
-            path.push("Library/Application Support/arkavo/device_id");
-            path
-        };
-
-        #[cfg(target_os = "linux")]
-        let storage_path = {
-            let mut path = dirs::data_local_dir().unwrap();
-            path.push("arkavo/device_id");
-            path
-        };
+        // Through the storage module, so the file lands in this process's
+        // test directory and never overwrites the developer's device ID.
+        let storage_path = platform::get_storage_path().unwrap();
 
         fs::write(&storage_path, "invalid_hex_data").expect("Failed to write malformed data");
 
@@ -407,7 +429,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(
+        target_os = "macos",
+        all(target_os = "linux", not(feature = "linux-keyring"))
+    ))]
     fn test_wrong_size_device_id() {
         use std::fs;
 
@@ -415,19 +440,9 @@ mod tests {
         let _ = delete();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        #[cfg(target_os = "macos")]
-        let storage_path = {
-            let mut path = dirs::home_dir().unwrap();
-            path.push("Library/Application Support/arkavo/device_id");
-            path
-        };
-
-        #[cfg(target_os = "linux")]
-        let storage_path = {
-            let mut path = dirs::data_local_dir().unwrap();
-            path.push("arkavo/device_id");
-            path
-        };
+        // Through the storage module, so the file lands in this process's
+        // test directory and never overwrites the developer's device ID.
+        let storage_path = platform::get_storage_path().unwrap();
 
         let wrong_size_data = hex::encode([0u8; 8]);
         fs::write(&storage_path, wrong_size_data).expect("Failed to write wrong size data");

@@ -483,12 +483,16 @@ impl AgUiGateway {
                 get(crate::gateway_static::static_file_handler),
             );
 
+        let addr = crate::gateway_bind::resolve_bind_addr(self.port);
+
         let app = static_routes
             .merge(api_routes)
             .layer(crate::gateway_security::security_headers())
+            .layer(middleware::from_fn_with_state(
+                crate::gateway_origin::OriginGuard::new(addr.ip()),
+                crate::gateway_origin::guard,
+            ))
             .with_state(state);
-
-        let addr = crate::gateway_bind::resolve_bind_addr(self.port);
         if addr.ip().is_loopback() {
             println!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
             println!("Open http://127.0.0.1:{} in your web browser", self.port);

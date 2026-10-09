@@ -5,6 +5,20 @@ use uuid::Uuid;
 pub mod keypair;
 pub mod storage;
 
+/// Where unit tests keep identity files: a directory of the test's own
+/// process, never the developer's. The real files hold the device ID and the
+/// device and agent keys, and nextest runs each test in a process of its own,
+/// where no lock stops one test from deleting a file another just put back.
+#[cfg(test)]
+pub(crate) fn test_storage_dir() -> Option<std::path::PathBuf> {
+    Some(std::env::temp_dir().join(format!("arkavo-identity-test-{}", std::process::id())))
+}
+
+#[cfg(not(test))]
+pub(crate) fn test_storage_dir() -> Option<std::path::PathBuf> {
+    None
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceIdentityError {
     #[error("Storage error: {0}")]

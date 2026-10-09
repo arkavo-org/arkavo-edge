@@ -865,16 +865,21 @@ pub async fn start_agent_server(
 
                     // Initiate key exchange with the peer
                     if let Some(addr) = address {
-                        let our_public_key = learning_bus_peers.keypair().public_key().to_base64();
-                        let our_agent_id = learning_bus_peers.agent_id().to_string();
-
-                        let request = A2aRequest::new(
-                            "agent/exchangeKeys",
-                            serde_json::json!({
-                                "peer_id": our_agent_id,
-                                "public_key": our_public_key
-                            }),
+                        // Prove we hold our key, addressed to this peer, and
+                        // keep the challenge its reply must sign.
+                        let (exchange, challenge) = arkavo_gossip::key_exchange::sign_request(
+                            learning_bus_peers.keypair(),
+                            learning_bus_peers.agent_id(),
+                            &peer_id,
                         );
+                        let params = match serde_json::to_value(&exchange) {
+                            Ok(params) => params,
+                            Err(e) => {
+                                tracing::warn!("Failed to encode key exchange: {}", e);
+                                continue;
+                            }
+                        };
+                        let request = A2aRequest::new("agent/exchangeKeys", params);
 
                         let mut config = TransportConfig::default();
                         config.tls_config.require_tls = false;
@@ -906,29 +911,42 @@ pub async fn start_agent_server(
 
                         match transport.send_request(request).await {
                             Ok(response) => {
+                                use arkavo_gossip::key_exchange::{
+                                    KeyExchangeResponse, verify_response,
+                                };
                                 use arkavo_protocol::transport::A2aResponse;
-                                // Parse the response to get their public key
-                                if let A2aResponse::Success { result, .. } = response
-                                    && let Some(their_key_b64) = result.as_str()
-                                {
-                                    match arkavo_crypto::AgentPublicKey::from_base64(their_key_b64)
-                                    {
-                                        Ok(their_key) => {
-                                            learning_bus_peers
-                                                .register_peer_key(peer_id.clone(), their_key)
-                                                .await;
-                                            tracing::info!(
-                                                "Key exchange completed with peer: {}",
-                                                peer_id
-                                            );
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                "Invalid public key from {}: {}",
-                                                peer_id,
-                                                e
-                                            );
-                                        }
+                                // Bind their key only once their reply proves
+                                // they hold it.
+                                if let A2aResponse::Success { result, .. } = response {
+                                    let proven =
+                                        serde_json::from_value::<KeyExchangeResponse>(result)
+                                            .map_err(|e| e.to_string())
+                                            .and_then(|reply| {
+                                                verify_response(
+                                                    &reply,
+                                                    &peer_id,
+                                                    learning_bus_peers.agent_id(),
+                                                    &challenge,
+                                                )
+                                                .map_err(|e| e.to_string())
+                                            });
+                                    let bound = match proven {
+                                        Ok(their_key) => learning_bus_peers
+                                            .register_peer_key(peer_id.clone(), their_key)
+                                            .await
+                                            .map_err(|e| e.to_string()),
+                                        Err(e) => Err(e),
+                                    };
+                                    match bound {
+                                        Ok(()) => tracing::info!(
+                                            "Key exchange completed with peer: {}",
+                                            peer_id
+                                        ),
+                                        Err(e) => tracing::warn!(
+                                            "Key exchange with {} refused: {}",
+                                            peer_id,
+                                            e
+                                        ),
                                     }
                                 }
                             }
@@ -1263,6 +1281,7 @@ fn broadcast_agent_mdns_sync(
             public_key.as_deref(),
             &capabilities,
         )?;
+        let fullname = service_info.get_fullname().to_string();
         mdns.register(service_info)?;
 
         // Signal that mDNS is ready
@@ -1280,10 +1299,10 @@ fn broadcast_agent_mdns_sync(
 
         println!("mDNS service shutting down...");
 
+        advertise::announce_departure(&mdns, &fullname);
+
         // Wait for discovery thread to finish
         let _ = discovery_thread.join();
-
-        // Service will be unregistered when mdns goes out of scope
     }
 
     #[cfg(not(feature = "mdns"))]

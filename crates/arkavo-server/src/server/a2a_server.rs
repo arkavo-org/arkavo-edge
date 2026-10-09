@@ -993,7 +993,11 @@ impl A2aServer {
         ])
         .map_err(|e| A2aError::Transport(format!("Failed to create proxy layer: {e}")))?;
         let server = ServerBuilder::with_config(server_cfg)
-            .set_http_middleware(tower::ServiceBuilder::new().layer(proxy_layer))
+            .set_http_middleware(
+                tower::ServiceBuilder::new()
+                    .layer(super::browser_origin::RefuseBrowserOriginLayer)
+                    .layer(proxy_layer),
+            )
             .build(addr)
             .await
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;

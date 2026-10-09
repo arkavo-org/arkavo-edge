@@ -160,9 +160,22 @@ impl GossipProtocol {
         self.peers.write().await.insert(peer_id, ());
     }
 
-    /// Remove a peer from the known peers list
+    /// Remove a peer from the known peers list, and forget its key: a peer
+    /// that comes back may have a new one.
     pub async fn remove_peer(&self, peer_id: &str) {
         self.peers.write().await.remove(peer_id);
+        self.verifier
+            .write()
+            .await
+            .registry_mut()
+            .unregister(peer_id);
+    }
+
+    /// Whether `voter`'s vote counts toward a quorum: this agent's own, or a
+    /// peer discovery found. A key bound for any other id still verifies, but
+    /// counting its votes would let one caller fill a quorum with ids it made up.
+    pub(crate) async fn counts_as_voter(&self, voter: &str) -> bool {
+        voter == self.agent_id || self.peers.read().await.contains_key(voter)
     }
 
     /// Get number of known peers
@@ -350,9 +363,14 @@ impl GossipProtocol {
             verifier.verify_vote(&vote)?;
         }
 
+        let counted = self.counts_as_voter(&vote.voter).await;
+        if !counted {
+            tracing::warn!(voter = %vote.voter, "Patch vote from an undiscovered peer not counted");
+        }
+
         // Update consensus
         let mut patches = self.patches.write().await;
-        if let Some(state) = patches.get_mut(&vote.patch_id) {
+        if counted && let Some(state) = patches.get_mut(&vote.patch_id) {
             state.consensus.add_vote(vote.clone());
 
             // Check if quorum reached
@@ -419,7 +437,9 @@ impl GossipProtocol {
                 if !state.consensus.votes.contains_key(&vote.voter) {
                     // Verify vote signature before adding
                     let verifier = self.verifier.read().await;
-                    if verifier.verify_vote(&vote).is_ok() {
+                    if verifier.verify_vote(&vote).is_ok()
+                        && self.counts_as_voter(&vote.voter).await
+                    {
                         state.consensus.add_vote(vote);
                     }
                 }
@@ -516,13 +536,17 @@ impl GossipProtocol {
         self.patches.read().await.len()
     }
 
-    /// Register a key for an agent
-    pub async fn register_key(&self, agent_id: String, pubkey: arkavo_crypto::AgentPublicKey) {
+    /// Bind a key to an agent; a different key for a bound id is refused.
+    pub async fn register_key(
+        &self,
+        agent_id: String,
+        pubkey: arkavo_crypto::AgentPublicKey,
+    ) -> GossipResult<()> {
         self.verifier
             .write()
             .await
             .registry_mut()
-            .register(agent_id, pubkey);
+            .register(agent_id, pubkey)
     }
 
     /// Clean up expired entries based on max_message_age
@@ -864,7 +888,8 @@ mod tests {
         let keypair = AgentKeypair::generate();
         protocol
             .register_key("originator".to_string(), keypair.public_key().clone())
-            .await;
+            .await
+            .unwrap();
 
         let mut announcement =
             PatchAnnouncement::new(Uuid::new_v4(), [0u8; 32], "originator".to_string(), vec![]);
@@ -889,7 +914,8 @@ mod tests {
         let keypair = AgentKeypair::generate();
         protocol
             .register_key("originator".to_string(), keypair.public_key().clone())
-            .await;
+            .await
+            .unwrap();
 
         let mut announcement =
             PatchAnnouncement::new(Uuid::new_v4(), [0u8; 32], "originator".to_string(), vec![]);
@@ -991,7 +1017,8 @@ mod tests {
         let keypair = AgentKeypair::generate();
         protocol
             .register_key("originator".into(), keypair.public_key().clone())
-            .await;
+            .await
+            .unwrap();
         let mut ann =
             PatchAnnouncement::new(Uuid::new_v4(), [1u8; 32], "originator".into(), vec![]);
         sign_announcement(&mut ann, &keypair).unwrap();
@@ -1059,7 +1086,8 @@ mod tests {
         let keypair = AgentKeypair::generate();
         protocol
             .register_key("originator".into(), keypair.public_key().clone())
-            .await;
+            .await
+            .unwrap();
         let patch_id = Uuid::new_v4();
         let mut ann = PatchAnnouncement::new(patch_id, [3u8; 32], "originator".into(), vec![]);
         sign_announcement(&mut ann, &keypair).unwrap();
@@ -1100,7 +1128,8 @@ mod tests {
         let keypair = AgentKeypair::generate();
         protocol
             .register_key("originator".into(), keypair.public_key().clone())
-            .await;
+            .await
+            .unwrap();
 
         // Send many messages from the same peer (> DEFAULT_MAX_MESSAGES_PER_PEER)
         let mut rate_limited = false;
@@ -1130,7 +1159,8 @@ mod tests {
         let keypair_a = AgentKeypair::generate();
         protocol
             .register_key("agent-a".into(), keypair_a.public_key().clone())
-            .await;
+            .await
+            .unwrap();
 
         // Sign with DIFFERENT key — originator is known but signature won't verify
         let keypair_b = AgentKeypair::generate();
@@ -1187,7 +1217,8 @@ mod tests {
         let keypair = AgentKeypair::generate();
         protocol
             .register_key("known-agent".into(), keypair.public_key().clone())
-            .await;
+            .await
+            .unwrap();
 
         // Create signed announcement
         let mut announcement =
@@ -1199,5 +1230,167 @@ mod tests {
             .handle_message(GossipMessage::PatchAnnounce(announcement))
             .await;
         assert!(result.is_ok());
+    }
+
+    /// Registers a fresh key for `id` and returns its signed patch vote.
+    async fn signed_patch_vote(protocol: &GossipProtocol, id: &str, patch_id: Uuid) -> PatchVote {
+        let key = AgentKeypair::generate();
+        protocol
+            .register_key(id.to_string(), key.public_key().clone())
+            .await
+            .unwrap();
+        let mut vote = PatchVote::new(patch_id, id.to_string(), true);
+        crate::verification::sign_vote(&mut vote, &key).unwrap();
+        vote
+    }
+
+    /// Regression: anyone who could register keys for ids it made up could
+    /// approve a patch with their votes alone.
+    #[spec("INGRESS-004")]
+    #[tokio::test]
+    async fn votes_from_undiscovered_ids_do_not_approve_a_patch() {
+        let protocol = create_test_protocol("agent-1");
+        protocol.add_peer("peer-1".to_string()).await;
+        protocol.add_peer("peer-2".to_string()).await;
+
+        let originator = AgentKeypair::generate();
+        protocol
+            .register_key("origin".to_string(), originator.public_key().clone())
+            .await
+            .unwrap();
+        let patch_id = Uuid::new_v4();
+        let mut announcement =
+            PatchAnnouncement::new(patch_id, [0u8; 32], "origin".to_string(), vec![]);
+        sign_announcement(&mut announcement, &originator).unwrap();
+        protocol
+            .handle_message(GossipMessage::PatchAnnounce(announcement))
+            .await
+            .unwrap();
+
+        for sybil in ["sybil-1", "sybil-2", "sybil-3", "sybil-4"] {
+            let vote = signed_patch_vote(&protocol, sybil, patch_id).await;
+            protocol
+                .handle_message(GossipMessage::PatchVote(vote))
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            protocol.get_patch_status(patch_id).await,
+            Some(PatchStatus::Pending)
+        );
+
+        // Quorum is ceil(3 x 0.67) = 3 of this agent and its two peers.
+        for peer in ["peer-1", "peer-2", "agent-1"] {
+            let vote = signed_patch_vote(&protocol, peer, patch_id).await;
+            protocol
+                .handle_message(GossipMessage::PatchVote(vote))
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            protocol.get_patch_status(patch_id).await,
+            Some(PatchStatus::Approved)
+        );
+    }
+
+    #[spec("INGRESS-004")]
+    #[tokio::test]
+    async fn votes_from_undiscovered_ids_do_not_approve_a_lesson() {
+        use crate::learning_message::{LessonAnnouncement, LessonStatus, LessonVote};
+        use crate::verification::{sign_lesson_announcement, sign_lesson_vote};
+
+        let protocol = create_test_protocol("agent-1");
+        protocol.add_peer("peer-1".to_string()).await;
+        protocol.add_peer("peer-2".to_string()).await;
+
+        let originator = AgentKeypair::generate();
+        protocol
+            .register_key("origin".to_string(), originator.public_key().clone())
+            .await
+            .unwrap();
+        let lesson_id = Uuid::new_v4();
+        let mut announcement = LessonAnnouncement::new(
+            lesson_id,
+            [0u8; 32],
+            "origin".to_string(),
+            "test-swarm".to_string(),
+            "general".to_string(),
+            0.9,
+        );
+        sign_lesson_announcement(&mut announcement, &originator).unwrap();
+        protocol
+            .handle_message(GossipMessage::LessonAnnounce(announcement))
+            .await
+            .unwrap();
+
+        let vote_from = |id: &'static str| {
+            let key = AgentKeypair::generate();
+            let mut vote = LessonVote::new(lesson_id, id.to_string(), true);
+            sign_lesson_vote(&mut vote, &key).unwrap();
+            (key, vote)
+        };
+        for sybil in ["sybil-1", "sybil-2", "sybil-3"] {
+            let (key, vote) = vote_from(sybil);
+            protocol
+                .register_key(sybil.to_string(), key.public_key().clone())
+                .await
+                .unwrap();
+            protocol
+                .handle_message(GossipMessage::LessonVote(vote))
+                .await
+                .unwrap();
+        }
+        assert_ne!(
+            protocol.get_lesson_status(lesson_id).await,
+            Some(LessonStatus::Approved)
+        );
+
+        // This agent voted on announcement; quorum is 3 of 3.
+        for peer in ["peer-1", "peer-2"] {
+            let (key, vote) = vote_from(peer);
+            protocol
+                .register_key(peer.to_string(), key.public_key().clone())
+                .await
+                .unwrap();
+            protocol
+                .handle_message(GossipMessage::LessonVote(vote))
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            protocol.get_lesson_status(lesson_id).await,
+            Some(LessonStatus::Approved)
+        );
+    }
+
+    /// Regression: `agent/exchangeKeys` replaced a peer's bound key.
+    #[spec("INGRESS-004")]
+    #[tokio::test]
+    async fn a_bound_key_is_not_replaced_until_the_peer_leaves() {
+        let protocol = create_test_protocol("agent-1");
+        protocol.add_peer("peer-1".to_string()).await;
+        let first = AgentKeypair::generate();
+        let second = AgentKeypair::generate();
+
+        protocol
+            .register_key("peer-1".to_string(), first.public_key().clone())
+            .await
+            .unwrap();
+        protocol
+            .register_key("peer-1".to_string(), first.public_key().clone())
+            .await
+            .unwrap();
+        assert!(matches!(
+            protocol
+                .register_key("peer-1".to_string(), second.public_key().clone())
+                .await,
+            Err(GossipError::KeyConflict(id)) if id == "peer-1"
+        ));
+
+        protocol.remove_peer("peer-1").await;
+        protocol
+            .register_key("peer-1".to_string(), second.public_key().clone())
+            .await
+            .unwrap();
     }
 }

@@ -1,12 +1,13 @@
 feature: Arkavo GUI Application Gateway
 module: arkavo_agui
-version: 0.57.2
+version: 0.57.3
 
 invariants:
   - AgUiGateway manages agent connections
   - mDNS discovery for peer agents
   - Health monitoring and ROI metrics
   - Timeout analysis and handling
+  - "Only the gateway's own pages and non-browser clients reach it; a Host must name this machine"
 
 scenarios:
   - id: AGUI-001
@@ -293,3 +294,29 @@ scenarios:
       - The legacy bridge unwraps it back to the legacy shape
     refs: [crates/arkavo-agui/src/legacy_agui_bridge.rs]
     changed: "2026-06-12"
+
+  - id: AGUI-021
+    name: Gateway refuses cross-site and rebound requests
+    criticality: critical
+    given:
+      - The arkavo ui gateway is listening, on loopback by default
+      - A web page the user visits is on another site, or on a DNS name pointed at this machine
+    when: The page opens /ws or /debug, or sends any request, to the gateway
+    then:
+      - A request whose Origin is not the gateway's own scheme and host:port is refused with 403 before any handler runs
+      - A request whose Host is not localhost, a loopback address, or an address literal the gateway listens on is refused with 403
+      - A request without Origin (a non-browser client or a plain navigation) is admitted when its Host passes
+      - The gateway's own pages, which connect to their own /ws, keep working
+    refs: [crates/arkavo-agui/src/gateway_origin.rs, "crates/arkavo-agui/src/gateway.rs:486-495"]
+    changed: "2026-10-04"
+    edge_cases:
+      - condition: "Origin https://evil.example on a WebSocket upgrade to /ws (accepted with 101 before this change)"
+        expected: "403"
+      - condition: Host evil.example with a matching Origin (DNS rebinding)
+        expected: 403, refused on Host
+      - condition: Origin null, a repeated Origin, or an Origin that is not valid header text
+        expected: "403"
+      - condition: ARKAVO_AGUI_BIND=0.0.0.0 and the page opened at http://192.168.1.5:7700
+        expected: Admitted, since an address literal cannot be rebound; a host name such as box.local is refused
+      - condition: HTTP/2 request with no Host header
+        expected: The request authority is checked instead

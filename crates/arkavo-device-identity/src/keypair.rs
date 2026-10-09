@@ -61,7 +61,7 @@ mod platform {
     use std::path::PathBuf;
 
     fn keypair_path(filename: &str) -> Result<PathBuf> {
-        if let Some(dir) = super::test_slot_dir() {
+        if let Some(dir) = crate::test_storage_dir() {
             fs::create_dir_all(&dir).map_err(|e| {
                 DeviceIdentityError::Storage(format!("Failed to create directory: {}", e))
             })?;
@@ -159,7 +159,7 @@ mod platform {
     use std::path::PathBuf;
 
     fn keypair_path(filename: &str) -> Result<PathBuf> {
-        if let Some(dir) = super::test_slot_dir() {
+        if let Some(dir) = crate::test_storage_dir() {
             fs::create_dir_all(&dir).map_err(|e| {
                 DeviceIdentityError::Storage(format!("Failed to create directory: {}", e))
             })?;
@@ -255,7 +255,7 @@ mod platform {
     use std::path::PathBuf;
 
     fn keypair_path(filename: &str) -> Result<PathBuf> {
-        if let Some(dir) = super::test_slot_dir() {
+        if let Some(dir) = crate::test_storage_dir() {
             fs::create_dir_all(&dir).map_err(|e| {
                 DeviceIdentityError::Storage(format!("Failed to create directory: {}", e))
             })?;
@@ -344,20 +344,6 @@ mod platform {
     }
 }
 
-/// Where unit tests keep the slots: a directory of the test's own process,
-/// never the developer's. The real slots hold the device and agent keys, and
-/// nextest runs each test in a process of its own, where no lock stops one
-/// test from deleting a key that another has just put back.
-#[cfg(test)]
-fn test_slot_dir() -> Option<std::path::PathBuf> {
-    Some(std::env::temp_dir().join(format!("arkavo-keypair-test-{}", std::process::id())))
-}
-
-#[cfg(not(test))]
-fn test_slot_dir() -> Option<std::path::PathBuf> {
-    None
-}
-
 /// Filesystem locations of the device and agent keypair slots, in that order.
 #[cfg(test)]
 fn slot_paths() -> Result<Vec<std::path::PathBuf>> {
@@ -423,7 +409,7 @@ mod tests {
     /// when run under nextest.
     #[test]
     fn tests_never_touch_the_real_slots() {
-        let dir = test_slot_dir().unwrap();
+        let dir = crate::test_storage_dir().unwrap();
         for path in slot_paths().unwrap() {
             assert!(path.starts_with(&dir), "{}", path.display());
             assert!(path.starts_with(std::env::temp_dir()), "{}", path.display());

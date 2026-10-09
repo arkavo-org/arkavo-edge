@@ -610,7 +610,7 @@ components:
     module: arkavo_agui
     description: Arkavo GUI application gateway
     criticality: high
-    scenario_count: 20
+    scenario_count: 21
     invariants:
       - AgUiGateway manages connections
       - mDNS discovery for peers
@@ -1036,8 +1036,8 @@ components:
 
 stats:
   total_specs: 88
-  total_scenarios: 868
-  critical_scenarios: 284
+  total_scenarios: 869
+  critical_scenarios: 285
   coverage_areas:
     - authentication
     - authorization

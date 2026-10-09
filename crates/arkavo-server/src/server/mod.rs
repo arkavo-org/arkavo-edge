@@ -8,6 +8,7 @@ mod agent_loop;
 mod anti_pattern;
 mod autolearn_bridge;
 mod bind_addr;
+mod browser_origin;
 mod conductor;
 mod conductor_autoresearch;
 mod conductor_evofabric;
@@ -27,6 +28,9 @@ mod egress_guard;
 mod egress_guard_fixture;
 mod episode_buffer;
 mod event_loop;
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod exchange_keys_tests;
 mod gossip_transport;
 pub mod handlers;
 mod learning_bus;
@@ -273,9 +277,18 @@ pub trait A2aRpc {
         message: arkavo_gossip::GossipMessage,
     ) -> RpcResult<Vec<arkavo_gossip::GossipMessage>>;
 
-    /// Exchange public keys with peer for signature verification
+    /// Exchange gossip keys with a peer: each side proves it holds its key
+    /// (`arkavo_gossip::key_exchange`), and a key bound to the peer is not
+    /// replaced until the peer is seen to leave.
     #[method(name = "agent/exchangeKeys")]
-    async fn exchange_keys(&self, peer_id: String, public_key: String) -> RpcResult<String>;
+    async fn exchange_keys(
+        &self,
+        peer_id: String,
+        public_key: String,
+        recipient: String,
+        challenge: String,
+        signature: String,
+    ) -> RpcResult<arkavo_gossip::key_exchange::KeyExchangeResponse>;
 
     /// Check behavior policy for a sector based on learned lessons
     #[method(name = "learning/checkPolicy")]
@@ -843,7 +856,16 @@ impl A2aRpcServer for A2aRpcImpl {
         }
     }
 
-    async fn exchange_keys(&self, peer_id: String, public_key: String) -> RpcResult<String> {
+    async fn exchange_keys(
+        &self,
+        peer_id: String,
+        public_key: String,
+        recipient: String,
+        challenge: String,
+        signature: String,
+    ) -> RpcResult<arkavo_gossip::key_exchange::KeyExchangeResponse> {
+        use arkavo_gossip::key_exchange::{KeyExchangeRequest, sign_response, verify_request};
+
         let timer = RpcTimer::new("exchange_keys".to_string(), self.metrics.clone());
 
         // Check rate limit
@@ -853,38 +875,54 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        // Parse incoming public key from base64
-        let peer_key = match arkavo_crypto::AgentPublicKey::from_base64(&public_key) {
+        let Some(bus) = &self.learning_bus else {
+            tracing::warn!("Key exchange attempted but LearningBus not configured");
+            timer.error();
+            return Err(ErrorObjectOwned::owned(
+                -32603,
+                "LearningBus not configured",
+                None::<()>,
+            ));
+        };
+
+        let request = KeyExchangeRequest {
+            peer_id,
+            public_key,
+            recipient,
+            challenge,
+            signature,
+        };
+        let refused = |reason: String| {
+            tracing::warn!(peer = %request.peer_id, "Key exchange refused: {reason}");
+            ErrorObjectOwned::owned(
+                -32602,
+                format!("Key exchange refused: {reason}"),
+                None::<()>,
+            )
+        };
+        let peer_key = match verify_request(&request, bus.agent_id()) {
             Ok(key) => key,
             Err(e) => {
                 timer.error();
-                return Err(ErrorObjectOwned::owned(
-                    -32602,
-                    format!("Invalid public key: {e}"),
-                    None::<()>,
-                ));
+                return Err(refused(e.to_string()));
             }
         };
-
-        // Register peer's key in LearningBus
-        match &self.learning_bus {
-            Some(bus) => {
-                bus.register_peer_key(peer_id.clone(), peer_key).await;
-
-                // Return our public key
-                let our_key = bus.keypair().public_key().to_base64();
-                tracing::info!("Key exchange completed with peer: {}", peer_id);
+        if let Err(e) = bus
+            .register_peer_key(request.peer_id.clone(), peer_key)
+            .await
+        {
+            timer.error();
+            return Err(refused(e.to_string()));
+        }
+        match sign_response(bus.keypair(), bus.agent_id(), &request) {
+            Ok(response) => {
+                tracing::info!("Key exchange completed with peer: {}", request.peer_id);
                 timer.success();
-                Ok(our_key)
+                Ok(response)
             }
-            None => {
-                tracing::warn!("Key exchange attempted but LearningBus not configured");
+            Err(e) => {
                 timer.error();
-                Err(ErrorObjectOwned::owned(
-                    -32603,
-                    "LearningBus not configured",
-                    None::<()>,
-                ))
+                Err(refused(e.to_string()))
             }
         }
     }

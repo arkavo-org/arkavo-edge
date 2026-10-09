@@ -184,10 +184,10 @@ fn build_input(
         success_rate,
         success_std_dev,
         observation_count,
-        // Peer subjects are names learned from mDNS discovery; any key for
-        // them arrives later through `agent/exchangeKeys`, which accepts a
-        // caller-chosen peer_id without proof of possession, and no
-        // attestation verifier runs on this path. Report that absence through
+        // Peer subjects are names learned from mDNS discovery. Their gossip
+        // keys arrive through `agent/exchangeKeys`, which proves possession of
+        // the key but not that the caller is the agent the name belonged to,
+        // and no attestation verifier runs on this path. Report that absence through
         // the attestation tier (HATT-008) so VERIFICATION is 0 with no
         // evidence, and keep the deprecated flag consistent for any reader
         // that still consults it.

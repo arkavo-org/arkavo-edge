@@ -50,6 +50,10 @@ pub enum GossipError {
     #[error("Rate limited: peer {0} exceeded message limit")]
     RateLimited(String),
 
+    /// A different key is already bound to this agent id
+    #[error("a different key is already bound to {0}")]
+    KeyConflict(String),
+
     /// Message rejected because it originated from a different swarm
     #[error("swarm mismatch: message from '{0}' rejected")]
     SwarmMismatch(String),

@@ -135,9 +135,14 @@ impl GossipProtocol {
             verifier.verify_lesson_vote(&vote)?;
         }
 
+        let counted = self.counts_as_voter(&vote.voter).await;
+        if !counted {
+            tracing::warn!(voter = %vote.voter, "Lesson vote from an undiscovered peer not counted");
+        }
+
         // Update consensus
         let mut lessons = self.lessons.write().await;
-        if let Some(state) = lessons.get_mut(&vote.lesson_id) {
+        if counted && let Some(state) = lessons.get_mut(&vote.lesson_id) {
             state.consensus.add_vote(vote.clone());
 
             // Check if quorum reached
@@ -225,7 +230,9 @@ impl GossipProtocol {
                 if !state.consensus.votes.contains_key(&vote.voter) {
                     // Verify vote signature before adding
                     let verifier = self.verifier.read().await;
-                    if verifier.verify_lesson_vote(&vote).is_ok() {
+                    if verifier.verify_lesson_vote(&vote).is_ok()
+                        && self.counts_as_voter(&vote.voter).await
+                    {
                         state.consensus.add_vote(vote);
                     }
                 }
