@@ -176,7 +176,7 @@ scenarios:
       - Further requests are rejected (429)
       - Exponential backoff is applied
       - Sustained abuse triggers temp ban
-    refs: [crates/arkavo-protocol/src/rate_limit_middleware.rs:48-82, crates/arkavo-protocol/src/rate_limit.rs:160-247]
+    refs: [crates/arkavo-protocol/src/rate_limit_middleware.rs:48-82, crates/arkavo-protocol/src/rate_limit.rs:160-258]
 
   - id: NET-011
     name: Admin interface separate from public API

@@ -147,7 +147,9 @@ pub mod arkavo_attrs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("TDF-003")]
     #[test]
     fn builder_basic() {
         let policy = PolicyBuilder::new()
@@ -161,6 +163,7 @@ mod tests {
         assert_eq!(policy.attributes[0].values, vec!["admin"]);
     }
 
+    #[spec("TDF-003")]
     #[test]
     fn builder_multiple_attributes() {
         let policy = PolicyBuilder::new()

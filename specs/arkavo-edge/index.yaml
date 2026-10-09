@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
 version: 0.93.0
-last_updated: 2026-10-02
+last_updated: 2026-10-09
 
 components:
   - name: astra
@@ -141,7 +141,7 @@ components:
     module: arkavo_tdf
     description: Trusted Data Format encryption and policy enforcement
     criticality: critical
-    scenario_count: 9
+    scenario_count: 11
     invariants:
       - AES-256-GCM payload encryption
       - Policy binding for integrity
@@ -779,7 +779,7 @@ components:
     module: arkavo_tdf::security
     description: TDF control plane protection and format security
     criticality: critical
-    scenario_count: 15
+    scenario_count: 16
     invariants:
       - Control plane commands TDF-encrypted
       - TDF-JSON and TDF-CBOR equivalent security
@@ -1036,7 +1036,7 @@ components:
 
 stats:
   total_specs: 88
-  total_scenarios: 869
+  total_scenarios: 872
   critical_scenarios: 285
   coverage_areas:
     - authentication

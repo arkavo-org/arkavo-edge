@@ -5,9 +5,11 @@
 use arkavo_tdf::testing::{MockBlobTransport, MockTdfService};
 use arkavo_tdf::{BlobTransport, TdfDecryptor, TdfEncryptor};
 use arkavo_tdf_iroh::{IrohNode, IrohTransport};
+use arkavo_test_macros::spec;
 use std::io::Cursor;
 
 /// Verify IrohTransport implements BlobTransport trait correctly.
+#[spec("TDF-007")]
 #[tokio::test]
 async fn iroh_implements_blob_transport() {
     let transport = IrohTransport::new(IrohNode::memory().await.unwrap());

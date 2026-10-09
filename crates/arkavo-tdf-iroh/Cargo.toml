@@ -24,6 +24,7 @@ iroh-base = { version = "1.0.3", default-features = false }
 iroh-blobs = { version = "0.103", default-features = false }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tokio = { workspace = true, features = ["full", "test-util"] }
 futures = { workspace = true }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["testing", "opentdf"] }

@@ -171,8 +171,10 @@ impl BlobTransport for IrohTransport {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::io::Cursor;
 
+    #[spec("TDF-007")]
     #[tokio::test]
     async fn transport_stage_fetch_roundtrip() {
         let node = IrohNode::memory().await.unwrap();
@@ -223,6 +225,7 @@ mod tests {
         assert!(!transport.health_check().await.unwrap());
     }
 
+    #[spec("TDF-007")]
     #[tokio::test]
     async fn transport_invalid_ticket() {
         let node = IrohNode::memory().await.unwrap();

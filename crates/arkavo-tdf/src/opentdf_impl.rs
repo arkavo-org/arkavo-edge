@@ -55,6 +55,43 @@ impl Default for OpenTdfConfig {
     }
 }
 
+impl KeyAccessObject {
+    /// Edge's view of an opentdf key access entry. `kid`, `encryptedMetadata`
+    /// and `ephemeralPublicKey` have no counterpart here and are not kept.
+    pub(crate) fn from_opentdf(ka: &opentdf::KeyAccess) -> Self {
+        Self {
+            access_type: ka.access_type.clone(),
+            url: ka.url.clone(),
+            protocol: ka.protocol.clone(),
+            wrapped_key: ka.wrapped_key.clone(),
+            policy_binding: PolicyBinding {
+                alg: ka.policy_binding.alg.clone(),
+                hash: ka.policy_binding.hash.clone(),
+            },
+            sid: ka.sid.clone(),
+        }
+    }
+
+    /// The opentdf key access entry a decrypt or KAS rewrap sends.
+    pub(crate) fn to_opentdf(&self) -> opentdf::KeyAccess {
+        opentdf::KeyAccess {
+            access_type: self.access_type.clone(),
+            url: self.url.clone(),
+            kid: None,
+            protocol: self.protocol.clone(),
+            wrapped_key: self.wrapped_key.clone(),
+            policy_binding: opentdf::PolicyBinding {
+                alg: self.policy_binding.alg.clone(),
+                hash: self.policy_binding.hash.clone(),
+            },
+            encrypted_metadata: None,
+            schema_version: Some("1.0".to_string()),
+            ephemeral_public_key: None,
+            sid: self.sid.clone(),
+        }
+    }
+}
+
 /// TDF service implementation using opentdf-rs.
 ///
 /// Provides AES-256-GCM encryption with ZTDF-JSON format.
@@ -139,16 +176,7 @@ impl TdfEncryptor for OpenTdfService {
                     .encryption_information
                     .key_access
                     .iter()
-                    .map(|ka| KeyAccessObject {
-                        access_type: ka.access_type.clone(),
-                        url: ka.url.clone(),
-                        protocol: ka.protocol.clone(),
-                        wrapped_key: ka.wrapped_key.clone(),
-                        policy_binding: PolicyBinding {
-                            alg: ka.policy_binding.alg.clone(),
-                            hash: ka.policy_binding.hash.clone(),
-                        },
-                    })
+                    .map(KeyAccessObject::from_opentdf)
                     .collect(),
                 method: EncryptionMethod {
                     algorithm: envelope
@@ -210,20 +238,7 @@ impl TdfDecryptor for OpenTdfService {
                     .encryption_information
                     .key_access
                     .iter()
-                    .map(|ka| opentdf::KeyAccess {
-                        access_type: ka.access_type.clone(),
-                        url: ka.url.clone(),
-                        kid: None,
-                        protocol: ka.protocol.clone(),
-                        wrapped_key: ka.wrapped_key.clone(),
-                        policy_binding: opentdf::PolicyBinding {
-                            alg: ka.policy_binding.alg.clone(),
-                            hash: ka.policy_binding.hash.clone(),
-                        },
-                        encrypted_metadata: None,
-                        schema_version: Some("1.0".to_string()),
-                        ephemeral_public_key: None,
-                    })
+                    .map(KeyAccessObject::to_opentdf)
                     .collect(),
                 method: opentdf::EncryptionMethod {
                     algorithm: manifest.encryption_information.method.algorithm.clone(),
@@ -447,5 +462,41 @@ mod tests {
 
         assert_eq!(manifest.version, deserialized.version);
         assert_eq!(manifest.payload.value, deserialized.payload.value);
+    }
+
+    #[spec("TDF-010")]
+    #[test]
+    fn key_access_conversion_keeps_the_split_id() {
+        let mut ka = KeyAccessObject::new(
+            "https://kas.example.com",
+            "d3JhcHBlZA==",
+            PolicyBinding::new("aGFzaA=="),
+        );
+        ka.sid = Some("split-1".to_string());
+
+        let upstream = ka.to_opentdf();
+        assert_eq!(upstream.sid.as_deref(), Some("split-1"));
+        assert_eq!(KeyAccessObject::from_opentdf(&upstream), ka);
+    }
+
+    #[spec("TDF-011")]
+    #[tokio::test]
+    async fn encrypt_writes_the_spec_policy_binding() {
+        let service = OpenTdfService::with_kas_url("https://kas.example.com");
+        let policy = PolicyBuilder::new()
+            .attribute("https://arkavo.net/attr/role", &["admin"])
+            .build()
+            .unwrap();
+
+        let manifest = service.encrypt(b"bound", &policy).await.unwrap();
+        let binding = &manifest.encryption_information.key_access[0].policy_binding;
+
+        assert_eq!(binding.alg, "HS256");
+        assert_eq!(binding.hash.len(), 44);
+        assert_eq!(
+            BASE64.decode(&binding.hash).unwrap().len(),
+            32,
+            "Base64 of the raw MAC, not of its hex"
+        );
     }
 }

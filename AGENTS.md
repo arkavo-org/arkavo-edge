@@ -116,24 +116,14 @@ For complex tasks requiring step-by-step thinking, use Ministral Reasoning varia
 Think through this problem step-by-step before providing your answer.
 ```
 
-## 6. Useful Commands
-
-# Build (Debug). No release builds.
-```bash
-cargo build -q
-```
-
-# Test
-```bash
-cargo test
-```
+## Useful Commands
 
 # Run
 ```bash
 ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1 cargo run -p arkavo -- chat --prompt "What time is it?"
 ```
 
-## 7. Environment Variables
+## Environment Variables
 - `ARKAVO_DEBUG=1`: General debug logging.
 - `ARKAVO_DEBUG_CHAT=1`: Chat/Template/Token debug.
 - `ARKAVO_DELEGATION_PUBLIC_KEY_PEM`: Trusted authnz-rs ES256 public key (inline PEM or path to PEM file) used to verify delegation JWTs at registration. Unset → delegation entitlements are never granted (fail-closed).

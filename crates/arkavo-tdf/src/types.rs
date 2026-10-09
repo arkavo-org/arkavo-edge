@@ -83,6 +83,11 @@ pub struct KeyAccessObject {
     /// Cryptographic binding of policy to key
     #[serde(rename = "policyBinding")]
     pub policy_binding: PolicyBinding,
+
+    /// Split id. Kept so a multi-KAS split survives conversion to and from
+    /// opentdf; without it the KAS cannot tell which share a key belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sid: Option<String>,
 }
 
 impl KeyAccessObject {
@@ -95,6 +100,7 @@ impl KeyAccessObject {
             protocol: "kas".to_string(),
             wrapped_key: wrapped_key.to_string(),
             policy_binding,
+            sid: None,
         }
     }
 }
@@ -288,6 +294,7 @@ mod tests {
                         alg: "HS256".to_string(),
                         hash: "policy_hash".to_string(),
                     },
+                    sid: None,
                 }],
                 method: EncryptionMethod {
                     algorithm: "AES-256-GCM".to_string(),
@@ -316,6 +323,7 @@ mod tests {
     }
 
     #[spec("TDFS-003")]
+    #[spec("TDF-003")]
     #[test]
     fn policy_serialization() {
         let policy = Policy {
@@ -356,6 +364,26 @@ mod tests {
         assert_eq!(kao.access_type, "wrapped");
         assert_eq!(kao.protocol, "kas");
         assert_eq!(kao.url, "https://platform.arkavo.net");
+    }
+
+    #[spec("TDF-010")]
+    #[test]
+    fn split_id_is_omitted_when_absent_and_round_trips_when_present() {
+        let mut kao = KeyAccessObject::new(
+            "https://platform.arkavo.net",
+            "d3JhcHBlZA==",
+            PolicyBinding::new("aA=="),
+        );
+        let json = serde_json::to_string(&kao).unwrap();
+        assert!(
+            !json.contains("sid"),
+            "no sid on the wire unless set: {json}"
+        );
+
+        kao.sid = Some("split-1".to_string());
+        let json = serde_json::to_string(&kao).unwrap();
+        assert!(json.contains(r#""sid":"split-1""#));
+        assert_eq!(serde_json::from_str::<KeyAccessObject>(&json).unwrap(), kao);
     }
 
     #[spec("TDFS-008")]

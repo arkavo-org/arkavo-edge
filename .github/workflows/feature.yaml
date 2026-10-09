@@ -336,6 +336,10 @@ jobs:
             # taint,kas feature set as the two lines above so it shares their
             # arkavo-server build instead of a new feature unification.
             cargo test --locked -p arkavo-server --features taint,kas --test kas_delegation_test
+            # arkavo-tdf's own tests: manifest conversion, policy binding and the
+            # A2A KAS handler. kas_client.rs and a2a_handler.rs only compile with
+            # these features, and no other line here runs this crate's tests.
+            cargo test --locked -p arkavo-tdf --features kas,a2a
             cargo test --locked -p arkavo-critic --features sentinel --lib checks::sentinel
             # Pack command tests live in arkavo-cli and only compile when the
             # knowledge-pack feature (which pulls fingerprint) is on.

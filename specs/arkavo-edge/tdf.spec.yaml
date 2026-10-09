@@ -22,14 +22,16 @@ scenarios:
     when: encrypt() called with data and policy
     then:
       - Payload encrypted with AES-256-GCM
-      - EncryptionInformation generated with key access
-      - PolicyBinding cryptographically binds policy to payload
-      - TdfManifest returned with all components
-    refs: [crates/arkavo-tdf/src/traits.rs]
+      - EncryptionInformation generated with one key access object
+      - PolicyBinding binds the policy to the DEK (TDF-011)
+      - TdfManifest returned with encryption information, policy and payload; integrity information is not carried
+    refs: [crates/arkavo-tdf/src/traits.rs, crates/arkavo-tdf/src/opentdf_impl.rs]
 
   - id: TDF-002
     name: Decrypt data with KAS rewrap
     criticality: critical
+    wip: true
+    issue: "OpenTdfService::decrypt always returns an error, and OpenTdfService::encrypt seals wrappedKey under a key it discards, so nothing it writes can be decrypted. ArkavoKasClient::decrypt_manifest has no callers and no crate enables arkavo-tdf/kas. The agent-credentials plan (docs/superpowers plans, 2026-09-26, layer B) replaces this path with a sealed platform envelope and KasBundleDecryptor."
     given:
       - TdfDecryptor initialized
       - Valid TdfManifest with encrypted payload
@@ -39,7 +41,7 @@ scenarios:
       - KeyAccessObject sent to KAS for rewrap
       - Symmetric key unwraps payload
       - Plaintext returned to caller
-      - Invalid keys return TdfError::DecryptionFailed
+      - Invalid keys return TdfError::Decryption
     refs: [crates/arkavo-tdf/src/traits.rs,crates/arkavo-tdf/src/kas_client.rs]
 
   - id: TDF-003
@@ -51,8 +53,8 @@ scenarios:
     when: PolicyBuilder constructs policy
     then:
       - Attributes added to policy
-      - PolicyBinding generated
-      - Policy serializes to JSON
+      - Policy serializes to JSON and parses back unchanged
+      - The builder produces no binding; encrypt() computes it against the DEK (TDF-011)
     refs: [crates/arkavo-tdf/src/policy.rs]
 
   - id: TDF-004
@@ -66,25 +68,29 @@ scenarios:
     then:
       - Attributes compared against policy
       - Decision returns Permit or Deny
-      - Denied access returns AbacError::AccessDenied
+      - A deny is Ok(Decision::Deny); the KAS returns it as KasError::AccessDenied
     refs: [crates/arkavo-tdf/src/abac.rs]
 
   - id: TDF-005
     name: Delegation token verification
     criticality: high
     given:
-      - DelegationToken issued by trusted root
-      - Token claims include delegated permissions
+      - DelegationToken chain issued by a trusted root
+      - Token claims include delegated entitlements
     when: DelegationVerifier validates token
     then:
-      - Token signature verified against trusted root
-      - Claims extracted and validated
-      - Expired tokens return DelegationError::Expired
+      - Each token's Ed25519 signature verifies against its issuer's did:key
+      - The chain ends at a trusted root DID and its leaf subject is the caller
+      - A token altered after signing fails with DelegationError::ChainBroken
+      - Delegated entitlements are returned
+      - An expired token anywhere in the chain returns DelegationError::Expired
     refs: [crates/arkavo-tdf/src/delegation.rs]
 
   - id: TDF-006
     name: Streaming encryption for large files
     criticality: high
+    wip: true
+    issue: "encrypt_stream reads the whole stream into memory before encrypting, and TdfManifest has no segment metadata. Only the GGUF-TDF writer bounds memory, and it is not reached through TdfEncryptor."
     given:
       - GB-scale data to encrypt
       - Streaming encryptor configured
@@ -94,38 +100,42 @@ scenarios:
       - Each chunk encrypted independently
       - Memory usage bounded (no OOM)
       - Manifest aggregates segment metadata
-    refs: [crates/arkavo-tdf/src/traits.rs]
+    refs: [crates/arkavo-tdf/src/traits.rs, crates/arkavo-tdf/src/opentdf_impl.rs]
 
   - id: TDF-007
     name: Blob transport stages encrypted payload
     criticality: medium
     given:
       - Encrypted payload ready
-      - BlobTransport configured (S3/filesystem)
+      - BlobTransport configured (Iroh)
     when: stage() called with payload
     then:
-      - Payload uploaded to storage backend
-      - Ticket/reference returned
-      - TransportError on failure
-    refs: [crates/arkavo-tdf/src/traits.rs]
+      - Payload staged in the Iroh blob store
+      - A ticket is returned, and fetch() with it returns the staged bytes
+      - An invalid ticket fails with a TransportError
+    refs: [crates/arkavo-tdf/src/traits.rs, crates/arkavo-tdf-iroh/src/transport.rs]
 
   - id: TDF-008
     name: A2A KAS handler processes rewrap requests
     criticality: high
     given:
-      - KasA2aHandler initialized
+      - KasA2aHandler initialized with trusted roots and a KAS keypair
       - Rewrap request received via A2A
-      - Requester authenticated
     when: handle_rewrap() processes request
     then:
-      - Request validated
-      - Key unwrapped and rewrapped for requester
+      - The delegation chain verifies to a trusted root and its leaf subject is the caller
+      - The policy binding verifies against the unwrapped DEK (TDFS-006)
+      - ABAC permits the caller's delegated entitlements against the policy, or the request is refused with AccessDenied
+      - The DEK is rewrapped for the client's EC key (ECDH, HKDF-SHA256, AES-256-GCM), and the client recovers the same DEK
       - KasRewrapResponse returned
     refs: [crates/arkavo-tdf/src/a2a_handler.rs]
+    changed: "2026-10-09"
 
   - id: TDF-009
     name: OpenTDF integration for standard compliance
     criticality: medium
+    wip: true
+    issue: "OpenTdfService uses opentdf's deprecated pre-spec JSON-RPC types, cannot decrypt (TDF-002), and has no interoperability test against another TDF implementation. The agent-credentials plan (docs/superpowers plans, 2026-09-26, layer B) replaces this path with a sealed platform envelope and KasBundleDecryptor."
     given:
       - OpenTDF feature enabled
       - Standard TDF manifest received
@@ -137,9 +147,37 @@ scenarios:
     refs: [crates/arkavo-tdf/src/opentdf_impl.rs]
     edge_cases:
       - condition: KAS server unreachable
-        expected: Returns TransportError::ConnectionFailed
+        expected: Returns TdfError::Kas naming the failure
       - condition: Policy binding verification fails
-        expected: Returns TdfError::IntegrityCheckFailed
+        expected: The KAS refuses the rewrap; ArkavoKasClient returns TdfError::Kas, and the A2A KAS returns PolicyBindingInvalid (TDFS-006)
       - condition: Subject lacks required attributes
         expected: AbacEvaluator returns Decision::Deny
-    changed: "2025-01-31"
+    changed: "2026-10-09"
+
+  - id: TDF-010
+    name: Split id survives manifest conversion
+    criticality: high
+    given:
+      - A key access entry carries a split id (sid), as multi-KAS TDFs from other SDKs do
+    when: The manifest is converted between arkavo-tdf and opentdf types for decrypt or KAS rewrap
+    then:
+      - The sid reaches the opentdf key access entry unchanged
+      - Converting back yields the same KeyAccessObject
+      - A KeyAccessObject without a sid serializes without a sid field, so existing wire messages are unchanged
+    refs: [crates/arkavo-tdf/src/types.rs, crates/arkavo-tdf/src/opentdf_impl.rs, crates/arkavo-tdf/src/kas_client.rs]
+    changed: "2026-10-09"
+
+  - id: TDF-011
+    name: Writers emit the spec policy binding
+    criticality: critical
+    given:
+      - A TDF is written through OpenTdfService or the GGUF-TDF writer (opentdf-rs 0.16)
+    when: The key access policy binding is computed
+    then:
+      - policyBinding.alg is HS256
+      - policyBinding.hash is Base64(HMAC-SHA256(DEK, Base64(policy JSON))), 44 characters, the form OpenTDFKit 5.0.0 writes
+      - The legacy Base64(hex(HMAC)) form, 88 characters, is no longer written
+      - GGUF-TDF archives rewrap at platform.arkavo.net, which accepts the spec form through opentdf-platform#54; released upstream KAS builds do not yet
+      - OpenTdfService output carries the spec binding but cannot be rewrapped by any KAS (TDF-002)
+    refs: [crates/arkavo-tdf/src/opentdf_impl.rs, crates/arkavo-gguf-tdf/src/writer.rs]
+    changed: "2026-10-09"
