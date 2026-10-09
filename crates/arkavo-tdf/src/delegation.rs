@@ -292,7 +292,7 @@ mod tests {
         ));
     }
 
-    #[spec("TDFS-009")]
+    #[spec("TDF-005")]
     #[test]
     fn test_expired_token() {
         let mut token = make_test_token(
@@ -310,7 +310,7 @@ mod tests {
         assert!(matches!(result, Err(DelegationError::Expired(_))));
     }
 
-    #[spec("TDFS-009")]
+    #[spec("TDF-005")]
     #[test]
     fn test_expired_parent_token_in_chain() {
         use arkavo_crypto::AgentKeypair;
@@ -352,6 +352,44 @@ mod tests {
         let result = verifier.verify(&leaf, caller_did);
 
         assert!(matches!(result, Err(DelegationError::Expired(_))));
+    }
+
+    #[spec("TDF-005")]
+    #[test]
+    fn signed_chain_verifies_and_an_altered_one_does_not() {
+        use arkavo_crypto::AgentKeypair;
+
+        let root_key = AgentKeypair::generate();
+        let root_did = root_key.public_key().to_did_key();
+        let caller_did = AgentKeypair::generate().public_key().to_did_key();
+        let mut token = DelegationToken {
+            issuer_did: root_did.clone(),
+            subject_did: caller_did.clone(),
+            entitlements: vec!["https://arkavo.net/attr/role/value/user".to_string()],
+            expires_at: Utc::now() + chrono::Duration::seconds(3600),
+            signature: String::new(),
+            parent: None,
+        };
+        token.signature =
+            general_purpose::STANDARD.encode(root_key.sign(&token.payload_bytes().unwrap()));
+        let verifier = DelegationVerifier::new(vec![TrustedRoot {
+            did: root_did,
+            public_key_bytes: root_key.public_key().to_bytes(),
+        }]);
+
+        assert_eq!(
+            verifier.verify(&token, &caller_did).unwrap(),
+            token.entitlements
+        );
+
+        // Widen the grant after signing: the signature no longer covers it.
+        token
+            .entitlements
+            .push("https://arkavo.net/attr/role/value/admin".to_string());
+        assert!(matches!(
+            verifier.verify(&token, &caller_did),
+            Err(DelegationError::ChainBroken { .. })
+        ));
     }
 
     #[spec("TDFS-008")]

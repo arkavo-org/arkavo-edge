@@ -28,7 +28,7 @@ scenarios:
     refs:
       - crates/arkavo-swarmkit-runtime/src/tdf.rs:88-98
       - crates/arkavo-swarmkit-runtime/src/tdf.rs:371-403
-      - crates/arkavo-tdf/src/opentdf_impl.rs:114-174
+      - crates/arkavo-tdf/src/opentdf_impl.rs:156-205
 
   - id: TDFS-002
     name: Configuration bundle TDF encryption
@@ -61,8 +61,8 @@ scenarios:
       - Same security properties as binary TDF
     refs:
       - crates/arkavo-tdf/src/types.rs:12-23
-      - crates/arkavo-tdf/src/types.rs:158-201
-      - crates/arkavo-tdf/src/opentdf_impl.rs:114-174
+      - crates/arkavo-tdf/src/types.rs:164-207
+      - crates/arkavo-tdf/src/opentdf_impl.rs:156-205
 
   - id: TDFS-004
     name: TDF-CBOR format for efficiency
@@ -148,6 +148,8 @@ scenarios:
   - id: TDFS-009
     name: Time-based policy enforcement
     criticality: high
+    wip: true
+    issue: "Policy has no time window and AbacEvaluator reads no clock. Only delegation-token expiry is enforced (TDF-005), against the local clock, which is not tamper-evident."
     given:
       - Policy includes temporal constraints
       - Data access attempted outside allowed time window
@@ -158,8 +160,8 @@ scenarios:
       - Time window validation cryptographically bound
       - Policy engine uses tamper-evident time source
     refs:
-      - crates/arkavo-tdf/src/delegation.rs:160-164
-      - crates/arkavo-policy-cache/src/lib.rs:97-121
+      - crates/arkavo-tdf/src/types.rs
+      - crates/arkavo-tdf/src/abac.rs
 
   - id: TDFS-010
     name: Data residency enforcement
@@ -180,14 +182,13 @@ scenarios:
     name: Secure key hierarchy
     criticality: critical
     given:
-      - TDF uses key encryption keys (KEKs)
-      - KEKs protect data encryption keys (DEKs)
+      - A TDF's DEK is wrapped to a KAS key
+      - The KAS releases DEKs only by rewrapping them
     when: Key hierarchy is established
     then:
-      - Root KEK stored in hardware security module
-      - Intermediate KEKs rotated regularly
-      - DEKs never stored in plaintext
-      - Key derivation uses approved algorithms
+      - Key agreement and wrapping use approved algorithms (P-256 ECDH, HKDF-SHA256, AES-256-GCM)
+      - The KAS rewraps a DEK for the client's key and never returns it in the clear
+      - A DEK the KAS recovers for the policy binding check is held only in memory that is zeroized on drop
     refs:
       - crates/arkavo-tdf/src/a2a_handler.rs:80-210
       - crates/arkavo-config-encryption/src/keys.rs:61-78
@@ -210,6 +211,8 @@ scenarios:
   - id: TDFS-013
     name: Forward secrecy for key agreement
     criticality: critical
+    wip: true
+    issue: "The rewrap session key is ECDH between the KAS's static key and the client's key; the KAS uses no ephemeral key per session. Its long-term key plus recorded rewrap traffic recovers every past DEK."
     given:
       - ECDH used for key agreement with KAS
       - Long-term keys may be compromised
@@ -221,7 +224,6 @@ scenarios:
       - Ephemeral keys destroyed after use
     refs:
       - crates/arkavo-tdf/src/a2a_handler.rs:126-210
-      - crates/arkavo-tdf/src/kas_client.rs:236-259
 
   - id: TDFS-014
     name: Policy update propagation
@@ -254,13 +256,31 @@ scenarios:
       - Padding amount logged for capacity planning
     edge_cases:
       - condition: KAS unavailable during decryption
-        expected: Returns TdfError::KasUnavailable with retry guidance
+        expected: Returns TdfError::Kas naming the failure
       - condition: Policy attributes malformed
-        expected: Returns TdfError::InvalidPolicy with parse details
+        expected: Returns TdfError::Policy with parse details
       - condition: Clock skew causes temporal policy failure
-        expected: Returns TdfError::TemporalViolation with time details
+        expected: Not enforced; temporal policy is unimplemented (TDFS-009)
       - condition: TDF-JSON with invalid base64 payload
-        expected: Returns TdfError::InvalidPayload with decode error
+        expected: Returns TdfError::Base64 with the decode error
       - condition: TDF-CBOR with truncated data
-        expected: Returns TdfError::InvalidPayload with CBOR error
+        expected: Not applicable; TDF-CBOR is unimplemented (TDFS-004)
     changed: "2025-01-31"
+
+  - id: TDFS-016
+    name: KAS key custody and rotation
+    criticality: critical
+    wip: true
+    issue: "The agent server generates a new KAS keypair on every start (a2a_server.rs) and persists nothing, so a restart orphans every key wrapped to the old one. There is no HSM or enclave custody and no rotation."
+    given:
+      - An agent runs the A2A KAS capability
+      - TDFs are wrapped to its KAS public key
+    when: The agent restarts or its KAS key is rotated
+    then:
+      - The KAS private key is held in hardware-backed storage where the device has it
+      - The same KAS key is loaded after a restart
+      - Rotation publishes a new key while the previous one still rewraps existing TDFs
+    refs:
+      - crates/arkavo-tdf/src/a2a_handler.rs
+      - crates/arkavo-server/src/server/a2a_server.rs
+    changed: "2026-10-09"

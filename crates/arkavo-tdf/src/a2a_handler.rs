@@ -678,7 +678,6 @@ mod tests {
     }
 
     #[spec("TDFS-011")]
-    #[spec("TDFS-013")]
     #[tokio::test]
     async fn test_handler_with_defaults_has_keypair() {
         // with_defaults() should generate a keypair
@@ -694,7 +693,6 @@ mod tests {
     }
 
     #[spec("TDFS-011")]
-    #[spec("TDFS-013")]
     #[test]
     fn test_kas_keypair_public_key() {
         let keypair = KasKeypair::generate();

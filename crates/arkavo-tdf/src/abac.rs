@@ -144,6 +144,7 @@ mod tests {
     }
 
     #[spec("TDFS-008")]
+    #[spec("TDF-004")]
     #[test]
     fn test_deny_with_missing_entitlement() {
         let evaluator = AbacEvaluator::new();

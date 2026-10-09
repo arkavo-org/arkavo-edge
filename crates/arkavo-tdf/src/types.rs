@@ -323,6 +323,7 @@ mod tests {
     }
 
     #[spec("TDFS-003")]
+    #[spec("TDF-003")]
     #[test]
     fn policy_serialization() {
         let policy = Policy {

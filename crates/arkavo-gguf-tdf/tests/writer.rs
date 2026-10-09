@@ -3,6 +3,7 @@
 mod common;
 
 use arkavo_gguf_tdf::{GgufTdfError, PayloadKeyWrapper, ProtectOptions, WrappedKey, protect};
+use arkavo_test_macros::spec;
 use base64::Engine as _;
 use opentdf::{TdfManifest, TdfMemberIndex};
 use std::fs::File;
@@ -51,6 +52,7 @@ fn read_manifest(path: &std::path::Path) -> (TdfManifest, TdfMemberIndex) {
 }
 
 /// T1: a tiny GGUF with at least one tensor packs into the profile layout.
+#[spec("TDF-011")]
 #[test]
 fn t1_packs_a_tiny_gguf_into_profile_members() {
     let dir = tempfile::tempdir().unwrap();
