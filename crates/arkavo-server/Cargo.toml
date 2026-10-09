@@ -164,6 +164,9 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+# Seal a DEK and bind a policy to it, as a TDF writer does, for KAS rewrap tests
+hkdf = "0.12"
+hmac = "0.12"
 
 [lints]
 workspace = true

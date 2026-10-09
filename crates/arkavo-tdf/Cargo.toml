@@ -34,17 +34,25 @@ reqwest = { workspace = true, optional = true }
 # A2A KAS capability dependencies (optional)
 arkavo-crypto = { path = "../arkavo-crypto", optional = true }
 schemars = { workspace = true, optional = true }
+# Policy binding verification: recover the DEK (HKDF-SHA256) and check its HMAC
+hkdf = { version = "0.12", optional = true }
+hmac = { version = "0.12", optional = true }
+sha2 = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+zeroize = { version = "1.8", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+# Opens the rewrapped DEK the way a client does, to prove it matches the bound one
+aes-gcm = "0.10"
 
 [features]
 default = []
 testing = []  # Enables mock implementations
 opentdf = ["dep:opentdf"]  # Real TDF encryption via opentdf-rs
 kas = ["opentdf", "opentdf/kas", "dep:reqwest"]  # KAS client support
-a2a = ["dep:arkavo-crypto", "dep:opentdf-kas", "dep:schemars"]  # A2A KAS capability over JSON-RPC
+a2a = ["dep:arkavo-crypto", "dep:opentdf-kas", "dep:schemars", "dep:hkdf", "dep:hmac", "dep:sha2", "dep:hex", "dep:zeroize"]  # A2A KAS capability over JSON-RPC
 
 [lints]
 workspace = true

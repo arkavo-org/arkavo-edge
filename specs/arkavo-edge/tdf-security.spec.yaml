@@ -98,17 +98,20 @@ scenarios:
     name: Policy binding prevents policy tampering
     criticality: critical
     given:
-      - TDF manifest contains policy
-      - Attacker attempts to modify policy
-    when: Policy binding is verified
+      - A rewrap request carries a wrapped key, the TDF's base64 policy and its policy binding
+      - A caller may swap in a policy it satisfies while keeping the wrapped key
+    when: The A2A KAS handles kas.rewrap
     then:
-      - Policy hash computed and compared to binding
-      - Modified policy fails integrity check
-      - Decryption refused if binding invalid
-      - Tampering attempt logged with forensic details
+      - The KAS recovers the DEK from the wrapped key (ECDH with the header's ephemeral key, then HKDF-SHA256) before releasing anything
+      - It computes HMAC-SHA256(DEK, policy) over the base64 policy exactly as sent
+      - It accepts the spec binding Base64(MAC) and the legacy Base64(hex(MAC)), comparing in constant time
+      - The binding is checked before ABAC evaluates the policy
+      - A modified policy, a binding made with another key, an algorithm other than HS256 or a malformed hash is refused with PolicyBindingInvalid (JSON-RPC -32003), and no key is rewrapped
     refs:
-      - crates/arkavo-tdf/src/types.rs:102-123
-      - crates/arkavo-tdf/src/a2a_handler.rs:305-331
+      - crates/arkavo-tdf/src/a2a_handler/policy_binding.rs
+      - crates/arkavo-tdf/src/a2a_handler.rs
+      - crates/arkavo-server/src/server/handlers/kas.rs
+    changed: "2026-10-09"
 
   - id: TDFS-007
     name: Key escrow for data recovery
@@ -186,7 +189,7 @@ scenarios:
       - DEKs never stored in plaintext
       - Key derivation uses approved algorithms
     refs:
-      - crates/arkavo-tdf/src/a2a_handler.rs:73-171
+      - crates/arkavo-tdf/src/a2a_handler.rs:80-210
       - crates/arkavo-config-encryption/src/keys.rs:61-78
 
   - id: TDFS-012
@@ -217,7 +220,7 @@ scenarios:
       - Compromise of long-term key doesn't expose past sessions
       - Ephemeral keys destroyed after use
     refs:
-      - crates/arkavo-tdf/src/a2a_handler.rs:120-171
+      - crates/arkavo-tdf/src/a2a_handler.rs:126-210
       - crates/arkavo-tdf/src/kas_client.rs:236-259
 
   - id: TDFS-014

@@ -7,8 +7,9 @@
 //! `trusted_roots_from_config` -> `KasA2aHandler::handle_rewrap`.
 
 #![cfg(feature = "kas")]
+#![allow(clippy::disallowed_methods)] // Tokio test entrypoint owns its runtime.
 
-use arkavo_crypto::{AgentKeypair, KasEcKeypair};
+use arkavo_crypto::{AgentKeypair, KasEcKeypair, KasEcPublicKey};
 use arkavo_server::server::handlers::kas::trusted_roots_from_config;
 use arkavo_tdf::{
     Attribute, DelegationError, DelegationToken, KasA2aConfig, KasA2aHandler, KasError, KasKeypair,
@@ -16,6 +17,10 @@ use arkavo_tdf::{
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::{Duration, Utc};
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
+use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 
 const ROLE_ADMIN_FQN: &str = "https://arkavo.net/attr/role/value/admin";
 
@@ -72,9 +77,11 @@ fn load_kas_config(trusted_root_dids: &[&str]) -> arkavo_router::KasYamlConfig {
         String::new()
     };
     for did in trusted_root_dids {
-        roots_yaml.push_str(&format!(
-            "      - did: \"{did}\"\n        name: \"Test Root\"\n"
-        ));
+        writeln!(
+            roots_yaml,
+            "      - did: \"{did}\"\n        name: \"Test Root\""
+        )
+        .unwrap();
     }
     let content = format!(
         r#"spec_version: "1.0.0"
@@ -136,26 +143,36 @@ runtime:
     agent_config.kas.expect("kas config should parse")
 }
 
-fn make_rewrap_request(delegation_token: String) -> KasRewrapRequest {
-    // NanoTDF header stub: 3-byte magic + 33-byte compressed ephemeral key.
-    // The handler only needs a parseable ephemeral public key at offset 3.
+/// A rewrap request for `kas`, sealed as a NanoTDF v1.2 writer seals one:
+/// the DEK comes from ECDH with an ephemeral key and HKDF salted with
+/// SHA-256("L1L"), and the policy binding is Base64(HMAC-SHA256(DEK, policy)).
+fn make_rewrap_request(delegation_token: String, kas: &KasKeypair) -> KasRewrapRequest {
+    let kas_public = KasEcPublicKey::from_base64(&kas.public_key_base64()).unwrap();
     let ephemeral = KasEcKeypair::generate();
     let mut header = b"L1L".to_vec();
     header.extend_from_slice(&ephemeral.public_key_sec1_compressed());
+
+    let salt = Sha256::digest(b"L1L");
+    let mut dek = [0u8; 32];
+    Hkdf::<Sha256>::new(Some(&salt), &ephemeral.diffie_hellman(&kas_public))
+        .expand(b"", &mut dek)
+        .unwrap();
 
     let policy = Policy {
         id: Some("test-policy".to_string()),
         attributes: vec![Attribute::new("https://arkavo.net/attr/role", &["admin"])],
         dissemination: vec![],
     };
-    let policy_json = serde_json::to_string(&policy).unwrap();
+    let policy = BASE64.encode(serde_json::to_string(&policy).unwrap());
+    let mut mac = Hmac::<Sha256>::new_from_slice(&dek).unwrap();
+    mac.update(policy.as_bytes());
 
     let client_key = KasEcKeypair::generate();
 
     KasRewrapRequest {
         wrapped_key: BASE64.encode(header),
-        policy_binding: PolicyBinding::new("test-binding-hash"),
-        policy: BASE64.encode(policy_json.as_bytes()),
+        policy_binding: PolicyBinding::new(&BASE64.encode(mac.finalize().into_bytes())),
+        policy,
         delegation_token,
         client_public_key: client_key.public_key_base64(),
     }
@@ -170,9 +187,9 @@ async fn rewrap_succeeds_when_chain_terminates_at_configured_root() {
     assert_eq!(trusted_roots[0].did, chain.root_did);
 
     let mut handler = KasA2aHandler::new(trusted_roots, KasA2aConfig::default());
-    handler.set_keypair(KasKeypair::generate());
-
-    let request = make_rewrap_request(chain.delegation_token);
+    let kas = KasKeypair::generate();
+    let request = make_rewrap_request(chain.delegation_token, &kas);
+    handler.set_keypair(kas);
     let response = handler.handle_rewrap(request, &chain.caller_did).await;
 
     assert!(
@@ -192,9 +209,9 @@ async fn rewrap_denied_when_chain_terminates_at_unknown_root() {
     let trusted_roots = trusted_roots_from_config(&kas_config);
 
     let mut handler = KasA2aHandler::new(trusted_roots, KasA2aConfig::default());
-    handler.set_keypair(KasKeypair::generate());
-
-    let request = make_rewrap_request(chain.delegation_token);
+    let kas = KasKeypair::generate();
+    let request = make_rewrap_request(chain.delegation_token, &kas);
+    handler.set_keypair(kas);
     let result = handler.handle_rewrap(request, &chain.caller_did).await;
 
     assert!(matches!(
@@ -213,9 +230,9 @@ async fn rewrap_denied_when_no_roots_configured() {
     assert!(trusted_roots.is_empty());
 
     let mut handler = KasA2aHandler::new(trusted_roots, KasA2aConfig::default());
-    handler.set_keypair(KasKeypair::generate());
-
-    let request = make_rewrap_request(chain.delegation_token);
+    let kas = KasKeypair::generate();
+    let request = make_rewrap_request(chain.delegation_token, &kas);
+    handler.set_keypair(kas);
     let result = handler.handle_rewrap(request, &chain.caller_did).await;
 
     assert!(matches!(
