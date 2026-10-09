@@ -133,23 +133,24 @@ fn t1_packs_a_tiny_gguf_into_profile_members() {
         assert_eq!(tag.len(), 16, "GMAC hash is the raw 16-byte GCM tag");
     }
 
-    // keyAccess: one wrapped entry, no sid, an 88-character hex-then-base64
-    // policy binding, which is what the platform KAS verifies.
+    // keyAccess: one wrapped entry, no sid, and the 44-character spec policy
+    // binding Base64(HMAC-SHA256). The platform KAS accepts it alongside the
+    // legacy Base64(hex) form since opentdf-platform#54.
     assert_eq!(enc.key_access.len(), 1);
     let ka = &enc.key_access[0];
     assert_eq!(ka.access_type, "wrapped");
     assert_eq!(ka.protocol, "kas");
     assert_eq!(ka.kid.as_deref(), Some("kas-key-1"));
     assert_eq!(ka.policy_binding.alg, "HS256");
+    assert_eq!(ka.policy_binding.hash.len(), 44);
     let binding = base64::engine::general_purpose::STANDARD
         .decode(&ka.policy_binding.hash)
         .unwrap();
     assert_eq!(
         binding.len(),
-        64,
-        "binding is Base64 of 64 hex characters, not of the 32 raw MAC bytes"
+        32,
+        "binding is Base64 of the raw 32-byte MAC, not of its hex"
     );
-    assert!(binding.iter().all(|b| b.is_ascii_hexdigit()));
 
     // The manifest JSON must not carry a `sid`.
     let json = manifest.to_json().unwrap();

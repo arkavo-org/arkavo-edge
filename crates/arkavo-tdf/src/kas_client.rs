@@ -275,8 +275,10 @@ impl ArkavoKasClient {
         // Convert arkavo-tdf manifest to opentdf manifest
         let opentdf_manifest = self.to_opentdf_manifest(manifest)?;
 
-        // Create or get KAS client
-        let kas_client = opentdf::kas::KasClient::new(&self.config.kas_url, &token)
+        // This KAS serves the legacy REST paths (`KAS_PUBLIC_KEY_PATH`), not Connect.
+        let kas_config =
+            opentdf::kas_discovery::OpentdfConfiguration::for_kas_legacy_rest(&self.config.kas_url);
+        let kas_client = opentdf::kas::KasClient::new(&kas_config, &token)
             .map_err(|e| TdfError::Kas(format!("Failed to create KAS client: {e}")))?;
 
         // Perform rewrap
@@ -296,20 +298,7 @@ impl ArkavoKasClient {
             .encryption_information
             .key_access
             .iter()
-            .map(|ka| opentdf::KeyAccess {
-                access_type: ka.access_type.clone(),
-                url: ka.url.clone(),
-                kid: None,
-                protocol: ka.protocol.clone(),
-                wrapped_key: ka.wrapped_key.clone(),
-                policy_binding: opentdf::PolicyBinding {
-                    alg: ka.policy_binding.alg.clone(),
-                    hash: ka.policy_binding.hash.clone(),
-                },
-                encrypted_metadata: None,
-                schema_version: Some("1.0".to_string()),
-                ephemeral_public_key: None,
-            })
+            .map(crate::types::KeyAccessObject::to_opentdf)
             .collect();
 
         // Build encryption information
@@ -348,6 +337,10 @@ impl ArkavoKasClient {
             payload,
             encryption_information: encryption_info,
             schema_version: Some("1.1.0".to_string()),
+            tdf_spec_version: None,
+            gguf: None,
+            // ZTDF-JSON inline manifests carry no assertions, so there are none to forward.
+            assertions: Vec::new(),
         })
     }
 
@@ -379,20 +372,7 @@ impl ArkavoKasClient {
                     .encryption_information
                     .key_access
                     .iter()
-                    .map(|ka| opentdf::KeyAccess {
-                        access_type: ka.access_type.clone(),
-                        url: ka.url.clone(),
-                        kid: None,
-                        protocol: ka.protocol.clone(),
-                        wrapped_key: ka.wrapped_key.clone(),
-                        policy_binding: opentdf::PolicyBinding {
-                            alg: ka.policy_binding.alg.clone(),
-                            hash: ka.policy_binding.hash.clone(),
-                        },
-                        encrypted_metadata: None,
-                        schema_version: Some("1.0".to_string()),
-                        ephemeral_public_key: None,
-                    })
+                    .map(crate::types::KeyAccessObject::to_opentdf)
                     .collect(),
                 method: opentdf::EncryptionMethod {
                     algorithm: manifest.encryption_information.method.algorithm.clone(),
@@ -448,6 +428,7 @@ impl KasClient for ArkavoKasClient {
                         alg: "HS256".to_string(),
                         hash: String::new(),
                     },
+                    sid: None,
                 }],
                 method: crate::types::EncryptionMethod::default(),
                 policy: policy.to_string(),

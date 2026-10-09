@@ -141,7 +141,7 @@ components:
     module: arkavo_tdf
     description: Trusted Data Format encryption and policy enforcement
     criticality: critical
-    scenario_count: 9
+    scenario_count: 11
     invariants:
       - AES-256-GCM payload encryption
       - Policy binding for integrity
@@ -1036,7 +1036,7 @@ components:
 
 stats:
   total_specs: 88
-  total_scenarios: 869
+  total_scenarios: 871
   critical_scenarios: 285
   coverage_areas:
     - authentication

@@ -143,3 +143,30 @@ scenarios:
       - condition: Subject lacks required attributes
         expected: AbacEvaluator returns Decision::Deny
     changed: "2025-01-31"
+
+  - id: TDF-010
+    name: Split id survives manifest conversion
+    criticality: high
+    given:
+      - A key access entry carries a split id (sid), as multi-KAS TDFs from other SDKs do
+    when: The manifest is converted between arkavo-tdf and opentdf types for decrypt or KAS rewrap
+    then:
+      - The sid reaches the opentdf key access entry unchanged
+      - Converting back yields the same KeyAccessObject
+      - A KeyAccessObject without a sid serializes without a sid field, so existing wire messages are unchanged
+    refs: [crates/arkavo-tdf/src/types.rs, crates/arkavo-tdf/src/opentdf_impl.rs, crates/arkavo-tdf/src/kas_client.rs]
+    changed: "2026-10-09"
+
+  - id: TDF-011
+    name: Writers emit the spec policy binding
+    criticality: critical
+    given:
+      - A TDF is written through OpenTdfService or the GGUF-TDF writer (opentdf-rs 0.16)
+    when: The key access policy binding is computed
+    then:
+      - policyBinding.alg is HS256
+      - policyBinding.hash is Base64(HMAC-SHA256(DEK, Base64(policy JSON))), 44 characters, the form OpenTDFKit 5.0.0 writes
+      - The legacy Base64(hex(HMAC)) form, 88 characters, is no longer written
+      - Rewrap needs a KAS that accepts the spec form; platform.arkavo.net does through opentdf-platform#54, and the Arkavo A2A KAS does (TDFS-006)
+    refs: [crates/arkavo-tdf/src/opentdf_impl.rs, crates/arkavo-gguf-tdf/src/writer.rs]
+    changed: "2026-10-09"

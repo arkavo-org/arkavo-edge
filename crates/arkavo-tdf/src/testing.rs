@@ -64,6 +64,7 @@ impl MockTdfService {
                         alg: "HS256".to_string(),
                         hash: "mock_hash".to_string(),
                     },
+                    sid: None,
                 }],
                 method: EncryptionMethod {
                     algorithm: "XOR-MOCK".to_string(),

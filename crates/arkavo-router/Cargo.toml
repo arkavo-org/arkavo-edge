@@ -47,7 +47,7 @@ arkavo-memory = { path = "../arkavo-memory", default-features = false, optional 
 arkavo-tdf = { path = "../arkavo-tdf", optional = true, features = ["opentdf"] }
 arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf", optional = true, features = ["kas"] }
 arkavo-identity = { path = "../arkavo-identity", optional = true }
-opentdf = { version = "0.15.0", default-features = false, features = ["rustls-tls", "kas-client"], optional = true }
+opentdf = { version = "0.16.0", default-features = false, features = ["rustls-tls", "kas-client"], optional = true }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]

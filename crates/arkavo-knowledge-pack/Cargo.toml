@@ -15,7 +15,7 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-sentinel = { path = "../arkavo-sentinel", default-features = false }
 arkavo-fingerprint = { path = "../arkavo-fingerprint" }
 arkavo-protocol = { path = "../arkavo-protocol", features = ["taint"] }
-opentdf = { version = "0.15.0", default-features = false, features = ["rustls-tls"] }
+opentdf = { version = "0.16.0", default-features = false, features = ["rustls-tls"] }
 base64 = { workspace = true }
 hex = { workspace = true }
 rand = { workspace = true }
