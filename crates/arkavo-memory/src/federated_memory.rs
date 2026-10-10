@@ -208,7 +208,16 @@ impl FederatedMemoryService {
         let mut filtered = 0;
 
         for row in rows {
-            let policy: MemoryPolicy = serde_json::from_str(&row.policy_json).unwrap_or_default();
+            // The default policy has no attributes and admits everyone, so an
+            // unreadable policy withholds the item instead of defaulting.
+            let Ok(policy) = serde_json::from_str::<MemoryPolicy>(&row.policy_json) else {
+                tracing::warn!(
+                    item_id = %row.id,
+                    "Withholding federated memory item whose policy does not parse"
+                );
+                filtered += 1;
+                continue;
+            };
 
             if evaluate_entitlements(&q.entitlements, &policy) {
                 items.push(FederatedItem {
@@ -492,6 +501,37 @@ mod tests {
 
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.filtered_by_policy, 0);
+    }
+
+    #[tokio::test]
+    async fn query_withholds_an_item_whose_policy_does_not_parse() {
+        // Regression: an unreadable policy fell back to the default, which has
+        // no attributes, so the item went to every requester.
+        let svc = create_test_service().await;
+        let item = sample_item("agent-1", "sess-1", admin_policy());
+        svc.store_batch(std::slice::from_ref(&item)).await.unwrap();
+        sqlx::query("UPDATE federated_memory SET policy_json = ? WHERE id = ?")
+            .bind(r#"{"attributes":"not-a-list"}"#)
+            .bind(&item.id)
+            .execute(&svc.pool)
+            .await
+            .unwrap();
+
+        let result = svc
+            .query(&FederatedQuery {
+                requester_id: "agent-2".to_string(),
+                entitlements: vec![],
+                session_filter: None,
+                agent_filter: None,
+                content_type_filter: None,
+                since: None,
+                limit: 100,
+            })
+            .await
+            .unwrap();
+
+        assert!(result.items.is_empty());
+        assert_eq!(result.filtered_by_policy, 1);
     }
 
     #[tokio::test]
