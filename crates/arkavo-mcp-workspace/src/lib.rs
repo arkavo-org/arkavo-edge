@@ -1,3 +1,4 @@
+mod clone;
 mod error;
 mod workspace;
 
