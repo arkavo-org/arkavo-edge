@@ -31,8 +31,12 @@ pub struct CycleReceipt {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CycleOutcome {
     /// Assistant text, or a summary of the cycle's tool activity when the
-    /// model answered with tool calls only.
-    Completed { text: String },
+    /// model answered with tool calls only, and the images the cycle's
+    /// generate_image calls produce, delivered with the text (ASSET-008).
+    Completed {
+        text: String,
+        assets: super::assets::Assets,
+    },
     /// The cycle could not produce an answer: a routing, budget, policy or
     /// timeout refusal, or a cycle that yielded nothing at all. `error`
     /// carries the underlying message so the requester can act on it.

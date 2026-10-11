@@ -18,6 +18,7 @@ use super::super::agent_cycle_reply::{
     REQUEST_REPLY_BUDGET, apply_outcome, deliver_outcome_to_task,
 };
 use super::super::agent_event::CycleOutcome;
+use super::super::assets::{AssetService, accept_request, request_in};
 use super::super::config_helpers::AgentMetadata;
 use super::super::pipeline::{self, Driving};
 use super::super::tool_memory::ToolMemory;
@@ -94,6 +95,7 @@ pub async fn handle_message_send(
         >,
     >,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
+    assets: Option<&Arc<AssetService>>,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
     handle_message_send_from(
@@ -114,6 +116,7 @@ pub async fn handle_message_send(
         agent_event_tx,
         #[cfg(feature = "iroh")]
         iroh_node,
+        assets,
         &PlanSource::Kit,
         request,
     )
@@ -143,6 +146,7 @@ pub(in crate::server) async fn handle_message_send_from(
         >,
     >,
     #[cfg(feature = "iroh")] iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
+    assets: Option<&Arc<AssetService>>,
     plans: &PlanSource,
     request: MessageSendRequest,
 ) -> Result<MessageSendResponse, ErrorObjectOwned> {
@@ -291,6 +295,34 @@ pub(in crate::server) async fn handle_message_send_from(
         ));
     }
 
+    // An asset request goes to the generator, never to the model: it is a
+    // request for files, which the model neither makes nor sees (ASSET-003).
+    if let Some(asset_request) = request_in(&request.message) {
+        let accepted = match asset_request {
+            Ok(asset_request) => {
+                accept_request(
+                    assets,
+                    router,
+                    task_executor,
+                    request.message,
+                    asset_request,
+                )
+                .await
+            }
+            Err(e) => Err(ErrorObjectOwned::owned(
+                -32602,
+                format!("invalid_params: asset request: {e}"),
+                None::<()>,
+            )),
+        };
+        if accepted.is_ok() {
+            timer.success();
+        } else {
+            timer.error();
+        }
+        return accepted;
+    }
+
     // Budget enforcement: reject if session budget exhausted
     if let Some(manager) = budget_manager {
         let tracker = manager.tracker();
@@ -361,6 +393,7 @@ pub(in crate::server) async fn handle_message_send_from(
                     model_hint,
                     #[cfg(feature = "iroh")]
                     iroh_node: iroh_node.cloned(),
+                    assets: assets.cloned(),
                 };
 
                 // A step of someone else's run is answered and nothing more:

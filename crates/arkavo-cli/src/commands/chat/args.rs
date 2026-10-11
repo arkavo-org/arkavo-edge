@@ -22,6 +22,8 @@ pub(super) struct ChatCliArgs {
     pub(super) prompt: Option<String>,
     pub(super) agent_id: Option<String>,
     pub(super) model: Option<String>,
+    /// Where a mesh agent's delivered assets are saved (CLI-018).
+    pub(super) out: Option<std::path::PathBuf>,
 }
 
 pub(super) fn parse_cli_args(args: &[String]) -> Result<ChatCliArgs, Box<dyn std::error::Error>> {
@@ -39,6 +41,11 @@ pub(super) fn parse_cli_args(args: &[String]) -> Result<ChatCliArgs, Box<dyn std
             "--agent-id" => {
                 let id = value.ok_or("--agent-id requires an argument")?;
                 flags.agent_id = Some(id.clone());
+                i += 1;
+            }
+            "--out" => {
+                let dir = value.ok_or("--out requires a directory")?;
+                flags.out = Some(dir.into());
                 i += 1;
             }
             "--model" | "--gguf" => {
@@ -225,5 +232,13 @@ mod tests {
     fn nothing_after_a_refused_argument_is_acted_on() {
         let err = error_for(&["--prompt", "hi", "--stream"]);
         assert!(err.contains("unknown option '--stream'"), "{err}");
+    }
+
+    /// CLI-018: --out names where delivered assets go, and needs a value.
+    #[test]
+    fn out_names_the_assets_directory() {
+        let flags = parse_cli_args(&args(&["--agent-id", "artist", "--out", "./art"])).unwrap();
+        assert_eq!(flags.out, Some(std::path::PathBuf::from("./art")));
+        assert!(error_for(&["--out"]).contains("--out requires a directory"));
     }
 }

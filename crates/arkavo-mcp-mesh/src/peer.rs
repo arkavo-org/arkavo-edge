@@ -6,8 +6,9 @@
 //! for its answer cannot drift apart in how they reach an agent or read its
 //! reply.
 
-// The module is private, so nothing here leaves the crate. `pub(crate)` on
-// these items trips clippy's `redundant_pub_crate` and plain `pub` trips
+// The module is private and only `Peer`, `Patience` and `PeerError` leave
+// the crate, re-exported for agents that delegate structured work. `pub(crate)`
+// on the rest trips clippy's `redundant_pub_crate` and plain `pub` trips
 // rustc's `unreachable_pub`; the repo settles it this way elsewhere too.
 #![allow(unreachable_pub)]
 
@@ -15,7 +16,8 @@ use std::sync::Arc;
 
 use arkavo_protocol::transport::TlsConfig;
 use arkavo_protocol::types::{
-    Message, MessagePart, MessageSendRequest, MessageSendResponse, TaskGetRequest, TaskGetResponse,
+    AgentCapabilitiesGetResponse, Message, MessagePart, MessageSendRequest, MessageSendResponse,
+    TaskGetRequest, TaskGetResponse,
 };
 use arkavo_protocol::{
     A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, HttpTransport, TransportConfig,
@@ -116,6 +118,11 @@ impl Peer {
         self.call("tasks/get", json!([request])).await
     }
 
+    /// `agent.capabilities.get`: what the agent reports it can do.
+    pub async fn capabilities(&self) -> Result<AgentCapabilitiesGetResponse, PeerError> {
+        self.call("agent.capabilities.get", json!([])).await
+    }
+
     pub async fn close(self) {
         let _ = self.transport.close().await;
     }
@@ -140,6 +147,28 @@ impl Peer {
             }),
         }
     }
+}
+
+/// One data part of a message.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskData {
+    pub schema: String,
+    pub content: serde_json::Value,
+}
+
+/// Every data part of a message, in order.
+pub fn data_of(message: &Message) -> Vec<TaskData> {
+    message
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            MessagePart::Data { schema, content } => Some(TaskData {
+                schema: schema.clone(),
+                content: content.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The text of a message: its text parts, in order, one per line.

@@ -106,15 +106,30 @@ pub fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Erro
     Ok(Vec::new())
 }
 
-/// Send a message to an agent via A2A and poll until the task completes.
+/// An agent's finished answer: the task it ran and every part of its result.
+pub struct Answer {
+    pub task_id: String,
+    pub parts: Vec<arkavo_protocol::types::MessagePart>,
+}
+
+impl Answer {
+    /// The text of the answer, one line per text part.
+    pub fn text(&self) -> String {
+        answer_text(&self.parts)
+    }
+}
+
+/// Send a message to an agent via A2A and poll until the task completes,
+/// for as long as the task keeps reporting progress (CLI-019).
 ///
-/// Returns the text of the agent's answer, empty when it completed without
-/// one. Printing is left to the caller so that nothing reaches the terminal
-/// for an exchange that failed.
+/// `on_progress` hears each new progress message. The answer itself is left
+/// to the caller to print, so nothing of it reaches the terminal for an
+/// exchange that failed.
 pub async fn send_and_poll_agent(
     transport: &arkavo_protocol::http::HttpTransport,
     text: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+    on_progress: &mut dyn FnMut(&str),
+) -> Result<Answer, Box<dyn std::error::Error>> {
     use arkavo_protocol::{
         transport::{A2aRequest, A2aResponse, A2aTransport},
         types::{
@@ -152,13 +167,8 @@ pub async fn send_and_poll_agent(
         }
     };
 
-    // Poll for completion (2s intervals, 5min timeout)
-    let start = std::time::Instant::now();
-    let timeout = Duration::from_mins(5);
+    let mut watch = super::poll::Watch::default();
     loop {
-        if start.elapsed() > timeout {
-            return Err("Response timed out after 5 minutes".into());
-        }
         let get_req = TaskGetRequest {
             task_id: task_id.clone(),
         };
@@ -176,7 +186,7 @@ pub async fn send_and_poll_agent(
                 match task_resp.status {
                     TaskStatus::Completed => {
                         let parts = task_resp.result.map(|m| m.parts).unwrap_or_default();
-                        return Ok(answer_text(parts));
+                        return Ok(Answer { task_id, parts });
                     }
                     TaskStatus::Failed => {
                         let msg = task_resp
@@ -189,6 +199,9 @@ pub async fn send_and_poll_agent(
                         return Err("Task was canceled by agent".into());
                     }
                     _ => {
+                        if let Some(message) = watch.observe(&task_resp)? {
+                            on_progress(&message);
+                        }
                         tokio::time::sleep(Duration::from_secs(2)).await;
                     }
                 }
@@ -201,11 +214,11 @@ pub async fn send_and_poll_agent(
 }
 
 /// The text of an agent's answer, one line per text part.
-fn answer_text(parts: Vec<arkavo_protocol::types::MessagePart>) -> String {
+fn answer_text(parts: &[arkavo_protocol::types::MessagePart]) -> String {
     parts
-        .into_iter()
+        .iter()
         .filter_map(|part| match part {
-            arkavo_protocol::types::MessagePart::Text { content } => Some(content),
+            arkavo_protocol::types::MessagePart::Text { content } => Some(content.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -227,8 +240,8 @@ mod tests {
                 content: "second".to_string(),
             },
         ];
-        assert_eq!(answer_text(parts), "first\nsecond");
-        assert_eq!(answer_text(Vec::new()), "");
+        assert_eq!(answer_text(&parts), "first\nsecond");
+        assert_eq!(answer_text(&[]), "");
     }
 
     #[test]

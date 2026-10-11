@@ -25,6 +25,7 @@ fn set(job: &Job) -> &'static WeightSet {
     &job.entry.sets[1]
 }
 
+#[arkavo_test_macros::spec("IMG-009", "IMG-010")]
 #[test]
 fn headers_report_size_and_alpha() {
     assert_eq!(
@@ -41,6 +42,7 @@ fn headers_report_size_and_alpha() {
 }
 
 /// IMG-009: a tRNS chunk counts as alpha.
+#[arkavo_test_macros::spec("IMG-009")]
 #[test]
 fn trns_chunks_count_as_alpha() {
     let mut bytes = png(8, 8, false);
@@ -56,6 +58,7 @@ fn trns_chunks_count_as_alpha() {
 
 /// IMG-010, IMG-013: every image is checked and described, with the entry,
 /// license and runtime named.
+#[arkavo_test_macros::spec("IMG-010", "IMG-013")]
 #[tokio::test]
 async fn collect_describes_verified_images() {
     let dir = tempfile::tempdir().unwrap();
@@ -85,6 +88,7 @@ async fn collect_describes_verified_images() {
     assert_eq!(manifest.assets[0].sha256.len(), 64);
 }
 
+#[arkavo_test_macros::spec("IMG-010")]
 #[tokio::test]
 async fn seeds_fall_back_to_consecutive_values() {
     let dir = tempfile::tempdir().unwrap();
@@ -102,6 +106,7 @@ async fn seeds_fall_back_to_consecutive_values() {
     assert!(!manifest.transparency_missing);
 }
 
+#[arkavo_test_macros::spec("IMG-010")]
 #[tokio::test]
 async fn missing_wrong_and_extra_images_are_rejected() {
     let job = job(1, false);

@@ -21,7 +21,7 @@ use arkavo_protocol::agent_config::AgentMode;
 use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_server::execute_with_conductor_and_learning;
 use arkavo_server::server::{
-    AgentEvent, AgentLoopConfig, CorrelationId, CycleOutcome, run_agent_loop,
+    AgentEvent, AgentLoopConfig, Assets, CorrelationId, CycleOutcome, run_agent_loop,
 };
 use model::{SCRIPTED_MODEL, Script, scripted_router, text};
 use tokio::sync::{mpsc, oneshot};
@@ -97,6 +97,7 @@ impl Agent {
             agent_metadata: Arc::new(tokio::sync::RwLock::new(metadata)),
             #[cfg(feature = "iroh")]
             iroh_node: None,
+            assets: None,
         };
         Self {
             events,
@@ -202,7 +203,8 @@ async fn an_agent_idle_past_its_window_still_answers() {
     assert_eq!(
         outcome,
         CycleOutcome::Completed {
-            text: ANSWER.to_string()
+            text: ANSWER.to_string(),
+            assets: Assets::default(),
         }
     );
     assert_eq!(script.dispatches(), 1);

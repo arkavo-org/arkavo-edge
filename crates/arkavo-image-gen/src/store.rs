@@ -1,5 +1,5 @@
-//! Where weights, the runtime and outputs live, and pruning what no pin
-//! names (IMG-004, IMG-020).
+//! Where weights and the runtime live, and pruning what no pin names
+//! (IMG-004, IMG-020).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ impl Store {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn with_hub(root: PathBuf, hub: String) -> Self {
         Self { root, hub }
     }
@@ -48,10 +48,6 @@ impl Store {
 
     pub fn runtime_dir(&self) -> PathBuf {
         self.root.join("runtime")
-    }
-
-    pub fn outputs_dir(&self) -> PathBuf {
-        self.root.join("outputs")
     }
 
     pub fn model_path(&self, file: &PinnedFile) -> PathBuf {
@@ -107,7 +103,8 @@ impl Store {
     }
 
     /// Delete weights, partial downloads and runtimes no pin of this
-    /// release names, and outputs a previous run left behind.
+    /// release names. Outputs are not here: each process keeps its own in a
+    /// temporary directory, which another agent's start never touches.
     pub fn prune(&self, keep_models: &BTreeSet<String>, keep_runtime: &str) -> Result<Pruned> {
         let mut pruned = Pruned::default();
         for entry in read_dir(&self.models_dir())? {
@@ -122,12 +119,6 @@ impl Store {
             if name != keep_runtime && name != format!("{keep_runtime}.zip.part") {
                 pruned.remove(&entry.path(), name)?;
             }
-        }
-        for entry in read_dir(&self.outputs_dir())? {
-            pruned.remove(
-                &entry.path(),
-                entry.file_name().to_string_lossy().into_owned(),
-            )?;
         }
         if !pruned.names.is_empty() {
             info!(bytes = pruned.bytes, names = ?pruned.names, "pruned image-gen files no pin names");

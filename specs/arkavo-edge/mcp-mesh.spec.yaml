@@ -136,8 +136,6 @@ scenarios:
   - id: MESH-009
     name: Delegated task answers keep data parts
     criticality: high
-    wip: true
-    issue: "TaskAnswer holds text only (request.rs:36) and text_of drops every other part (peer.rs:146), so an asset manifest a member returns never reaches the agent that delegated"
     given:
       - A member's completed task whose result has text and data parts
     when: send_and_wait or get_task_status reads the result
@@ -145,22 +143,26 @@ scenarios:
       - "The answer keeps the text and every data part with its schema"
       - "A urn:arkavo:asset:manifest:v1 part comes back as references; the mesh layer fetches nothing"
     refs:
-      - crates/arkavo-mcp-mesh/src/request.rs:36
-      - crates/arkavo-mcp-mesh/src/peer.rs:146
+      - crates/arkavo-mcp-mesh/src/request.rs:34-44
+      - crates/arkavo-mcp-mesh/src/peer.rs:152-173
+      - crates/arkavo-mcp-mesh/src/lib.rs:719-730
     changed: "2026-10-11"
 
   - id: MESH-010
-    name: Capability queries read members' reports, not announcements
+    name: Choosing a member for work reads members' reports, not announcements
     criticality: high
-    wip: true
     given:
       - Members found by discovery
-    when: agent_query, or an agent choosing a member for work (ASSET-002), looks for a capability
+    when: An agent chooses a member for work by capability (ASSET-002)
     then:
-      - "Each member's capabilities come from its agent.capabilities.get answer, cached for 60 seconds"
-      - "The mDNS TXT capabilities and mcp_tools keys are not read; INGRESS-007 removes them"
+      - "Each member's capabilities come from its agent.capabilities.get answer, reused for 60 seconds while the member stays at the same address"
+      - "A member that does not answer within 5 seconds is left out of that choice"
+      - "The mDNS TXT capabilities and mcp_tools keys are not read"
       - "image_generation matches only a member whose report carries the image_generation descriptor (ASSET-001)"
+    edge_cases:
+      - condition: agent_query, which still matches on announced capabilities
+        expected: Unchanged here; INGRESS-007 removes what it reads
     refs:
-      - crates/arkavo-mcp-mesh/src/lib.rs:800-876
+      - crates/arkavo-mcp-mesh/src/members.rs
       - crates/arkavo-server/src/server/handlers/discovery.rs:240
     changed: "2026-10-11"

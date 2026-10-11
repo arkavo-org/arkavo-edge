@@ -1017,6 +1017,11 @@ pub struct AgentCapabilitiesGetResponse {
     /// Supported interaction modes
     #[serde(default)]
     pub interaction_modes: Vec<InteractionMode>,
+
+    /// Local image generation this host offers, when `capabilities` lists
+    /// `image_generation`: one row per catalog entry (ASSET-001).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_generation: Option<serde_json::Value>,
 }
 
 /// Information about an MCP tool

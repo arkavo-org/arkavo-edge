@@ -118,7 +118,10 @@ async fn turbo_renders_a_transparent_sprite() {
         manifest.license_line()
     );
     assert_eq!(manifest.assets.len(), 1);
-    assert_eq!((manifest.assets[0].width, manifest.assets[0].height), (side, side));
+    assert_eq!(
+        (manifest.assets[0].width, manifest.assets[0].height),
+        (side, side)
+    );
     assert_eq!(manifest.assets[0].seed, 42);
     assert_eq!(manifest.model.id, "qwen-image-2.1-turbo");
     let row = &generator.descriptor().models[0];

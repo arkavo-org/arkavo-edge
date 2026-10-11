@@ -57,7 +57,7 @@ impl AssetJob {
 
     /// The latest progress the job reported.
     pub fn progress(&self) -> Option<Progress> {
-        *self.progress.borrow()
+        self.progress.borrow().clone()
     }
 
     /// The outcome, if the job finishes by `until`.
@@ -80,7 +80,7 @@ impl AssetJob {
                 outcome = &mut result => return outcome,
                 changed = progress.changed() => {
                     if changed.is_ok()
-                        && let Some(p) = *progress.borrow_and_update()
+                        && let Some(p) = progress.borrow_and_update().clone()
                     {
                         on_progress(p);
                     }
@@ -88,6 +88,24 @@ impl AssetJob {
                 () = tokio::time::sleep_until(until) => return Err(Arc::new(ImageGenError::TimedOut)),
             }
         }
+    }
+}
+
+impl PartialEq for AssetJob {
+    /// The same job, as two holders of one generation see it.
+    fn eq(&self, other: &Self) -> bool {
+        self.result.ptr_eq(&other.result)
+    }
+}
+
+impl Eq for AssetJob {}
+
+impl std::fmt::Debug for AssetJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AssetJob")
+            .field("prompt", &self.request.prompt)
+            .field("progress", &self.progress())
+            .finish_non_exhaustive()
     }
 }
 
@@ -133,16 +151,19 @@ mod tests {
     use crate::output::Manifest;
     use std::time::Duration;
 
-    fn generated() -> Generated {
-        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+    fn manifest() -> Manifest {
+        serde_json::from_value(serde_json::json!({
             "model": {"id": "m", "repo": "r", "revision": "v", "diffusion": "d", "text_encoder": "t"},
             "license": "l", "license_url": "u", "runtime": "rt", "prompt": "p", "assets": []
         }))
-        .unwrap();
-        Generated {
-            dir: "/tmp/none".into(),
-            manifest,
-        }
+        .unwrap()
+    }
+
+    /// Assets in a fresh directory of their own.
+    fn generated() -> Generated {
+        let dir = std::env::temp_dir().join(format!("arkavo-job-{:016x}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Generated::owning(dir, manifest())
     }
 
     fn request() -> ImageRequest {
@@ -180,6 +201,7 @@ mod tests {
         );
     }
 
+    #[arkavo_test_macros::spec("IMG-012")]
     #[tokio::test]
     async fn waits_stop_at_their_deadline_and_errors_are_shared() {
         let slow = AssetJob::spawn(request(), |_| async move {
@@ -202,6 +224,30 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert_eq!(err.code(), "busy");
+    }
+
+    /// ASSET-008: the files of a job nobody will deliver are deleted once
+    /// the last holder is gone, and not before.
+    #[arkavo_test_macros::spec("ASSET-008")]
+    #[tokio::test]
+    async fn output_lives_as_long_as_a_holder_of_the_job() {
+        let job = AssetJob::spawn(request(), |_| async move { Ok(generated()) });
+        let other = AssetJob::spawn(request(), |_| async move { Ok(generated()) });
+        assert_eq!(job, job.clone());
+        assert_ne!(job, other);
+        assert!(format!("{job:?}").contains("AssetJob"));
+
+        let holder = job.clone();
+        let dir = job
+            .wait_until(Instant::now() + Duration::from_secs(5))
+            .await
+            .unwrap()
+            .unwrap()
+            .dir;
+        drop(job);
+        assert!(dir.exists(), "another holder may still deliver it");
+        drop(holder);
+        assert!(!dir.exists());
     }
 
     #[test]

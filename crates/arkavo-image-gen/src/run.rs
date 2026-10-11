@@ -82,6 +82,8 @@ async fn run_inner(
     spec: RunSpec<'_>,
     on_event: &(dyn Fn(Event) + Send + Sync),
 ) -> Result<RunOutput> {
+    // The arguments name files and sizes only; the prompt is in a file.
+    tracing::debug!(cli = %spec.cli.display(), args = ?spec.args, "starting sd-cli");
     let env = ChildEnv::isolated_from_current(&EnvSpec::default());
     let mut command = match spec.sandbox {
         Sandbox::MacOs => {

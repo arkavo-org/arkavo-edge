@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use arkavo_image_gen::Outbox;
 use arkavo_protocol::types::{Message, MessagePart, TaskError, TaskStatus};
 use arkavo_tasks::task_store::TaskStore;
 use tokio::sync::RwLock;
@@ -35,6 +36,7 @@ pub(super) async fn run(
 
     info!("Executing task {} via HRM Conductor", task_id);
 
+    let outbox = Arc::new(Outbox::default());
     let answer = direct
         .answer(Request {
             content,
@@ -43,15 +45,21 @@ pub(super) async fn run(
             memory: agent_memory,
             // Specialists may need complexity assessment.
             skip_complexity: false,
+            outbox: Some(outbox.clone()),
         })
         .await;
+    // Taken whatever the answer: a failed answer delivers nothing, and its
+    // images are dropped with it (ASSET-008).
+    let assets = direct.assets_in(&outbox);
     let succeeded = answer.is_ok();
     let reported = match answer {
         Ok(result_content) => {
+            let mut parts = vec![MessagePart::Text {
+                content: result_content.clone(),
+            }];
+            parts.extend(assets.parts(&task_executor, &task_id).await);
             let result_message = Message {
-                parts: vec![MessagePart::Text {
-                    content: result_content.clone(),
-                }],
+                parts,
                 metadata: None,
             };
             let result_value =

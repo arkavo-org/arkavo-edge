@@ -15,7 +15,10 @@ use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_tasks::task_executor::TaskExecutor;
 use tokio::sync::RwLock;
 
+use arkavo_image_gen::Outbox;
+
 use crate::server::LearningBus;
+use crate::server::assets::{AssetService, Assets};
 use crate::server::conductor_parallel::for_requester;
 use crate::server::config_helpers::AgentMetadata;
 use crate::server::execute_with_conductor_and_learning;
@@ -39,6 +42,8 @@ pub(in crate::server) struct DirectExecution {
     pub model_hint: Option<arkavo_router::ModelChoice>,
     #[cfg(feature = "iroh")]
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
+    /// Image generation and delivery, when the agent has a data plane.
+    pub assets: Option<Arc<AssetService>>,
 }
 
 /// How one message is to be answered.
@@ -51,6 +56,10 @@ pub(in crate::server) struct Request {
     pub memory: Arc<RwLock<ToolMemory>>,
     /// Skip the model call that decides whether to split the task up.
     pub skip_complexity: bool,
+    /// Where generate_image puts the images it starts, for the reply to
+    /// deliver. Without one the tool is not offered: nothing would deliver
+    /// what it made.
+    pub outbox: Option<Arc<Outbox>>,
 }
 
 impl Request {
@@ -66,11 +75,29 @@ impl Request {
             // A role's step is one piece of work by definition; the agent
             // loop, which runs these roles otherwise, skips the check too.
             skip_complexity: true,
+            outbox: None,
+        }
+    }
+
+    /// The same request, with generate_image offered and its images kept
+    /// in `outbox`.
+    pub(in crate::server) fn delivering_to(self, outbox: &Arc<Outbox>) -> Self {
+        Self {
+            outbox: Some(outbox.clone()),
+            ..self
         }
     }
 }
 
 impl DirectExecution {
+    /// The images in `outbox`, for the reply to deliver.
+    pub(in crate::server) fn assets_in(&self, outbox: &Outbox) -> Assets {
+        let jobs = outbox.take();
+        self.assets
+            .as_ref()
+            .map_or_else(Assets::default, |service| Assets::of(service, jobs))
+    }
+
     /// Answer `request` and return the model's text.
     ///
     /// The tools offered are the agent's mesh and MCP tools, narrowed to the
@@ -96,6 +123,9 @@ impl DirectExecution {
                     let bridge = McpBridgeTool::new(self.mcp_registry.clone(), tool);
                     registry.register(&name, Box::new(bridge));
                 }
+            }
+            if let (Some(assets), Some(outbox)) = (&self.assets, &request.outbox) {
+                assets.register_tools(&mut registry, outbox.clone());
             }
             if specialized {
                 registry.retain_granted(&granted);

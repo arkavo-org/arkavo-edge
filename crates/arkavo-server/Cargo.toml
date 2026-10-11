@@ -110,6 +110,9 @@ arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 ed25519-dalek = { workspace = true }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["a2a"], optional = true }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
+# generate_image and asset requests; generation runs only on hosts that
+# qualify, and every agent with a data plane can ask a member that does.
+arkavo-image-gen = { path = "../arkavo-image-gen" }
 # kas-only: the agent-loop apply_swarmkit tool runs the orchestrator's
 # apply_kit pipeline (match -> TDF-wrap -> ship over Iroh -> dispatch).
 arkavo-orchestrator = { path = "../arkavo-orchestrator", optional = true }
@@ -164,6 +167,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-image-gen = { path = "../arkavo-image-gen", features = ["testing"] }
 # Seal a DEK and bind a policy to it, as a TDF writer does, for KAS rewrap tests
 hkdf = "0.12"
 hmac = "0.12"

@@ -36,6 +36,7 @@ async fn fetch(server: &MockServer, dest: &Path, sha: &str, size: u64, seen: &Se
 }
 
 /// IMG-004: a fresh download is hashed, then renamed into place.
+#[arkavo_test_macros::spec("IMG-004")]
 #[tokio::test]
 async fn downloads_verify_then_rename() {
     let server = MockServer::start().await;
@@ -57,6 +58,7 @@ async fn downloads_verify_then_rename() {
 }
 
 /// IMG-004: a partial file resumes with a Range request.
+#[arkavo_test_macros::spec("IMG-004")]
 #[tokio::test]
 async fn partial_downloads_resume_with_range() {
     let server = MockServer::start().await;
@@ -80,6 +82,7 @@ async fn partial_downloads_resume_with_range() {
 
 /// A server that ignores the range sends the whole file, which replaces
 /// the partial one rather than being appended to it.
+#[arkavo_test_macros::spec("IMG-004")]
 #[tokio::test]
 async fn ignored_ranges_restart_the_file() {
     let server = MockServer::start().await;
@@ -105,6 +108,7 @@ async fn ignored_ranges_restart_the_file() {
 }
 
 /// IMG-004 edge: a wrong hash deletes the file and fails, with no retry.
+#[arkavo_test_macros::spec("IMG-004")]
 #[tokio::test]
 async fn hash_mismatch_deletes_and_fails() {
     let server = MockServer::start().await;
@@ -131,6 +135,7 @@ async fn hash_mismatch_deletes_and_fails() {
 }
 
 /// A body longer than the pin is refused and discarded at once.
+#[arkavo_test_macros::spec("IMG-004")]
 #[tokio::test]
 async fn oversized_bodies_are_refused() {
     let server = MockServer::start().await;
@@ -150,6 +155,7 @@ async fn oversized_bodies_are_refused() {
 }
 
 /// Errors from the server are retried, then reported.
+#[arkavo_test_macros::spec("IMG-004")]
 #[tokio::test]
 async fn server_errors_are_retried_then_reported() {
     let server = MockServer::start().await;
@@ -173,6 +179,7 @@ async fn server_errors_are_retried_then_reported() {
 }
 
 /// A file at its final name with the pinned size is not fetched again.
+#[arkavo_test_macros::spec("IMG-004")]
 #[tokio::test]
 async fn present_files_are_not_fetched() {
     let server = MockServer::start().await;
@@ -192,6 +199,7 @@ async fn present_files_are_not_fetched() {
 }
 
 /// IMG-004 edge: refused before any byte when the disk cannot hold it.
+#[arkavo_test_macros::spec("IMG-004")]
 #[test]
 fn space_is_checked_before_fetching() {
     let dir = tempfile::tempdir().unwrap();

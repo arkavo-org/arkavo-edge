@@ -194,6 +194,40 @@ async fn the_answer_is_the_full_text_of_the_finished_task() {
     agent.stop().await;
 }
 
+/// MESH-009: data parts come back with their schema, beside the text.
+#[arkavo_test_macros::spec("MESH-009")]
+#[tokio::test]
+async fn data_parts_are_kept_with_their_schema() {
+    let manifest =
+        json!({"assets": [{"name": "coin_000.png"}], "references": [{"ticket": "blob1"}]});
+    let agent = ScriptedAgent::start(
+        OnSend::Accept,
+        vec![completed(vec![
+            text("One coin."),
+            MessagePart::Data {
+                schema: "urn:arkavo:asset:manifest:v1".to_string(),
+                content: manifest.clone(),
+            },
+        ])],
+    )
+    .await;
+    let mesh = mesh_knowing(&[("artist", &agent.address)]).await;
+
+    let answer = ask(&mesh, "artist", message("A coin.", None), PATIENT)
+        .await
+        .expect("the task finished");
+
+    assert_eq!(answer.text, "One coin.");
+    assert_eq!(
+        answer.data,
+        [crate::TaskData {
+            schema: "urn:arkavo:asset:manifest:v1".to_string(),
+            content: manifest,
+        }]
+    );
+    agent.stop().await;
+}
+
 #[tokio::test]
 async fn a_running_task_is_waited_for() {
     let agent = ScriptedAgent::start(

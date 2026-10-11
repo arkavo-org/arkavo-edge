@@ -29,7 +29,8 @@ enum ModelSubcommand {
     /// Download a model from the registry
     Download {
         /// Name of the model to download (defaults to the model recommended
-        /// for this device)
+        /// for this device). Image models: qwen-image, qwen-image-quality,
+        /// or a catalog id such as qwen-image-2.1-turbo
         name: Option<String>,
     },
 
@@ -112,7 +113,10 @@ fn resolve_download_model(
         Some("ministral-8b" | "ministral8b") => RecommendedModel::Ministral8B,
         Some("glm-4.7-flash" | "glm" | "glm4") => RecommendedModel::Glm47Flash,
         Some(other) => {
-            anyhow::bail!("unknown model '{other}'\n\n{DOWNLOADABLE_MODELS}")
+            anyhow::bail!(
+                "unknown model '{other}'\n\n{DOWNLOADABLE_MODELS}\n\n{}",
+                super::model_image::this_host_listing()
+            )
         }
     })
 }
@@ -173,6 +177,8 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 }
             }
 
+            println!("{}", super::model_image::this_host_listing());
+
             // Show local GGUF models
             println!("Local Models (GGUF via llama.cpp):");
             let found_models = list_local_gguf_models();
@@ -205,6 +211,13 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
 
         ModelSubcommand::Download { name } => {
             use crate::first_run::{RecommendedModel, detect_capabilities, download_model};
+
+            if let Some(image_model) = name
+                .as_deref()
+                .filter(|n| super::model_image::is_image_model(n))
+            {
+                return super::model_image::download(image_model);
+            }
 
             let caps = detect_capabilities();
 

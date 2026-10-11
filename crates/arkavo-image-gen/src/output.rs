@@ -2,6 +2,7 @@
 //! IMG-013).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -69,15 +70,42 @@ impl Manifest {
     }
 }
 
-/// Assets on disk with their manifest; the caller owns `dir` and deletes it
-/// once the files are delivered.
+/// Assets on disk with their manifest. Every copy shares the directory, which
+/// is deleted when the last copy is dropped: by then each reply that could
+/// deliver the files has staged them or given up.
 #[derive(Debug, Clone)]
 pub struct Generated {
     pub dir: PathBuf,
     pub manifest: Manifest,
+    _cleanup: Arc<Cleanup>,
+}
+
+#[derive(Debug)]
+struct Cleanup(PathBuf);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A new empty directory for one set of assets, apart from every other set
+/// and every other process's; whoever fills it hands it to
+/// [`Generated::owning`].
+pub fn assets_dir(prefix: &str) -> Result<PathBuf> {
+    Ok(tempfile::Builder::new().prefix(prefix).tempdir()?.keep())
 }
 
 impl Generated {
+    /// Assets in `dir`, which this value now owns.
+    pub fn owning(dir: PathBuf, manifest: Manifest) -> Self {
+        Self {
+            _cleanup: Arc::new(Cleanup(dir.clone())),
+            dir,
+            manifest,
+        }
+    }
+
     pub fn path_of(&self, asset: &AssetEntry) -> PathBuf {
         self.dir.join(&asset.name)
     }

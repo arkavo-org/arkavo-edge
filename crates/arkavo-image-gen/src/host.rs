@@ -93,6 +93,7 @@ mod tests {
     }
 
     /// The IMG-001 examples: a 32 GiB M6 with Gemma 4 12B resident.
+    #[arkavo_test_macros::spec("IMG-001")]
     #[test]
     fn budget_subtracts_chat_model_and_os() {
         let budget = mac(32).budget(7_200_000_000);
@@ -105,6 +106,7 @@ mod tests {
         assert_eq!(mac(4).budget(7_200_000_000), 0);
     }
 
+    #[arkavo_test_macros::spec("IMG-001")]
     #[test]
     fn only_native_apple_silicon_qualifies() {
         assert!(mac(32).qualifies());

@@ -2,11 +2,14 @@
 
 feature: Local Image Generation
 module: arkavo_image_gen
-version: 0.102.3
+version: 0.103.0
 
-# Every scenario is wip: the crate does not exist at 2d11f5c. The model,
-# runtime and file facts were checked on 2026-10-11 and are pinned here, so
-# moving to a later release is a reviewed spec change.
+# The model, runtime and file facts were checked on 2026-10-11 and are
+# pinned here, so moving to a later release is a reviewed spec change. Two
+# scenarios stay wip until an Apple Silicon host has run them: IMG-006's
+# sandbox profile with Metal, and IMG-018's measured allowance table. The
+# rest run on x86_64 Linux in CI against an sd-cli stand-in, and once
+# against the pinned Linux CPU build of the same release with real weights.
 #
 # Models: a compiled-in catalog (IMG-016). It starts with the two
 # Qwen-Image-2.1 checkpoints, both 7B single-stream DiTs with a Qwen3-VL-8B
@@ -41,7 +44,6 @@ scenarios:
   - id: IMG-001
     name: Host qualifies by platform and memory budget
     criticality: high
-    wip: true
     given:
       - An agent starting on a host
     when: The agent assesses whether it can generate images
@@ -65,15 +67,14 @@ scenarios:
       - condition: Intel Mac, Linux or Windows host
         expected: Does not qualify in this revision; no GPU backend is specified for them
     refs:
-      - crates/arkavo-cli/src/hardware.rs:7
-      - crates/arkavo-cli/src/hardware.rs:52
+      - crates/arkavo-image-gen/src/host.rs
+      - crates/arkavo-image-gen/src/generator.rs:57-76
       - crates/arkavo-router/src/decision.rs:536
     changed: "2026-10-11"
 
   - id: IMG-002
     name: Weight set per entry sized to the memory budget
     criticality: high
-    wip: true
     given:
       - A qualifying host, its memory budget (IMG-001) and the catalog (IMG-016)
     when: The generator chooses each entry's weights
@@ -89,30 +90,33 @@ scenarios:
         expected: "3 GiB at 1 MP with guidance 1, until the entry's measured allowance table replaces it (IMG-018)"
       - condition: Files of a larger set are on disk already
         expected: Not used; the set follows the budget, not the cache
+    refs:
+      - crates/arkavo-image-gen/src/plan.rs
     changed: "2026-10-11"
 
   - id: IMG-003
     name: Pinned stable-diffusion.cpp runtime with Metal
     criticality: critical
-    wip: true
     given:
       - A qualifying host without the runtime installed
     when: The runtime is installed
     then:
       - "The archive is https://github.com/leejet/stable-diffusion.cpp/releases/download/master-956-1b0ba10/sd-master-1b0ba10-bin-Darwin-macOS-26.6.2-arm64.zip, 35,158,090 bytes, SHA-256 72c18ca1ba4177ca77cd288a9cb1e0f78d63ad3bde4b91fd7c84f3f4187b5761"
-      - "Only sd-cli, libstable-diffusion.dylib and the two license texts (ggml.txt, stable-diffusion.cpp.txt) are extracted, into a directory named for the release; any other entry, or a name with a path separator, fails the install"
+      - "Only sd-cli, libstable-diffusion.dylib and the two license texts (ggml.txt, stable-diffusion.cpp.txt) are extracted, into a directory named for the release; any other entry of the archive, such as sd-server, is skipped, and a listed member that is missing or whose name has a path separator fails the install"
       - "Both binaries are universal Mach-O with ggml's Metal backend and its kernels compiled in, so no Metal library is fetched or looked up at run time"
       - "The release's build number, 956, is the runtime version catalog entries are compared with (IMG-017)"
       - "The sizes and SHA-256 of the extracted files are recorded at install and checked before each start; a mismatch reinstalls from the pinned archive"
     edge_cases:
       - condition: Archive size or hash differs
         expected: The archive is deleted, nothing is extracted, and generation fails naming the expected and actual hash
+    refs:
+      - crates/arkavo-image-gen/src/runtime.rs
+      - crates/arkavo-image-gen/src/catalog/pins.rs
     changed: "2026-10-11"
 
   - id: IMG-004
     name: Weights fetched by pinned revision and verified
     criticality: critical
-    wip: true
     given:
       - The weight set chosen for an entry (IMG-002), its files named in the catalog (IMG-016)
     when: A file of the set is missing or incomplete
@@ -120,33 +124,41 @@ scenarios:
       - "Each file comes from https://huggingface.co/<repo>/resolve/<revision>/<path>, never from a branch name; the redirect to Hugging Face's CDN is followed and the content is judged by its hash alone"
       - "Files live under the arkavo data directory (on macOS ~/Library/Application Support/arkavo/image-gen), and a file several entries use is stored once"
       - "A partial download resumes with an HTTP Range request, and the finished file is hashed before it is renamed into place"
+      - "A file already in place with its pinned size is used without hashing it again: nothing is renamed into place unhashed"
       - "No Hugging Face token is sent; every pinned repository is public"
     edge_cases:
       - condition: Free disk below the bytes still to fetch plus 10 percent
         expected: Refused before any byte is fetched, naming the space needed
       - condition: A finished file with the wrong hash
         expected: Deleted, and the request fails; no other revision is tried
+    refs:
+      - crates/arkavo-image-gen/src/fetch.rs
+      - crates/arkavo-image-gen/src/store.rs
     changed: "2026-10-11"
 
   - id: IMG-005
     name: Weights fetched on first use, with step-level progress
     criticality: medium
-    wip: true
     given:
       - A qualifying host
     when: A request names an entry whose weight set is not fully on disk, or the operator prefetches (CLI-020)
     then:
-      - "Nothing is fetched at agent start; each offered entry reports needs_download and its bytes still to fetch"
+      - "Nothing is fetched at agent start; each offered entry reports ready false and its bytes still to fetch"
       - "The first request for an entry starts its fetch and waits on it, and its task reports bytes fetched of bytes needed"
       - "Concurrent requests share one fetch; a file shared with another entry is fetched once"
+      - "Downloads into the generator's directory are serialized across the agent processes on the host by a second lock file, so two never write the same partial file"
       - "While generating, the task reports step s of S for image i of n, read from sd-cli's per-step progress line, so a 40-step image at 4 MP still reports every step"
       - "When every file of the entry's set verifies, the entry reports ready"
+    refs:
+      - crates/arkavo-image-gen/src/generator.rs
+      - crates/arkavo-image-gen/src/progress.rs
     changed: "2026-10-11"
 
   - id: IMG-006
     name: Runtime runs isolated, with local paths only
     criticality: critical
     wip: true
+    issue: "The profile has run only off macOS, where it is not applied; whether Metal works under it is checked on an Apple Silicon host before this leaves wip"
     given:
       - A verified runtime and weight set
     when: sd-cli is started for a request
@@ -160,14 +172,13 @@ scenarios:
       - condition: Metal needs a path or service the sandbox profile denies
         expected: Generation fails with the denial in the error; the profile is widened in this spec, never dropped at run time
     refs:
+      - crates/arkavo-image-gen/src/run.rs
       - crates/arkavo-process-env/src/lib.rs:80
-      - crates/arkavo-dataflow/src/engine/sandbox.rs:165
     changed: "2026-10-11"
 
   - id: IMG-007
     name: Request validated against its entry before any work
     criticality: high
-    wip: true
     given:
       - A generation request and the catalog entry it names (IMG-019)
     when: It is validated
@@ -186,12 +197,13 @@ scenarios:
         expected: InvalidParams; Turbo samples at CFG 1, where a negative prompt has no effect
       - condition: 2752x1536 for either entry
         expected: Valid (4,227,072 pixels); whether this host can render it is IMG-018
+    refs:
+      - crates/arkavo-image-gen/src/request.rs
     changed: "2026-10-11"
 
   - id: IMG-008
     name: Each entry sampled with its own profile
     criticality: high
-    wip: true
     given:
       - A valid request on a ready host
     when: sd-cli is invoked
@@ -205,12 +217,14 @@ scenarios:
         expected: "Never done: sd.cpp would use the full model's schedule, which Turbo was not distilled for"
       - condition: guidance above 1 on the full model
         expected: Both conditions run each step, roughly doubling step time and the working set (IMG-018)
+    refs:
+      - crates/arkavo-image-gen/src/args.rs
+      - crates/arkavo-image-gen/src/catalog/pins.rs
     changed: "2026-10-11"
 
   - id: IMG-009
     name: Transparent sprites and tileable textures
     criticality: medium
-    wip: true
     given:
       - A request with transparent or tileable set
     when: It is generated
@@ -223,12 +237,14 @@ scenarios:
         expected: The asset is delivered with has_alpha false, and the result says the model did not produce transparency
       - condition: transparent requested of an entry without an RGBA template
         expected: InvalidParams naming the entry
+    refs:
+      - crates/arkavo-image-gen/src/args.rs
+      - crates/arkavo-image-gen/src/output.rs
     changed: "2026-10-11"
 
   - id: IMG-010
     name: Outputs verified before they become assets
     criticality: high
-    wip: true
     given:
       - sd-cli has exited
     when: Its output directory is read
@@ -237,25 +253,30 @@ scenarios:
       - "Each file starts with the PNG signature, and its IHDR width and height equal the request"
       - "Each asset gets a manifest entry: name, size in bytes, SHA-256, width, height, has_alpha, tileable and seed"
       - "On any failure the output directory is removed, and the error carries the exit status and the kept standard error"
+    refs:
+      - crates/arkavo-image-gen/src/output.rs
     changed: "2026-10-11"
 
   - id: IMG-011
     name: One generation at a time with a bounded queue
     criticality: high
-    wip: true
     given:
       - A generation running on the host
     when: Another request arrives
     then:
       - "It waits in a queue of at most 4 requests, served in arrival order"
+      - "Agent processes on the same host take turns as well: each holds an advisory lock file in the generator's directory while sd-cli runs, so a kit that runs several roles on one Mac still loads one model at a time"
+      - "Each run writes to a new temporary directory of its own, so no other agent's start or run touches its files"
       - "A request beyond that fails at once with busy, so its requester can try another member"
       - "The queue depth is reported with the capability"
+    refs:
+      - crates/arkavo-image-gen/src/generator.rs
+      - crates/arkavo-image-gen/src/lock.rs
     changed: "2026-10-11"
 
   - id: IMG-012
     name: Requests stop at their deadline
     criticality: medium
-    wip: true
     given:
       - A request whose deadline comes from its task's time budget
     when: The deadline passes while the request waits, fetches weights or generates
@@ -265,12 +286,14 @@ scenarios:
     edge_cases:
       - condition: The full model at 2048x2048 on a small host
         expected: "Expect several times Turbo's time per image: five times the steps at four times the pixels; requesters set deadlines from the reported seconds per step (ASSET-001)"
+    refs:
+      - crates/arkavo-image-gen/src/generator.rs
+      - crates/arkavo-image-gen/src/run.rs
     changed: "2026-10-11"
 
   - id: IMG-013
     name: Manifest names the entry, its license and the runtime
     criticality: high
-    wip: true
     given:
       - Verified assets (IMG-010)
     when: The manifest is written
@@ -283,12 +306,13 @@ scenarios:
     edge_cases:
       - condition: Assets meant for a commercial game
         expected: The license line is shown with every delivery (CLI-018); whether the license permits the use is the requester's call, not the agent's
+    refs:
+      - crates/arkavo-image-gen/src/output.rs
     changed: "2026-10-11"
 
   - id: IMG-014
     name: generate_image tool on every agent
     criticality: high
-    wip: true
     given:
       - An agent building a tool registry, in the agent loop or for a direct execution
     when: arkavo_image_gen::register_tools runs
@@ -301,14 +325,14 @@ scenarios:
       - condition: A specialized role whose grant set omits generate_image
         expected: Removed by retain_granted like any other tool
     refs:
-      - crates/arkavo-server/src/server/agent_loop.rs:50-80
-      - crates/arkavo-server/src/server/handlers/messaging/direct.rs:88-103
+      - crates/arkavo-image-gen/src/tool.rs
+      - crates/arkavo-server/src/server/agent_loop.rs:49-89
+      - crates/arkavo-server/src/server/handlers/messaging/direct.rs
     changed: "2026-10-11"
 
   - id: IMG-015
     name: No cloud fallback
     criticality: critical
-    wip: true
     given:
       - A request that neither this host nor any member can serve
     when: generate_image or an asset request handles it
@@ -316,12 +340,14 @@ scenarios:
       - "It fails with no_capable_member"
       - "No cloud provider is called, whatever runtime.cloud_policy says, cloud_within_cap included; the hosted Qwen-Image-2.1 Pro and Turbo APIs are never used"
       - "arkavo-qwen, a DashScope chat and vision client, is never used to generate images"
+    refs:
+      - crates/arkavo-image-gen/src/tool.rs
+      - crates/arkavo-server/src/server/assets/delegate.rs
     changed: "2026-10-11"
 
   - id: IMG-016
     name: Catalog of pinned model entries
     criticality: critical
-    wip: true
     given:
       - The catalog compiled into this release
     when: The generator loads it
@@ -338,12 +364,14 @@ scenarios:
         expected: "Turbo's are a third-party quantization: AtomicChat built them for stable-diffusion.cpp from Qwen's BF16 weights, and Qwen publishes no GGUF of Turbo. Comfy-Org's qwen_image_2.1_turbo_int8_convrot.safetensors (7,256,787,829 bytes, SHA-256 8144a0182964aa8403ad6dbc011db837304167d235161b9aabaa8532e967314c) is the alternative if a Comfy-Org repackaging is preferred. The full model's GGUF files are by leejet, the stable-diffusion.cpp author"
       - condition: An edit request with reference images
         expected: Not in this revision; both entries can edit, which needs the text encoder's vision projector and reference images over the data plane (PROTO-020), and is refused with unsupported_feature until specified
+    refs:
+      - crates/arkavo-image-gen/src/catalog.rs
+      - crates/arkavo-image-gen/src/catalog/pins.rs
     changed: "2026-10-11"
 
   - id: IMG-017
     name: A later model version is added as a catalog entry
     criticality: high
-    wip: true
     given:
       - A new Qwen image release, such as a later Qwen-Image or Turbo checkpoint
     when: It is added to the catalog
@@ -352,7 +380,7 @@ scenarios:
       - "Its sampling profile, default size, limits and RGBA template come from the release's own model_index.json, scheduler config, reference pipeline and model card, each cited in this spec"
       - "When it needs a newer stable-diffusion.cpp, the runtime pin (IMG-003) moves in the same change"
       - "Moving an alias to it is an explicit change; adding an entry never changes what qwen-image means"
-      - "A catalog test fails the build when ids or aliases collide, an alias names no entry, an entry's oldest runtime is newer than the pinned build, a revision is not 40 hex digits, a hash is not 64, a set's size disagrees with its files, sets are not ordered by size, or a size limit is not a multiple of the entry's step"
+      - "A catalog test fails the build when ids or aliases collide, an alias names no entry, an entry's oldest runtime is newer than the pinned build, a revision is not 40 hex digits, a hash is not 64, sets are not ordered by size (a set's size is the sum of its files', never stated separately), or a size limit is not a multiple of the entry's step"
       - "An ignored network test sends HEAD for every pinned URL and compares x-repo-commit, x-linked-size and x-linked-etag with the entry"
     edge_cases:
       - condition: A release whose architecture the pinned runtime does not support
@@ -362,13 +390,14 @@ scenarios:
       - condition: A swarm whose members run different arkavo releases
         expected: Each member offers its own catalog; a request naming an id is served only by members that list it (ASSET-002)
     refs:
-      - crates/arkavo-router/tests/hf_registry_test.rs:24
+      - crates/arkavo-image-gen/src/catalog/tests.rs
     changed: "2026-10-11"
 
   - id: IMG-018
     name: Each request checked against the host's budget
     criticality: high
     wip: true
+    issue: "The allowance table is provisional: 3 GiB at 1 MP with guidance 1 and no other point, so nothing larger or guided is accepted until it is measured on an Apple Silicon host"
     given:
       - A valid request (IMG-007) for an entry this host offers
     when: The generator decides whether it can run it
@@ -380,12 +409,14 @@ scenarios:
     edge_cases:
       - condition: An entry without its measured table
         expected: It stays wip; nothing above 1 MP or with guidance above 1 is accepted for it
+    refs:
+      - crates/arkavo-image-gen/src/plan.rs
+      - crates/arkavo-image-gen/src/catalog/pins.rs
     changed: "2026-10-11"
 
   - id: IMG-019
     name: Request names its entry
     criticality: high
-    wip: true
     given:
       - A generation request
     when: Its model is resolved
@@ -394,12 +425,14 @@ scenarios:
       - "An alias resolves on the host that generates, and the manifest records the id it resolved to (IMG-013)"
       - "An unknown name fails with InvalidParams listing this host's ids and aliases"
       - "A known entry that this host does not offer (its smallest set does not fit) is served by a member that offers it, or fails with no_capable_member"
+    refs:
+      - crates/arkavo-image-gen/src/catalog.rs
+      - crates/arkavo-image-gen/src/request.rs
     changed: "2026-10-11"
 
   - id: IMG-020
     name: Files no entry names are pruned at start
     criticality: medium
-    wip: true
     given:
       - An agent starting after an upgrade that dropped or replaced catalog entries or the runtime
     when: The generator scans its directory under the arkavo data directory
@@ -410,4 +443,6 @@ scenarios:
     edge_cases:
       - condition: A downgrade to a release whose entries were pruned
         expected: Their files are fetched again on first use (IMG-005)
+    refs:
+      - crates/arkavo-image-gen/src/store.rs
     changed: "2026-10-11"

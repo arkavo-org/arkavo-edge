@@ -32,7 +32,7 @@ pub fn offers(budget: u64) -> Vec<Offer> {
 }
 
 impl Offer {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) const fn for_test(
         entry: &'static Entry,
         set: &'static WeightSet,
@@ -95,6 +95,7 @@ mod tests {
     }
 
     /// The IMG-001 edge cases, with Gemma 4 12B (7.2 GB) resident.
+    #[arkavo_test_macros::spec("IMG-002")]
     #[test]
     fn sets_follow_the_budget() {
         let gemma_12b = 7_200_000_000;
@@ -124,6 +125,7 @@ mod tests {
 
     /// IMG-018: only measured sizes are accepted, and the refusal names the
     /// largest one that fits.
+    #[arkavo_test_macros::spec("IMG-018")]
     #[test]
     fn requests_beyond_the_measured_table_are_refused() {
         let offer = offers(budget(32, 7_200_000_000))[0];

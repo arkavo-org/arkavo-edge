@@ -19,6 +19,7 @@ fn spec<'a>(cli: &'a Path, out: &'a Path, args: &[&str], within: Duration) -> Ru
 
 /// IMG-005: images and steps are reported as sd-cli prints them, and model
 /// loading bars are not counted as steps.
+#[arkavo_test_macros::spec("IMG-005")]
 #[tokio::test]
 async fn events_follow_the_output() {
     let tools = tempfile::tempdir().unwrap();
@@ -70,6 +71,7 @@ async fn events_follow_the_output() {
 
 /// IMG-006: a failing run reports its exit status and the end of its
 /// output.
+#[arkavo_test_macros::spec("IMG-006", "IMG-010")]
 #[tokio::test]
 async fn failures_carry_status_and_output() {
     let tools = tempfile::tempdir().unwrap();
@@ -90,6 +92,7 @@ async fn failures_carry_status_and_output() {
 }
 
 /// IMG-012: the deadline kills the process.
+#[arkavo_test_macros::spec("IMG-006", "IMG-012")]
 #[tokio::test]
 async fn deadlines_kill_the_run() {
     let tools = tempfile::tempdir().unwrap();
@@ -106,6 +109,7 @@ async fn deadlines_kill_the_run() {
 }
 
 /// IMG-006: the runtime gets the isolated environment, not the agent's.
+#[arkavo_test_macros::spec("IMG-006")]
 #[tokio::test]
 async fn the_environment_is_isolated() {
     let tools = tempfile::tempdir().unwrap();
@@ -123,6 +127,7 @@ async fn the_environment_is_isolated() {
     assert!(!env.contains("CARGO_PKG_NAME"), "{env}");
 }
 
+#[arkavo_test_macros::spec("IMG-006")]
 #[test]
 fn the_sandbox_profile_denies_network_and_confines_writes() {
     assert!(MACOS_PROFILE.contains("(deny network*)"));

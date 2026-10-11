@@ -388,7 +388,6 @@ components:
       - Raw bytes only, no encryption
       - Tickets self-contained
       - Embedded node lifecycle managed
-      - Data for another party staged on the long-lived node only
 
   - name: image-gen
     file: image-gen.spec.yaml
@@ -406,12 +405,12 @@ components:
   - name: swarm-assets
     file: swarm-assets.spec.yaml
     module: arkavo_server
-    description: Routing asset requests to capable members and delivering sealed assets over the Iroh data plane
+    description: Routing asset requests to capable members and delivering assets over the Iroh data plane
     criticality: critical
     scenario_count: 9
     invariants:
       - Asset bytes never cross the control plane
-      - Every staged asset sealed to the party it is handed to
+      - Tickets written only into the result for the party that asked
       - Capabilities reported to members, never announced
       - No cloud inference at any step
 

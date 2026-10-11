@@ -38,10 +38,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
+mod members;
 mod peer;
 mod request;
 
-use peer::{Patience, Peer, PeerError, text_of};
+use members::ReportCache;
+pub use members::{Member, REPORT_TTL};
+use peer::text_of;
+pub use peer::{Patience, Peer, PeerError, TaskData};
 pub use request::{RequestError, TaskAnswer, send_and_wait};
 
 // Re-export error type for mesh-specific errors
@@ -79,6 +83,8 @@ pub struct MeshToolsState {
     /// Telemetry: completions delivered via push vs fallback polling
     completions_pushed: std::sync::atomic::AtomicU64,
     completions_polled: std::sync::atomic::AtomicU64,
+    /// Members' capability reports, read over the member channel (MESH-010)
+    reports: ReportCache,
 }
 
 impl MeshToolsState {
@@ -90,6 +96,7 @@ impl MeshToolsState {
             push_completions: Arc::new(RwLock::new(Vec::new())),
             completions_pushed: std::sync::atomic::AtomicU64::new(0),
             completions_polled: std::sync::atomic::AtomicU64::new(0),
+            reports: ReportCache::default(),
         }
     }
 
@@ -711,6 +718,14 @@ impl Tool for GetTaskStatusTool {
 
                 if let Some(result_msg) = task_response.result {
                     result_json["result"] = json!(text_of(&result_msg));
+                    // Data parts carry references, never payloads (MESH-009).
+                    let data: Vec<_> = peer::data_of(&result_msg)
+                        .into_iter()
+                        .map(|d| json!({"schema": d.schema, "content": d.content}))
+                        .collect();
+                    if !data.is_empty() {
+                        result_json["data"] = json!(data);
+                    }
                 }
 
                 Ok(result_json)

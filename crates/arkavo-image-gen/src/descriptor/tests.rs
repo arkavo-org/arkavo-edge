@@ -37,6 +37,7 @@ const TURBO: &str = "qwen-image-2.1-turbo";
 
 /// ASSET-002: a row serves a request named by id or by the alias the member
 /// resolves, when its measured size covers the request.
+#[arkavo_test_macros::spec("ASSET-002")]
 #[test]
 fn rows_match_by_name_and_size() {
     let m = member(
@@ -58,6 +59,7 @@ fn rows_match_by_name_and_size() {
 /// ASSET-002: ready first, then the larger set, then the shorter estimate
 /// (unmeasured last), then the shorter queue; members that cannot serve the
 /// request are left out.
+#[arkavo_test_macros::spec("ASSET-002")]
 #[test]
 fn members_rank_by_readiness_set_time_and_queue() {
     let n = need(TURBO, 1 << 20, false);
@@ -105,6 +107,7 @@ fn members_rank_by_readiness_set_time_and_queue() {
     );
 }
 
+#[arkavo_test_macros::spec("ASSET-002")]
 #[test]
 fn queues_break_ties_and_count_in_estimates() {
     let n = need(TURBO, 1 << 20, false);
@@ -119,6 +122,7 @@ fn queues_break_ties_and_count_in_estimates() {
     assert_eq!(measured.estimate(&n), Some(12.0));
 }
 
+#[arkavo_test_macros::spec("ASSET-002")]
 #[test]
 fn needs_come_from_the_request() {
     let known = Need::of(&ImageRequest {
@@ -145,6 +149,7 @@ fn needs_come_from_the_request() {
     assert_eq!(future_default_size.pixels, None);
 }
 
+#[arkavo_test_macros::spec("ASSET-001")]
 #[test]
 fn descriptors_round_trip_as_json() {
     let m = member(

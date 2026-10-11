@@ -6,6 +6,7 @@ mod agent_cycle_reply;
 mod agent_event;
 mod agent_loop;
 mod anti_pattern;
+pub mod assets;
 mod autolearn_bridge;
 mod bind_addr;
 mod browser_origin;
@@ -67,6 +68,7 @@ pub use agent_event::{
 };
 pub use agent_loop::{AgentLoopConfig, run_agent_loop};
 pub use arkavo_autolearn::PainSignal;
+pub use assets::{AssetService, Assets, Identity};
 pub use autolearn_bridge::AutoLearnBridge;
 pub use conductor::{execute_with_conductor, execute_with_conductor_and_learning};
 pub use config_helpers::AgentMetadata;
@@ -446,6 +448,8 @@ pub struct A2aRpcImpl {
     /// Shared Iroh P2P node for TDF blob transport
     #[cfg(feature = "iroh")]
     pub(crate) iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
+    /// Image generation and delivery, when the agent has a data plane
+    pub(crate) assets: Option<Arc<AssetService>>,
 }
 
 #[async_trait]
@@ -605,6 +609,7 @@ impl A2aRpcServer for A2aRpcImpl {
             self.agent_event_tx.clone(),
             #[cfg(feature = "iroh")]
             self.iroh_node.as_ref(),
+            self.assets.as_ref(),
             request,
         )
         .await
@@ -1059,6 +1064,7 @@ impl A2aRpcServer for A2aRpcImpl {
             &self.mcp_registry,
             &self.agent_metadata,
             self.public_key.as_deref(),
+            self.assets.as_deref(),
         )
         .await
     }
@@ -1197,6 +1203,10 @@ impl A2aRpcServer for A2aRpcImpl {
             )),
             #[cfg(feature = "kas")]
             kas_enabled: true,
+            image_generation: self
+                .assets
+                .as_ref()
+                .is_some_and(|a| a.descriptor().is_some()),
         };
         let card = well_known::build_agent_card(&state).await;
         serde_json::to_value(card).map_err(|e| {

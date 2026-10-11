@@ -14,7 +14,7 @@ use std::time::Duration;
 use arkavo_protocol::types::{Message, TaskGetResponse, TaskStatus};
 use tokio::time::Instant;
 
-use crate::peer::{Patience, Peer, PeerError, text_of};
+use crate::peer::{Patience, Peer, PeerError, TaskData, data_of, text_of};
 use crate::{MeshToolsState, discover_and_register_agents};
 
 /// First wait between two looks at the task. An agent on the same machine
@@ -32,12 +32,15 @@ const UNANSWERED_POLLS: u32 = 5;
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// An agent's answer to a message.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TaskAnswer {
     /// The task the agent opened for the message.
     pub task_id: String,
     /// Every text part of the result, in full.
     pub text: String,
+    /// Every data part of the result, such as an asset manifest whose
+    /// references the caller fetches over the data plane (MESH-009).
+    pub data: Vec<TaskData>,
 }
 
 /// Why a message sent with [`send_and_wait`] has no answer.
@@ -265,6 +268,7 @@ fn ending(agent_id: &str, task: TaskGetResponse) -> Option<Result<TaskAnswer, Re
         TaskStatus::Completed => Ok(TaskAnswer {
             task_id,
             text: task.result.as_ref().map(text_of).unwrap_or_default(),
+            data: task.result.as_ref().map(data_of).unwrap_or_default(),
         }),
         TaskStatus::Failed => {
             let (code, message) = task.error.map_or_else(

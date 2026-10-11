@@ -4,7 +4,7 @@
 use std::fmt;
 
 /// What a running request is doing, for the requester's task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Progress {
     /// Weights or the runtime being fetched.
     Fetching { fetched: u64, needed: u64 },
@@ -17,6 +17,8 @@ pub enum Progress {
         step: u32,
         steps: u32,
     },
+    /// What the member generating a delegated request last reported.
+    Relayed { member: String, message: String },
 }
 
 impl fmt::Display for Progress {
@@ -38,6 +40,10 @@ impl fmt::Display for Progress {
                 step,
                 steps,
             } => write!(f, "image {image} of {images}: step {step} of {steps}"),
+            Self::Relayed {
+                ref member,
+                ref message,
+            } => write!(f, "{member}: {message}"),
         }
     }
 }
@@ -98,6 +104,7 @@ fn fraction(text: &str) -> Option<(u32, u32)> {
 mod tests {
     use super::*;
 
+    #[arkavo_test_macros::spec("IMG-005")]
     #[test]
     fn image_and_step_lines_become_events() {
         let mut parser = Parser::new(8);

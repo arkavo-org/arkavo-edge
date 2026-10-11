@@ -9,8 +9,8 @@
 mod support;
 
 use arkavo_protocol::agent_config::AgentMode;
-use arkavo_server::server::CycleOutcome;
-use support::{RunningAgent, Script, text, tool_call};
+use arkavo_server::server::{Assets, CycleOutcome};
+use support::{RunningAgent, Script, text, tool_call, tool_call_with};
 
 /// Regression: in specialist mode the agent ran a full planner cycle on
 /// `Continue.` at startup and made a tool call before any task had arrived.
@@ -46,7 +46,8 @@ async fn a_text_answer_is_what_the_requester_receives() {
     assert_eq!(
         outcome,
         CycleOutcome::Completed {
-            text: answer.to_string()
+            text: answer.to_string(),
+            assets: Assets::default(),
         }
     );
     assert_eq!(script.dispatches(), 1, "the answer needed no second round");
@@ -87,7 +88,8 @@ async fn a_specialist_that_answers_in_text_is_not_pushed_to_act() {
         assert_eq!(
             agent.ask("What should we measure?").await,
             CycleOutcome::Completed {
-                text: expected.to_string()
+                text: expected.to_string(),
+                assets: Assets::default(),
             }
         );
     }
@@ -142,4 +144,48 @@ async fn a_state_broadcast_is_still_answered_briefly() {
 
     let prompt = script.prompt(0);
     assert!(prompt.contains(BREVITY_RULE), "got {prompt}");
+}
+
+/// IMG-014, ASSET-008: a cycle whose model calls generate_image answers with
+/// the model's text and the images it started, for the reply to deliver.
+#[arkavo_test_macros::spec("IMG-014", "ASSET-008")]
+#[tokio::test]
+async fn a_cycle_that_generates_images_answers_with_them() {
+    use std::sync::Arc;
+
+    let fake = arkavo_image_gen::testing::fake_generator(1, std::time::Duration::ZERO).await;
+    let node = Arc::new(arkavo_tdf_iroh::IrohNode::with_defaults());
+    node.start().await.expect("data plane");
+    let service = Arc::new(arkavo_server::server::AssetService::new(
+        Some(fake.generator.clone()),
+        None,
+        arkavo_tdf_iroh::IrohTransport::new(node.clone()),
+    ));
+    let script = Script::new(vec![
+        tool_call_with(
+            "generate_image",
+            serde_json::json!({
+                "prompt": "a gold coin icon", "width": 256, "height": 256,
+                "transparent": true, "name": "coin"
+            }),
+        ),
+        text("Here is your coin."),
+    ]);
+    let agent =
+        RunningAgent::start_with_assets(AgentMode::Specialist, false, script, Some(service)).await;
+
+    let outcome = agent.ask("Draw a gold coin icon for my game.").await;
+    let script = agent.stop().await;
+
+    let CycleOutcome::Completed { text, assets } = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert_eq!(text, "Here is your coin.");
+    assert!(!assets.is_empty(), "the image goes with the answer");
+    assert!(
+        script.prompt(1).contains("coin_000.png"),
+        "the model saw the file it made, not its bytes: {}",
+        script.prompt(1)
+    );
+    node.stop().await.expect("data plane stops");
 }

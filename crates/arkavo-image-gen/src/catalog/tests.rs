@@ -20,6 +20,7 @@ fn all_files() -> Vec<&'static PinnedFile> {
 }
 
 /// IMG-017: ids and aliases are unique and every alias names an entry.
+#[arkavo_test_macros::spec("IMG-017", "IMG-019")]
 #[test]
 fn ids_and_aliases_are_unique_and_resolve() {
     let mut seen = HashSet::new();
@@ -37,6 +38,7 @@ fn ids_and_aliases_are_unique_and_resolve() {
 }
 
 /// IMG-017: no entry needs a newer runtime than the pinned one.
+#[arkavo_test_macros::spec("IMG-017")]
 #[test]
 fn entries_run_on_the_pinned_runtime() {
     for entry in entries() {
@@ -51,6 +53,7 @@ fn entries_run_on_the_pinned_runtime() {
 }
 
 /// IMG-017: every pin is a commit, a SHA-256 and a size.
+#[arkavo_test_macros::spec("IMG-016", "IMG-017")]
 #[test]
 fn pins_are_commits_hashes_and_sizes() {
     for file in all_files() {
@@ -73,6 +76,7 @@ fn pins_are_commits_hashes_and_sizes() {
 }
 
 /// IMG-002 relies on sets being ordered largest first.
+#[arkavo_test_macros::spec("IMG-017")]
 #[test]
 fn sets_are_ordered_largest_first() {
     for entry in entries() {
@@ -93,6 +97,7 @@ fn sets_are_ordered_largest_first() {
 }
 
 /// IMG-007: limits are whole steps and the default size is inside them.
+#[arkavo_test_macros::spec("IMG-007", "IMG-017")]
 #[test]
 fn limits_are_consistent() {
     for entry in entries() {
@@ -124,6 +129,7 @@ fn limits_are_consistent() {
 
 /// IMG-002 chooses sets with the 1 MP unguided allowance, so every entry
 /// needs one.
+#[arkavo_test_macros::spec("IMG-018")]
 #[test]
 fn every_entry_has_a_base_allowance() {
     for entry in entries() {
@@ -137,6 +143,7 @@ fn every_entry_has_a_base_allowance() {
 
 /// IMG-018: the smallest measured point covering a size applies, and an
 /// unmeasured size or guidance has no allowance.
+#[arkavo_test_macros::spec("IMG-018")]
 #[test]
 fn allowance_lookup_takes_the_covering_point() {
     let entry = resolve("qwen-image").unwrap().entry;
@@ -149,6 +156,7 @@ fn allowance_lookup_takes_the_covering_point() {
 }
 
 /// Shared files are stored once, under a name that keeps the extension.
+#[arkavo_test_macros::spec("IMG-004")]
 #[test]
 fn store_names_dedupe_shared_files() {
     let names = pinned_store_names();
@@ -163,6 +171,7 @@ fn store_names_dedupe_shared_files() {
 }
 
 /// The weight set sizes the spec quotes (IMG-002).
+#[arkavo_test_macros::spec("IMG-002", "IMG-016")]
 #[test]
 fn weight_set_sizes_match_the_spec() {
     let turbo = resolve("qwen-image-2.1-turbo").unwrap().entry;
@@ -191,6 +200,7 @@ fn weight_set_sizes_match_the_spec() {
 
 /// IMG-017: every pinned weight file still resolves at its commit with the
 /// size and hash the catalog names. Needs the network.
+#[arkavo_test_macros::spec("IMG-017")]
 #[tokio::test]
 #[ignore = "requires network access to huggingface.co"]
 async fn pins_match_the_hub() {

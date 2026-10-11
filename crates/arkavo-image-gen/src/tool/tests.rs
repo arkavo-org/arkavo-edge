@@ -43,10 +43,10 @@ impl Delegate for FakeDelegate {
             tileable: false,
             seed: 3,
         });
-        Ok(Generated {
-            dir: "/tmp/none".into(),
+        Ok(Generated::owning(
+            std::env::temp_dir().join(format!("arkavo-tool-{:016x}", rand::random::<u64>())),
             manifest,
-        })
+        ))
     }
 }
 
@@ -59,6 +59,7 @@ fn delegate(fail: bool) -> Arc<FakeDelegate> {
 
 /// IMG-014: a host that generates nothing hands the work to a member, and
 /// the model sees names and sizes, never bytes.
+#[arkavo_test_macros::spec("IMG-014", "ASSET-002")]
 #[tokio::test]
 async fn incapable_hosts_delegate() {
     let outbox = Arc::new(Outbox::default());
@@ -84,6 +85,7 @@ async fn incapable_hosts_delegate() {
 
 /// IMG-015: with neither a local generator nor a member, nothing is
 /// generated anywhere.
+#[arkavo_test_macros::spec("IMG-015")]
 #[tokio::test]
 async fn no_capable_member_is_a_result_the_model_sees() {
     let outbox = Arc::new(Outbox::default());
@@ -93,6 +95,7 @@ async fn no_capable_member_is_a_result_the_model_sees() {
     assert_eq!(result["code"], "no_capable_member");
 }
 
+#[arkavo_test_macros::spec("IMG-007")]
 #[tokio::test]
 async fn invalid_requests_are_refused_before_starting() {
     let outbox = Arc::new(Outbox::default());
@@ -109,6 +112,7 @@ async fn invalid_requests_are_refused_before_starting() {
     assert!(matches!(err, ToolError::InvalidParams(_)));
 }
 
+#[arkavo_test_macros::spec("IMG-014")]
 #[tokio::test]
 async fn delegate_failures_reach_the_model() {
     let outbox = Arc::new(Outbox::default());
@@ -118,6 +122,7 @@ async fn delegate_failures_reach_the_model() {
     assert_eq!(result["code"], "delegation_failed");
 }
 
+#[arkavo_test_macros::spec("IMG-014")]
 #[test]
 fn the_schema_lists_every_model() {
     let schema = schema();
@@ -135,6 +140,7 @@ fn the_schema_lists_every_model() {
     assert_eq!(schema.parameters["required"], json!(["prompt"]));
 }
 
+#[arkavo_test_macros::spec("IMG-014")]
 #[test]
 fn registration_adds_generate_image() {
     let mut registry = ToolRegistry::empty();

@@ -6,9 +6,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use futures::FutureExt;
-use futures::future::{BoxFuture, Shared};
-use tokio::sync::{OnceCell, Semaphore, watch};
+use tokio::sync::{OnceCell, Semaphore};
 use tokio::time::Instant;
 
 use crate::args::{ModelPaths, sd_args, write_prompts};
@@ -17,23 +15,18 @@ use crate::descriptor::{Descriptor, ModelRow};
 use crate::error::{ImageGenError, Result};
 use crate::fetch::Fetcher;
 use crate::host::Host;
-use crate::output::{Generated, collect};
+use crate::lock::{self, HostLock};
+use crate::output::{Generated, assets_dir, collect};
 use crate::plan::{BASE_PIXELS, Offer, offers};
 use crate::progress::{Event, Progress};
 use crate::request::{ImageRequest, Job};
 use crate::run::{RunSpec, Sandbox, run};
 use crate::runtime::{Runtime, install};
 use crate::store::Store;
+use fetches::InFlight;
 
 /// Requests that may wait behind the one running (IMG-011).
 pub const MAX_QUEUE: usize = 4;
-
-type FetchResult = std::result::Result<ModelPaths, Arc<ImageGenError>>;
-
-struct InFlight {
-    result: Shared<BoxFuture<'static, FetchResult>>,
-    progress: watch::Receiver<(u64, u64)>,
-}
 
 /// Image generation on this host.
 pub struct Generator {
@@ -166,6 +159,22 @@ impl Generator {
         self.models(offer.set, far, progress).await.map(drop)
     }
 
+    /// Whether this host would take `request` now: valid, offered, within
+    /// its budget, and room in the queue. A requester that hears no can try
+    /// another member before anything has started (ASSET-002).
+    pub fn admits(&self, request: &ImageRequest) -> Result<()> {
+        let job = request.validate()?;
+        let offer = self.offer(job.entry.id).ok_or(ImageGenError::NotOffered {
+            entry: job.entry.id,
+        })?;
+        offer.check(job.pixels(), job.guided())?;
+        let depth = self.waiting.load(Ordering::SeqCst);
+        if depth >= MAX_QUEUE {
+            return Err(ImageGenError::Busy { depth });
+        }
+        Ok(())
+    }
+
     /// Generate `request` here, by `deadline`.
     pub async fn generate(
         &self,
@@ -200,12 +209,12 @@ impl Generator {
             .map_err(|_| ImageGenError::TimedOut)?
             .map_err(|_| ImageGenError::Canceled)?;
         drop(admitted);
+        // Other agents on this host take turns with this one (IMG-011).
+        let _host = HostLock::acquire(self.store.root(), lock::GENERATE, Some(deadline)).await?;
         runtime.verify().await?;
-        let dir = self
-            .store
-            .outputs_dir()
-            .join(format!("{:016x}", rand::random::<u64>()));
-        tokio::fs::create_dir_all(&dir).await?;
+        // A directory of this run's own: another agent's start or run on
+        // this host never touches it.
+        let dir = assets_dir("arkavo-image-gen-")?;
         let result =
             Box::pin(self.run_job(&job, offer.set, &runtime, &models, &dir, deadline, progress))
                 .await;
@@ -256,10 +265,7 @@ impl Generator {
         }
         let mut manifest = collect(dir, job, set, &output.seeds).await?;
         manifest.producer.clone_from(&self.producer);
-        Ok(Generated {
-            dir: dir.to_path_buf(),
-            manifest,
-        })
+        Ok(Generated::owning(dir.to_path_buf(), manifest))
     }
 
     /// Keep a moving average of seconds per step, normalized to 1 MP so
@@ -276,88 +282,10 @@ impl Generator {
         self.runtime
             .get_or_try_init(|| async {
                 let _fetching = self.fetch_lock.lock().await;
+                let _host = HostLock::acquire(self.store.root(), lock::FETCH, None).await?;
                 install(&self.store, &self.fetcher, self.runtime_pin).await
             })
             .await
-    }
-
-    /// The set's files, fetching them in a task that outlives a requester
-    /// that gives up, shared with every request waiting on the same set.
-    async fn models(
-        &self,
-        set: &'static WeightSet,
-        deadline: Instant,
-        progress: &(dyn Fn(Progress) + Send + Sync),
-    ) -> Result<ModelPaths> {
-        let key = std::ptr::from_ref(set) as usize;
-        let (result, mut watched) = self.join_fetch(key, set);
-        let mut result = std::pin::pin!(result);
-        let outcome = loop {
-            tokio::select! {
-                outcome = &mut result => break outcome,
-                changed = watched.changed() => {
-                    if changed.is_ok() {
-                        let (fetched, needed) = *watched.borrow_and_update();
-                        progress(Progress::Fetching { fetched, needed });
-                    }
-                }
-                () = tokio::time::sleep_until(deadline) => return Err(ImageGenError::TimedOut),
-            }
-        };
-        if outcome.is_err() {
-            lock(&self.fetches).remove(&key);
-        }
-        outcome.map_err(|e| ImageGenError::Download {
-            url: String::new(),
-            reason: e.to_string(),
-        })
-    }
-
-    /// The in-flight fetch of `set`, started if there is none. Kept out of
-    /// the async caller so the map's guard never spans an await.
-    fn join_fetch(
-        &self,
-        key: usize,
-        set: &'static WeightSet,
-    ) -> (
-        Shared<BoxFuture<'static, FetchResult>>,
-        watch::Receiver<(u64, u64)>,
-    ) {
-        let mut fetches = lock(&self.fetches);
-        let in_flight = fetches.entry(key).or_insert_with(|| self.spawn_fetch(set));
-        let joined = (in_flight.result.clone(), in_flight.progress.clone());
-        drop(fetches);
-        joined
-    }
-
-    fn spawn_fetch(&self, set: &'static WeightSet) -> InFlight {
-        let (tx, rx) = watch::channel((0, self.store.missing_bytes(set)));
-        let (store, fetcher, lock) = (
-            self.store.clone(),
-            self.fetcher.clone(),
-            self.fetch_lock.clone(),
-        );
-        let task = tokio::spawn(async move {
-            let _fetching = lock.lock().await;
-            store
-                .fetch_set(&fetcher, set, &|fetched, needed| {
-                    tx.send_replace((fetched, needed));
-                })
-                .await
-                .map_err(Arc::new)
-        });
-        let result = async move {
-            task.await.unwrap_or_else(|e| {
-                Err(Arc::new(ImageGenError::Download {
-                    url: String::new(),
-                    reason: format!("fetch task ended: {e}"),
-                }))
-            })
-        };
-        InFlight {
-            result: result.boxed().shared(),
-            progress: rx,
-        }
     }
 }
 
@@ -386,6 +314,8 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
+
+mod fetches;
 
 #[cfg(test)]
 mod tests;

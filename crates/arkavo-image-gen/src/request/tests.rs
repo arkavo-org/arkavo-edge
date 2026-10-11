@@ -15,6 +15,7 @@ fn field(err: &ImageGenError) -> &'static str {
 }
 
 /// IMG-019: no model means the default alias, recorded as such.
+#[arkavo_test_macros::spec("IMG-007", "IMG-019")]
 #[test]
 fn defaults_follow_the_default_entry() {
     let job = req("a grass tile").validate().unwrap();
@@ -39,6 +40,7 @@ fn the_full_model_defaults_to_2k() {
 }
 
 /// IMG-019: an unknown name lists what this host knows.
+#[arkavo_test_macros::spec("IMG-019")]
 #[test]
 fn unknown_models_list_the_catalog() {
     let err = ImageRequest {
@@ -59,6 +61,7 @@ fn unknown_models_list_the_catalog() {
     }
 }
 
+#[arkavo_test_macros::spec("IMG-007")]
 #[test]
 fn prompts_are_trimmed_and_bounded() {
     assert_eq!(req("  sword  ").validate().unwrap().prompt, "sword");
@@ -72,6 +75,7 @@ fn prompts_are_trimmed_and_bounded() {
 
 /// IMG-007: sizes are whole steps within the entry's limits; 2752x1536 is
 /// an official preset and valid for both entries.
+#[arkavo_test_macros::spec("IMG-007")]
 #[test]
 fn sizes_follow_the_entry_limits() {
     let sized = |w, h| ImageRequest {
@@ -96,6 +100,7 @@ fn sizes_follow_the_entry_limits() {
     assert_eq!((one_side.width, one_side.height), (512, 1024));
 }
 
+#[arkavo_test_macros::spec("IMG-007")]
 #[test]
 fn count_and_name_are_checked() {
     let with = |count, name: &str| ImageRequest {
@@ -114,6 +119,7 @@ fn count_and_name_are_checked() {
     );
 }
 
+#[arkavo_test_macros::spec("IMG-007")]
 #[test]
 fn seeds_are_kept_or_drawn() {
     let job = ImageRequest {
@@ -129,6 +135,7 @@ fn seeds_are_kept_or_drawn() {
 }
 
 /// IMG-007 edge: Turbo refuses a negative prompt and any guidance but 1.
+#[arkavo_test_macros::spec("IMG-007", "IMG-008")]
 #[test]
 fn turbo_refuses_guidance() {
     let neg = ImageRequest {
@@ -149,6 +156,7 @@ fn turbo_refuses_guidance() {
 }
 
 /// IMG-007: guidance above 1 and a negative prompt come together.
+#[arkavo_test_macros::spec("IMG-007")]
 #[test]
 fn full_model_guidance_needs_a_negative_prompt() {
     let full = |guidance, negative: Option<&str>| ImageRequest {
@@ -180,6 +188,7 @@ fn full_model_guidance_needs_a_negative_prompt() {
 }
 
 /// IMG-009: transparent output uses Qwen's framing.
+#[arkavo_test_macros::spec("IMG-009")]
 #[test]
 fn transparent_prompts_are_framed() {
     let job = ImageRequest {
@@ -199,6 +208,7 @@ fn transparent_prompts_are_framed() {
 }
 
 /// IMG-016 edge: editing is refused by name, not as an unknown field.
+#[arkavo_test_macros::spec("IMG-016")]
 #[test]
 fn reference_images_are_unsupported() {
     let request: ImageRequest =
@@ -210,6 +220,7 @@ fn reference_images_are_unsupported() {
     );
 }
 
+#[arkavo_test_macros::spec("IMG-007")]
 #[test]
 fn unknown_fields_are_rejected_when_parsing() {
     let parsed: std::result::Result<ImageRequest, _> =

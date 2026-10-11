@@ -129,6 +129,7 @@ impl Agent {
             self.events.clone(),
             #[cfg(feature = "iroh")]
             None,
+            None,
             &self.plans,
             request,
         )

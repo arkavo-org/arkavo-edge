@@ -42,12 +42,18 @@ pub struct AgentLoopConfig {
     pub agent_metadata: Arc<tokio::sync::RwLock<crate::server::config_helpers::AgentMetadata>>,
     #[cfg(feature = "iroh")]
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
+    /// Image generation and delivery, when the agent has a data plane.
+    pub assets: Option<Arc<super::assets::AssetService>>,
 }
 
 // --- Registry build helpers ---
 
-/// Build the full (unfiltered) tool registry from config sources.
-async fn build_full_registry(config: &AgentLoopConfig) -> arkavo_mcp_tools::ToolRegistry {
+/// Build the full (unfiltered) tool registry from config sources. The
+/// images generate_image starts go to `outbox`, for the cycle's reply.
+async fn build_full_registry(
+    config: &AgentLoopConfig,
+    outbox: &Arc<arkavo_image_gen::Outbox>,
+) -> arkavo_mcp_tools::ToolRegistry {
     use arkavo_mcp_tools::ToolRegistry;
     let mut registry = ToolRegistry::empty();
     if let Ok(mcp_tools) = config.mcp_registry.list_all_tools().await {
@@ -58,6 +64,9 @@ async fn build_full_registry(config: &AgentLoopConfig) -> arkavo_mcp_tools::Tool
         }
     }
     arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
+    if let Some(assets) = &config.assets {
+        assets.register_tools(&mut registry, outbox.clone());
+    }
     #[cfg(feature = "iroh")]
     if let Some(ref node) = config.iroh_node {
         arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut registry, node.clone());
@@ -82,11 +91,27 @@ async fn build_full_registry(config: &AgentLoopConfig) -> arkavo_mcp_tools::Tool
 /// Derive a registry filtered to the SwarmKit grant set.
 async fn derive_filtered_registry(
     config: &AgentLoopConfig,
+    outbox: &Arc<arkavo_image_gen::Outbox>,
     granted: &std::collections::HashSet<String>,
 ) -> Arc<arkavo_mcp_tools::ToolRegistry> {
-    let mut registry = build_full_registry(config).await;
+    let mut registry = build_full_registry(config, outbox).await;
     registry.retain_granted(granted);
     Arc::new(registry)
+}
+
+/// The images this cycle's generate_image calls started, taken so the next
+/// cycle starts with none.
+fn cycle_assets(
+    config: &AgentLoopConfig,
+    outbox: &arkavo_image_gen::Outbox,
+) -> super::assets::Assets {
+    let jobs = outbox.take();
+    config
+        .assets
+        .as_ref()
+        .map_or_else(super::assets::Assets::default, |service| {
+            super::assets::Assets::of(service, jobs)
+        })
 }
 
 // --- Main event loop ---
@@ -142,7 +167,10 @@ pub async fn run_agent_loop(
 
     // Build initial tool registry (unfiltered). Filtering by grant set is done
     // lazily on first cycle after specialization (design D9).
-    let full_registry = build_full_registry(&config).await;
+    // Every cycle's generate_image calls land here; the cycle's reply takes
+    // them, so a reply never carries another cycle's images (ASSET-008).
+    let outbox = Arc::new(arkavo_image_gen::Outbox::default());
+    let full_registry = build_full_registry(&config, &outbox).await;
     info!(
         "Agent loop: cached {} tools for reuse across cycles",
         full_registry.list_tools().len()
@@ -231,7 +259,8 @@ pub async fn run_agent_loop(
                     h.finish()
                 };
                 if specialized && grant_hash != active_grant_hash {
-                    active_registry = derive_filtered_registry(&config, &granted_set).await;
+                    active_registry =
+                        derive_filtered_registry(&config, &outbox, &granted_set).await;
                     active_grant_hash = grant_hash;
                     info!(
                         granted = granted_set.len(),
@@ -608,7 +637,10 @@ pub async fn run_agent_loop(
                             elapsed.as_secs_f64(),
                             result.len(),
                         );
-                        answer_waiters(cycle_waiters, &outcome_for_cycle(&Ok(cycle_answer)));
+                        answer_waiters(
+                            cycle_waiters,
+                            &outcome_for_cycle(&Ok(cycle_answer), cycle_assets(&config, &outbox)),
+                        );
                     }
                     Err(e) => {
                         // User msg already pushed (step 7), no assistant response
@@ -617,7 +649,10 @@ pub async fn run_agent_loop(
                         }
                         consecutive_timeouts += 1;
                         warn!("Agent cycle {cycle} failed: {e}");
-                        answer_waiters(cycle_waiters, &outcome_for_cycle(&Err(e)));
+                        answer_waiters(
+                            cycle_waiters,
+                            &outcome_for_cycle(&Err(e), cycle_assets(&config, &outbox)),
+                        );
                     }
                 }
                 config.inference_active.store(false, std::sync::atomic::Ordering::SeqCst);

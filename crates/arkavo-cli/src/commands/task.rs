@@ -571,15 +571,9 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
         // Poll for task completion
         println!("=== Monitoring Task Progress ===\n");
 
-        let start = std::time::Instant::now();
-        let timeout = Duration::from_mins(5);
+        let mut watch = super::poll::Watch::default();
 
         loop {
-            if start.elapsed() > timeout {
-                transport.close().await.ok();
-                return Err("Task execution timed out after 5 minutes".into());
-            }
-
             let get_request = TaskGetRequest {
                 task_id: task_id.clone(),
             };
@@ -600,18 +594,33 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
                         TaskStatus::Completed => {
                             println!("\n  ✓ Task completed successfully!\n");
 
+                            let mut saved = Ok(());
                             if let Some(result_msg) = task_response.result {
                                 println!("=== Result ===\n");
-                                for part in result_msg.parts {
+                                for part in &result_msg.parts {
                                     if let MessagePart::Text { content } = part {
                                         println!("{content}");
                                     }
                                 }
                                 println!();
+                                let deliveries = super::assets::deliveries(&result_msg.parts);
+                                if !deliveries.is_empty() {
+                                    let dir = super::assets::task_dir(
+                                        std::path::Path::new(super::assets::DEFAULT_DIR),
+                                        &task_id,
+                                    );
+                                    println!("=== Assets ({}) ===\n", dir.display());
+                                    saved = super::assets::save(
+                                        &deliveries,
+                                        &dir,
+                                        &mut std::io::stdout(),
+                                    )
+                                    .await;
+                                }
                             }
 
                             transport.close().await.ok();
-                            return Ok(());
+                            return saved;
                         }
                         TaskStatus::Failed => {
                             let error_msg = if let Some(error) = &task_response.error {
@@ -628,16 +637,20 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
                             return Err("Task was canceled".into());
                         }
                         TaskStatus::Submitted | TaskStatus::Working | TaskStatus::InputRequired => {
-                            // Show progress
-                            if let Some(progress) = &task_response.progress {
-                                if let Some(msg) = &progress.message {
-                                    println!("  → {msg}");
+                            // Polling lasts while the task reports change
+                            // (CLI-019), and each change is shown once.
+                            match watch.observe(&task_response) {
+                                Ok(Some(msg)) => println!("  → {msg}"),
+                                Ok(None) => {}
+                                Err(still_running) => {
+                                    transport.close().await.ok();
+                                    return Err(still_running.into());
                                 }
-                                if let Some(pct) = progress.percentage {
-                                    println!("  {pct}% complete");
-                                }
-                            } else {
-                                println!("  Status: {:?}", task_response.status);
+                            }
+                            if let Some(pct) =
+                                task_response.progress.as_ref().and_then(|p| p.percentage)
+                            {
+                                println!("  {pct}% complete");
                             }
 
                             // Wait before next poll

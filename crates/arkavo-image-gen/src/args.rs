@@ -124,6 +124,7 @@ mod tests {
     }
 
     /// IMG-008: Turbo gets its distilled schedule at CFG 1.
+    #[arkavo_test_macros::spec("IMG-008")]
     #[test]
     fn turbo_uses_its_sigmas() {
         let job = ImageRequest {
@@ -166,6 +167,7 @@ mod tests {
 
     /// IMG-008: the full model lets sd.cpp pick its schedule and applies
     /// guidance with the negative prompt.
+    #[arkavo_test_macros::spec("IMG-008")]
     #[test]
     fn full_model_uses_guidance_and_no_sigmas() {
         let job = ImageRequest {

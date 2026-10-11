@@ -294,47 +294,48 @@ scenarios:
   - id: CLI-018
     name: Save assets from a task result
     criticality: high
-    wip: true
-    issue: "arkavo task prints text parts only (task.rs:605-610); every other part of a result is dropped"
     given:
-      - arkavo task or arkavo chat receives a result with a urn:arkavo:asset:manifest:v1 data part
+      - arkavo chat --agent-id or arkavo task receives a result with a urn:arkavo:asset:manifest:v1 data part
     when: The result is shown
     then:
-      - "Each asset is fetched, verified and unwrapped (ASSET-007)"
-      - "Files are written to ./arkavo-assets/<task id>/<name>.png, or under --out <dir>, and an existing file is never overwritten"
+      - "The text parts are printed, then each asset is fetched over the data plane and verified (ASSET-007)"
+      - "Files are written to ./arkavo-assets/<task id>/<name>, or under the directory arkavo chat is given with --out <dir>, and an existing file is never overwritten"
+      - "A task id that is not a plain id is never used as a path; the directory gets a generated name instead"
       - "For each file the CLI prints the path, size, dimensions and whether it has alpha, then one line naming the model and its license (IMG-013)"
       - "No asset bytes or base64 are printed"
+      - "An asset that fails a check is reported and the command exits with an error, keeping the files that passed"
     refs:
-      - crates/arkavo-cli/src/commands/task.rs:605-610
-      - crates/arkavo-cli/src/commands/mesh.rs:114
+      - crates/arkavo-cli/src/commands/assets.rs
+      - crates/arkavo-cli/src/commands/chat.rs:428-453
+      - crates/arkavo-cli/src/commands/task.rs:597-623
     changed: "2026-10-11"
 
   - id: CLI-019
     name: Polling lasts while the task makes progress
     criticality: medium
-    wip: true
     given:
-      - arkavo task or arkavo chat polling a remote task with tasks/get
+      - arkavo task or arkavo chat --agent-id polling a remote task with tasks/get
     when: The task is still working after 5 minutes
     then:
-      - "Polling goes on while the reported progress changes"
+      - "Polling goes on while the reported status, progress message or percentage changes, and each new progress message is shown once"
       - "It stops after 5 minutes with no change, saying the task is still running and how to read its result with tasks/get"
     refs:
-      - crates/arkavo-cli/src/commands/task.rs:575
-      - crates/arkavo-cli/src/commands/mesh.rs:157
+      - crates/arkavo-cli/src/commands/poll.rs
+      - crates/arkavo-cli/src/commands/mesh.rs:122-214
+      - crates/arkavo-cli/src/commands/task.rs:574-660
     changed: "2026-10-11"
 
   - id: CLI-020
     name: Prefetch the image model
     criticality: low
-    wip: true
     given:
       - An operator who wants a capable member ready before the first request
     when: The operator runs arkavo model download with an image catalog id or alias (qwen-image, qwen-image-quality, qwen-image-2.1-turbo, qwen-image-2.1)
     then:
       - "On a qualifying host (IMG-001) the runtime (IMG-003) and the entry's weight set for this host (IMG-002, IMG-004) are fetched and verified, with progress"
-      - "The model download listing shows each catalog entry with the weight set and download size this host would get"
+      - "The model listing (arkavo model list, and the list shown for an unknown name) shows each catalog entry with the weight set and download size this host would get"
       - "For an entry this host does not offer, or on a host that does not qualify, nothing is fetched, and the CLI says why: the platform, or the memory budget against the 12.2 GiB the entry's smallest set needs"
     refs:
-      - crates/arkavo-cli/src/commands/model.rs:86
+      - crates/arkavo-cli/src/commands/model_image.rs
+      - crates/arkavo-cli/src/commands/model.rs:213-221
     changed: "2026-10-11"

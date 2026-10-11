@@ -10,6 +10,7 @@ use arkavo_protocol::types::{
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
 
+use super::super::assets::AssetService;
 use super::super::config_helpers::AgentMetadata;
 use super::super::well_known::published_description;
 
@@ -243,6 +244,7 @@ pub async fn handle_agent_capabilities_get(
     mcp_registry: &Arc<McpRegistry>,
     agent_metadata: &Arc<tokio::sync::RwLock<AgentMetadata>>,
     public_key: Option<&str>,
+    assets: Option<&AssetService>,
 ) -> Result<arkavo_protocol::types::AgentCapabilitiesGetResponse, ErrorObjectOwned> {
     use arkavo_protocol::types::{AgentCapabilitiesGetResponse, InteractionMode, McpToolInfo};
 
@@ -261,7 +263,7 @@ pub async fn handle_agent_capabilities_get(
     let metadata = agent_metadata.read().await;
     let agent_id = metadata.name.clone();
     let name = metadata.name.clone();
-    let capabilities = infer_capabilities_from_purpose(&name, &metadata.purpose);
+    let mut capabilities = infer_capabilities_from_purpose(&name, &metadata.purpose);
     let purpose = published_description(&metadata).unwrap_or_default();
     let model = metadata.model.clone();
     drop(metadata);
@@ -280,6 +282,15 @@ pub async fn handle_agent_capabilities_get(
         Err(_) => Vec::new(),
     };
 
+    // From the hardware check alone, never from the name or purpose: a
+    // member is asked for images only when its host can make them (ASSET-001).
+    let image_generation = assets
+        .and_then(AssetService::descriptor)
+        .and_then(|d| serde_json::to_value(d).ok());
+    if image_generation.is_some() {
+        capabilities.push(arkavo_image_gen::CAPABILITY.to_string());
+    }
+
     let response = AgentCapabilitiesGetResponse {
         agent_id,
         name,
@@ -296,6 +307,7 @@ pub async fn handle_agent_capabilities_get(
             InteractionMode::Streaming,
             InteractionMode::Asynchronous,
         ],
+        image_generation,
     };
 
     timer.success();
@@ -405,6 +417,7 @@ mod tests {
             &Arc::new(McpRegistry::new()),
             &reviewer(description),
             Some("key"),
+            None,
         )
         .await
         .expect("agent.capabilities.get answers");

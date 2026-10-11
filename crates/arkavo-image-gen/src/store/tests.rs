@@ -46,6 +46,7 @@ async fn serve(server: &MockServer, file: &PinnedFile, body: &'static [u8], time
 
 /// IMG-004/IMG-005: a set is fetched once per distinct file, with progress
 /// as bytes fetched of bytes needed.
+#[arkavo_test_macros::spec("IMG-004", "IMG-005")]
 #[tokio::test]
 async fn sets_fetch_each_distinct_file_once() {
     const D: &[u8] = b"diffusion-weights";
@@ -82,6 +83,7 @@ async fn sets_fetch_each_distinct_file_once() {
         .unwrap();
 }
 
+#[arkavo_test_macros::spec("IMG-005")]
 #[test]
 fn partial_downloads_count_what_they_lack() {
     let file = pinned("p.gguf", b"0123456789");
@@ -97,14 +99,14 @@ fn partial_downloads_count_what_they_lack() {
 
 /// IMG-020: files no pin names are deleted; pinned ones, partial downloads
 /// of pinned files and the current runtime stay.
+#[arkavo_test_macros::spec("IMG-020")]
 #[test]
 fn prune_keeps_only_what_pins_name() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::new(dir.path().to_path_buf());
     let models = store.models_dir();
     let runtime = store.runtime_dir();
-    let outputs = store.outputs_dir();
-    for d in [&models, &runtime, &outputs] {
+    for d in [&models, &runtime] {
         std::fs::create_dir_all(d).unwrap();
     }
     std::fs::write(models.join("keep.gguf"), b"k").unwrap();
@@ -119,8 +121,7 @@ fn prune_keeps_only_what_pins_name() {
     )
     .unwrap();
     std::fs::write(runtime.join("master-956-1b0ba10.zip.part"), b"z").unwrap();
-    std::fs::create_dir_all(outputs.join("stale")).unwrap();
-    std::fs::write(outputs.join("stale").join("a.png"), b"pp").unwrap();
+    std::fs::write(dir.path().join(".generate.lock"), b"").unwrap();
 
     let keep = ["keep.gguf".to_string(), "keep2.gguf".to_string()]
         .into_iter()
@@ -129,9 +130,13 @@ fn prune_keeps_only_what_pins_name() {
     pruned.names.sort();
     assert_eq!(
         pruned.names,
-        ["master-900-aaaaaaa", "old.gguf", "old.gguf.part", "stale"]
+        ["master-900-aaaaaaa", "old.gguf", "old.gguf.part"]
     );
-    assert_eq!(pruned.bytes, 5 + 3 + 7 + 2);
+    assert_eq!(pruned.bytes, 5 + 3 + 7);
+    assert!(
+        dir.path().join(".generate.lock").exists(),
+        "lock files stay"
+    );
     assert!(models.join("keep.gguf").exists());
     assert!(models.join("keep2.gguf.part").exists());
     assert!(runtime.join("master-956-1b0ba10").exists());
@@ -146,6 +151,7 @@ fn prune_keeps_only_what_pins_name() {
     assert_eq!(empty.prune(&keep, "x").unwrap(), Pruned::default());
 }
 
+#[arkavo_test_macros::spec("IMG-004")]
 #[test]
 fn default_root_is_under_the_data_dir() {
     if let Some(root) = Store::default_root() {

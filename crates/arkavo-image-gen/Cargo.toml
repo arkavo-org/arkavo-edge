@@ -13,6 +13,7 @@ categories = ["multimedia::images"]
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", default-features = false }
 arkavo-process-env = { path = "../arkavo-process-env" }
+arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 async-trait = { workspace = true }
 dirs = { workspace = true }
 futures = { workspace = true }
@@ -30,14 +31,22 @@ tracing = { workspace = true }
 # alone and flate2 is given its pure-Rust backend here.
 zip = { version = "2.4", default-features = false, features = ["deflate-flate2", "flate2"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Each process's outputs live in a temporary directory of their own.
+tempfile = { workspace = true }
+# Fixtures for other crates' tests (feature `testing`).
+wiremock = { version = "0.6", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tokio = { workspace = true, features = ["full"] }
 wiremock = "0.6"
+
+[features]
+# The sd-cli stand-in and a generator that runs it, for tests elsewhere.
+testing = ["dep:wiremock"]
 
 [lints]
 workspace = true

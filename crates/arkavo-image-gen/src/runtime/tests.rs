@@ -56,6 +56,7 @@ async fn serving(body: Vec<u8>, times: u64) -> MockServer {
 }
 
 /// IMG-003: only listed members are extracted, recorded and executable.
+#[arkavo_test_macros::spec("IMG-003")]
 #[tokio::test]
 async fn installs_listed_members_only() {
     let body = release();
@@ -92,6 +93,7 @@ async fn installs_listed_members_only() {
 }
 
 /// IMG-003: a changed file fails verification and is reinstalled.
+#[arkavo_test_macros::spec("IMG-003")]
 #[tokio::test]
 async fn tampered_installs_are_replaced() {
     let body = release();
@@ -121,6 +123,7 @@ async fn tampered_installs_are_replaced() {
     assert_eq!(std::fs::read(fresh.cli()).unwrap(), b"#!/bin/sh\n");
 }
 
+#[arkavo_test_macros::spec("IMG-003")]
 #[tokio::test]
 async fn entries_with_paths_fail_the_install() {
     let body = archive(&[
@@ -141,6 +144,7 @@ async fn entries_with_paths_fail_the_install() {
     assert!(!store.runtime_dir().join("master-956-test").exists());
 }
 
+#[arkavo_test_macros::spec("IMG-003")]
 #[tokio::test]
 async fn missing_members_fail_the_install() {
     let body = archive(&[("sd-cli", b"x"), ("ggml.txt", b"z")]);
@@ -158,6 +162,7 @@ async fn missing_members_fail_the_install() {
 
 /// IMG-003 edge: an archive with the wrong hash is deleted and nothing is
 /// extracted.
+#[arkavo_test_macros::spec("IMG-003")]
 #[tokio::test]
 async fn archive_hash_is_checked_before_extracting() {
     let body = release();

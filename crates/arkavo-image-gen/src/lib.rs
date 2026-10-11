@@ -7,12 +7,14 @@
 
 pub mod args;
 pub mod catalog;
+pub mod delivery;
 pub mod descriptor;
 pub mod error;
 pub mod fetch;
 pub mod generator;
 pub mod host;
 pub mod job;
+mod lock;
 pub mod output;
 pub mod plan;
 pub mod progress;
@@ -21,11 +23,13 @@ pub mod run;
 pub mod runtime;
 pub mod store;
 pub mod tool;
+pub mod transfer;
 
-#[cfg(test)]
-mod testing;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use catalog::{Entry, RUNTIME, SetLabel, WeightSet};
+pub use delivery::{AssetRef, AssetRequest, Delivery, verify_fetched};
 pub use descriptor::{
     ASSET_MANIFEST_SCHEMA, ASSET_REQUEST_SCHEMA, CAPABILITY, Descriptor, Need, rank,
 };
@@ -33,9 +37,10 @@ pub use error::{ImageGenError, Result};
 pub use generator::Generator;
 pub use host::{Host, Platform};
 pub use job::{AssetJob, AssetSink, Outbox};
-pub use output::{AssetEntry, Generated, Manifest};
+pub use output::{AssetEntry, Generated, Manifest, assets_dir};
 pub use plan::{Offer, offers};
 pub use progress::Progress;
 pub use request::{ImageRequest, Job};
 pub use store::Store;
 pub use tool::{Delegate, GenerateImageTool, register_tools};
+pub use transfer::{FetchPolicy, Fetched};
