@@ -1305,6 +1305,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-image-gen"
+version = "0.102.3"
+dependencies = [
+ "arkavo-mcp",
+ "arkavo-mcp-tools",
+ "arkavo-process-env",
+ "async-trait",
+ "dirs 6.0.0",
+ "flate2",
+ "futures",
+ "hex",
+ "libc",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "wiremock",
+ "zip",
+]
+
+[[package]]
 name = "arkavo-kimi"
 version = "0.102.4"
 dependencies = [

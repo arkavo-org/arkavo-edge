@@ -58,6 +58,7 @@ members = [
     "crates/arkavo-agent-auth",
     "crates/arkavo-tdf",
     "crates/arkavo-tdf-iroh",
+    "crates/arkavo-image-gen",
     "crates/arkavo-mcp-mesh",
     "crates/arkavo-config-bundle",
     "crates/arkavo-config-encryption",
