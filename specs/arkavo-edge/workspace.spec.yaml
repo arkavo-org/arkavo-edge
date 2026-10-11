@@ -47,10 +47,16 @@ scenarios:
       - repo_url provided
     when: create with repo_url
     then:
-      - Git clone executed
+      - git runs directly as `<runtime> exec <workspace_id> git clone -- <repo_url> /workspace`, never under a shell, so shell syntax in repo_url stays literal
+      - A repo_url that starts with '-', or holds whitespace or control characters, is refused with InvalidParams
+      - Only https://, ssh://, git:// and scp-style user@host:path are accepted; ext::, file://, other remote helpers and local paths are refused
+      - A user, host or port that starts with '-' is refused, so ssh never reads it as an option
+      - repo_url is checked before the runtime is probed, so a refused URL starts no container
       - Code available in workspace
-      - Ready for operations
-    refs: [crates/arkavo-mcp-workspace/src/workspace.rs:43-46]
+    refs:
+      - crates/arkavo-mcp-workspace/src/clone.rs
+      - crates/arkavo-mcp-workspace/src/workspace.rs
+    changed: "2026-10-10"
 
   - id: WORKSPACE-004
     name: Enforce resource quotas

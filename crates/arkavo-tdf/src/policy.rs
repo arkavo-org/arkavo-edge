@@ -14,12 +14,12 @@ use uuid::Uuid;
 /// let policy = PolicyBuilder::new()
 ///     .attribute("https://arkavo.net/attr/role", &["admin"])
 ///     .attribute("https://arkavo.net/attr/clearance", &["secret"])
-///     .dissemination(&["US", "CA"])
+///     .dissemination(&["did:key:z6MkRecipient"])
 ///     .build()
 ///     .unwrap();
 ///
 /// assert_eq!(policy.attributes.len(), 2);
-/// assert_eq!(policy.dissemination, vec!["US", "CA"]);
+/// assert_eq!(policy.dissemination, vec!["did:key:z6MkRecipient"]);
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct PolicyBuilder {
@@ -58,14 +58,14 @@ impl PolicyBuilder {
         self.attribute(fqn, &[value])
     }
 
-    /// Set dissemination controls (e.g., country codes).
+    /// Set the entities (agent DIDs) a KAS may release the key to.
     #[must_use]
     pub fn dissemination(mut self, controls: &[&str]) -> Self {
         self.dissemination = controls.iter().map(|s| (*s).to_string()).collect();
         self
     }
 
-    /// Add a single dissemination control.
+    /// Add one entity (agent DID) a KAS may release the key to.
     #[must_use]
     pub fn add_dissemination(mut self, control: &str) -> Self {
         self.dissemination.push(control.to_string());
