@@ -44,12 +44,21 @@ pub enum IrohError {
     /// Shutdown error
     #[error("Shutdown error: {0}")]
     Shutdown(String),
+
+    /// Staging would pass the bound on bytes staged for other parties
+    #[error("data plane full: {staged} bytes staged, {requested} more requested, limit {limit}")]
+    StoreFull {
+        staged: u64,
+        requested: u64,
+        limit: u64,
+    },
 }
 
 impl From<IrohError> for arkavo_tdf::TransportError {
     fn from(err: IrohError) -> Self {
         match err {
             IrohError::StoreAdd(msg) => arkavo_tdf::TransportError::Stage(msg),
+            IrohError::StoreFull { .. } => arkavo_tdf::TransportError::Stage(err.to_string()),
             IrohError::Download(msg) | IrohError::StoreExport(msg) => {
                 arkavo_tdf::TransportError::Fetch(msg)
             }

@@ -11,6 +11,7 @@ use tracing::{debug, info, instrument};
 
 use crate::error::IrohError;
 use crate::node::IrohNode;
+use crate::retention::sweep;
 use crate::ticket::IrohTicket;
 
 /// Iroh-based blob transport implementing the `BlobTransport` trait.
@@ -71,6 +72,33 @@ impl IrohTransport {
         Ok(IrohTicket::new(ticket))
     }
 
+    /// Stage data for another party, fetchable for `retention` and then
+    /// released to the garbage collector (IROH-009). Fails rather than evict
+    /// a blob still in its window when the staged bytes would pass the
+    /// node's bound (IROH-010).
+    #[instrument(skip(self, data), fields(data_len = data.len()))]
+    pub async fn stage_retained(
+        &self,
+        data: &[u8],
+        retention: std::time::Duration,
+    ) -> Result<IrohTicket, IrohError> {
+        let store = self.node.store().await?;
+        let endpoint = self.node.endpoint().await?;
+        let retained = self.node.retention();
+        sweep(&store, retained).await;
+        let tag = retained.reserve(data.len() as u64, retention)?;
+        let staged = match store.blobs().add_slice(data).with_named_tag(&tag).await {
+            Ok(staged) => staged,
+            Err(e) => {
+                retained.release(&tag);
+                return Err(IrohError::StoreAdd(e.to_string()));
+            }
+        };
+        let ticket = BlobTicket::new(endpoint.addr(), staged.hash, staged.format);
+        info!(%tag, ?retention, "retained blob staged");
+        Ok(IrohTicket::new(ticket))
+    }
+
     /// Fetch data using an IrohTicket (typed wrapper).
     #[instrument(skip(self))]
     pub async fn fetch_bytes(&self, ticket: &IrohTicket) -> Result<Vec<u8>, IrohError> {
@@ -95,6 +123,21 @@ impl IrohTransport {
         {
             debug!(error = %e, "Direct connect to provider failed; falling back to downloader resolution");
         }
+
+        // A fetched blob has no tag of its own, so a temp tag keeps the
+        // collector off it until it has been read.
+        let batch = store
+            .blobs()
+            .batch()
+            .await
+            .map_err(|e| IrohError::Download(e.to_string()))?;
+        let _protected = batch
+            .temp_tag(iroh_blobs::HashAndFormat {
+                hash: blob_ticket.hash(),
+                format: blob_ticket.format(),
+            })
+            .await
+            .map_err(|e| IrohError::Download(e.to_string()))?;
 
         // Create downloader and download blob
         let downloader = store.downloader(&endpoint);

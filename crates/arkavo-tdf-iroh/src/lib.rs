@@ -36,6 +36,7 @@
 
 mod error;
 mod node;
+mod retention;
 mod ticket;
 mod transport;
 
