@@ -429,14 +429,14 @@ async fn agent_transport(
 /// nothing of it when the exchange fails. Progress goes to standard error as
 /// it arrives. Assets the answer references are saved under `assets_dir`
 /// (CLI-018).
-async fn direct_exchange<W: Write>(
+async fn direct_exchange<W: Write + Send>(
     transport: &arkavo_protocol::http::HttpTransport,
     text: &str,
     assets_dir: &std::path::Path,
     out: &mut W,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let answer = super::mesh::send_and_poll_agent(transport, text, &mut |p| {
-        emit_stderr(&format!("  → {p}\n"))
+        emit_stderr(&format!("  → {p}\n"));
     })
     .await?;
     let reply = answer.text();

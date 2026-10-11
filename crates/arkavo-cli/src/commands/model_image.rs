@@ -69,7 +69,8 @@ pub fn listing(host: &Host, budget: u64, store: Option<&Store>) -> String {
                 smallest_need(entry) as f64 / GIB
             ),
             (None, Some(offer)) => {
-                let remaining = store.map_or(offer.set.bytes(), |s| s.missing_bytes(offer.set));
+                let remaining =
+                    store.map_or_else(|| offer.set.bytes(), |s| s.missing_bytes(offer.set));
                 let label = format!("{:?}", offer.set.label).to_uppercase();
                 format!("{label} set, {:.1} GB to download", remaining as f64 / 1e9)
             }

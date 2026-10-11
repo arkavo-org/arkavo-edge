@@ -64,7 +64,7 @@ The `arkavo` binary starts the agent's Iroh node by default (the `data-plane` fe
 
 ## Verifying on Apple Silicon
 
-Run these on the M6 Mac mini from a checkout of this branch. Each closes one of the open items above.
+Run these on the M6 Mac mini from a checkout of this branch. Each closes one of the open items above. `docs/swarm-image-assets-handover.md` has the setup, acceptance criteria and a prompt for continuing there.
 
 Generate with the real weights, Metal and the sandbox profile (about 12 GB on the first run: the test uses the small set):
 

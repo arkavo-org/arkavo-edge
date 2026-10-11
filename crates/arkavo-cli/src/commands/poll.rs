@@ -1,6 +1,8 @@
-//! How long a remote task is polled: as long as what it reports keeps
-//! changing (CLI-019). Generating images can take far longer than an answer
-//! in text, and a fixed timeout gave up on work that was still moving.
+//! How long a remote task is polled (CLI-019).
+//!
+//! Polling lasts as long as what the task reports keeps changing.
+//! Generating images can take far longer than an answer in text, and a
+//! fixed timeout gave up on work that was still moving.
 
 use std::time::{Duration, Instant};
 

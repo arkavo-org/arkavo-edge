@@ -128,7 +128,7 @@ impl Answer {
 pub async fn send_and_poll_agent(
     transport: &arkavo_protocol::http::HttpTransport,
     text: &str,
-    on_progress: &mut dyn FnMut(&str),
+    on_progress: &mut (dyn FnMut(&str) + Send),
 ) -> Result<Answer, Box<dyn std::error::Error>> {
     use arkavo_protocol::{
         transport::{A2aRequest, A2aResponse, A2aTransport},

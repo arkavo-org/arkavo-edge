@@ -50,10 +50,11 @@ pub fn task_dir(out: &Path, task_id: &str) -> PathBuf {
     }
 }
 
-/// Fetch, verify and save every asset of `deliveries` under `dir`, writing
-/// one line per file and the license of each set to `w`. Assets that fail a
-/// check are reported and the rest are kept; the result is an error when
-/// any failed.
+/// Fetch, verify and save every asset of `deliveries` under `dir`.
+///
+/// One line per file and the license of each set go to `w`. Assets that
+/// fail a check are reported and the rest are kept; the result is an error
+/// when any failed.
 pub async fn save<W: Write>(
     deliveries: &[Delivery],
     dir: &Path,

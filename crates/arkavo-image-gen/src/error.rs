@@ -123,7 +123,7 @@ impl ImageGenError {
             Self::DataPlane(_) => "data_plane_unavailable",
             Self::Unreachable { .. } => "asset_unreachable",
             Self::Stalled { .. } => "step_stalled",
-            Self::Shared { code, .. } => *code,
+            Self::Shared { code, .. } => code,
         }
     }
 
