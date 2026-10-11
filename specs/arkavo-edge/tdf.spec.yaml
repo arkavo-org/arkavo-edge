@@ -125,11 +125,12 @@ scenarios:
     then:
       - The delegation chain verifies to a trusted root and its leaf subject is the caller
       - The policy binding verifies against the unwrapped DEK (TDFS-006)
+      - A non-empty dissemination list names the caller exactly, or the request is refused with AccessDenied whatever entitlements it holds
       - ABAC permits the caller's delegated entitlements against the policy, or the request is refused with AccessDenied
       - The DEK is rewrapped for the client's EC key (ECDH, HKDF-SHA256, AES-256-GCM), and the client recovers the same DEK
       - KasRewrapResponse returned
-    refs: [crates/arkavo-tdf/src/a2a_handler.rs]
-    changed: "2026-10-09"
+    refs: [crates/arkavo-tdf/src/a2a_handler.rs, crates/arkavo-tdf/src/abac.rs]
+    changed: "2026-10-10"
 
   - id: TDF-009
     name: OpenTDF integration for standard compliance
