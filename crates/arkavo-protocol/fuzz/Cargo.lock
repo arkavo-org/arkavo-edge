@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-arp"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-llm",
  "async-trait",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-critic"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-evofabric",
  "arkavo-llm",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-crypto"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "base64",
  "bs58",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -313,7 +313,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "chrono",
  "serde",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-evofabric"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "bytes",
  "dashmap",
@@ -378,7 +378,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-process-env",
  "git2",
@@ -388,7 +388,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gossip"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-hrm"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-budget",
  "arkavo-events",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "anyhow",
  "arkavo-deepseek",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -487,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-code-search"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -508,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-workspace"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -590,11 +590,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-process-env"
-version = "0.102.1"
+version = "0.102.2"
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-swarmkit"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-budget",
  "arkavo-process-env",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "async-trait",
  "base64",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf-iroh"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-tdf",
  "async-trait",
@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test-macros"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-torg-circuits"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "parking_lot",
  "torg-core",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-validation"
-version = "0.102.1"
+version = "0.102.2"
 dependencies = [
  "arkavo-arp",
  "ipnet",

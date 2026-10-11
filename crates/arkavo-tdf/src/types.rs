@@ -227,7 +227,8 @@ pub struct Policy {
     /// Required attributes for access
     pub attributes: Vec<Attribute>,
 
-    /// Dissemination controls (e.g., country codes)
+    /// Entities (agent DIDs) a KAS may release the key to; empty leaves the
+    /// decision to the attributes
     pub dissemination: Vec<String>,
 }
 

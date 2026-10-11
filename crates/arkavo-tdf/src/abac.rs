@@ -46,22 +46,32 @@ impl AbacEvaluator {
         Self
     }
 
-    /// Evaluate whether the given entitlements satisfy the policy.
+    /// Evaluate whether `subject`, holding `entitlements`, satisfies the policy.
     ///
-    /// Returns `Permit` if all policy attributes are satisfied by the entitlements,
-    /// otherwise returns `Deny`.
+    /// Returns `Permit` only if the dissemination list admits the subject and
+    /// every policy attribute is satisfied by the entitlements, otherwise
+    /// returns `Deny`.
     ///
     /// Matching rules:
+    /// - A non-empty dissemination list must name the subject exactly; an empty
+    ///   one leaves the decision to the attributes
     /// - Each policy attribute must have at least one matching entitlement
     /// - Entitlement matches if it grants one of the required values for the attribute
     /// - Entitlement FQN format: `{authority}/attr/{name}/value/{value}`
     /// - Policy attribute FQN format: `{authority}/attr/{name}` with required values list
     pub fn evaluate(
         &self,
+        subject: &str,
         entitlements: &[String],
         policy: &Policy,
     ) -> Result<Decision, AbacError> {
-        // Empty policy means no restrictions
+        // Writers put the recipient's DID here so only that recipient can
+        // rewrap; entitlements a delegator can hand to anyone cannot stand in.
+        if !policy.dissemination.is_empty() && !policy.dissemination.iter().any(|d| d == subject) {
+            return Ok(Decision::Deny);
+        }
+
+        // No attributes means no attribute restrictions
         if policy.attributes.is_empty() {
             return Ok(Decision::Permit);
         }
@@ -120,6 +130,8 @@ mod tests {
     use crate::types::Attribute;
     use arkavo_test_macros::spec;
 
+    const SUBJECT: &str = "did:key:z6MkSubject";
+
     #[spec("TDFS-008")]
     #[test]
     fn test_permit_with_matching_entitlements() {
@@ -139,7 +151,7 @@ mod tests {
             "https://arkavo.net/attr/clearance/value/secret".to_string(),
         ];
 
-        let result = evaluator.evaluate(&entitlements, &policy).unwrap();
+        let result = evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Permit);
     }
 
@@ -159,7 +171,7 @@ mod tests {
             "https://arkavo.net/attr/role/value/user".to_string(), // Has user, not admin
         ];
 
-        let result = evaluator.evaluate(&entitlements, &policy).unwrap();
+        let result = evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Deny);
     }
 
@@ -172,7 +184,7 @@ mod tests {
 
         let entitlements = vec!["https://arkavo.net/attr/role/value/user".to_string()];
 
-        let result = evaluator.evaluate(&entitlements, &policy).unwrap();
+        let result = evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Permit);
     }
 
@@ -189,7 +201,7 @@ mod tests {
 
         let entitlements: Vec<String> = vec![];
 
-        let result = evaluator.evaluate(&entitlements, &policy).unwrap();
+        let result = evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Deny);
     }
 
@@ -216,7 +228,7 @@ mod tests {
             "https://arkavo.net/attr/clearance/value/confidential".to_string(),
         ];
 
-        let result = evaluator.evaluate(&entitlements, &policy).unwrap();
+        let result = evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Deny);
 
         // Has both admin role and secret clearance
@@ -225,7 +237,7 @@ mod tests {
             "https://arkavo.net/attr/clearance/value/secret".to_string(),
         ];
 
-        let result = evaluator.evaluate(&entitlements, &policy).unwrap();
+        let result = evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Permit);
     }
 
@@ -265,7 +277,7 @@ mod tests {
         // Has "security" which is one of the allowed values
         let entitlements = vec!["https://arkavo.net/attr/department/value/security".to_string()];
 
-        let result = evaluator.evaluate(&entitlements, &policy).unwrap();
+        let result = evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap();
         assert_eq!(result, Decision::Permit);
     }
 
@@ -287,13 +299,13 @@ mod tests {
             "https://arkavo.net/attr/clearance/value/secret".to_string(),
         ];
         assert_eq!(
-            evaluator.evaluate(&entitlements, &policy).unwrap(),
+            evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap(),
             Decision::Permit
         );
 
         let entitlements = vec!["https://arkavo.net/attr/role/value/admin".to_string()];
         assert_eq!(
-            evaluator.evaluate(&entitlements, &policy).unwrap(),
+            evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap(),
             Decision::Deny
         );
 
@@ -302,8 +314,66 @@ mod tests {
             "https://arkavo.net/attr/clearance/value/secret".to_string(),
         ];
         assert_eq!(
-            evaluator.evaluate(&entitlements, &policy).unwrap(),
+            evaluator.evaluate(SUBJECT, &entitlements, &policy).unwrap(),
             Decision::Deny
+        );
+    }
+
+    fn sealed_for(recipients: &[&str]) -> Policy {
+        Policy {
+            id: None,
+            attributes: vec![Attribute::new("https://arkavo.net/attr/role", &["admin"])],
+            dissemination: recipients.iter().map(|d| (*d).to_string()).collect(),
+        }
+    }
+
+    #[spec("TDF-008")]
+    #[test]
+    fn dissemination_admits_a_named_subject() {
+        let entitlements = vec!["https://arkavo.net/attr/role/value/admin".to_string()];
+        let policy = sealed_for(&["did:key:z6MkOther", SUBJECT]);
+
+        let decision = AbacEvaluator::new()
+            .evaluate(SUBJECT, &entitlements, &policy)
+            .unwrap();
+
+        assert_eq!(decision, Decision::Permit);
+    }
+
+    #[spec("TDF-008")]
+    #[test]
+    fn dissemination_refuses_an_unnamed_subject_that_holds_the_attributes() {
+        // Regression: the list was ignored, so a policy sealed for one agent
+        // released its key to any caller holding the attribute.
+        let entitlements = vec!["https://arkavo.net/attr/role/value/admin".to_string()];
+        let policy = sealed_for(&["did:key:z6MkRecipient"]);
+
+        let decision = AbacEvaluator::new()
+            .evaluate(SUBJECT, &entitlements, &policy)
+            .unwrap();
+
+        assert_eq!(decision, Decision::Deny);
+    }
+
+    #[spec("TDF-008")]
+    #[test]
+    fn dissemination_alone_restricts_a_policy_without_attributes() {
+        let policy = Policy {
+            id: None,
+            attributes: vec![],
+            dissemination: vec!["did:key:z6MkRecipient".to_string()],
+        };
+        let evaluator = AbacEvaluator::new();
+
+        assert_eq!(
+            evaluator.evaluate(SUBJECT, &[], &policy).unwrap(),
+            Decision::Deny
+        );
+        assert_eq!(
+            evaluator
+                .evaluate("did:key:z6MkRecipient", &[], &policy)
+                .unwrap(),
+            Decision::Permit
         );
     }
 }

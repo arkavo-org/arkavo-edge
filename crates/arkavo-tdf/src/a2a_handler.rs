@@ -260,7 +260,8 @@ impl KasA2aHandler {
     /// 3. Decode and parse the TDF policy
     /// 4. Verify the policy binding against the unwrapped DEK, so the policy
     ///    the decision uses is the one the data was sealed with
-    /// 5. Evaluate ABAC policy against entitlements
+    /// 5. Evaluate the policy's dissemination list against the caller and its
+    ///    attributes against the entitlements
     /// 6. Rewrap the key for the client's public key
     // 1.98 files the same shape under a second name for functions in impl blocks.
     #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
@@ -286,10 +287,10 @@ impl KasA2aHandler {
         let dek = keypair.unwrap_dek(&request.wrapped_key)?;
         policy_binding::verify(&request.policy_binding, &request.policy, dek.as_ref())?;
 
-        // 4. Evaluate ABAC policy
+        // 4. Evaluate ABAC policy for the subject the delegation verified
         let decision = self
             .abac
-            .evaluate(&entitlements, &policy)
+            .evaluate(caller_did, &entitlements, &policy)
             .map_err(|e| KasError::Abac(e.to_string()))?;
 
         if decision != Decision::Permit {
@@ -662,6 +663,63 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(KasError::AccessDenied)), "{result:?}");
+    }
+
+    fn policy_sealed_for(recipient: &str) -> String {
+        encode_policy(&Policy {
+            id: Some("sealed-for-recipient".to_string()),
+            attributes: vec![Attribute::new(ROLE, &["admin"])],
+            dissemination: vec![recipient.to_string()],
+        })
+    }
+
+    #[spec("TDF-008")]
+    #[tokio::test]
+    async fn rewrap_refuses_a_delegate_the_dissemination_list_does_not_name() {
+        // Regression: the list was ignored, so a bundle sealed for one agent
+        // released its DEK to any delegate holding the attribute.
+        let f = fixture(&[ADMIN]);
+        let (wrapped_key, dek) = seal(&f.kas_public);
+        let other_agent = arkavo_crypto::AgentKeypair::generate()
+            .public_key()
+            .to_did_key();
+        let policy = policy_sealed_for(&other_agent);
+        let binding = spec_binding(&dek, &policy);
+        let client = KasEcKeypair::generate();
+
+        let result = f
+            .handler
+            .handle_rewrap(
+                rewrap_request(&f, wrapped_key, policy, binding, &client),
+                &f.caller_did,
+            )
+            .await;
+
+        assert!(matches!(result, Err(KasError::AccessDenied)), "{result:?}");
+    }
+
+    #[spec("TDF-008")]
+    #[tokio::test]
+    async fn rewrap_releases_the_dek_to_the_named_recipient() {
+        let f = fixture(&[ADMIN]);
+        let (wrapped_key, dek) = seal(&f.kas_public);
+        let policy = policy_sealed_for(&f.caller_did);
+        let binding = spec_binding(&dek, &policy);
+        let client = KasEcKeypair::generate();
+
+        let response = f
+            .handler
+            .handle_rewrap(
+                rewrap_request(&f, wrapped_key, policy, binding, &client),
+                &f.caller_did,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            open(&response.entity_wrapped_key, &client, &f.kas_public),
+            dek
+        );
     }
 
     #[spec("TDFS-011")]

