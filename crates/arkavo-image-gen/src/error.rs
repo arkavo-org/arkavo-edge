@@ -78,17 +78,6 @@ pub enum ImageGenError {
     #[error("delegated generation failed: {0}")]
     Delegation(String),
 
-    #[error("the data plane cannot take the assets: {0}")]
-    DataPlaneFull(String),
-
-    #[error("the data plane is not available: {0}")]
-    DataPlane(String),
-
-    #[error(
-        "{name} could not be fetched from its producer ({reason}); it is unreachable or the reference is past its hour"
-    )]
-    Unreachable { name: String, reason: String },
-
     #[error("member {member} reported no progress for {minutes} minutes")]
     Stalled { member: String, minutes: u64 },
 
@@ -119,9 +108,6 @@ impl ImageGenError {
             Self::RuntimeInstall(_) => "runtime_install_failed",
             Self::Runtime { .. } | Self::Output(_) | Self::Io(_) => "generation_failed",
             Self::Delegation(_) => "delegation_failed",
-            Self::DataPlaneFull(_) => "data_plane_full",
-            Self::DataPlane(_) => "data_plane_unavailable",
-            Self::Unreachable { .. } => "asset_unreachable",
             Self::Stalled { .. } => "step_stalled",
             Self::Shared { code, .. } => code,
         }

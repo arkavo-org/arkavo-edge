@@ -9,8 +9,10 @@ version: 0.103.0
 # the assets reach the person.
 #
 # The control plane is A2A JSON-RPC: message/send, tasks/get, progress and
-# gossip. The data plane is Iroh blobs served by the agent's long-lived
-# node. The control plane carries requests and references, and bytes take
+# gossip. The data plane is the agent's existing long-lived Iroh node
+# (tdf-iroh.spec.yaml), which knows nothing about images: it stages bytes
+# and hands out references (IROH-011). Assets are one of its payloads. The
+# control plane carries requests, manifests and references, and bytes take
 # the data plane (PROTO-020, IROH-008).
 #
 # Each hop stages assets for the party it hands them to. An agent that
@@ -29,7 +31,7 @@ version: 0.103.0
 # that asked.
 
 invariants:
-  - "Asset bytes never cross the control plane: messages, task results, progress and gossip carry references (ticket, content hash, media type) and the manifest, and the bytes move over Iroh"
+  - "Asset bytes never cross the control plane: messages, task results, progress and gossip carry the manifest and data-plane references (IROH-011), and the bytes move over Iroh"
   - "Tickets for staged assets appear only in the task result written for the party that asked for them"
   - "Tickets are issued only by the agent's long-lived data-plane node"
   - "Image work goes only to members that report image_generation over the member channel; announcements carry no capability"
@@ -145,8 +147,8 @@ scenarios:
       - Verified assets (IMG-010) held for a reply
     when: They are staged
     then:
-      - "Each file is read and checked against its manifest entry again, then staged with IrohTransport::stage_retained on the node the A2A server starts for the agent's lifetime"
-      - "Its reference holds the asset name, the ticket, the BLAKE3 content hash the ticket names, and media type image/png; the manifest entry of the same name holds its size, SHA-256, width, height, has_alpha, tileable and seed"
+      - "Each file is read and checked against its manifest entry again, then staged as a data-plane reference (IROH-011) on the node the A2A server starts for the agent's lifetime"
+      - "Its reference holds the asset name, the ticket, the BLAKE3 content hash, the size and media type image/png; the manifest entry of the same name holds its size, SHA-256, width, height, has_alpha, tileable and seed"
       - "References stay fetchable for 1 hour, the TDF offer TTL, and their blobs are then dropped (IROH-009)"
       - "The message carrying the references stays within the 64 KiB inline bound (PROTO-020); a delivery that would not fit is refused"
       - "Generated files stay on disk until every reply that could deliver them has staged them or given up, and are then deleted"
@@ -159,8 +161,8 @@ scenarios:
         expected: It is not staged
     refs:
       - crates/arkavo-server/src/server/a2a_server.rs:1233-1252
-      - crates/arkavo-tdf-iroh/src/transport.rs:80
-      - crates/arkavo-image-gen/src/transfer.rs
+      - crates/arkavo-tdf-iroh/src/reference.rs
+      - crates/arkavo-server/src/server/assets/delivery.rs
     changed: "2026-10-11"
 
   - id: ASSET-006
@@ -170,7 +172,7 @@ scenarios:
       - Agent A, asked by requester H, delegated to capable member B (ASSET-002)
     when: B's references reach A
     then:
-      - "A fetches each asset over Iroh into a directory of its own and checks it against B's manifest: the ticket's content hash against the reference, then size, SHA-256 and PNG dimensions"
+      - "A fetches each asset by its reference (IROH-011) into a directory of its own, then checks it against B's manifest: size, SHA-256 and PNG dimensions"
       - "A stages the asset on its own node (ASSET-005) for H"
       - "A's references to H carry B's manifest, which names B's did:key as producer, and B's tickets are not passed on"
       - "No asset byte appears in any message between H, A and B"
@@ -190,8 +192,8 @@ scenarios:
       - A task result with a urn:arkavo:asset:manifest:v1 data part
     when: The requester takes delivery
     then:
-      - "Each reference must name a manifest entry, media type image/png, and a ticket whose content hash is the reference's"
-      - "Each ticket is fetched over Iroh, which checks the content hash; the size, SHA-256, PNG signature, width and height are then checked against the manifest entry"
+      - "Each reference must name a manifest entry, with media type image/png and the entry's size"
+      - "Each is fetched by its reference (IROH-011), which refuses a different blob or size before downloading; the SHA-256, PNG signature, width and height are then checked against the manifest entry"
       - "A file that fails a check is not written and is reported, and the others are kept"
       - "A name that could leave the destination directory is refused, and an existing file is never overwritten"
     edge_cases:
@@ -200,7 +202,7 @@ scenarios:
       - condition: Producer unreachable
         expected: Retried 3 times with backoff, then reported as asset_unreachable
     refs:
-      - crates/arkavo-image-gen/src/transfer.rs
+      - crates/arkavo-server/src/server/assets/delivery.rs
       - crates/arkavo-image-gen/src/delivery.rs
     changed: "2026-10-11"
 

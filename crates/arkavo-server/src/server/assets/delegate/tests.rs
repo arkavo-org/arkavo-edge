@@ -23,8 +23,8 @@ use serde_json::json;
 use tokio::time::Instant;
 
 use super::super::serve::{accept_request, request_in};
-use super::super::tests::{QUICK, deliveries, executor, open_task, take_delivery, transport};
-use super::super::{AssetService, Assets, Identity};
+use super::super::tests::{QUICK, executor, open_task, take_delivery, transport};
+use super::super::{AssetService, Assets, Identity, deliveries_in};
 use super::MeshDelegate;
 
 const QUIET_TASK: &str = "0d6f1a8e-3b7c-4e0f-9a51-6c2d8b7e4f10";
@@ -201,7 +201,7 @@ async fn work_goes_to_a_capable_member_and_comes_back_restaged() {
         .parts(&executor, &task_id)
         .await;
 
-    let delivered = deliveries(&parts);
+    let delivered = deliveries_in(&parts);
     assert_eq!(delivered.len(), 1, "{parts:?}");
     let delivery = &delivered[0];
     assert_eq!(

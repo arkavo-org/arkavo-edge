@@ -58,10 +58,7 @@ knowledge-pack = ["dep:arkavo-fingerprint", "dep:arkavo-knowledge-pack", "arkavo
 sentinel = ["dep:arkavo-sentinel", "dep:arkavo-llama-cpp", "dep:sha2", "dep:zeroize", "knowledge-pack", "arkavo-critic/sentinel", "arkavo-router/sentinel"]
 fingerprint = ["knowledge-pack"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
-# The agent's long-lived Iroh node: assets and other large payloads move
-# over it, never over the control plane (PROTO-020).
-data-plane = ["arkavo-server/iroh"]
-iroh = ["data-plane", "arkavo-server/swarm-apply"]
+iroh = ["arkavo-server/iroh", "arkavo-server/swarm-apply"]
 kas = ["arkavo-protocol/kas", "arkavo-server/kas"]
 # Taint-aware egress enforcement (SEQ-003, SEQ-014, SEQ-015). Off until the
 # sequence-integrity work reaches GA; the security suite builds a binary with it.
@@ -87,9 +84,9 @@ arkavo-permit = { path = "../arkavo-permit" }
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-session = { path = "../arkavo-session" }
 arkavo-server = { path = "../arkavo-server" }
-# Asset delivery: manifests, verification and fetching over the data plane,
-# and `arkavo model download` for the image catalog.
+# `arkavo model download` for the image catalog.
 arkavo-image-gen = { path = "../arkavo-image-gen" }
+# A data-plane node for taking delivery of what an agent's answer references.
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["persistence"] }

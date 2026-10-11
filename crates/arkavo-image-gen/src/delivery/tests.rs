@@ -94,31 +94,3 @@ fn names_that_could_escape_are_refused() {
         assert!(safe_name(bad).is_err(), "{bad}");
     }
 }
-
-#[arkavo_test_macros::spec("ASSET-005")]
-#[test]
-fn deliveries_round_trip_and_find_entries() {
-    let bytes = png(8, 8, false);
-    let manifest: Manifest = serde_json::from_value(serde_json::json!({
-        "model": {"id": "m", "repo": "r", "revision": "v", "diffusion": "d", "text_encoder": "t"},
-        "license": "l", "license_url": "u", "runtime": "rt", "prompt": "p",
-        "assets": [entry(&bytes, 8, 8)]
-    }))
-    .unwrap();
-    let delivery = Delivery {
-        manifest,
-        references: vec![AssetRef {
-            name: "coin_000.png".into(),
-            ticket: "blobticket".into(),
-            content_hash: "h".into(),
-            media_type: PNG.into(),
-        }],
-    };
-    let json = serde_json::to_value(&delivery).unwrap();
-    assert_eq!(json["model"]["id"], "m");
-    assert_eq!(json["references"][0]["ticket"], "blobticket");
-    assert!(!json.to_string().contains("base64"));
-    let back: Delivery = serde_json::from_value(json).unwrap();
-    assert_eq!(back, delivery);
-    assert_eq!(back.entry(&back.references[0]).unwrap().width, 8);
-}

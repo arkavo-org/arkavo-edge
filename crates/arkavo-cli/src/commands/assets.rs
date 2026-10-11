@@ -1,38 +1,18 @@
 //! Taking delivery of the assets an agent's answer references (CLI-018).
 //!
-//! The answer carries references only. Each asset is fetched from the agent
-//! that staged it over the data plane, checked against its manifest, and
+//! The answer carries references only. Each asset is fetched over the data
+//! plane from the agent that staged it, checked against its manifest, and
 //! written beside the others for the task; a file already there is kept.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use arkavo_image_gen::transfer::{FetchPolicy, fetch};
-use arkavo_image_gen::{ASSET_MANIFEST_SCHEMA, Delivery};
-use arkavo_protocol::types::MessagePart;
-use arkavo_tdf_iroh::{IrohNode, IrohTransport};
+use arkavo_server::server::assets::{Delivery, take};
+
+use arkavo_tdf_iroh::{FetchPolicy, IrohNode, IrohTransport};
 
 /// Where assets go when no directory is named.
 pub const DEFAULT_DIR: &str = "arkavo-assets";
-
-/// Every asset manifest in an answer, in order.
-pub fn deliveries(parts: &[MessagePart]) -> Vec<Delivery> {
-    parts
-        .iter()
-        .filter_map(|part| match part {
-            MessagePart::Data { schema, content } if schema == ASSET_MANIFEST_SCHEMA => {
-                match serde_json::from_value(content.clone()) {
-                    Ok(delivery) => Some(delivery),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "unreadable asset manifest");
-                        None
-                    }
-                }
-            }
-            _ => None,
-        })
-        .collect()
-}
 
 /// The directory a task's assets are written to. The task id comes from the
 /// remote agent, so anything but a plain id is replaced rather than used as
@@ -70,7 +50,7 @@ pub async fn save<W: Write>(
     let transport = IrohTransport::new(node);
     let mut failed = 0;
     for delivery in deliveries {
-        let fetched = fetch(&transport, delivery, dir, FetchPolicy::default()).await;
+        let fetched = take(&transport, delivery, dir, FetchPolicy::default()).await;
         for (entry, path) in &fetched.saved {
             let alpha = if entry.has_alpha { "alpha" } else { "no alpha" };
             writeln!(
@@ -103,7 +83,8 @@ mod tests {
 
     use super::*;
     use arkavo_image_gen::testing::generated;
-    use arkavo_image_gen::transfer::stage;
+    use arkavo_protocol::types::MessagePart;
+    use arkavo_server::server::assets::{deliveries_in, stage};
     use arkavo_test_macros::spec;
 
     /// CLI-018: each asset is fetched, verified and saved under the task's
@@ -119,16 +100,15 @@ mod tests {
             MessagePart::Text {
                 content: "Here is your coin.".into(),
             },
-            MessagePart::Data {
-                schema: ASSET_MANIFEST_SCHEMA.to_string(),
-                content: serde_json::to_value(&delivery).unwrap(),
-            },
+            delivery.part().unwrap(),
         ];
         let out = tempfile::tempdir().unwrap();
         let dir = task_dir(out.path(), "7f1f4a2e-6f0e-4c3b-9d67-2f6c1f0a9b11");
         let mut printed = Vec::new();
 
-        save(&deliveries(&parts), &dir, &mut printed).await.unwrap();
+        save(&deliveries_in(&parts), &dir, &mut printed)
+            .await
+            .unwrap();
 
         let printed = String::from_utf8(printed).unwrap();
         let saved = dir.join("coin_000.png");
@@ -145,7 +125,11 @@ mod tests {
 
         // A second delivery to the same place keeps the file that is there.
         let mut again = Vec::new();
-        assert!(save(&deliveries(&parts), &dir, &mut again).await.is_err());
+        assert!(
+            save(&deliveries_in(&parts), &dir, &mut again)
+                .await
+                .is_err()
+        );
         assert!(
             String::from_utf8(again)
                 .unwrap()

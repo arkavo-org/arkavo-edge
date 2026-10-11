@@ -54,7 +54,7 @@ arkavo model list                          # shows the set and download size thi
 
 The runtime is a pinned stable-diffusion.cpp release, downloaded and verified by SHA-256 like the weights. Files live under `~/Library/Application Support/arkavo/image-gen`, and files no pin of the running release names are deleted at agent start.
 
-The `arkavo` binary starts the agent's Iroh node by default (the `data-plane` feature). Without it an agent neither generates nor asks members, since nothing could be delivered.
+Delivery uses the agent's existing Iroh data-plane node, the one released `arkavo` binaries already start (the `iroh` feature). The data plane carries plain references (name, ticket, content hash, size, media type) and knows nothing about images; the asset layer pairs those references with the manifest. An agent built without the node neither generates nor asks members, since nothing could be delivered.
 
 ## What is not done yet
 

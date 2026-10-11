@@ -16,7 +16,7 @@ use jsonrpsee::types::ErrorObjectOwned;
 use tokio::time::Instant;
 use tracing::{info, warn};
 
-use super::{AssetService, wait_on_task};
+use super::{AssetService, DeliveryError, wait_on_task};
 
 /// JSON-RPC error for a request this host refuses before opening a task,
 /// so the requester can ask another member (ASSET-002).
@@ -182,7 +182,7 @@ impl AssetService {
         request: &AssetRequest,
         executor: &TaskExecutor,
         task_id: &uuid::Uuid,
-    ) -> Result<Vec<MessagePart>, ImageGenError> {
+    ) -> Result<Vec<MessagePart>, DeliveryError> {
         let generator = self.generator.clone().ok_or_else(unavailable)?;
         let until = Instant::now() + Duration::from_secs(request.deadline_secs).min(JOB_DEADLINE);
         let mut summary = Vec::new();

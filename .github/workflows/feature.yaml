@@ -285,6 +285,8 @@ jobs:
             cargo test --locked -p arkavo-mcp-tools
             cargo test --locked -p arkavo-mcp-mesh
             cargo test --locked -p arkavo-image-gen
+            # The data plane's retention and references (IROH-009 to IROH-011).
+            cargo test --locked -p arkavo-tdf-iroh --test retention_test --test reference_test
             cargo test --locked -p arkavo-mcp-code-search --lib
             cargo test --locked -p arkavo-browser --lib
           elif [ "${{ matrix.group }}" = "routing" ]; then

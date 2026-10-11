@@ -6,9 +6,10 @@ This picks up the swarm image work on the 32 GB M6 Mac mini. The code is on bran
 
 Working and tested on Linux:
 
-- `arkavo-image-gen`: catalog, host check and memory budget, pinned runtime install, weight fetch with resume and SHA-256, the sd-cli runner, output checks, manifest, the `generate_image` tool, and staging and fetching over Iroh. 96 unit tests run against an sd-cli stand-in and a mock Hub.
+- `arkavo-image-gen`: catalog, host check and memory budget, pinned runtime install, weight fetch with resume and SHA-256, the sd-cli runner, output checks, manifest, and the `generate_image` tool. It has no data-plane dependency. 89 unit tests run against an sd-cli stand-in and a mock Hub.
+- `arkavo-tdf-iroh`, the existing data plane: generic references (`DataRef`, `stage_ref`, `fetch_ref`) with a one-hour retention window and a staging bound. A fetch checks the hash and the provider's verified size before downloading, and retries a provider that has gone.
 - A real run of the pinned stable-diffusion.cpp release, Linux CPU build, with the real Qwen-Image-2.1-Turbo weights (S set). It produced a 256×256 transparent sprite in 311 to 460 s.
-- `arkavo-server`: the capability report, asset requests answered without the model, delegation to members, and replies that carry a manifest after the text. 11 asset tests run over real Iroh loopback nodes, including a full delegate, member, re-stage and requester round trip.
+- `arkavo-server`: the capability report, asset requests answered without the model, delegation to members, and replies that carry a manifest after the text. 16 asset tests run over real Iroh loopback nodes, including a full delegate, member, re-stage and requester round trip.
 - `arkavo-mcp-mesh`: data parts kept in answers, and members' reports read through `agent.capabilities.get`.
 - CLI: assets saved from `arkavo chat --agent-id` and `arkavo task`, polling that follows progress, and `arkavo model download qwen-image`.
 - Workspace build and clippy, and the security checklist: `security_vulnerabilities`, `mock_provider`, `e2e_security_test.sh`, `security_cli_test.sh` and `dlp_pii_security_test.sh`.
@@ -100,7 +101,6 @@ These stay open after the M6 work, each with its own spec scenario:
 - **`tdf_stage` on the long-lived node (MCP-017).** It still uses a per-call node.
 - **Refusing large inline File parts (PROTO-020).** This waits on vision images moving to the data plane.
 - **`agent_query` matching on announced capabilities.** Removing the TXT keys is INGRESS-007.
-- **Bounded fetches.** A fetch reads the whole blob before its size is checked, so a hostile member could send an oversized one. This needs a size-limited fetch in `arkavo-tdf-iroh`.
 
 ## Conventions for the follow-up
 

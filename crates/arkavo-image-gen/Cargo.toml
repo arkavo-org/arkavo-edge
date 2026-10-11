@@ -13,7 +13,6 @@ categories = ["multimedia::images"]
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", default-features = false }
 arkavo-process-env = { path = "../arkavo-process-env" }
-arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 async-trait = { workspace = true }
 dirs = { workspace = true }
 futures = { workspace = true }

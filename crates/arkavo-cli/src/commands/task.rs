@@ -603,7 +603,8 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
                                     }
                                 }
                                 println!();
-                                let deliveries = super::assets::deliveries(&result_msg.parts);
+                                let deliveries =
+                                    arkavo_server::server::assets::deliveries_in(&result_msg.parts);
                                 if !deliveries.is_empty() {
                                     let dir = super::assets::task_dir(
                                         std::path::Path::new(super::assets::DEFAULT_DIR),

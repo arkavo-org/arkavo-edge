@@ -52,6 +52,16 @@ pub enum IrohError {
         requested: u64,
         limit: u64,
     },
+
+    /// The provider offered something other than what the reference names
+    #[error("{name}: refused, {reason}")]
+    RefMismatch { name: String, reason: String },
+
+    /// The provider of a reference did not deliver after every attempt
+    #[error(
+        "{name} could not be fetched from its provider ({reason}); it is unreachable or the reference has expired"
+    )]
+    Unreachable { name: String, reason: String },
 }
 
 impl From<IrohError> for arkavo_tdf::TransportError {
@@ -61,6 +71,9 @@ impl From<IrohError> for arkavo_tdf::TransportError {
             IrohError::StoreFull { .. } => arkavo_tdf::TransportError::Stage(err.to_string()),
             IrohError::Download(msg) | IrohError::StoreExport(msg) => {
                 arkavo_tdf::TransportError::Fetch(msg)
+            }
+            IrohError::RefMismatch { .. } | IrohError::Unreachable { .. } => {
+                arkavo_tdf::TransportError::Fetch(err.to_string())
             }
             IrohError::InvalidTicket(msg) => arkavo_tdf::TransportError::InvalidTicket(msg),
             IrohError::NodeNotRunning | IrohError::EndpointInit(_) | IrohError::Router(_) => {

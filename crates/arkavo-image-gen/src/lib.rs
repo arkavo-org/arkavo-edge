@@ -23,13 +23,12 @@ pub mod run;
 pub mod runtime;
 pub mod store;
 pub mod tool;
-pub mod transfer;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
 pub use catalog::{Entry, RUNTIME, SetLabel, WeightSet};
-pub use delivery::{AssetRef, AssetRequest, Delivery, verify_fetched};
+pub use delivery::{AssetRequest, PNG, safe_name, verify_fetched};
 pub use descriptor::{
     ASSET_MANIFEST_SCHEMA, ASSET_REQUEST_SCHEMA, CAPABILITY, Descriptor, Need, rank,
 };
@@ -43,4 +42,3 @@ pub use progress::Progress;
 pub use request::{ImageRequest, Job};
 pub use store::Store;
 pub use tool::{Delegate, GenerateImageTool, register_tools};
-pub use transfer::{FetchPolicy, Fetched};

@@ -388,6 +388,7 @@ components:
       - Raw bytes only, no encryption
       - Tickets self-contained
       - Embedded node lifecycle managed
+      - A reference fetches exactly what it names, or nothing
 
   - name: image-gen
     file: image-gen.spec.yaml

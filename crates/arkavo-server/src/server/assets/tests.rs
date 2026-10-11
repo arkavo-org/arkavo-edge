@@ -3,17 +3,14 @@
 use std::sync::Arc;
 
 use arkavo_image_gen::testing::generated;
-use arkavo_image_gen::transfer::{FetchPolicy, fetch};
-use arkavo_image_gen::{
-    ASSET_MANIFEST_SCHEMA, AssetJob, Delivery, ImageGenError, ImageRequest, Progress,
-};
+use arkavo_image_gen::{AssetJob, ImageGenError, ImageRequest, Progress};
 use arkavo_protocol::types::{Message, MessagePart, TaskStatus};
 use arkavo_tasks::task_executor::{TaskExecutor, TaskExecutorConfig};
 use arkavo_tasks::task_store::{SqliteTaskStore, TaskStore};
-use arkavo_tdf_iroh::{IrohNode, IrohNodeConfig, IrohTransport};
+use arkavo_tdf_iroh::{FetchPolicy, IrohNode, IrohNodeConfig, IrohTransport};
 use arkavo_test_macros::spec;
 
-use super::{AssetService, Assets};
+use super::{AssetService, Assets, Delivery, deliveries_in, take};
 
 pub(super) const QUICK: FetchPolicy = FetchPolicy {
     attempt_timeout: std::time::Duration::from_secs(5),
@@ -51,25 +48,12 @@ pub(super) async fn open_task(executor: &TaskExecutor) -> uuid::Uuid {
         .expect("submit")
 }
 
-/// Every manifest data part of a message.
-pub(super) fn deliveries(parts: &[MessagePart]) -> Vec<Delivery> {
-    parts
-        .iter()
-        .filter_map(|part| match part {
-            MessagePart::Data { schema, content } if schema == ASSET_MANIFEST_SCHEMA => {
-                Some(serde_json::from_value(content.clone()).expect("a delivery"))
-            }
-            _ => None,
-        })
-        .collect()
-}
-
 /// Fetch every asset of `delivery` as the requester would, failing the test
 /// on any asset that does not verify.
 pub(super) async fn take_delivery(delivery: &Delivery) -> Vec<Vec<u8>> {
     let requester = transport().await;
     let dir = tempfile::tempdir().unwrap();
-    let fetched = fetch(&requester, delivery, dir.path(), QUICK).await;
+    let fetched = take(&requester, delivery, dir.path(), QUICK).await;
     assert!(fetched.failed.is_empty(), "{:?}", fetched.failed);
     let bytes = fetched
         .saved
@@ -123,7 +107,7 @@ async fn replies_list_references_after_their_text() {
         .and_then(|p| p.message)
         .expect("progress was reported");
     assert!(progress.contains("step 4 of 8"), "{progress}");
-    let delivered = deliveries(&parts);
+    let delivered = deliveries_in(&parts);
     assert_eq!(delivered.len(), 1);
     assert_eq!(delivered[0].references.len(), 2);
     let serialized = serde_json::to_string(&parts).unwrap();
@@ -149,7 +133,7 @@ async fn a_failed_generation_is_reported_in_text() {
         .parts(&executor, &task_id)
         .await;
 
-    assert!(deliveries(&parts).is_empty());
+    assert!(deliveries_in(&parts).is_empty());
     let MessagePart::Text { content } = &parts[0] else {
         panic!("{parts:?}");
     };

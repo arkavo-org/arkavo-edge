@@ -7,7 +7,8 @@ use arkavo_protocol::types::{Message, MessagePart, TaskStatus};
 use arkavo_tasks::task_store::TaskStore;
 use arkavo_test_macros::spec;
 
-use super::super::tests::{deliveries, executor, take_delivery, transport};
+use super::super::deliveries_in;
+use super::super::tests::{executor, take_delivery, transport};
 use super::{AssetService, accept_request, request_in};
 
 fn coin(count: u32) -> ImageRequest {
@@ -142,7 +143,7 @@ async fn a_capable_host_answers_with_references() {
         "{content}"
     );
     assert!(content.contains("Qwen Research License"), "{content}");
-    let delivered = deliveries(&result.parts);
+    let delivered = deliveries_in(&result.parts);
     assert_eq!(delivered[0].manifest.assets.len(), 2);
     assert_eq!(
         delivered[0].manifest.producer.as_deref(),

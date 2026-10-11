@@ -443,7 +443,7 @@ async fn direct_exchange<W: Write + Send>(
     if !reply.is_empty() {
         writeln!(out, "{reply}")?;
     }
-    let deliveries = super::assets::deliveries(&answer.parts);
+    let deliveries = arkavo_server::server::assets::deliveries_in(&answer.parts);
     if !deliveries.is_empty() {
         let dir = super::assets::task_dir(assets_dir, &answer.task_id);
         writeln!(out, "Assets saved to {}:", dir.display())?;

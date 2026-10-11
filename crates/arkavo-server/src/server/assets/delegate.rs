@@ -11,19 +11,18 @@ use std::time::Duration;
 
 use arkavo_image_gen::catalog;
 use arkavo_image_gen::tool::Delegate;
-use arkavo_image_gen::transfer::{FetchPolicy, fetch};
 use arkavo_image_gen::{
-    ASSET_MANIFEST_SCHEMA, ASSET_REQUEST_SCHEMA, AssetRequest, Delivery, Descriptor, Generated,
-    ImageGenError, ImageRequest, Need, Progress, assets_dir, rank,
+    ASSET_REQUEST_SCHEMA, AssetRequest, Descriptor, Generated, ImageGenError, ImageRequest, Need,
+    Progress, assets_dir, rank,
 };
 use arkavo_mcp_mesh::{Member, MeshToolsState, Patience, Peer};
 use arkavo_protocol::types::{Message, MessagePart, TaskGetResponse, TaskStatus};
-use arkavo_tdf_iroh::IrohTransport;
+use arkavo_tdf_iroh::{FetchPolicy, IrohTransport};
 use async_trait::async_trait;
 use tokio::time::Instant;
 use tracing::info;
 
-use super::Identity;
+use super::{Identity, deliveries_in, take};
 
 /// A member whose progress does not change for this long is stalled.
 const STALL: Duration = Duration::from_mins(5);
@@ -185,24 +184,15 @@ impl MeshDelegate {
 
     /// Fetch and check the assets a finished task references.
     async fn take_delivery(&self, member: &str, task: TaskGetResponse) -> Result<Generated> {
-        let delivery: Delivery = task
-            .result
-            .iter()
-            .flat_map(|m| m.parts.iter())
-            .find_map(|part| match part {
-                MessagePart::Data { schema, content } if schema == ASSET_MANIFEST_SCHEMA => {
-                    serde_json::from_value(content.clone()).ok()
-                }
-                _ => None,
-            })
-            .ok_or_else(|| {
-                ImageGenError::Delegation(format!("{member} finished without an asset manifest"))
-            })?;
+        let parts = task.result.map(|m| m.parts).unwrap_or_default();
+        let delivery = deliveries_in(&parts).into_iter().next().ok_or_else(|| {
+            ImageGenError::Delegation(format!("{member} finished without an asset manifest"))
+        })?;
         // Fetched files are untrusted until checked, so they get a directory
         // of their own, owned from here and removed on every early return.
         let dir = assets_dir("arkavo-received-")?;
         let mut generated = Generated::owning(dir.clone(), delivery.manifest.clone());
-        let fetched = fetch(&self.transport, &delivery, &dir, self.fetch_policy).await;
+        let fetched = take(&self.transport, &delivery, &dir, self.fetch_policy).await;
         if let Some((name, e)) = fetched.failed.first() {
             return Err(ImageGenError::Delegation(format!("{member}: {name}: {e}")));
         }

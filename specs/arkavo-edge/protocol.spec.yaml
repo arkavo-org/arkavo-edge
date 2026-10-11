@@ -322,7 +322,7 @@ scenarios:
     when: A message or a result would carry file data
     then:
       - "A File part with is_uri false holds at most 64 KiB once decoded"
-      - "Larger data is staged on the agent's data-plane node and carried as a reference: ticket, content hash, size and media type (IROH-009)"
+      - "Larger data is staged on the agent's data-plane node and carried as a reference: name, ticket, content hash, size and media type (IROH-009, IROH-011)"
       - "A message/send with a larger inline File part is refused with an error that names the data plane"
       - "A result the agent writes never carries more than 64 KiB inline"
     edge_cases:

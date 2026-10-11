@@ -9,11 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arkavo_image_gen::tool::{Delegate, JOB_DEADLINE};
-use arkavo_image_gen::transfer::stage;
-use arkavo_image_gen::{
-    ASSET_MANIFEST_SCHEMA, AssetJob, AssetSink, Delivery, Descriptor, Generated, Generator,
-    ImageGenError,
-};
+use arkavo_image_gen::{AssetJob, AssetSink, Descriptor, Generated, Generator, ImageGenError};
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_protocol::types::{MessagePart, TaskProgress};
 use arkavo_tasks::task_executor::TaskExecutor;
@@ -22,8 +18,10 @@ use tokio::time::Instant;
 use tracing::{info, warn};
 
 mod delegate;
+mod delivery;
 mod serve;
 
+pub use delivery::{Delivery, DeliveryError, Fetched, deliveries_in, stage, take};
 pub(crate) use serve::{accept_request, request_in};
 
 /// How often a waiting reply copies a job's progress onto its task.
@@ -113,15 +111,10 @@ impl AssetService {
         }
     }
 
-    /// Stage `generated` and describe it as a manifest data part.
-    async fn manifest_part(&self, generated: &Generated) -> Result<MessagePart, ImageGenError> {
-        let delivery: Delivery = stage(&self.transport, generated).await?;
-        let content = serde_json::to_value(&delivery)
-            .map_err(|e| ImageGenError::Output(format!("manifest: {e}")))?;
-        Ok(MessagePart::Data {
-            schema: ASSET_MANIFEST_SCHEMA.to_string(),
-            content,
-        })
+    /// Stage `generated` on the data plane and describe it as a manifest
+    /// data part.
+    async fn manifest_part(&self, generated: &Generated) -> Result<MessagePart, DeliveryError> {
+        stage(&self.transport, generated).await?.part()
     }
 }
 
@@ -159,7 +152,7 @@ impl Assets {
         for job in jobs {
             let staged = match wait_on_task(job, until, executor, task_id, "").await {
                 Ok(generated) => service.manifest_part(&generated).await,
-                Err(e) => Err(e),
+                Err(e) => Err(e.into()),
             };
             match staged {
                 Ok(part) => parts.push(part),
