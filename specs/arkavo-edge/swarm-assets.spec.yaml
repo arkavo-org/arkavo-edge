@@ -39,7 +39,8 @@ scenarios:
       - An agent on a host that qualifies (IMG-001)
     when: A peer reads its capabilities with agent.capabilities.get or its agent card
     then:
-      - "capabilities include image_generation with a descriptor: model, weight set, chip, unified memory in GiB, state (ready, or needs_download with the bytes remaining) and queue depth"
+      - "capabilities include image_generation with a descriptor: chip, unified memory in GiB, runtime build, queue depth, and one row per catalog entry the host offers (IMG-002)"
+      - "Each row holds the entry id and the aliases that resolve to it here, the weight set, state (ready, or needs_download with the bytes remaining), the largest pixel count the host can render with guidance 1 and above 1 (IMG-018), and the seconds per step at 1 MP measured on this host, null until its first run"
       - "The agent card lists an image_generation skill whose output mode is image/png"
       - "The mDNS TXT record does not change; image_generation is never added to its capabilities key, which INGRESS-007 removes"
       - "The capability comes from the hardware check, never from the agent's name or purpose"
@@ -63,7 +64,8 @@ scenarios:
     when: It chooses where the work runs
     then:
       - "It reads the capabilities of the members discovery found (MESH-010) and keeps those that report image_generation"
-      - "It prefers state ready, then the larger weight set, then the shorter queue"
+      - "It keeps members whose descriptor offers the entry the request names, as an id or an alias the member resolves, with a largest pixel count at least the request's for its guidance"
+      - "Among them it prefers state ready, then the larger weight set, then the shorter estimated time (steps times seconds per step times megapixels, for the images queued and requested), then the shorter queue"
       - "It sends that member one message/send whose data part has schema urn:arkavo:asset:request:v1: the items to generate, each with the IMG-007 fields, the deadline, and its own did:key and TDF key statement digest as the party to seal to"
       - "A member that refuses before accepting (busy) is passed over for the next candidate; once a member accepts, its failure is the task's failure"
       - "When no member reports the capability, the work fails with no_capable_member (IMG-015)"
@@ -72,6 +74,12 @@ scenarios:
         expected: It generates here and sends nothing
       - condition: More than 16 images in one request
         expected: Refused before any member is asked
+      - condition: The request names an id that only members on a newer arkavo release offer
+        expected: Only those members are candidates; with none, the request fails with no_capable_member naming the id
+      - condition: The request names the alias qwen-image and members on different releases resolve it to different entries
+        expected: "Accepted; the manifest records the entry used (IMG-019). A requester that needs one exact version names its id"
+      - condition: A 2048x2048 request for the full model that no member's budget fits with the requested guidance
+        expected: Fails with too_large_for_host naming the largest size any member offers
     refs:
       - crates/arkavo-mcp-mesh/src/lib.rs:333
       - crates/arkavo-protocol/src/agent_registry.rs:187
@@ -202,7 +210,7 @@ scenarios:
     when: The member is fetching weights or generating
     then:
       - "The wait lasts until the request's deadline, not a fixed per-call timeout"
-      - "The member's progress is copied onto the agent's own task, so the requester sees it"
+      - "The member's progress, down to step s of S (IMG-005), is copied onto the agent's own task, so the requester sees it"
       - "A member whose progress does not change for 5 minutes is treated as stalled, and the task fails with step_stalled"
     refs:
       - crates/arkavo-mcp-mesh/src/request.rs:129

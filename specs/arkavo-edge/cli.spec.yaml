@@ -330,10 +330,11 @@ scenarios:
     wip: true
     given:
       - An operator who wants a capable member ready before the first request
-    when: The operator runs arkavo model download qwen-image
+    when: The operator runs arkavo model download with an image catalog id or alias (qwen-image, qwen-image-quality, qwen-image-2.1-turbo, qwen-image-2.1)
     then:
-      - "On a qualifying host (IMG-001) the runtime (IMG-003) and the host's weight set (IMG-002, IMG-004) are fetched and verified, with progress"
-      - "On a host that does not qualify nothing is fetched, and the CLI says why: the platform, or the memory budget against the 12.2 GiB the small set needs"
+      - "On a qualifying host (IMG-001) the runtime (IMG-003) and the entry's weight set for this host (IMG-002, IMG-004) are fetched and verified, with progress"
+      - "The model download listing shows each catalog entry with the weight set and download size this host would get"
+      - "For an entry this host does not offer, or on a host that does not qualify, nothing is fetched, and the CLI says why: the platform, or the memory budget against the 12.2 GiB the entry's smallest set needs"
     refs:
       - crates/arkavo-cli/src/commands/model.rs:86
     changed: "2026-10-11"

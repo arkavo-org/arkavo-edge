@@ -393,12 +393,13 @@ components:
   - name: image-gen
     file: image-gen.spec.yaml
     module: arkavo_image_gen
-    description: Local Qwen-Image-2.1-Turbo generation on Apple Silicon through a pinned stable-diffusion.cpp runtime
+    description: Local Qwen-Image-2.1 and 2.1-Turbo generation on Apple Silicon from a pinned model catalog through a pinned stable-diffusion.cpp runtime
     criticality: critical
-    scenario_count: 15
+    scenario_count: 20
     invariants:
       - Local generation only; no cloud fallback
       - Runtime and weights pinned by revision, size and SHA-256
+      - Models and versions are catalog entries, added by reviewed change
       - Runtime isolated and given local paths only
       - Images leave as files with a manifest, never as bytes to the model or the control plane
 
