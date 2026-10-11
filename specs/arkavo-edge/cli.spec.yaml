@@ -2,7 +2,7 @@
 
 feature: Arkavo Edge CLI Interface
 module: arkavo_cli
-version: 0.57.2
+version: 0.58.0
 
 invariants:
   - Tracing subscriber initialized once on first run
@@ -290,3 +290,50 @@ scenarios:
       - Returns to shell
     refs: [crates/arkavo-cli/src/commands/chat.rs:311-320]
     changed: "2025-02-05"
+
+  - id: CLI-018
+    name: Save assets from a task result
+    criticality: high
+    wip: true
+    issue: "arkavo task prints text parts only (task.rs:605-610); every other part of a result is dropped"
+    given:
+      - arkavo task or arkavo chat receives a result with a urn:arkavo:asset:manifest:v1 data part
+    when: The result is shown
+    then:
+      - "Each asset is fetched, verified and unwrapped (ASSET-007)"
+      - "Files are written to ./arkavo-assets/<task id>/<name>.png, or under --out <dir>, and an existing file is never overwritten"
+      - "For each file the CLI prints the path, size, dimensions and whether it has alpha, then one line naming the model and its license (IMG-013)"
+      - "No asset bytes or base64 are printed"
+    refs:
+      - crates/arkavo-cli/src/commands/task.rs:605-610
+      - crates/arkavo-cli/src/commands/mesh.rs:114
+    changed: "2026-10-11"
+
+  - id: CLI-019
+    name: Polling lasts while the task makes progress
+    criticality: medium
+    wip: true
+    given:
+      - arkavo task or arkavo chat polling a remote task with tasks/get
+    when: The task is still working after 5 minutes
+    then:
+      - "Polling goes on while the reported progress changes"
+      - "It stops after 5 minutes with no change, saying the task is still running and how to read its result with tasks/get"
+    refs:
+      - crates/arkavo-cli/src/commands/task.rs:575
+      - crates/arkavo-cli/src/commands/mesh.rs:157
+    changed: "2026-10-11"
+
+  - id: CLI-020
+    name: Prefetch the image model
+    criticality: low
+    wip: true
+    given:
+      - An operator who wants a capable member ready before the first request
+    when: The operator runs arkavo model download qwen-image
+    then:
+      - "On a qualifying host (IMG-001) the runtime (IMG-003) and the host's weight set (IMG-002, IMG-004) are fetched and verified, with progress"
+      - "On a host that does not qualify nothing is fetched, and the CLI says why: the platform, or the memory budget against the 12.2 GiB the small set needs"
+    refs:
+      - crates/arkavo-cli/src/commands/model.rs:86
+    changed: "2026-10-11"

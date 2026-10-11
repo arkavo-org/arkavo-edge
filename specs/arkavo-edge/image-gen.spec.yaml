@@ -1,0 +1,300 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Local Image Generation
+module: arkavo_image_gen
+version: 0.102.3
+
+# Every scenario is wip: the crate does not exist at 2d11f5c. The model,
+# runtime and file facts were checked on 2026-10-11 and are pinned here, so
+# moving to a later release is a reviewed spec change.
+#
+# Model: Qwen-Image-2.1-Turbo (Qwen/Qwen-Image-2.1-Turbo at d65dbc9a,
+# 2026-10-09), the newest Qwen image model: a 7B single-stream DiT with a
+# Qwen3-VL-8B text encoder and its own VAE, distilled to 8 steps at CFG 1.
+# It is licensed under the Qwen Research License, not Apache-2.0.
+#
+# Runtime: stable-diffusion.cpp, which added Qwen-Image-2.1 on 2026-09-20
+# and runs it on ggml's Metal backend. llama.cpp has no image generation;
+# its examples/diffusion is for diffusion language models. sd.cpp runs as a
+# pinned subprocess rather than linked like llama.cpp: its library is
+# 39.7 MB on Linux and 82.5 MB as the macOS universal dylib, past the 65 MB
+# cap on the arkavo binary, and it needs a newer ggml than the vendored
+# llama.cpp b10615, so two ggml copies would collide at link time.
+#
+# Delivery of what this crate produces is swarm-assets.spec.yaml.
+
+invariants:
+  - "Generation runs on this host: no code path sends a prompt or an image to a remote inference service, and a host that cannot generate never falls back to one, whatever the cloud policy"
+  - "Every file fetched for generation, runtime and weights alike, is pinned by URL at a fixed revision, byte size and SHA-256; a file that does not match is deleted and never executed or loaded"
+  - "The runtime is a separate process that receives local file paths only: no URL, no credential and no inherited environment"
+  - "A generated image leaves the generator as a file on disk described by a manifest; its bytes are never returned to the model or written into a control-plane message"
+  - "At most one generation runs on a host at a time"
+  - "Every asset manifest names the model, its license and the runtime that produced it"
+
+scenarios:
+  - id: IMG-001
+    name: Host qualifies by platform and memory budget
+    criticality: high
+    wip: true
+    given:
+      - An agent starting on a host
+    when: The agent assesses whether it can generate images
+    then:
+      - "The host qualifies only as macOS on Apple Silicon running a native aarch64 arkavo binary, where the runtime uses Metal"
+      - "The chip name comes from sysctl machdep.cpu.brand_string (for example Apple M6) and unified memory from hw.memsize"
+      - "The memory budget is unified memory, minus the size of the chat model the agent keeps resident (ModelChoice::size_bytes), minus 4 GiB for the OS"
+      - "The host qualifies when the budget holds the small weight set of IMG-002"
+      - "A host that does not qualify registers no generator, reports no image capability and downloads nothing"
+    edge_cases:
+      - condition: M6 with 32 GiB and Gemma 4 12B resident (7.2 GB)
+        expected: "Budget 21.3 GiB; qualifies with the large set"
+      - condition: 24 GiB with Gemma 4 12B resident
+        expected: "Budget 13.3 GiB; qualifies with the small set"
+      - condition: 16 GiB, whichever Gemma 4 model is resident
+        expected: "Budget at most 9.2 GiB, under the 12.2 GiB the small set needs; does not qualify"
+      - condition: An x86_64 arkavo binary under Rosetta on Apple Silicon (sysctl.proc_translated is 1)
+        expected: Does not qualify
+      - condition: Intel Mac, Linux or Windows host
+        expected: Does not qualify in this revision; no GPU backend is specified for them
+    refs:
+      - crates/arkavo-cli/src/hardware.rs:7
+      - crates/arkavo-cli/src/hardware.rs:52
+      - crates/arkavo-router/src/decision.rs:536
+    changed: "2026-10-11"
+
+  - id: IMG-002
+    name: Weight set sized to the memory budget
+    criticality: high
+    wip: true
+    given:
+      - A qualifying host and its memory budget (IMG-001)
+    when: The generator chooses its weights
+    then:
+      - "It takes the largest set whose weights plus a 3 GiB working set fit the budget"
+      - "Large, needing 18.8 GiB: diffusion Q8_0, text encoder Q8_0 and VAE bf16, 16,976,583,928 bytes"
+      - "Medium, needing 15.4 GiB: diffusion Q8_0, text encoder Q4_K_M and VAE bf16, 13,294,849,272 bytes"
+      - "Small, needing 12.2 GiB: diffusion AD-Q4_K, text encoder Q4_K_M and VAE bf16, 9,904,989,432 bytes"
+      - "The choice holds for the life of the agent and is reported with the capability, so a requester can tell members apart"
+    edge_cases:
+      - condition: The 3 GiB working set
+        expected: "An allowance for 1024x1024 output with flash attention and a short prompt's prefix cache (sd.cpp puts a 4096-token f16 prefix at 2 GiB); it is measured on an M-series host before this scenario leaves wip"
+      - condition: Files of a larger set are on disk already
+        expected: Not used; the set follows the budget, not the cache
+    changed: "2026-10-11"
+
+  - id: IMG-003
+    name: Pinned stable-diffusion.cpp runtime with Metal
+    criticality: critical
+    wip: true
+    given:
+      - A qualifying host without the runtime installed
+    when: The runtime is installed
+    then:
+      - "The archive is https://github.com/leejet/stable-diffusion.cpp/releases/download/master-956-1b0ba10/sd-master-1b0ba10-bin-Darwin-macOS-26.6.2-arm64.zip, 35,158,090 bytes, SHA-256 72c18ca1ba4177ca77cd288a9cb1e0f78d63ad3bde4b91fd7c84f3f4187b5761"
+      - "Only sd-cli, libstable-diffusion.dylib and the two license texts (ggml.txt, stable-diffusion.cpp.txt) are extracted, into a directory named for the release; any other entry, or a name with a path separator, fails the install"
+      - "Both binaries are universal Mach-O with ggml's Metal backend and its kernels compiled in, so no Metal library is fetched or looked up at run time"
+      - "The release (2026-10-10) is after c150a6b (2026-10-06), which fixed the custom sigma lists Turbo sampling needs (IMG-008)"
+      - "The sizes and SHA-256 of the extracted files are recorded at install and checked before each start; a mismatch reinstalls from the pinned archive"
+    edge_cases:
+      - condition: Archive size or hash differs
+        expected: The archive is deleted, nothing is extracted, and generation fails naming the expected and actual hash
+    changed: "2026-10-11"
+
+  - id: IMG-004
+    name: Pinned weights fetched by revision and verified
+    criticality: critical
+    wip: true
+    given:
+      - The weight set chosen by IMG-002
+    when: A file of the set is missing or incomplete
+    then:
+      - "Diffusion, AtomicChat/Qwen-Image-2.1-Turbo-GGUF at bb25d06bc74119c12207243d68917951e6d9c232: Qwen-Image-2.1-Turbo-Q8_0.gguf, 7,591,554,784 bytes, SHA-256 99f498fb7188be7eac9eb5f345a9e074d30eef3ca235b419e92563e5b48073c4; Qwen-Image-2.1-Turbo-AD-Q4_K.gguf, 4,201,694,944 bytes, SHA-256 4bb73c53cbe284bbd6d69b9fdc59539c531f0389dd2aa567663d777f8130bc59"
+      - "Text encoder, Qwen/Qwen3-VL-8B-Instruct-GGUF at f982a07559d4a2f6c8744d840bf6fccab30eea96: Qwen3VL-8B-Instruct-Q8_0.gguf, 8,709,519,456 bytes, SHA-256 0d264b3941185d00a74f75c4245521dae088ff1efc90ab8d1754e83f5844adb0; Qwen3VL-8B-Instruct-Q4_K_M.gguf, 5,027,784,800 bytes, SHA-256 67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2"
+      - "VAE, Comfy-Org/Qwen-Image-2.1 at df94239739eef7205973a145ffa6f441f7b64e84: vae/qwen_image_2.1_vae_bf16.safetensors, 675,509,688 bytes, SHA-256 bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+      - "Each file comes from https://huggingface.co/<repo>/resolve/<revision>/<path>, never from a branch name"
+      - "Files live under the arkavo data directory (on macOS ~/Library/Application Support/arkavo/image-gen)"
+      - "A partial download resumes with an HTTP Range request, and the finished file is hashed before it is renamed into place"
+      - "No Hugging Face token is sent; every pinned repository is public"
+    edge_cases:
+      - condition: Free disk below the bytes still to fetch plus 10 percent
+        expected: Refused before any byte is fetched, naming the space needed
+      - condition: A finished file with the wrong hash
+        expected: Deleted, and the request fails; no other revision is tried
+      - condition: Provenance of the diffusion file
+        expected: "A third-party quantization: AtomicChat built it for stable-diffusion.cpp from Qwen's BF16 weights, and Qwen publishes no GGUF of Turbo. Comfy-Org's qwen_image_2.1_turbo_int8_convrot.safetensors (7,256,787,829 bytes, SHA-256 8144a0182964aa8403ad6dbc011db837304167d235161b9aabaa8532e967314c) is the alternative if a Comfy-Org repackaging is preferred"
+    changed: "2026-10-11"
+
+  - id: IMG-005
+    name: Weights fetched on first use, with progress
+    criticality: medium
+    wip: true
+    given:
+      - A qualifying host whose weight set is not fully on disk
+    when: The first generation request arrives, or the operator prefetches (CLI-020)
+    then:
+      - "Nothing is fetched at agent start; the capability reports needs_download and the bytes still to fetch"
+      - "The first request starts the fetch and waits on it, and its task reports bytes fetched of bytes needed"
+      - "Concurrent requests share one fetch"
+      - "When every file verifies, the capability reports ready"
+    changed: "2026-10-11"
+
+  - id: IMG-006
+    name: Runtime runs isolated, with local paths only
+    criticality: critical
+    wip: true
+    given:
+      - A verified runtime and weight set
+    when: sd-cli is started for a request
+    then:
+      - "Its environment is the isolated profile, the platform baseline and nothing else, so no provider key or token reaches it (PENV-001)"
+      - "Its arguments name local files and the request's output directory only"
+      - "It runs under a macOS sandbox profile that denies network access and allows writes only to the output directory and the per-user temporary and cache directories"
+      - "It is killed with its process group when its request is canceled or its deadline passes"
+      - "The last 4 KiB of its standard error are kept for the failure message"
+    edge_cases:
+      - condition: Metal needs a path or service the sandbox profile denies
+        expected: Generation fails with the denial in the error; the profile is widened in this spec, never dropped at run time
+    refs:
+      - crates/arkavo-process-env/src/lib.rs:80
+      - crates/arkavo-dataflow/src/engine/sandbox.rs:165
+    changed: "2026-10-11"
+
+  - id: IMG-007
+    name: Request validated before any work
+    criticality: high
+    wip: true
+    given:
+      - A generation request
+    when: It is validated
+    then:
+      - "prompt is 1 to 2,000 characters after trimming"
+      - "width and height are multiples of 32 from 256 to 2048, default 1024, and width times height is at most 4,194,304"
+      - "count is 1 to 4, default 1"
+      - "seed is a 32-bit unsigned integer; when absent one is drawn at random and reported"
+      - "name is a file stem of 1 to 64 characters from [A-Za-z0-9_-]; default asset"
+      - "transparent and tileable are booleans, default false"
+      - "There is no negative prompt: Turbo samples at CFG 1, where it has no effect"
+      - "An invalid request fails with InvalidParams naming the field, and nothing is fetched or started"
+    changed: "2026-10-11"
+
+  - id: IMG-008
+    name: Turbo sampled with its distilled schedule
+    criticality: high
+    wip: true
+    given:
+      - A valid request on a ready host
+    when: sd-cli is invoked
+    then:
+      - "--steps 8 --cfg-scale 1.0 --sampling-method euler"
+      - "--sigmas 1.0,0.978453,0.95418,0.926626,0.89508,0.845148,0.704534,0.414568,0.0, the sample_sigmas of Qwen/Qwen-Image-2.1-Turbo's model_index.json at d65dbc9a with the final 0.0"
+      - "--diffusion-fa, -W and -H from the request, -s the seed, -b the count, and an -o pattern inside the output directory"
+      - "--disable-image-metadata, so the prompt is not written into the files"
+    edge_cases:
+      - condition: Sampling without --sigmas
+        expected: "Never done: sd.cpp would use Qwen-Image-2.1's base schedule, which Turbo was not distilled for"
+    changed: "2026-10-11"
+
+  - id: IMG-009
+    name: Transparent sprites and tileable textures
+    criticality: medium
+    wip: true
+    given:
+      - A request with transparent or tileable set
+    when: It is generated
+    then:
+      - "transparent frames the prompt as Qwen recommends: This is an RGBA image with transparency. <prompt>. The image has alpha channel and the background is transparent."
+      - "tileable adds --circular, so the texture wraps on both axes"
+      - "has_alpha in the manifest is read from the PNG (an alpha color type or a tRNS chunk), not taken from the request"
+    edge_cases:
+      - condition: transparent requested and the PNG has no alpha
+        expected: The asset is delivered with has_alpha false, and the result says the model did not produce transparency
+    changed: "2026-10-11"
+
+  - id: IMG-010
+    name: Outputs verified before they become assets
+    criticality: high
+    wip: true
+    given:
+      - sd-cli has exited
+    when: Its output directory is read
+    then:
+      - "The exit status is 0 and exactly count files match the -o pattern"
+      - "Each file starts with the PNG signature, and its IHDR width and height equal the request"
+      - "Each asset gets a manifest entry: name, size in bytes, SHA-256, width, height, has_alpha, tileable and seed"
+      - "On any failure the output directory is removed, and the error carries the exit status and the kept standard error"
+    changed: "2026-10-11"
+
+  - id: IMG-011
+    name: One generation at a time with a bounded queue
+    criticality: high
+    wip: true
+    given:
+      - A generation running on the host
+    when: Another request arrives
+    then:
+      - "It waits in a queue of at most 4 requests, served in arrival order"
+      - "A request beyond that fails at once with busy, so its requester can try another member"
+      - "The queue depth is reported with the capability"
+    changed: "2026-10-11"
+
+  - id: IMG-012
+    name: Requests stop at their deadline
+    criticality: medium
+    wip: true
+    given:
+      - A request whose deadline comes from its task's time budget
+    when: The deadline passes while the request waits, fetches weights or generates
+    then:
+      - "The request fails with timed_out, and sd-cli is killed (IMG-006)"
+      - "A weight fetch in progress continues for the requests still waiting on it"
+    changed: "2026-10-11"
+
+  - id: IMG-013
+    name: Manifest names the model, its license and the runtime
+    criticality: high
+    wip: true
+    given:
+      - Verified assets (IMG-010)
+    when: The manifest is written
+    then:
+      - "model is Qwen/Qwen-Image-2.1-Turbo, with the diffusion and text encoder quantizations used"
+      - "license is the Qwen Research License Agreement, linked as https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE"
+      - "runtime is stable-diffusion.cpp master-956-1b0ba10"
+      - "producer is the did:key of the agent that generated the assets"
+    edge_cases:
+      - condition: Assets meant for a commercial game
+        expected: The license line is shown with every delivery (CLI-018); whether the license permits the use is the requester's call, not the agent's
+    changed: "2026-10-11"
+
+  - id: IMG-014
+    name: generate_image tool on every agent
+    criticality: high
+    wip: true
+    given:
+      - An agent building a tool registry, in the agent loop or for a direct execution
+    when: arkavo_image_gen::register_tools runs
+    then:
+      - "generate_image is registered with the IMG-007 parameters"
+      - "On a qualifying host it generates here; elsewhere it asks a capable member (ASSET-002)"
+      - "The model gets the manifest entries (name, size, dimensions, has_alpha, seed) and the license line, never bytes or base64"
+      - "The assets are held for the reply to the requester (ASSET-008)"
+    edge_cases:
+      - condition: A specialized role whose grant set omits generate_image
+        expected: Removed by retain_granted like any other tool
+    refs:
+      - crates/arkavo-server/src/server/agent_loop.rs:50-80
+      - crates/arkavo-server/src/server/handlers/messaging/direct.rs:88-103
+    changed: "2026-10-11"
+
+  - id: IMG-015
+    name: No cloud fallback
+    criticality: critical
+    wip: true
+    given:
+      - A request that neither this host nor any member can serve
+    when: generate_image or an asset request handles it
+    then:
+      - "It fails with no_capable_member"
+      - "No cloud provider is called, whatever runtime.cloud_policy says, cloud_within_cap included"
+      - "arkavo-qwen, a DashScope chat and vision client, is never used to generate images"
+    changed: "2026-10-11"

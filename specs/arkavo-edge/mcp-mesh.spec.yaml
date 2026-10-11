@@ -1,12 +1,13 @@
 feature: MCP Tools for Agent Mesh Orchestration
 module: arkavo_mcp_mesh
-version: 0.57.2
+version: 0.58.0
 
 invariants:
   - Agent discovery via mDNS
   - Task delegation to specialist agents
   - A2A protocol for mesh communication
   - Tool-based mesh operations
+  - "A member's capabilities come from its own report over the member channel, not from its announcement"
 
 scenarios:
   - id: MESH-001
@@ -131,3 +132,35 @@ scenarios:
       - Context preserved
     refs: [crates/arkavo-mcp-mesh/src/lib.rs:44-46]
     changed: "2025-01-31"
+
+  - id: MESH-009
+    name: Delegated task answers keep data parts
+    criticality: high
+    wip: true
+    issue: "TaskAnswer holds text only (request.rs:36) and text_of drops every other part (peer.rs:146), so an asset manifest a member returns never reaches the agent that delegated"
+    given:
+      - A member's completed task whose result has text and data parts
+    when: send_and_wait or get_task_status reads the result
+    then:
+      - "The answer keeps the text and every data part with its schema"
+      - "A urn:arkavo:asset:manifest:v1 part comes back as references; the mesh layer fetches nothing"
+    refs:
+      - crates/arkavo-mcp-mesh/src/request.rs:36
+      - crates/arkavo-mcp-mesh/src/peer.rs:146
+    changed: "2026-10-11"
+
+  - id: MESH-010
+    name: Capability queries read members' reports, not announcements
+    criticality: high
+    wip: true
+    given:
+      - Members found by discovery
+    when: agent_query, or an agent choosing a member for work (ASSET-002), looks for a capability
+    then:
+      - "Each member's capabilities come from its agent.capabilities.get answer, cached for 60 seconds"
+      - "The mDNS TXT capabilities and mcp_tools keys are not read; INGRESS-007 removes them"
+      - "image_generation matches only a member whose report carries the image_generation descriptor (ASSET-001)"
+    refs:
+      - crates/arkavo-mcp-mesh/src/lib.rs:800-876
+      - crates/arkavo-server/src/server/handlers/discovery.rs:240
+    changed: "2026-10-11"

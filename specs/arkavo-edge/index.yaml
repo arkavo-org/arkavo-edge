@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
-version: 0.93.0
-last_updated: 2026-10-09
+version: 0.94.0
+last_updated: 2026-10-11
 
 components:
   - name: astra
@@ -218,7 +218,7 @@ components:
     module: arkavo_mcp_tools
     description: MCP tool registry and execution
     criticality: critical
-    scenario_count: 16
+    scenario_count: 17
     invariants:
       - Tools registered before execution
       - Schemas define valid parameters
@@ -383,11 +383,36 @@ components:
     module: arkavo_tdf_iroh
     description: TDF blob transport via Iroh P2P
     criticality: critical
-    scenario_count: 9
+    scenario_count: 11
     invariants:
       - Raw bytes only, no encryption
       - Tickets self-contained
       - Embedded node lifecycle managed
+      - Data for another party staged on the long-lived node only
+
+  - name: image-gen
+    file: image-gen.spec.yaml
+    module: arkavo_image_gen
+    description: Local Qwen-Image-2.1-Turbo generation on Apple Silicon through a pinned stable-diffusion.cpp runtime
+    criticality: critical
+    scenario_count: 15
+    invariants:
+      - Local generation only; no cloud fallback
+      - Runtime and weights pinned by revision, size and SHA-256
+      - Runtime isolated and given local paths only
+      - Images leave as files with a manifest, never as bytes to the model or the control plane
+
+  - name: swarm-assets
+    file: swarm-assets.spec.yaml
+    module: arkavo_server
+    description: Routing asset requests to capable members and delivering sealed assets over the Iroh data plane
+    criticality: critical
+    scenario_count: 9
+    invariants:
+      - Asset bytes never cross the control plane
+      - Every staged asset sealed to the party it is handed to
+      - Capabilities reported to members, never announced
+      - No cloud inference at any step
 
   - name: ensemble
     file: ensemble.spec.yaml
@@ -493,7 +518,7 @@ components:
     module: arkavo_cli
     description: Arkavo Edge CLI interface with interactive REPL commands
     criticality: high
-    scenario_count: 17
+    scenario_count: 20
     invariants:
       - Tracing initialized once
       - First-run checks models
@@ -728,7 +753,7 @@ components:
     module: arkavo_mcp_mesh
     description: MCP tools for agent mesh orchestration
     criticality: high
-    scenario_count: 8
+    scenario_count: 10
     invariants:
       - Agent discovery via mDNS
       - Task delegation to specialists
@@ -739,7 +764,7 @@ components:
     module: arkavo_protocol
     description: A2A protocol, agent communication, and peer management
     criticality: critical
-    scenario_count: 19
+    scenario_count: 20
     invariants:
       - A2A enables agent-to-agent communication
       - WebSocket and HTTP transports

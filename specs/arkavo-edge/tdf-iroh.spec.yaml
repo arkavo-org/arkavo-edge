@@ -1,12 +1,13 @@
 feature: TDF Iroh P2P Transport
 module: crate::tdf_iroh
-version: 0.57.2
+version: 0.58.0
 
 invariants:
   - Transport handles raw bytes; encryption occurs before handoff to Iroh
   - Tickets are self-contained and transferable
   - Embedded Iroh node lifecycle managed automatically
   - Content-addressed storage ensures data integrity
+  - "Data handed to another party is staged on the agent's long-lived node, never on a node created for one call"
 
 scenarios:
   - id: IROH-001
@@ -164,3 +165,37 @@ scenarios:
       - Serving blobs to peers that fetch them is unaffected
     refs: [crates/arkavo-tdf-iroh/src/node.rs, crates/arkavo-tdf-iroh/tests/push_policy_test.rs, crates/arkavo-tdf-iroh/tests/integration_test.rs]
     changed: "2026-10-16"
+
+  - id: IROH-009
+    name: Handed-out tickets live for their retention window
+    criticality: high
+    wip: true
+    given:
+      - The agent's data-plane node, started with the A2A server for the agent's lifetime
+    when: A blob is staged for another party
+    then:
+      - "It stays fetchable for its retention window, 1 hour unless the caller staging it sets a shorter one"
+      - "After the window the blob is deleted from the store, and a fetch fails with not found"
+      - "A node created for one call never stages data for another party: dropping it drops its Router, which aborts the accept loop, so nothing serves the ticket afterwards"
+    edge_cases:
+      - condition: The agent restarts
+        expected: "The in-memory store is gone with every blob in it; fetches of its tickets fail"
+    refs:
+      - crates/arkavo-server/src/server/a2a_server.rs:1202
+      - crates/arkavo-tdf-iroh/src/node.rs:77
+      - crates/arkavo-tdf-iroh/src/transport.rs:50
+    changed: "2026-10-11"
+
+  - id: IROH-010
+    name: Staged data is bounded
+    criticality: medium
+    wip: true
+    given:
+      - The agent's in-memory blob store (MemStore)
+    when: Staging would take the staged bytes past 1 GiB
+    then:
+      - "Staging fails with an error naming the bound"
+      - "Blobs within their retention window are never evicted to make room"
+    refs:
+      - crates/arkavo-tdf-iroh/src/node.rs:106
+    changed: "2026-10-11"

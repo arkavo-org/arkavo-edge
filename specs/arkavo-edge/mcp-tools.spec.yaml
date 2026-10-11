@@ -2,7 +2,7 @@
 
 feature: MCP Tool Registry and Execution
 module: arkavo_mcp_tools
-version: 0.57.2
+version: 0.58.0
 
 invariants:
   - All tools must be registered before execution
@@ -307,3 +307,18 @@ scenarios:
       - crates/arkavo-git/src/remote_fallback.rs
       - crates/arkavo-mcp-workspace/src/workspace.rs
     changed: "2026-09-29"
+
+  - id: MCP-017
+    name: tdf_stage tickets stay fetchable after the call
+    criticality: high
+    wip: true
+    issue: "tdf_stage stages on IrohNode::memory() created for the call (tdf.rs:389) and drops it on return; iroh's Router aborts its accept loop when dropped, so the ticket it hands out is served by nothing"
+    given:
+      - tdf_stage called with a file inside the workspace (MCP-012)
+    when: It stages the file
+    then:
+      - "The file is staged on the agent's long-lived data-plane node (IROH-009)"
+      - "The returned ticket can be fetched by another agent after the call returns, for the retention window"
+    refs:
+      - crates/arkavo-mcp-tools/src/tdf.rs:389
+    changed: "2026-10-11"
