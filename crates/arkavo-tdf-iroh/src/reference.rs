@@ -8,6 +8,8 @@
 use std::time::Duration;
 
 use iroh_base::EndpointAddr;
+use iroh_blobs::HashAndFormat;
+use iroh_blobs::api::blobs::BlobStatus;
 use iroh_blobs::get::request::get_verified_size;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -95,6 +97,9 @@ impl IrohTransport {
                 reason: "the ticket names a different blob".to_string(),
             });
         }
+        if let Some(bytes) = self.held(&ticket, reference).await? {
+            return Ok(bytes);
+        }
         let mut reason = String::new();
         let mut backoff = policy.backoff;
         for attempt in 0..ATTEMPTS {
@@ -119,6 +124,50 @@ impl IrohTransport {
             name: reference.name.clone(),
             reason: format!("{ATTEMPTS} attempts, last: {reason}"),
         })
+    }
+
+    /// The data when this node already holds the whole blob, staged here or
+    /// fetched before. Iroh never connects a node to itself, and agents
+    /// sharing one node in a process hand each other references to it.
+    async fn held(
+        &self,
+        ticket: &IrohTicket,
+        reference: &DataRef,
+    ) -> Result<Option<Vec<u8>>, IrohError> {
+        let store = self.node().store().await?;
+        let failed = |e: &dyn std::fmt::Display| IrohError::StoreExport(e.to_string());
+        // Tag first, so the collector cannot drop the blob between the
+        // status check and the read.
+        let batch = store.blobs().batch().await.map_err(|e| failed(&e))?;
+        let _protected = batch
+            .temp_tag(HashAndFormat {
+                hash: ticket.hash(),
+                format: ticket.inner().format(),
+            })
+            .await
+            .map_err(|e| failed(&e))?;
+        let status = store
+            .blobs()
+            .status(ticket.hash())
+            .await
+            .map_err(|e| failed(&e))?;
+        match status {
+            BlobStatus::Complete { size } if size == reference.size => {}
+            BlobStatus::Complete { size } => {
+                return Err(IrohError::RefMismatch {
+                    name: reference.name.clone(),
+                    reason: format!("{size} bytes held, {} referenced", reference.size),
+                });
+            }
+            BlobStatus::Partial { .. } | BlobStatus::NotFound => return Ok(None),
+        }
+        let bytes = store
+            .blobs()
+            .get_bytes(ticket.hash())
+            .await
+            .map_err(|e| failed(&e))?;
+        debug!(name = %reference.name, "data-plane reference read from this node");
+        Ok(Some(bytes.to_vec()))
     }
 
     /// One attempt: the verified size first, then the bytes.

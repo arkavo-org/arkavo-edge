@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
 version: 0.94.0
-last_updated: 2026-10-11
+last_updated: 2026-10-12
 
 components:
   - name: astra
@@ -218,7 +218,7 @@ components:
     module: arkavo_mcp_tools
     description: MCP tool registry and execution
     criticality: critical
-    scenario_count: 17
+    scenario_count: 19
     invariants:
       - Tools registered before execution
       - Schemas define valid parameters
@@ -973,7 +973,7 @@ components:
     module: arkavo_server
     description: A2A server and runtime orchestration
     criticality: critical
-    scenario_count: 12
+    scenario_count: 13
     invariants:
       - Server binds localhost by default
       - JSON-RPC 2.0 protocol

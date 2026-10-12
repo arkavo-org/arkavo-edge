@@ -214,6 +214,8 @@ scenarios:
         expected: "Reported as unreachable: to the fetcher an expired reference and a gone provider look the same"
       - condition: Staging a reference past the store bound (IROH-010)
         expected: Fails with the bound, and nothing is staged
+      - condition: "The fetching node already holds the whole blob: it staged it, as agents sharing one node in a process do, or fetched it before"
+        expected: "Read from its own store without contacting the provider, since iroh never connects a node to itself; a held size other than the reference's is refused"
     refs:
       - crates/arkavo-tdf-iroh/src/reference.rs
-    changed: "2026-10-11"
+    changed: "2026-10-12"

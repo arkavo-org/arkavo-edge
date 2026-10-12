@@ -7,7 +7,7 @@ This picks up the swarm image work on the 32 GB M6 Mac mini. The code is on bran
 Working and tested on Linux:
 
 - `arkavo-image-gen`: catalog, host check and memory budget, pinned runtime install, weight fetch with resume and SHA-256, the sd-cli runner, output checks, manifest, and the `generate_image` tool. It has no data-plane dependency. 89 unit tests run against an sd-cli stand-in and a mock Hub.
-- `arkavo-tdf-iroh`, the existing data plane: generic references (`DataRef`, `stage_ref`, `fetch_ref`) with a one-hour retention window and a staging bound. A fetch checks the hash and the provider's verified size before downloading, and retries a provider that has gone.
+- `arkavo-tdf-iroh`, the existing data plane: generic references (`DataRef`, `stage_ref`, `fetch_ref`) with a one-hour retention window and a staging bound. A fetch checks the hash and the provider's verified size before downloading, and retries a provider that has gone. A blob the fetching node already holds is read from its own store. `iroh_stage`/`iroh_fetch`, `tdf_share`/`tdf_receive` and the agent loop's state broadcast hand out and take the same references.
 - A real run of the pinned stable-diffusion.cpp release, Linux CPU build, with the real Qwen-Image-2.1-Turbo weights (S set). It produced a 256×256 transparent sprite in 311 to 460 s.
 - `arkavo-server`: the capability report, asset requests answered without the model, delegation to members, and replies that carry a manifest after the text. 16 asset tests run over real Iroh loopback nodes, including a full delegate, member, re-stage and requester round trip.
 - `arkavo-mcp-mesh`: data parts kept in answers, and members' reports read through `agent.capabilities.get`.

@@ -85,6 +85,34 @@ async fn mismatched_references_are_refused() {
     fetcher.shutdown().await.unwrap();
 }
 
+/// IROH-011 edge: a reference to a blob this node already holds is read
+/// here, since iroh never connects a node to itself; its size is still
+/// checked against the reference.
+#[spec("IROH-011")]
+#[tokio::test]
+async fn references_held_here_are_read_here() {
+    let node = node().await;
+    let reference = node
+        .stage_ref(
+            "state.txt",
+            "text/plain; charset=utf-8",
+            b"turn 12",
+            Duration::from_mins(1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(node.fetch_ref(&reference, QUICK).await.unwrap(), b"turn 12");
+
+    let understated = DataRef {
+        size: 3,
+        ..reference
+    };
+    let err = node.fetch_ref(&understated, QUICK).await.unwrap_err();
+    assert!(matches!(err, IrohError::RefMismatch { .. }), "{err}");
+    assert!(err.to_string().contains("7 bytes held"), "{err}");
+    node.shutdown().await.unwrap();
+}
+
 /// IROH-011: a provider that is gone is tried again, then reported as
 /// unreachable, naming the reference.
 #[spec("IROH-011")]
