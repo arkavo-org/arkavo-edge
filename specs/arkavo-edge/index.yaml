@@ -408,7 +408,7 @@ components:
     module: arkavo_server
     description: Routing asset requests to capable members and delivering assets over the Iroh data plane
     criticality: critical
-    scenario_count: 9
+    scenario_count: 10
     invariants:
       - Asset bytes never cross the control plane
       - Tickets written only into the result for the party that asked
