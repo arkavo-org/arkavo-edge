@@ -88,7 +88,7 @@ pub fn this_host_listing() -> String {
 }
 
 /// Fetch and verify the runtime and `name`'s weights for this host.
-pub fn download(name: &str) -> anyhow::Result<()> {
+pub async fn download(name: &str) -> anyhow::Result<()> {
     let host = Host::detect();
     let resident = resident_chat_bytes();
     if let Some(reason) = platform_refusal(&host) {
@@ -107,7 +107,18 @@ pub fn download(name: &str) -> anyhow::Result<()> {
         )
     };
     let generator = Generator::for_this_host(resident, None).ok_or_else(refusal)?;
-    let offer = generator.offer(resolved.entry.id).ok_or_else(refusal)?;
+    generator.offer(resolved.entry.id).ok_or_else(refusal)?;
+    prefetch(&generator, name).await
+}
+
+/// Fetch with `generator` on the caller's runtime: `arkavo model` already
+/// runs on one, and a nested runtime panics.
+async fn prefetch(generator: &Generator, name: &str) -> anyhow::Result<()> {
+    let resolved =
+        catalog::resolve(name).ok_or_else(|| anyhow::anyhow!("unknown image model '{name}'"))?;
+    let offer = generator
+        .offer(resolved.entry.id)
+        .ok_or_else(|| anyhow::anyhow!("{} is not offered on this host", resolved.entry.id))?;
     println!(
         "Fetching {} ({:?} set) and the stable-diffusion.cpp runtime",
         resolved.entry.id, offer.set.label
@@ -121,8 +132,7 @@ pub fn download(name: &str) -> anyhow::Result<()> {
             );
         }
     };
-    #[allow(clippy::disallowed_methods)]
-    tokio::runtime::Runtime::new()?.block_on(generator.prefetch(name, &report))?;
+    generator.prefetch(name, &report).await?;
     eprintln!();
     println!("{} is ready on this host", resolved.entry.id);
     Ok(())
@@ -187,6 +197,18 @@ mod tests {
 
     fn listing_for_budget(host: &Host) -> String {
         listing(host, host.budget(7_200_000_000), None)
+    }
+
+    /// CLI-020 regression: `arkavo model download qwen-image` panicked
+    /// starting a runtime inside the CLI's own. The fetch now runs on the
+    /// caller's runtime and leaves the runtime and weights in place.
+    #[spec("CLI-020")]
+    #[tokio::test]
+    async fn prefetch_runs_on_the_callers_runtime() {
+        let fake = arkavo_image_gen::testing::fake_generator(1, std::time::Duration::ZERO).await;
+        prefetch(&fake.generator, "qwen-image").await.unwrap();
+        let row = &fake.generator.descriptor().models[0];
+        assert!(row.ready, "{row:?}");
     }
 
     #[test]

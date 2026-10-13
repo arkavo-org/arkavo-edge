@@ -216,7 +216,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 .as_deref()
                 .filter(|n| super::model_image::is_image_model(n))
             {
-                return super::model_image::download(image_model);
+                return super::model_image::download(image_model).await;
             }
 
             let caps = detect_capabilities();
