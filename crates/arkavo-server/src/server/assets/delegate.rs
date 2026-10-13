@@ -170,6 +170,7 @@ impl MeshDelegate {
         let mut last: Option<(TaskStatus, Option<String>)> = None;
         let mut changed_at = Instant::now();
         let mut wait = Duration::from_millis(250);
+        let queued = Progress::Queued.to_string();
         loop {
             let now = Instant::now();
             if now >= deadline {
@@ -177,12 +178,13 @@ impl MeshDelegate {
             }
             tokio::time::sleep(wait.min(deadline - now)).await;
             wait = (wait * 2).min(MAX_POLL);
-            let seen = match peer.get_task(task_id).await {
+            let (seen, waiting) = match peer.get_task(task_id).await {
                 Ok(task) => match task.status {
                     TaskStatus::Completed => return Ok(task),
                     TaskStatus::Submitted | TaskStatus::Working => {
                         let message = task.progress.and_then(|p| p.message);
-                        Some((task.status, message))
+                        let waiting = message.as_deref() == Some(queued.as_str());
+                        (Some((task.status, message)), waiting)
                     }
                     other => return Err(ended(member, other, &task)),
                 },
@@ -190,9 +192,15 @@ impl MeshDelegate {
                 // progress stopped.
                 Err(e) => {
                     tracing::debug!(member, error = %e, "member did not answer a poll");
-                    last.clone()
+                    (last.clone(), false)
                 }
             };
+            // A member that answers that it is waiting behind other
+            // generations is busy, not stalled: one job ahead can take an
+            // hour at 4.3 MP. The request's deadline bounds that wait.
+            if waiting {
+                changed_at = Instant::now();
+            }
             if seen == last {
                 if changed_at.elapsed() >= self.stall {
                     return Err(ImageGenError::Stalled {

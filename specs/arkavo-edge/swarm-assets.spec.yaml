@@ -240,9 +240,10 @@ scenarios:
       - "The wait lasts until the request's deadline, not a fixed per-call timeout"
       - "The member's progress, down to step s of S (IMG-005), is copied onto the agent's own task, so the requester sees it"
       - "A member whose task reports nothing new for 5 minutes, or stops answering for that long, is treated as stalled, and the task fails with step_stalled naming it"
+      - "Time the member answers that the request is waiting behind other generations (IMG-011) is not a stall: it is working through its queue, and one job ahead can take an hour at 4.3 MP. That wait runs to the request's deadline"
     refs:
       - crates/arkavo-server/src/server/assets/delegate.rs
-    changed: "2026-10-11"
+    changed: "2026-10-12"
 
   - id: ASSET-010
     name: A kit role's tool grants decide whether it hosts generation

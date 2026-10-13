@@ -12,7 +12,7 @@ use arkavo_protocol::metrics::MetricsCollector;
 use arkavo_protocol::rate_limit::{RateLimitConfig, RateLimiter};
 use arkavo_protocol::types::{
     AgentCapabilitiesGetResponse, MessageSendRequest, MessageSendResponse, TaskGetRequest,
-    TaskGetResponse, TaskStatus,
+    TaskGetResponse, TaskProgress, TaskStatus,
 };
 use arkavo_tdf_iroh::{IrohTicket, IrohTransport};
 use arkavo_test_macros::spec;
@@ -37,6 +37,8 @@ enum Answer {
     Busy,
     /// Accepts, then never moves.
     Quiet,
+    /// Accepts, then reports waiting behind other generations.
+    Queued,
 }
 
 struct Member {
@@ -80,7 +82,7 @@ impl Member {
                         "busy: image generation queue is full (4 waiting)",
                         None::<()>,
                     )),
-                    Answer::Quiet => Ok(MessageSendResponse {
+                    Answer::Quiet | Answer::Queued => Ok(MessageSendResponse {
                         task_id: QUIET_TASK.to_string(),
                         status: TaskStatus::Submitted,
                         response: None,
@@ -91,13 +93,18 @@ impl Member {
         module
             .register_async_method("tasks/get", |params, c, _| async move {
                 let request: TaskGetRequest = params.one()?;
-                if matches!(c.0, Answer::Quiet) {
+                if matches!(c.0, Answer::Quiet | Answer::Queued) {
+                    let progress = matches!(c.0, Answer::Queued).then(|| TaskProgress {
+                        percentage: None,
+                        message: Some(Progress::Queued.to_string()),
+                        eta_seconds: None,
+                    });
                     return Ok(TaskGetResponse {
                         task_id: request.task_id,
                         status: TaskStatus::Working,
                         result: None,
                         error: None,
-                        progress: None,
+                        progress,
                     });
                 }
                 crate::server::handlers::tasks::handle_tasks_get(
@@ -312,5 +319,29 @@ async fn a_member_that_stops_moving_is_stalled() {
     assert_eq!(error.code(), "step_stalled", "{error}");
     assert!(error.to_string().contains("quiet"), "{error}");
     quiet.stop().await;
+    own_plane.shutdown().await.unwrap();
+}
+
+/// ASSET-009 regression: a member that answers that the request is waiting
+/// behind other generations is busy, not stalled. A requester queued behind
+/// two others was failed as step_stalled after 5 minutes while the member
+/// worked through its queue; the wait now runs to the request's deadline.
+#[spec("ASSET-009")]
+#[tokio::test]
+async fn a_member_working_through_its_queue_is_not_stalled() {
+    let fake = fake_generator(0, Duration::ZERO).await;
+    let descriptor = serde_json::to_value(fake.generator.descriptor()).unwrap();
+    let mesh = Arc::new(MeshToolsState::new());
+    let busy = Member::start(&mesh, "artist", Some(descriptor), Answer::Queued).await;
+    let own_plane = transport().await;
+    let delegate = commander(mesh, own_plane.clone(), Duration::from_secs(1));
+
+    let error = delegate
+        .generate(&coin(), Instant::now() + Duration::from_secs(4), &|_| {})
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), "timed_out", "{error}");
+    busy.stop().await;
     own_plane.shutdown().await.unwrap();
 }
