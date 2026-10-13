@@ -18,8 +18,11 @@ openai = ["arkavo-cli/openai"]
 # `arkavo-cli/cloud` rather than repeating its expansion here, so that
 # manifest is the single place the list is named.
 cloud = ["arkavo-cli/cloud"]
-# Full defaults with all LLM providers
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent"]
+# Full defaults with all LLM providers. `iroh` is the agent's data-plane
+# node; without it there is no state broadcast, Iroh tool or image delivery.
+# Workspace release builds already had it through arkavo-cli's defaults, so
+# naming it here makes `cargo build -p arkavo` match them.
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "iroh"]
 # Minimal feature set for non-typical use cases
 minimal = ["memory", "mdns", "mcp-tools"]
 # Default features for Windows: every cloud provider the router's own
@@ -39,6 +42,7 @@ snpe = ["arkavo-cli/snpe"]
 mcp-tools = ["arkavo-cli/mcp-tools"]
 mcp-macos = ["arkavo-cli/mcp-macos"]
 kas = ["arkavo-cli/kas"]
+iroh = ["arkavo-cli/iroh"]
 cef-ui = ["arkavo-cli/cef-ui"]
 web-ui = ["arkavo-cli/web-ui"]
 claude-agent = ["arkavo-cli/claude-agent"]
