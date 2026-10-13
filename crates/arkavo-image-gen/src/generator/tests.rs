@@ -67,14 +67,14 @@ async fn first_request_fetches_then_generates() {
     drop(f.server);
 }
 
-/// IMG-018, IMG-019: refusals come before any fetch.
+/// IMG-007, IMG-019: refusals come before any fetch.
 #[arkavo_test_macros::spec("IMG-007", "IMG-019")]
 #[tokio::test]
 async fn refusals_fetch_nothing() {
     let f = fake_generator(0, Duration::ZERO).await;
     let too_large = ImageRequest {
-        width: Some(2048),
-        height: Some(2048),
+        width: Some(2752),
+        height: Some(2752),
         ..request(1)
     };
     let err = f
@@ -82,7 +82,7 @@ async fn refusals_fetch_nothing() {
         .generate(&too_large, soon(60), &|_| {})
         .await
         .unwrap_err();
-    assert_eq!(err.code(), "too_large_for_host");
+    assert_eq!(err.code(), "invalid_params");
     let other = ImageRequest {
         model: Some("qwen-image-2.1".into()),
         width: Some(512),

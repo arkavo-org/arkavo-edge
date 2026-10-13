@@ -5,11 +5,11 @@ module: arkavo_image_gen
 version: 0.103.0
 
 # The model, runtime and file facts were checked on 2026-10-11 and are
-# pinned here, so moving to a later release is a reviewed spec change. Two
-# scenarios stay wip until an Apple Silicon host has run them: IMG-006's
-# sandbox profile with Metal, and IMG-018's measured allowance table. The
-# rest run on x86_64 Linux in CI against an sd-cli stand-in, and once
-# against the pinned Linux CPU build of the same release with real weights.
+# pinned here, so moving to a later release is a reviewed spec change.
+# IMG-006's sandbox profile and IMG-018's allowance table were checked on a
+# 32 GiB Apple M6 on 2026-10-12, with the real weights on Metal. The rest run
+# on x86_64 Linux in CI against an sd-cli stand-in, and once against the
+# pinned Linux CPU build of the same release with real weights.
 #
 # Models: a compiled-in catalog (IMG-016). It starts with the two
 # Qwen-Image-2.1 checkpoints, both 7B single-stream DiTs with a Qwen3-VL-8B
@@ -61,7 +61,7 @@ scenarios:
       - condition: 24 GiB with Gemma 4 12B resident
         expected: "Budget 13.3 GiB; both entries qualify with their small set"
       - condition: 16 GiB, whichever Gemma 4 model is resident
-        expected: "Budget at most 9.2 GiB, under the 12.2 GiB the smallest set needs; does not qualify"
+        expected: "Budget at most 9.2 GiB, under the 10.2 GiB the smallest set needs; does not qualify"
       - condition: An x86_64 arkavo binary under Rosetta on Apple Silicon (sysctl.proc_translated is 1)
         expected: Does not qualify
       - condition: Intel Mac, Linux or Windows host
@@ -70,7 +70,7 @@ scenarios:
       - crates/arkavo-image-gen/src/host.rs
       - crates/arkavo-image-gen/src/generator.rs:57-76
       - crates/arkavo-router/src/decision.rs:536
-    changed: "2026-10-11"
+    changed: "2026-10-12"
 
   - id: IMG-002
     name: Weight set per entry sized to the memory budget
@@ -80,19 +80,19 @@ scenarios:
     when: The generator chooses each entry's weights
     then:
       - "For each entry it takes the largest set whose weights plus the entry's working set at 1 MP with guidance 1 fit the budget; entries with no fitting set are not offered"
-      - "XL: diffusion BF16, text encoder F16, VAE bf16; needs 32.1 GiB"
-      - "L: diffusion Q8_0, text encoder Q8_0, VAE bf16; needs 18.8 GiB for turbo and 18.9 GiB for the full model"
-      - "M: diffusion Q8_0, text encoder Q4_K_M, VAE bf16; needs 15.4 GiB for turbo and 15.5 GiB for the full model"
-      - "S: diffusion Q4_K (AD-Q4_K for turbo), text encoder Q4_K_M, VAE bf16; needs 12.2 GiB"
+      - "XL: diffusion BF16, text encoder F16, VAE bf16; needs 30.1 GiB"
+      - "L: diffusion Q8_0, text encoder Q8_0, VAE bf16; needs 16.8 GiB for turbo and 16.9 GiB for the full model"
+      - "M: diffusion Q8_0, text encoder Q4_K_M, VAE bf16; needs 13.4 GiB for turbo and 13.5 GiB for the full model"
+      - "S: diffusion Q4_K (AD-Q4_K for turbo), text encoder Q4_K_M, VAE bf16; needs 10.2 GiB"
       - "The choices hold for the life of the agent and are reported with the capability, so a requester can tell members apart"
     edge_cases:
       - condition: Working set used for the choice
-        expected: "3 GiB at 1 MP with guidance 1, until the entry's measured allowance table replaces it (IMG-018)"
+        expected: "The entry's measured allowance at 1 MP with guidance 1 (IMG-018): 1 GiB"
       - condition: Files of a larger set are on disk already
         expected: Not used; the set follows the budget, not the cache
     refs:
       - crates/arkavo-image-gen/src/plan.rs
-    changed: "2026-10-11"
+    changed: "2026-10-12"
 
   - id: IMG-003
     name: Pinned stable-diffusion.cpp runtime with Metal
@@ -159,8 +159,6 @@ scenarios:
   - id: IMG-006
     name: Runtime runs isolated, with local paths only
     criticality: critical
-    wip: true
-    issue: "The profile has run only off macOS, where it is not applied; whether Metal works under it is checked on an Apple Silicon host before this leaves wip"
     given:
       - A verified runtime and weight set
     when: sd-cli is started for a request
@@ -173,10 +171,12 @@ scenarios:
     edge_cases:
       - condition: Metal needs a path or service the sandbox profile denies
         expected: Generation fails with the denial in the error; the profile is widened in this spec, never dropped at run time
+      - condition: The pinned runtime on Apple Silicon (checked on an M6, 2026-10-12)
+        expected: "Metal runs under the profile as written, with nothing widened, and at the same speed as without it: 3.1 s per step at 512x512 either way"
     refs:
       - crates/arkavo-image-gen/src/run.rs
       - crates/arkavo-process-env/src/lib.rs:80
-    changed: "2026-10-11"
+    changed: "2026-10-12"
 
   - id: IMG-007
     name: Request validated against its entry before any work
@@ -398,23 +398,25 @@ scenarios:
   - id: IMG-018
     name: Each request checked against the host's budget
     criticality: high
-    wip: true
-    issue: "The allowance table is provisional: 3 GiB at 1 MP with guidance 1 and no other point, so nothing larger or guided is accepted until it is measured on an Apple Silicon host"
     given:
       - A valid request (IMG-007) for an entry this host offers
     when: The generator decides whether it can run it
     then:
       - "The memory it needs is the entry's chosen weight set plus the entry's working-set allowance at the request's pixel count and guidance"
       - "The allowance table is part of the entry: peak memory above the weights, measured with the pinned runtime on an M-series host at 1, 2 and 4.3 MP, with guidance 1 and above 1; between measured points the larger applies"
+      - "Measured on a 32 GiB M6 under the sandbox profile, peak physical footprint stayed at or below the weights at every point, for the S and L sets and with guidance 4: sd-cli loads every weight file up front and sizes its compute buffers once. Each point is 1 GiB of headroom; turbo has points with guidance 1 only, since it runs at CFG 1"
+      - "Seconds per step measured there, the same for the S and L sets: about 16 at 1 MP, 36 at 2 MP and 107 at 4.3 MP with guidance 1, about twice that with guidance above 1"
       - "A request that does not fit fails with too_large_for_host, naming the largest size this host can render for that entry and guidance"
       - "For each entry the capability reports the largest pixel count this host can render with guidance 1 and above 1 (ASSET-001)"
     edge_cases:
       - condition: An entry without its measured table
         expected: It stays wip; nothing above 1 MP or with guidance above 1 is accepted for it
+      - condition: A 32 GiB M6 with Gemma 4 12B resident
+        expected: Every preset size up to 4.3 MP fits, with guidance for the full model
     refs:
       - crates/arkavo-image-gen/src/plan.rs
       - crates/arkavo-image-gen/src/catalog/pins.rs
-    changed: "2026-10-11"
+    changed: "2026-10-12"
 
   - id: IMG-019
     name: Request names its entry

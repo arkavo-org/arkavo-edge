@@ -146,13 +146,22 @@ fn every_entry_has_a_base_allowance() {
 #[arkavo_test_macros::spec("IMG-018")]
 #[test]
 fn allowance_lookup_takes_the_covering_point() {
-    let entry = resolve("qwen-image").unwrap().entry;
-    assert_eq!(entry.allowance(512 * 512, false), Some(3 << 30));
-    assert_eq!(entry.allowance(1024 * 1024, false), Some(3 << 30));
-    assert_eq!(entry.allowance(2048 * 2048, false), None);
-    assert_eq!(entry.allowance(512 * 512, true), None);
-    assert_eq!(entry.largest_measured(false), Some(1024 * 1024));
-    assert_eq!(entry.largest_measured(true), None);
+    let turbo = resolve("qwen-image-2.1-turbo").unwrap().entry;
+    let full = resolve("qwen-image-2.1").unwrap().entry;
+    let largest = 2400 * 1792;
+    for entry in [turbo, full] {
+        assert_eq!(entry.allowance(512 * 512, false), Some(1 << 30));
+        assert_eq!(entry.allowance(2048 * 2048, false), Some(1 << 30));
+        assert_eq!(entry.allowance(largest + 1, false), None);
+        assert_eq!(entry.largest_measured(false), Some(largest));
+    }
+    assert_eq!(
+        turbo.allowance(512 * 512, true),
+        None,
+        "turbo runs at CFG 1"
+    );
+    assert_eq!(full.allowance(1024 * 1024, true), Some(1 << 30));
+    assert_eq!(full.largest_measured(true), Some(largest));
 }
 
 /// Shared files are stored once: a hash always names the same repository,

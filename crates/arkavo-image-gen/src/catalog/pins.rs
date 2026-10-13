@@ -5,14 +5,39 @@ use super::{Allowance, Entry, Limits, PinnedFile, Profile, RuntimePin, SetLabel,
 
 const GIB: u64 = 1 << 30;
 
-/// Provisional working set until measurement on an M-series host replaces
-/// it (IMG-018): 3 GiB for 1024x1024 with guidance 1, and nothing else, so
-/// larger or guided runs are refused rather than guessed at.
-const PROVISIONAL: &[Allowance] = &[Allowance {
-    pixels: 1024 * 1024,
-    guided: false,
-    bytes: 3 * GIB,
-}];
+/// Working set above the weights, measured on a 32 GiB Apple M6 with the
+/// pinned runtime under its sandbox profile on 2026-10-12 (IMG-018). sd-cli
+/// loads every weight file up front and sizes its compute buffers once, so
+/// its peak footprint stayed at or below the weights at 1, 2 and 4.3 MP,
+/// with guidance 1 and 4, for the S and L sets. What remains is headroom.
+const MEASURED_HEADROOM: u64 = GIB;
+
+/// The largest Qwen-Image-2.1 preset, 2400x1792.
+const LARGEST: u64 = 2400 * 1792;
+
+const fn point(pixels: u64, guided: bool) -> Allowance {
+    Allowance {
+        pixels,
+        guided,
+        bytes: MEASURED_HEADROOM,
+    }
+}
+
+/// Turbo runs at CFG 1 only.
+const TURBO_ALLOWANCES: &[Allowance] = &[
+    point(1024 * 1024, false),
+    point(1408 * 1408, false),
+    point(LARGEST, false),
+];
+
+const FULL_ALLOWANCES: &[Allowance] = &[
+    point(1024 * 1024, false),
+    point(1408 * 1408, false),
+    point(LARGEST, false),
+    point(1024 * 1024, true),
+    point(1408 * 1408, true),
+    point(LARGEST, true),
+];
 
 pub const RUNTIME: RuntimePin = RuntimePin {
     build: 956,
@@ -132,7 +157,7 @@ const fn qwen_21_limits(default_side: u32) -> Limits {
         step: 32,
         min_side: 256,
         max_side: 2752,
-        max_pixels: 2400 * 1792,
+        max_pixels: LARGEST,
         default_width: default_side,
         default_height: default_side,
     }
@@ -183,7 +208,7 @@ pub(super) static ENTRIES: &[Entry] = &[
                 vae: &VAE,
             },
         ],
-        allowances: PROVISIONAL,
+        allowances: TURBO_ALLOWANCES,
     },
     Entry {
         id: "qwen-image-2.1",
@@ -230,6 +255,6 @@ pub(super) static ENTRIES: &[Entry] = &[
                 vae: &VAE,
             },
         ],
-        allowances: PROVISIONAL,
+        allowances: FULL_ALLOWANCES,
     },
 ];

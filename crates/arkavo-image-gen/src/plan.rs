@@ -123,23 +123,29 @@ mod tests {
         assert!(offers(budget(16, 3_000_000_000)).is_empty());
     }
 
-    /// IMG-018: only measured sizes are accepted, and the refusal names the
-    /// largest one that fits.
+    /// IMG-018: on a 32 GiB M6 every preset size up to 4.3 MP is accepted,
+    /// with guidance for the full model; a host whose budget holds the
+    /// weights but not their working set is refused, naming what it can do.
     #[arkavo_test_macros::spec("IMG-018")]
     #[test]
-    fn requests_beyond_the_measured_table_are_refused() {
-        let offer = offers(budget(32, 7_200_000_000))[0];
-        assert!(offer.check(1024 * 1024, false).is_ok());
-        assert!(offer.check(512 * 512, false).is_ok());
-        let err = offer.check(2048 * 2048, false).unwrap_err();
+    fn requests_are_checked_against_the_measured_table() {
+        let largest = 2400 * 1792;
+        let [turbo, full] = offers(budget(32, 7_200_000_000))[..] else {
+            panic!("both entries on 32 GiB");
+        };
+        assert!(turbo.check(largest, false).is_ok());
+        assert!(full.check(largest, true).is_ok());
+        assert_eq!(turbo.largest_pixels(false), Some(largest));
+        assert_eq!(full.largest_pixels(true), Some(largest));
+        assert_eq!(turbo.largest_pixels(true), None, "turbo runs at CFG 1");
+
+        let tight = Offer::for_test(full.entry, full.set, full.set.bytes() + GIB / 2);
+        let err = tight.check(1024 * 1024, false).unwrap_err();
         assert_eq!(err.code(), "too_large_for_host");
-        assert!(err.to_string().contains("1048576 pixels"), "{err}");
-        let err = offer.check(512 * 512, true).unwrap_err();
         assert!(
             err.to_string().contains("nothing at this guidance"),
             "{err}"
         );
-        assert_eq!(offer.largest_pixels(false), Some(BASE_PIXELS));
-        assert_eq!(offer.largest_pixels(true), None);
+        assert_eq!(tight.largest_pixels(false), None);
     }
 }

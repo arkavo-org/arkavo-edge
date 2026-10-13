@@ -192,7 +192,7 @@ mod tests {
 
         let small = mac(16);
         let listing = listing_for_budget(&small);
-        assert!(listing.contains("under the 12.2 GiB"), "{listing}");
+        assert!(listing.contains("under the 10.2 GiB"), "{listing}");
     }
 
     fn listing_for_budget(host: &Host) -> String {
