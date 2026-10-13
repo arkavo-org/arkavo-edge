@@ -13,7 +13,7 @@ An agent generates images when its host is macOS on Apple Silicon running the na
 | 24 GiB | Gemma 4 12B | 13.3 GiB | S (Q4_K diffusion, Q4_K_M text encoder) |
 | 16 GiB | any | at most 9.2 GiB | none: asks a member instead |
 
-Every other agent with a data plane offers the same `generate_image` tool and sends the work to a member that reports the capability.
+Every other agent with a data plane offers the same `generate_image` tool and sends the work to a member that reports the capability. A kit role can also leave generation to another role on the same Mac (see "Several roles on one Mac").
 
 The catalog has two entries:
 
@@ -56,19 +56,49 @@ Weights go in the Hugging Face cache (`HF_HOME/hub`, else `~/.cache/huggingface/
 
 The runtime is a pinned stable-diffusion.cpp release from GitHub, verified by SHA-256 like the weights. It lives under `~/Library/Application Support/arkavo/image-gen` with the lock files, and runtimes no pin of the running release names are deleted at agent start.
 
+## Several roles on one Mac
+
+Every agent on a qualifying Mac hosts image generation unless its kit role says otherwise. A role that lists `mcp_tools` grants hosts it only when they include `image_generation`; a role that lists none keeps the zero-config default (ASSET-010). The `generate_image` grant is not the signal, because a role that only asks members needs that tool too. So a kit can run an artist and other roles on one machine, with only the artist generating:
+
+```yaml
+roles:
+- id: artist
+  mcp_tools:
+  - server: arkavo
+    auth: none
+    tools: [generate_image, image_generation]
+- id: writer
+  mcp_tools:
+  - server: arkavo
+    auth: none
+    tools: [generate_image]
+```
+
+Start each role as its own process, from its own directory (`arkavo agent -c <kit> -n <role>`), the artist first. The writer's `generate_image` calls go to the artist over the mesh and the data plane, and the artist runs one generation at a time for all of them. Only the `image_generation` grant is read on this path; other tool grants are still not enforced there (docs/SWARMKIT.md).
+
+Editing a kit changes its content hash: `arkavo kit validate <path>` names the `kit.id` the edited file needs.
+
 Delivery uses the agent's existing Iroh data-plane node, the one released `arkavo` binaries already start (the `iroh` feature). The data plane carries plain references (name, ticket, content hash, size, media type) and knows nothing about images; the asset layer pairs those references with the manifest. An agent built without the node neither generates nor asks members, since nothing could be delivered.
 
 ## What is not done yet
 
 - Assets are not sealed to their requester. Sealing (ASSET-004) needs a TDF path that decrypts (TDF-002). Until then a ticket is a bearer reference for one hour, and tickets are written only into the task result for the party that asked.
-- The working-set allowance table is provisional: 3 GiB at 1 MP with guidance 1. Requests above 1 MP or with guidance above 1 are refused as `too_large_for_host` until the table is measured on Apple Silicon (IMG-018).
-- The macOS sandbox profile that denies sd-cli network access has not yet run with Metal (IMG-006).
+- Two machines have not run the swarm together; three roles on one M6 have (above). On one host every agent signs with the device's did:key, so a manifest's `producer` names the host, not the role.
+- Models that see tool names and descriptions only (Gemma 4 E2B and other small models) cannot pass `width` or `height`, so they get each entry's default size.
 
-## Verifying on Apple Silicon
+## Measured on Apple Silicon
 
-Run these on the M6 Mac mini from a checkout of this branch. Each closes one of the open items above. `docs/swarm-image-assets-handover.md` has the setup, acceptance criteria and a prompt for continuing there.
+On a 32 GiB Apple M6 Mac mini with the L sets, under the sandbox profile, on 2026-10-12. Seconds per step were the same for the S set; guidance above 1 doubles them.
 
-Generate with the real weights, Metal and the sandbox profile (about 12 GB on the first run: the test uses the small set):
+| Size | Turbo, 8 steps | Full model, 40 steps, guidance 1 | Peak footprint (weights 17.0 GB) |
+|---|---|---|---|
+| 1024x1024 (1 MP) | 16 s/step, about 2.5 min | 15 s/step, about 10 min | 16.8 to 16.9 GB |
+| 1408x1408 (2 MP) | 36 s/step, about 6 min | 36 s/step, about 24 min | 16.2 to 16.3 GB |
+| 2400x1792 (4.3 MP) | 106 s/step, about 16 min | 107 s/step, about 73 min | 16.3 to 16.4 GB |
+
+sd-cli loads every weight file up front and sizes its compute buffers once, so its peak never passed the weights. Each allowance point is 1 GiB of headroom (IMG-018), and a 32 GiB M6 with Gemma 4 12B resident accepts every preset size. Metal ran under the sandbox profile as written, at the same speed as without it (IMG-006).
+
+To check again on another host:
 
 ```bash
 cargo test -p arkavo-image-gen --test real_runtime -- --ignored --nocapture
@@ -76,12 +106,10 @@ cargo test -p arkavo-image-gen --test real_runtime -- --ignored --nocapture
 
 It prints the PNG path, the time taken and the seconds per step at 1 MP. A sandbox denial shows in the error; widen the profile in `crates/arkavo-image-gen/src/run.rs` and in IMG-006, never by turning the sandbox off.
 
-Measure the allowance table. For each entry and weight set this host loads, run sd-cli at 1 MP (1024x1024), 2 MP (1408x1408) and 4.3 MP (2400x1792) with guidance 1, and the full model again with guidance 4 and a negative prompt. Record the peak physical footprint above the weights' size: use `footprint` or Activity Monitor rather than RSS, since Metal buffers may not show in RSS. The generator refuses those sizes while the table is provisional, so run sd-cli directly with the arguments it would pass; `RUST_LOG=arkavo_image_gen=debug` on a running agent logs them. Replace `PROVISIONAL` in `crates/arkavo-image-gen/src/catalog/pins.rs` with the measured points, and move IMG-018 out of wip.
-
 Check that the pins still match the Hub:
 
 ```bash
 cargo test -p arkavo-image-gen --lib pins_match_the_hub -- --ignored
 ```
 
-Run a two-machine swarm: start `arkavo agent` on the M6 and on a second machine, then from the second machine run the `arkavo chat --agent-id` example above against its own agent. Its model's `generate_image` call goes to the M6, and the PNGs come back through the second agent's data-plane node.
+Run a two-machine swarm: start `arkavo agent` on a generating Mac and on a second machine, then from the second machine run the `arkavo chat --agent-id` example above against its own agent. Its model's `generate_image` call goes to the Mac, and the PNGs come back through the second agent's data-plane node.

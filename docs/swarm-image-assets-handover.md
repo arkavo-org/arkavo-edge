@@ -2,6 +2,17 @@
 
 This picks up the swarm image work on the 32 GB M6 Mac mini. The code is on branch `feature/swarm-image-assets` (draft PR #740). Everything that can run without Apple Silicon was built and tested in a Linux container. What is left needs Metal, unified memory and a second machine. Usage and design are in `docs/swarm-image-assets.md`; behavior is in `specs/arkavo-edge/image-gen.spec.yaml` and `specs/arkavo-edge/swarm-assets.spec.yaml`.
 
+## Status after the M6 session
+
+Done on the 32 GiB M6 on 2026-10-12; details and numbers are in `docs/swarm-image-assets.md` and PR #740.
+
+- Real generation on Metal under the sandbox profile passes, with the profile unchanged (IMG-006 out of wip).
+- The allowance table is measured and `PROVISIONAL` is gone: peak footprint stayed at or below the weights at every size and guidance (IMG-018 out of wip).
+- `arkavo model list` and `arkavo model download qwen-image` work; weights now live in the Hugging Face cache.
+- A three-role swarm on the one M6 (artist, writer, designer) delivered PNGs to `./arkavo-assets/<task id>/` through delegation, with progress relayed.
+
+Still open: the two-machine run below. On one host every agent shares the device did:key, so the manifest `producer` check needs a second machine.
+
 ## State at handover
 
 Working and tested on Linux:
@@ -67,9 +78,12 @@ For each entry, with the weight set this host loads (L on 32 GB), measure the pe
 On the M6 and on a second machine on the same network:
 
 ```bash
-arkavo kit init artist  # once per machine, if it has no kit yet
-arkavo agent            # each machine
+arkavo kit init artist  # on the M6
+arkavo kit init writer  # on the second machine
+arkavo agent            # each machine, the M6 first
 ```
+
+`kit init` names every role `agent`, and the mesh tells members apart by that name, so give each machine's role its own `id` (`artist`, `writer`) before starting. `arkavo kit validate` then names the `kit.id` the edited file needs.
 
 From the second machine, ask its own agent. It cannot generate, so it has to delegate:
 
