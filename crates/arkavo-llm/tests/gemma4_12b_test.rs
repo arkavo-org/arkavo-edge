@@ -134,6 +134,47 @@ mod tests {
         );
     }
 
+    /// Regression: with a token cap, as every router path passes one, the
+    /// template's output parser was recorded on an inner provider and lost,
+    /// so Gemma 4's `<|"|>`-quoted string arguments reached the text
+    /// fallback and were dropped (`generate_image` saw no `prompt`).
+    #[tokio::test]
+    #[ignore = "requires local Gemma-4-12B model (~7GB)"]
+    async fn test_gemma4_12b_tool_call_arguments_survive_a_token_cap() {
+        let Some(provider) = load_provider() else {
+            eprintln!("Skipping: Gemma-4-12B model not found in HuggingFace cache");
+            return;
+        };
+        let tools: serde_json::Value = serde_json::from_str(TEST_TOOLS).unwrap();
+        let messages = vec![Message {
+            role: Role::User,
+            content: "What's the weather in New York?".to_string(),
+            ..Default::default()
+        }];
+
+        let response = provider
+            .complete_with_tools(messages, Some(tools), Some(256))
+            .await
+            .expect("completion failed");
+
+        let call = response
+            .tool_calls
+            .first()
+            .unwrap_or_else(|| panic!("no tool call; content: {}", response.content));
+        assert_eq!(call.tool_name, "get_weather");
+        let location = call.arguments.get("location").and_then(|l| l.as_str());
+        assert!(
+            location.is_some_and(|l| l.contains("New York")),
+            "expected the location argument, got: {}",
+            call.arguments
+        );
+        assert!(
+            !response.content.contains("<|tool_call>"),
+            "the call was left in the text: {}",
+            response.content
+        );
+    }
+
     /// Three tools with distinct purposes — verify the model selects the
     /// correct one (and the right argument) for a time query rather than
     /// defaulting to the first tool.
