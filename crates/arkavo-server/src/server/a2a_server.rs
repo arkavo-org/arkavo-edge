@@ -297,6 +297,12 @@ impl A2aServer {
         self.agent_metadata.write().await.role_id = role_id;
     }
 
+    /// Whether this agent may host image generation, from its kit role's
+    /// grants (ASSET-010). Takes effect when the server starts.
+    pub async fn set_image_generation_hosting(&self, hosting: super::assets::Hosting) {
+        self.agent_metadata.write().await.image_generation = hosting;
+    }
+
     /// Set the URL clients are told to connect to. `start_with_addr` sets
     /// it to the bound address; a caller that bound a wildcard address
     /// replaces it with an address other machines can reach.
@@ -418,18 +424,20 @@ impl A2aServer {
             .filter(|&bytes| bytes > 0)
             .or_else(|| router.map(|r| r.default_chat_model().size_bytes()))
             .unwrap_or(0);
-        let identity = {
+        let (identity, hosting) = {
             let metadata = self.agent_metadata.read().await;
-            super::assets::Identity {
+            let identity = super::assets::Identity {
                 agent_id: metadata.name.clone(),
                 did: metadata.did.clone(),
-            }
+            };
+            (identity, metadata.image_generation)
         };
         super::assets::AssetService::for_agent(
             node,
             Some(self.mesh_state.clone()),
             identity,
             resident,
+            hosting,
         )
         .await
     }

@@ -78,7 +78,7 @@ pub(crate) async fn accept_request(
         None => {
             let error = TaskError {
                 code: UNAVAILABLE.to_string(),
-                message: "this agent's host does not generate images".to_string(),
+                message: "this agent does not generate images".to_string(),
                 details: None,
             };
             if let Err(e) = task_executor.fail_task(&task_id, error).await {

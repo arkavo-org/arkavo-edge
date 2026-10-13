@@ -243,3 +243,25 @@ scenarios:
     refs:
       - crates/arkavo-server/src/server/assets/delegate.rs
     changed: "2026-10-11"
+
+  - id: ASSET-010
+    name: A kit role's tool grants decide whether it hosts generation
+    criticality: high
+    given:
+      - An agent started as a SwarmKit role (arkavo agent -c <kit> -n <role>) on a host that qualifies (IMG-001)
+    when: Its asset service starts
+    then:
+      - "A role that lists no mcp_tools grants hosts image generation wherever the host qualifies: the zero-config default"
+      - "A role that lists mcp_tools grants hosts it only when they include image_generation, the capability name (ASSET-001)"
+      - "A role that does not host it builds no generator, fetches nothing, reports no image_generation capability and fails asset requests sent to it with IMAGE_GENERATION_UNAVAILABLE; its generate_image tool asks members (ASSET-002)"
+      - "The generate_image grant alone does not make a role host generation: a role that only asks members needs that tool too"
+      - "Only this grant is read on this path; the role's other tool grants are still not enforced here (docs/SWARMKIT.md)"
+    edge_cases:
+      - condition: Several roles of one kit on one Mac, one granted image_generation
+        expected: Only that role generates; the others delegate to it over the mesh and the data plane
+      - condition: A kit reloaded while the agent runs
+        expected: Hosting stays as it was decided at start
+    refs:
+      - crates/arkavo-cli/src/commands/agent_kit.rs
+      - crates/arkavo-server/src/server/assets.rs
+    changed: "2026-10-12"

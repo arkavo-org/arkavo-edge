@@ -44,30 +44,51 @@ pub struct AssetService {
     transport: IrohTransport,
 }
 
+/// Whether an agent may host image generation (ASSET-010).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Hosting {
+    /// Wherever the host qualifies (IMG-001): the zero-config default.
+    #[default]
+    WhereQualified,
+    /// Never: the agent's kit role lists its tools without
+    /// `image_generation`, so it only asks members.
+    Withheld,
+}
+
 impl AssetService {
     /// The service for an agent with a data plane: it generates here when
-    /// the host qualifies (IMG-001) and asks members otherwise. Without a
-    /// data plane nothing could be delivered, so there is no service.
+    /// the host qualifies (IMG-001) and `hosting` allows it, and asks
+    /// members otherwise. Without a data plane nothing could be delivered,
+    /// so there is no service.
     pub async fn for_agent(
         node: Option<Arc<IrohNode>>,
         mesh: Option<Arc<arkavo_mcp_mesh::MeshToolsState>>,
         identity: Identity,
         resident_chat_bytes: u64,
+        hosting: Hosting,
     ) -> Option<Arc<Self>> {
         let node = node?;
         let did = identity.did.clone();
-        let generator = tokio::task::spawn_blocking(move || {
-            Generator::for_this_host(resident_chat_bytes, did).map(Arc::new)
-        })
-        .await
-        .ok()
-        .flatten();
-        match &generator {
-            Some(g) => info!(
+        let generator = match hosting {
+            Hosting::WhereQualified => tokio::task::spawn_blocking(move || {
+                Generator::for_this_host(resident_chat_bytes, did).map(Arc::new)
+            })
+            .await
+            .ok()
+            .flatten(),
+            Hosting::Withheld => None,
+        };
+        match (&generator, hosting) {
+            (Some(g), _) => info!(
                 models = g.offers().len(),
                 "image generation offered on this host"
             ),
-            None => info!("this host does not generate images; members are asked instead"),
+            (None, Hosting::Withheld) => info!(
+                "this role's tool grants leave out image_generation; members are asked instead"
+            ),
+            (None, Hosting::WhereQualified) => {
+                info!("this host does not generate images; members are asked instead");
+            }
         }
         let transport = IrohTransport::new(node);
         let delegate = mesh.map(|mesh| {

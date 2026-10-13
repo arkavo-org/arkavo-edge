@@ -107,7 +107,7 @@ arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n policy_e
 arkavo agent -c examples/compliance-kit/compliance-kit.swarmkit.yaml -n auditor -p 8343
 ```
 
-`-n` takes a role `id` from the manifest; without it the first role runs. Each process takes the role's id, model, and skill instructions, and the kit-level `runtime` block (`listen`, `mdns`, `mode`, `mcp_servers`, `preflight`, `cloud_policy`). The role's `isolation`, network egress, budget, `inference`, `context`, and `mcp_tools` grant fields are not enforced on this path.
+`-n` takes a role `id` from the manifest; without it the first role runs. Each process takes the role's id, model, and skill instructions, and the kit-level `runtime` block (`listen`, `mdns`, `mode`, `mcp_servers`, `preflight`, `cloud_policy`). The role's `isolation`, network egress, budget, `inference`, `context`, and `mcp_tools` grant fields are not enforced on this path. One grant is read: a role that lists `mcp_tools` grants hosts local image generation only when they include `image_generation` (ASSET-010), so several roles of one kit can run on one Mac with one of them generating.
 
 Send a running role work with `arkavo chat --agent-id <role-id>` or `arkavo task --agent-id <role-id> '<task>'`.
 

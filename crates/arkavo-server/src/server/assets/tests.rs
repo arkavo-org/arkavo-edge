@@ -161,3 +161,30 @@ async fn no_generations_add_nothing() {
     assert!(service.descriptor().is_none());
     provider.shutdown().await.unwrap();
 }
+
+/// ASSET-010: an agent whose role withholds image generation builds no
+/// generator, reports no capability and answers no asset request, whatever
+/// its host; it keeps generate_image, which asks members.
+#[spec("ASSET-010")]
+#[tokio::test]
+async fn a_withheld_role_only_asks_members() {
+    let plane = transport().await;
+    let service = AssetService::for_agent(
+        Some(plane.node().clone()),
+        Some(Arc::new(arkavo_mcp_mesh::MeshToolsState::new())),
+        super::Identity {
+            agent_id: "writer".into(),
+            did: None,
+        },
+        0,
+        super::Hosting::Withheld,
+    )
+    .await
+    .expect("a data plane gives a service");
+
+    assert!(service.descriptor().is_none());
+    let mut registry = arkavo_mcp_tools::ToolRegistry::empty();
+    service.register_tools(&mut registry, Arc::new(arkavo_image_gen::Outbox::default()));
+    assert!(registry.get("generate_image").is_some());
+    plane.shutdown().await.unwrap();
+}

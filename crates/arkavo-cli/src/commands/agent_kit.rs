@@ -7,6 +7,7 @@
 //! exists anywhere. Product AGENTS.md is never read here — see
 //! `arkavo_swarmkit::discover` for the rationale and the migrate hint.
 
+use arkavo_server::server::assets::Hosting;
 use std::path::Path;
 
 use arkavo_protocol::agent_config::AgentMode;
@@ -256,7 +257,26 @@ fn role_to_agent_config(
         a2a_enabled: true,
         a2a_service_type: None,
         swarm: None,
+        image_generation: image_generation_hosting(role),
     })
+}
+
+/// A role that lists its tools hosts image generation only when it is
+/// granted `image_generation`; a role that lists none keeps the zero-config
+/// default and hosts it wherever the host qualifies (ASSET-010). The
+/// `generate_image` tool is not the signal: a role that only asks members
+/// needs it too.
+fn image_generation_hosting(role: &RoleRuntimeView) -> Hosting {
+    let granted = role.mcp_tool_grants.is_empty()
+        || role
+            .mcp_tool_grants
+            .iter()
+            .any(|tool| tool == arkavo_image_gen::CAPABILITY);
+    if granted {
+        Hosting::WhereQualified
+    } else {
+        Hosting::Withheld
+    }
 }
 
 fn to_agent_mode(mode: RuntimeMode) -> AgentMode {
@@ -344,6 +364,7 @@ fn default_agent_config() -> AgentConfig {
         a2a_enabled: true,
         a2a_service_type: None,
         swarm: None,
+        image_generation: Hosting::WhereQualified,
     }
 }
 
@@ -824,6 +845,47 @@ provenance:
       signature: "AAA"
 "#
         .to_string()
+    }
+
+    /// ASSET-010: a role that lists its tools hosts image generation only
+    /// when granted image_generation; generate_image alone, which a role
+    /// that asks members needs, is not enough. A role that lists no tools
+    /// keeps the zero-config default.
+    #[arkavo_test_macros::spec("ASSET-010")]
+    #[test]
+    fn tool_grants_decide_whether_a_role_hosts_image_generation() {
+        let grants = |tools: &[&str]| {
+            if tools.is_empty() {
+                "mcp_tools: []".to_string()
+            } else {
+                format!(
+                    "mcp_tools:\n      - server: arkavo\n        auth: none\n        tools: [{}]",
+                    tools.join(", ")
+                )
+            }
+        };
+        for (tools, hosting) in [
+            (&[][..], Hosting::WhereQualified),
+            (&["generate_image"][..], Hosting::Withheld),
+            (
+                &["generate_image", "image_generation"][..],
+                Hosting::WhereQualified,
+            ),
+        ] {
+            let dir = tempdir();
+            let path = dir.path().join("agent.swarmkit.yaml");
+            fs::write(
+                &path,
+                minimal_kit_yaml().replace("mcp_tools: []", &grants(tools)),
+            )
+            .unwrap();
+            let configs = resolve_agent_configs(Some(&path), None, None, dir.path()).unwrap();
+            assert_eq!(configs[0].image_generation, hosting, "{tools:?}");
+        }
+        assert_eq!(
+            default_agent_config().image_generation,
+            Hosting::WhereQualified
+        );
     }
 
     #[arkavo_test_macros::spec("SK-105")]
