@@ -107,7 +107,7 @@ async fn invalid_requests_are_refused_before_starting() {
         .unwrap();
     assert_eq!(result["code"], "invalid_params");
     assert!(member.calls.lock().unwrap().is_empty());
-    assert!(outbox.take().is_empty());
+    assert_eq!(outbox.take().len(), 0);
     let err = tool.execute(json!({"prompt": 3})).await.unwrap_err();
     assert!(matches!(err, ToolError::InvalidParams(_)));
 }

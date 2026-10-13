@@ -28,11 +28,12 @@ git checkout feature/swarm-image-assets
 # llama.cpp is not tracked in git; the README pins it at b10615
 git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
 git -C vendor/llama.cpp checkout f280b26983ad0fdb705a0d9ebf0503e76f2899b0
-brew install ccache cmake    # ccache is required for development builds
 cargo build -p arkavo        # debug build; no --release during development
 ```
 
-Weights go to `~/Library/Application Support/arkavo/image-gen`. Expect about 10 GB for the test's S set, and about 17 GB for the L set the agent itself loads on 32 GB with Gemma 4 12B resident. The VAE is shared. Keep 35 GB free.
+Building from source needs ccache and cmake on `PATH` (CLAUDE.md requires ccache for development builds). Running arkavo needs neither: the image runtime is the pinned stable-diffusion.cpp release, which links only macOS system frameworks, and weights are fetched by the hf-hub crate compiled into the binary.
+
+Weights go to the Hugging Face cache (`~/.cache/huggingface/hub`); the runtime goes to `~/Library/Application Support/arkavo/image-gen`. Expect about 10 GB for the test's S set, and about 17 GB for the L set the agent itself loads on 32 GB with Gemma 4 12B resident. The VAE is shared. Keep 35 GB free.
 
 ## Task: real generation on Metal, under the sandbox (IMG-006)
 

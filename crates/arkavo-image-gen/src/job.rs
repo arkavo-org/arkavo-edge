@@ -264,6 +264,6 @@ mod tests {
             |_| async move { Ok(generated()) },
         ));
         assert_eq!(outbox.take().len(), 2);
-        assert!(outbox.take().is_empty());
+        assert_eq!(outbox.take().len(), 0);
     }
 }

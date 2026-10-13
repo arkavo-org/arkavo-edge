@@ -10,7 +10,7 @@ use tokio::sync::{OnceCell, Semaphore};
 use tokio::time::Instant;
 
 use crate::args::{ModelPaths, sd_args, write_prompts};
-use crate::catalog::{ALIASES, RUNTIME, RuntimePin, WeightSet, pinned_store_names};
+use crate::catalog::{ALIASES, RUNTIME, RuntimePin, WeightSet};
 use crate::descriptor::{Descriptor, ModelRow};
 use crate::error::{ImageGenError, Result};
 use crate::fetch::Fetcher;
@@ -47,7 +47,7 @@ pub struct Generator {
 
 impl Generator {
     /// The generator for this machine, or `None` when it does not qualify
-    /// (IMG-001). Prunes files no pin of this release names (IMG-020).
+    /// (IMG-001). Prunes runtimes no pin of this release names (IMG-020).
     pub fn for_this_host(resident_chat_bytes: u64, producer: Option<String>) -> Option<Self> {
         let host = Host::detect();
         if !host.qualifies() {
@@ -58,7 +58,7 @@ impl Generator {
             return None;
         }
         let store = Store::new(Store::default_root()?);
-        if let Err(e) = store.prune(&pinned_store_names(), RUNTIME.tag) {
+        if let Err(e) = store.prune(RUNTIME.tag) {
             tracing::warn!(error = %e, "could not prune image-gen files");
         }
         let generator = Self::new(host, store, offers, &RUNTIME, Sandbox::MacOs).ok()?;

@@ -155,17 +155,25 @@ fn allowance_lookup_takes_the_covering_point() {
     assert_eq!(entry.largest_measured(true), None);
 }
 
-/// Shared files are stored once, under a name that keeps the extension.
+/// Shared files are stored once: a hash always names the same repository,
+/// commit and path, so entries sharing a file share its cache link and
+/// blob. The path keeps the extension stable-diffusion.cpp picks a loader by.
 #[arkavo_test_macros::spec("IMG-004")]
 #[test]
-fn store_names_dedupe_shared_files() {
-    let names = pinned_store_names();
-    let distinct: HashSet<_> = all_files().iter().map(|f| f.sha256).collect();
-    assert_eq!(names.len(), distinct.len());
-    for name in &names {
+fn shared_files_have_one_cache_location() {
+    let mut locations = std::collections::HashMap::new();
+    for file in all_files() {
+        let location = (file.repo, file.revision, file.path);
+        assert_eq!(
+            *locations.entry(file.sha256).or_insert(location),
+            location,
+            "{}",
+            file.sha256
+        );
         assert!(
-            name.ends_with(".gguf") || name.ends_with(".safetensors"),
-            "{name}"
+            file.path.ends_with(".gguf") || file.path.ends_with(".safetensors"),
+            "{}",
+            file.path
         );
     }
 }

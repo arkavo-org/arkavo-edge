@@ -75,18 +75,14 @@ impl Generator {
 
     fn spawn_fetch(&self, set: &'static WeightSet) -> InFlight {
         let (tx, rx) = watch::channel((0, self.store.missing_bytes(set)));
-        let (store, fetcher, lock) = (
-            self.store.clone(),
-            self.fetcher.clone(),
-            self.fetch_lock.clone(),
-        );
+        let (store, lock) = (self.store.clone(), self.fetch_lock.clone());
         let task = tokio::spawn(async move {
             let _fetching = lock.lock().await;
             let _host = HostLock::acquire(store.root(), crate::lock::FETCH, None)
                 .await
                 .map_err(Arc::new)?;
             store
-                .fetch_set(&fetcher, set, &|fetched, needed| {
+                .fetch_set(set, &|fetched, needed| {
                     tx.send_replace((fetched, needed));
                 })
                 .await

@@ -17,6 +17,8 @@ async-trait = { workspace = true }
 dirs = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
+# Weights go in the Hugging Face cache, beside the chat models.
+hf-hub = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

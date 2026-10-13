@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 use crate::catalog::{PinnedFile, RuntimePin, SetLabel, WeightSet, resolve};
 use crate::generator::Generator;
@@ -143,6 +143,72 @@ echo "[INFO ] generate_image completed""#,
 
 const GIB: u64 = 1 << 30;
 
+/// Answers a resolve URL the way the Hub does for an LFS file: the commit
+/// and the file's SHA-256 as its etag, and the requested range of the body.
+struct HubFile {
+    body: Vec<u8>,
+    revision: String,
+    etag: String,
+    delay: Duration,
+}
+
+impl Respond for HubFile {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let last = self.body.len().saturating_sub(1);
+        let (start, stop) = request
+            .headers
+            .get("range")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("bytes="))
+            .and_then(|v| v.split_once('-'))
+            .and_then(|(a, b)| Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)))
+            .map_or((0, last), |(a, b)| (a, b.min(last)));
+        ResponseTemplate::new(206)
+            .insert_header("x-repo-commit", self.revision.as_str())
+            .insert_header("x-linked-etag", format!("\"{}\"", self.etag).as_str())
+            .insert_header(
+                "content-range",
+                format!("bytes {start}-{stop}/{}", self.body.len()).as_str(),
+            )
+            .set_body_bytes(self.body[start..=stop].to_vec())
+            .set_delay(self.delay)
+    }
+}
+
+/// Serve `file` with `body` as the Hub would, expecting its bytes `times`.
+///
+/// The size and etag probes before each fetch are answered without
+/// counting; a body that differs from the pin is served with the body's own
+/// etag, as the Hub would serve another file.
+pub async fn serve_hub_file(
+    server: &MockServer,
+    file: &PinnedFile,
+    body: &[u8],
+    times: u64,
+    delay: Duration,
+) {
+    let route = format!("/{}/resolve/{}/{}", file.repo, file.revision, file.path);
+    let respond = |delay| HubFile {
+        body: body.to_vec(),
+        revision: file.revision.to_string(),
+        etag: hex::encode(Sha256::digest(body)),
+        delay,
+    };
+    Mock::given(method("GET"))
+        .and(path(route.clone()))
+        .and(header("range", "bytes=0-0"))
+        .respond_with(respond(Duration::ZERO))
+        .with_priority(1)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(route))
+        .respond_with(respond(delay))
+        .expect(times)
+        .mount(server)
+        .await;
+}
+
 fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
@@ -206,19 +272,8 @@ pub async fn fake_generator(fetches: u64, delay: Duration) -> FakeGenerator {
         .iter()
         .map(|(name, body)| pinned(name, body))
         .collect();
-    for ((name, body), _) in files.iter().zip(&pins) {
-        Mock::given(method("GET"))
-            .and(path(format!(
-                "/test/weights/resolve/1111111111111111111111111111111111111111/{name}"
-            )))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_bytes(*body)
-                    .set_delay(delay),
-            )
-            .expect(fetches)
-            .mount(&server)
-            .await;
+    for ((_, body), pin) in files.iter().zip(&pins) {
+        serve_hub_file(&server, pin, body, fetches, delay).await;
     }
     let set: &'static WeightSet = Box::leak(Box::new(WeightSet {
         label: SetLabel::L,
@@ -232,7 +287,11 @@ pub async fn fake_generator(fetches: u64, delay: Duration) -> FakeGenerator {
         chip: Some("Apple M6".into()),
         memory_bytes: 32 * GIB,
     };
-    let store = Store::with_hub(root.path().to_path_buf(), server.uri());
+    let store = Store::with_hub(
+        root.path().join("image-gen"),
+        hf_hub::Cache::new(root.path().join("hub")),
+        server.uri(),
+    );
     let generator = Generator::new(
         host,
         store,

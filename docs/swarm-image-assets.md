@@ -52,7 +52,9 @@ arkavo model download qwen-image-quality   # full model: about 7.7 GB more; the 
 arkavo model list                          # shows the set and download size this host gets
 ```
 
-The runtime is a pinned stable-diffusion.cpp release, downloaded and verified by SHA-256 like the weights. Files live under `~/Library/Application Support/arkavo/image-gen`, and files no pin of the running release names are deleted at agent start.
+Weights go in the Hugging Face cache (`HF_HOME/hub`, else `~/.cache/huggingface/hub`) through the hf-hub crate, beside the chat models, so `hf cache ls` lists them and `hf cache rm` removes them. Each file is fetched at its pinned commit and hashed once per agent process before it is loaded; a file already fetched with `hf download <repo> <file> --revision <commit>` is used once its hash matches. No Hugging Face token is sent.
+
+The runtime is a pinned stable-diffusion.cpp release from GitHub, verified by SHA-256 like the weights. It lives under `~/Library/Application Support/arkavo/image-gen` with the lock files, and runtimes no pin of the running release names are deleted at agent start.
 
 Delivery uses the agent's existing Iroh data-plane node, the one released `arkavo` binaries already start (the `iroh` feature). The data plane carries plain references (name, ticket, content hash, size, media type) and knows nothing about images; the asset layer pairs those references with the manifest. An agent built without the node neither generates nor asks members, since nothing could be delivered.
 

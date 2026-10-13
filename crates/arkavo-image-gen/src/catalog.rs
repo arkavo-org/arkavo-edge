@@ -35,14 +35,6 @@ impl PinnedFile {
             self.repo, self.revision, self.path
         )
     }
-
-    /// The name the file is stored under. Keyed by hash so a file several
-    /// entries use is stored once, keeping the upstream name because
-    /// stable-diffusion.cpp picks a loader by extension.
-    pub fn store_name(&self) -> String {
-        let base = self.path.rsplit('/').next().unwrap_or(self.path);
-        format!("{}-{base}", self.sha256)
-    }
 }
 
 /// The stable-diffusion.cpp release the generator runs.
@@ -204,16 +196,6 @@ pub fn names() -> Vec<&'static str> {
         .iter()
         .map(|e| e.id)
         .chain(ALIASES.iter().map(|(alias, _)| *alias))
-        .collect()
-}
-
-/// Every file the catalog and the runtime pin name, by store name.
-pub fn pinned_store_names() -> std::collections::BTreeSet<String> {
-    entries()
-        .iter()
-        .flat_map(|e| e.sets.iter())
-        .flat_map(WeightSet::files)
-        .map(PinnedFile::store_name)
         .collect()
 }
 
