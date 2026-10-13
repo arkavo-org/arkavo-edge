@@ -25,7 +25,7 @@ use tokio::time::Instant;
 use super::super::serve::{accept_request, request_in};
 use super::super::tests::{QUICK, executor, open_task, take_delivery, transport};
 use super::super::{AssetService, Assets, Identity, deliveries_in};
-use super::MeshDelegate;
+use super::{Discover, MeshDelegate};
 
 const QUIET_TASK: &str = "0d6f1a8e-3b7c-4e0f-9a51-6c2d8b7e4f10";
 
@@ -143,7 +143,11 @@ fn commander(mesh: Arc<MeshToolsState>, transport: IrohTransport, stall: Duratio
         agent_id: "commander".into(),
         did: Some("did:key:z6Mkcommander".into()),
     };
-    MeshDelegate::new(mesh, identity, transport).with_patience(QUICK, stall)
+    // Members are only the ones a test starts, never agents on the LAN.
+    let nowhere: Discover = Arc::new(|| Box::pin(async {}));
+    MeshDelegate::new(mesh, identity, transport)
+        .with_patience(QUICK, stall)
+        .with_discovery(nowhere)
 }
 
 /// ASSET-002, ASSET-006, ASSET-009: a member that refuses is passed over;
@@ -248,6 +252,44 @@ async fn without_a_capable_member_the_work_fails() {
 
     assert_eq!(error.code(), "no_capable_member", "{error}");
     writer.stop().await;
+    own_plane.shutdown().await.unwrap();
+}
+
+/// ASSET-002 regression: a requester that knows no member yet looks for
+/// members before giving up. Its agent loop may have last looked before the
+/// generating member started, or never looked, for a role without a purpose.
+#[spec("ASSET-002")]
+#[tokio::test]
+async fn members_are_looked_for_when_none_is_known() {
+    let fake = fake_generator(0, Duration::ZERO).await;
+    let descriptor = serde_json::to_value(fake.generator.descriptor()).unwrap();
+    let network = Arc::new(MeshToolsState::new());
+    let artist = Member::start(&network, "artist", Some(descriptor), Answer::Busy).await;
+    let mesh = Arc::new(MeshToolsState::new());
+    let looks = Arc::new(Mutex::new(0));
+    let discover: Discover = {
+        let (network, mesh, looks) = (network.clone(), mesh.clone(), looks.clone());
+        Arc::new(move || {
+            let (network, mesh, looks) = (network.clone(), mesh.clone(), looks.clone());
+            Box::pin(async move {
+                *looks.lock().unwrap() += 1;
+                let found = network.agent_addresses.read().await.clone();
+                mesh.agent_addresses.write().await.extend(found);
+            })
+        })
+    };
+    let own_plane = transport().await;
+    let delegate =
+        commander(mesh, own_plane.clone(), Duration::from_mins(5)).with_discovery(discover);
+
+    let error = delegate
+        .generate(&coin(), Instant::now() + Duration::from_secs(30), &|_| {})
+        .await
+        .unwrap_err();
+
+    assert_eq!(*looks.lock().unwrap(), 1);
+    assert!(error.to_string().contains("artist refused"), "{error}");
+    artist.stop().await;
     own_plane.shutdown().await.unwrap();
 }
 

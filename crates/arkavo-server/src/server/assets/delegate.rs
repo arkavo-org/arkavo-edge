@@ -9,6 +9,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::future::BoxFuture;
+
 use arkavo_image_gen::catalog;
 use arkavo_image_gen::tool::Delegate;
 use arkavo_image_gen::{
@@ -37,12 +39,16 @@ const PATIENCE: Patience = Patience {
 
 type Result<T> = std::result::Result<T, ImageGenError>;
 
+/// Looks for members on the network: an mDNS browse, or a stand-in in tests.
+pub(super) type Discover = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
+
 pub(super) struct MeshDelegate {
     mesh: Arc<MeshToolsState>,
     identity: Identity,
     transport: IrohTransport,
     fetch_policy: FetchPolicy,
     stall: Duration,
+    discover: Discover,
 }
 
 impl MeshDelegate {
@@ -51,10 +57,16 @@ impl MeshDelegate {
         identity: Identity,
         transport: IrohTransport,
     ) -> Self {
+        let browsed = mesh.clone();
+        let discover: Discover = Arc::new(move || {
+            let mesh = browsed.clone();
+            Box::pin(async move { mesh.discover_peers().await })
+        });
         Self {
             mesh,
             identity,
             transport,
+            discover,
             fetch_policy: FetchPolicy::default(),
             stall: STALL,
         }
@@ -72,8 +84,27 @@ impl MeshDelegate {
         self
     }
 
-    /// Members that report image generation, other than this agent.
+    /// Members found some other way than mDNS, for a test.
+    #[cfg(test)]
+    pub(super) fn with_discovery(mut self, discover: Discover) -> Self {
+        self.discover = discover;
+        self
+    }
+
+    /// Members that report image generation, other than this agent. With
+    /// none known it looks once more: the agent loop's last look may
+    /// predate a member that has just started, and an agent whose role has
+    /// no purpose runs no loop to look at all.
     async fn capable(&self) -> Vec<(Member, Descriptor)> {
+        let known = self.reporting().await;
+        if !known.is_empty() {
+            return known;
+        }
+        (self.discover)().await;
+        self.reporting().await
+    }
+
+    async fn reporting(&self) -> Vec<(Member, Descriptor)> {
         self.mesh
             .member_reports()
             .await
