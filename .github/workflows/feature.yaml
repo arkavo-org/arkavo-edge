@@ -460,12 +460,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
 
-      - uses: dtolnay/rust-toolchain@nightly
+      # nightly-2026-10-13 (822182db4), which is still the nightly channel,
+      # ICEs in compare_const_generic_param_types while checking iroh-blobs'
+      # cross-crate `async fn read<const L: usize>` impl of
+      # iroh_io::AsyncStreamReader. 2026-10-08 already defaults to the
+      # next-generation trait solver and type-checks this workspace. Move the
+      # pin forward once `cargo check -p arkavo-tdf-iroh` passes on a newer nightly.
+      - uses: dtolnay/rust-toolchain@master
+        id: toolchain
+        with:
+          toolchain: nightly-2026-10-08
 
       - name: Record toolchain version
         run: |
           # The rustc commit hash and date pin which nightly introduced a regression.
-          rustc +nightly --version --verbose
+          rustc +${{ steps.toolchain.outputs.name }} --version --verbose
 
       - name: Setup sccache for C++ caching
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -487,7 +496,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-        run: cargo +nightly check --locked -p arkavo --bins --tests
+        run: cargo +${{ steps.toolchain.outputs.name }} check --locked -p arkavo --bins --tests
 
       - name: Report runner headroom
         if: always()

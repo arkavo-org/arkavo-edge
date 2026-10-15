@@ -221,7 +221,9 @@ sha2 = "0.10"
 blake3 = "1.5"
 dirs = "6.0"
 toml = "0.8"
-serde_yaml = "0.9"
+# RUSTSEC-2024-0449: serde_yaml 0.9 depends on unmaintained unsafe-libyaml.
+# The package rename keeps existing `serde_yaml::` paths working.
+serde_yaml = { package = "noyalib-serde-yaml", version = "=0.0.57" }
 rand = "0.8"
 rand_distr = "0.4"
 bytes = "1.8"
@@ -258,7 +260,8 @@ sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio
 jsonrpsee = { version = "0.25", features = ["client", "server", "ws-client", "macros"] }
 tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
-rustls = { version = "0.23", default-features = false }
+# 0.23.45 and earlier are RUSTSEC-2026-0346 through RUSTSEC-2026-0349.
+rustls = { version = "0.23.46", default-features = false }
 webpki-roots = "0.26"
 governor = "0.10"
 dashmap = "6.1"

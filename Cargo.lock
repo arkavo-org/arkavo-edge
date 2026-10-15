@@ -861,13 +861,13 @@ dependencies = [
  "hf-hub 0.5.0 (git+https://github.com/huggingface/hf-hub?rev=cc015aa814e46ef880b57e6c955674f9fcc5084b)",
  "libc",
  "mdns-sd",
+ "noyalib-serde-yaml",
  "opentdf",
  "rand 0.8.6",
  "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.10.9",
  "tempfile",
  "tokio",
@@ -1984,6 +1984,7 @@ dependencies = [
  "futures",
  "glob",
  "hf-hub 0.5.0 (git+https://github.com/huggingface/hf-hub?rev=cc015aa814e46ef880b57e6c955674f9fcc5084b)",
+ "noyalib-serde-yaml",
  "opentdf",
  "rand 0.8.6",
  "rand_distr",
@@ -1991,7 +1992,6 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
@@ -2155,13 +2155,13 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "notify",
+ "noyalib-serde-yaml",
  "rand 0.8.6",
  "reqwest 0.12.28",
  "rustls",
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.10.9",
  "sqlx",
  "sysinfo",
@@ -2255,10 +2255,10 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "chrono",
+ "noyalib-serde-yaml",
  "semver 1.0.28",
  "serde",
  "serde_json",
- "serde_yaml",
  "thiserror 2.0.18",
 ]
 
@@ -6169,9 +6169,9 @@ dependencies = [
 
 [[package]]
 name = "iroh-blobs"
-version = "0.103.0"
+version = "0.103.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5be50b0e2d0a9ba65cee4e0dfb708b3704e02ad12bd4c14c6307e94245943126"
+checksum = "a3148ad01585eb6b7cfb641e4100564f4f56db644f4cbed8c10ab2478663161f"
 dependencies = [
  "arrayvec",
  "bao-tree",
@@ -7732,6 +7732,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "noyalib"
+version = "0.0.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70b8960f9f4668b69cae4ca71106c84d38ca1ea9f41a9acc20ce55473b967849"
+dependencies = [
+ "hashbrown 0.17.1",
+ "indexmap 2.14.0",
+ "libm",
+ "memchr",
+ "rustc-hash 2.1.2",
+ "serde_core",
+ "smallvec",
+]
+
+[[package]]
+name = "noyalib-serde-yaml"
+version = "0.0.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da3c0f67a13749c254e5e1ad26ffbd1fb924ca4732546acb0c9aa638d3471a6a"
+dependencies = [
+ "noyalib",
+]
+
+[[package]]
 name = "ntapi"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8972,9 +8996,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.17"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "bytes",
  "getrandom 0.4.3",
@@ -9798,9 +9822,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -10255,19 +10279,6 @@ dependencies = [
  "serde_core",
  "serde_json",
  "time",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.9.34+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
-dependencies = [
- "indexmap 2.14.0",
- "itoa 1.0.18",
- "ryu",
- "serde",
- "unsafe-libyaml",
 ]
 
 [[package]]
@@ -12053,12 +12064,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
-
-[[package]]
 name = "untrusted"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13318,11 +13323,11 @@ dependencies = [
  "anyhow",
  "clap",
  "colored",
+ "noyalib-serde-yaml",
  "regex",
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_yaml",
  "tokio",
  "tracing",
  "tracing-subscriber",
