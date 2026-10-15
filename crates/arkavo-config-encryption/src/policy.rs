@@ -55,6 +55,7 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    #[spec("CFGE-004")]
     #[test]
     fn test_create_policy() {
         let mut policy = Policy::new();
@@ -71,7 +72,7 @@ mod tests {
         assert_eq!(policy.attributes[0].value, "internal");
     }
 
-    #[spec("TDFS-008")]
+    #[spec("TDFS-008", "CFGE-004")]
     #[test]
     fn test_create_fqn() {
         let fqn = create_fqn("data/clearance", "confidential");

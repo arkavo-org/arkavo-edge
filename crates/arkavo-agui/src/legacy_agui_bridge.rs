@@ -196,8 +196,8 @@ fn canonical_to_legacy_message(msg: arkavo_agui_protocol::message::Message) -> O
 #[cfg(test)]
 mod tests {
     use arkavo_agui_protocol::event::{
-        RunErrorFields, RunStartedFields, TextMessageContentFields, TextMessageEndFields,
-        TextMessageStartFields,
+        CustomFields, RunErrorFields, RunStartedFields, TextMessageContentFields,
+        TextMessageEndFields, TextMessageStartFields,
     };
     use arkavo_agui_protocol::message::{AssistantMessage, UserMessage, UserMessageContent};
     use arkavo_test_macros::spec;
@@ -275,5 +275,75 @@ mod tests {
         ));
         let legacy = bridge(snapshot);
         assert!(matches!(legacy, Some(AgUiEvent::MessagesSnapshot { .. })));
+    }
+
+    #[test]
+    #[spec("AGUI-020")]
+    fn custom_event_uses_spec_wire_shape_and_unwraps() {
+        let event = BaseEvent::new(EventPayload::Custom(CustomFields {
+            name: "arkavo.telemetry".into(),
+            value: serde_json::json!({
+                "event_type": "context_topology",
+                "agent_id": "agent-a",
+                "details": {"toolMemory": {"entryCount": 3}},
+                "timestamp": "2026-06-12T10:00:00Z",
+            }),
+        }));
+
+        // Canonical transport wraps Arkavo-specific events as spec CUSTOM events
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "CUSTOM");
+        assert_eq!(json["name"], "arkavo.telemetry");
+        assert_eq!(json["value"]["agent_id"], "agent-a");
+
+        // The legacy bridge unwraps the same event back to the legacy shape
+        match bridge(event) {
+            Some(AgUiEvent::TelemetryEvent {
+                event_type,
+                agent_id,
+                details,
+                ..
+            }) => {
+                assert_eq!(event_type, "context_topology");
+                assert_eq!(agent_id, "agent-a");
+                assert_eq!(details["toolMemory"]["entryCount"], 3);
+            }
+            other => panic!("expected TelemetryEvent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[spec("AGUI-020")]
+    fn custom_model_selected_unwraps_and_unknown_names_drop() {
+        let event = BaseEvent::new(EventPayload::Custom(CustomFields {
+            name: "arkavo.model_selected".into(),
+            value: serde_json::json!({
+                "agent_id": "agent-b",
+                "provider": "local",
+                "model": "gemma-4",
+                "estimated_cost": {"cents": 150},
+                "reason": "budget",
+            }),
+        }));
+        match bridge(event) {
+            Some(AgUiEvent::ModelSelected {
+                agent_id,
+                model,
+                estimated_cost,
+                ..
+            }) => {
+                assert_eq!(agent_id, "agent-b");
+                assert_eq!(model, "gemma-4");
+                assert_eq!(estimated_cost, arkavo_budget::TokenCost::from_cents(150));
+            }
+            other => panic!("expected ModelSelected, got {other:?}"),
+        }
+
+        // Events with no legacy equivalent must not leak onto /ws
+        let unknown = BaseEvent::new(EventPayload::Custom(CustomFields {
+            name: "arkavo.unknown".into(),
+            value: serde_json::json!({}),
+        }));
+        assert!(bridge(unknown).is_none());
     }
 }

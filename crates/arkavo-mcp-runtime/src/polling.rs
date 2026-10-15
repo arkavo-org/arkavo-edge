@@ -221,6 +221,7 @@ impl AdaptiveBackoff {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_default_config() {
@@ -230,6 +231,7 @@ mod tests {
         assert!((config.backoff_factor - 2.0).abs() < f32::EPSILON);
     }
 
+    #[spec("MCPR-006")]
     #[test]
     fn test_backoff_on_empty_results() {
         let config = PollConfig {
@@ -247,6 +249,7 @@ mod tests {
         assert!(backoff.current_interval > Duration::from_millis(100));
     }
 
+    #[spec("MCPR-006")]
     #[test]
     fn test_reset_on_data() {
         let config = PollConfig {

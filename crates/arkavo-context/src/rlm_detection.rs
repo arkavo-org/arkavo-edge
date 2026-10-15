@@ -104,6 +104,7 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    #[spec("CTX-007")]
     #[spec("ROUTER-016")]
     #[spec("ROUTER-017")]
     #[test]
@@ -113,6 +114,7 @@ mod tests {
         assert!(activation.is_none());
     }
 
+    #[spec("CTX-007")]
     #[spec("ROUTER-016")]
     #[spec("ROUTER-017")]
     #[test]
@@ -125,12 +127,25 @@ mod tests {
         assert!(activation.unwrap().contains("context"));
     }
 
+    #[spec("CTX-013")]
     #[spec("ROUTER-016")]
     #[test]
     fn test_estimate_tokens() {
         let content = "Hello world"; // 11 chars
         let tokens = estimate_tokens(content);
         assert!((2..=4).contains(&tokens));
+    }
+
+    #[spec("CTX-013")]
+    #[test]
+    fn test_estimate_tokens_four_chars_per_token() {
+        assert_eq!(estimate_tokens(&"a".repeat(400)), 100);
+        assert_eq!(estimate_tokens(""), 0);
+        // Token count scales linearly with content length
+        assert_eq!(
+            estimate_tokens(&"b".repeat(800)),
+            2 * estimate_tokens(&"b".repeat(400))
+        );
     }
 
     #[spec("ROUTER-017")]
@@ -172,7 +187,8 @@ mod tests {
         assert!(!is_debug());
     }
 
-    /// CTX-007: Verify RLM activates at exactly the 70% boundary
+    /// Verify RLM activates at exactly the 70% boundary
+    #[spec("CTX-007")]
     #[spec("ROUTER-016")]
     #[spec("ROUTER-017")]
     #[test]
@@ -197,7 +213,8 @@ mod tests {
         );
     }
 
-    /// CTX-007: Empty content should never trigger RLM activation
+    /// Empty content should never trigger RLM activation
+    #[spec("CTX-007")]
     #[test]
     fn test_rlm_empty_content() {
         let activation = check_rlm_activation("", None, false);
@@ -211,7 +228,8 @@ mod tests {
         );
     }
 
-    /// CTX-007: Unknown model names should fall back to the default context size
+    /// Unknown model names should fall back to the default context size
+    #[spec("CTX-007")]
     #[spec("ROUTER-017")]
     #[test]
     fn test_rlm_unknown_model_defaults() {

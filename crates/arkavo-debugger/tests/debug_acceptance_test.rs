@@ -5,11 +5,30 @@
 
 use arkavo_debugger::{Diagnostics, SessionReplay};
 use arkavo_events::{Event, EventPayload};
+use arkavo_memory::event_store::SerializedEvent;
 use arkavo_memory::storage::MemoryStorage;
+use arkavo_test_macros::spec;
 use std::sync::Arc;
 use uuid::Uuid;
 
+fn serialize_events(events: &[Event]) -> Vec<SerializedEvent> {
+    events
+        .iter()
+        .map(|e| SerializedEvent {
+            id: e.id.to_string(),
+            session_id: e.session_id.clone(),
+            sequence: e.sequence,
+            timestamp: e.timestamp.to_rfc3339(),
+            agent_id: e.metadata.agent_id.clone(),
+            event_type: e.event_type().to_string(),
+            payload: serde_json::to_vec(&e.payload).unwrap(),
+            schema_version: e.metadata.schema_version.clone(),
+        })
+        .collect()
+}
+
 /// Test that session replay accurately reproduces the event sequence
+#[spec("DBG-002")]
 #[tokio::test]
 async fn test_replay_determinism() {
     // Create test storage
@@ -148,6 +167,7 @@ async fn test_replay_determinism() {
 }
 
 /// Test that agents can detect and recover from errors using diagnostics
+#[spec("DBG-003")]
 #[tokio::test]
 async fn test_self_healing_agent() {
     use arkavo_debugger::diagnostics::DefaultDiagnostics;
@@ -276,6 +296,151 @@ async fn test_self_healing_agent() {
     // Verify health report shows recovery
     let health = diagnostics.health().await.unwrap();
     assert_eq!(health.total_events, 9); // 3 success + 5 errors + 1 retry
+}
+
+/// Test that error analysis identifies distinct patterns and recommends fixes
+#[spec("DBG-003")]
+#[tokio::test]
+async fn test_error_pattern_root_cause_suggestions() {
+    use arkavo_debugger::diagnostics::DefaultDiagnostics;
+
+    let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+    let session_id = Uuid::new_v4().to_string();
+    let agent_id = "pattern-agent".to_string();
+
+    let diagnostics =
+        DefaultDiagnostics::new(agent_id.clone(), session_id.clone(), storage.clone());
+
+    let mut events = Vec::new();
+
+    // Recurring timeout errors (threshold 3) with distinct messages
+    for i in 0..4 {
+        events.push(Event::new(
+            session_id.clone(),
+            i,
+            agent_id.clone(),
+            EventPayload::Error {
+                error_type: "timeout".to_string(),
+                message: format!("request {i} timed out"),
+                stack_trace: None,
+                recoverable: Some(true),
+            },
+        ));
+    }
+
+    // A single authentication error
+    events.push(Event::new(
+        session_id.clone(),
+        4,
+        agent_id.clone(),
+        EventPayload::Error {
+            error_type: "authentication".to_string(),
+            message: "token expired".to_string(),
+            stack_trace: None,
+            recoverable: Some(false),
+        },
+    ));
+
+    storage
+        .store_events(serialize_events(&events))
+        .await
+        .unwrap();
+
+    let patterns = diagnostics.error_patterns().await.unwrap();
+    assert_eq!(patterns.len(), 2);
+
+    // Recurring timeout pattern identified with sample messages and a fix
+    let timeout = patterns
+        .iter()
+        .find(|p| p.error_type == "timeout")
+        .expect("timeout pattern");
+    assert_eq!(timeout.count, 4);
+    assert!(timeout.is_recurring(3));
+    assert_eq!(timeout.sample_messages.len(), 3); // capped at 3 samples
+    assert!(
+        timeout
+            .suggested_action
+            .as_ref()
+            .unwrap()
+            .contains("timeout")
+    );
+
+    // Authentication pattern always carries a credential-check recommendation
+    let auth = patterns
+        .iter()
+        .find(|p| p.error_type == "authentication")
+        .expect("authentication pattern");
+    assert_eq!(auth.count, 1);
+    assert!(!auth.is_recurring(3));
+    assert!(
+        auth.suggested_action
+            .as_ref()
+            .unwrap()
+            .contains("credentials")
+    );
+}
+
+/// Test that a health report aggregates stored metrics into a formatted report
+#[spec("DBG-004")]
+#[tokio::test]
+async fn test_health_report_generation() {
+    use arkavo_debugger::diagnostics::DefaultDiagnostics;
+    use arkavo_debugger::health::HealthStatus;
+
+    let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
+    let session_id = Uuid::new_v4().to_string();
+    let agent_id = "health-agent".to_string();
+
+    let diagnostics =
+        DefaultDiagnostics::new(agent_id.clone(), session_id.clone(), storage.clone());
+
+    let mut events = Vec::new();
+    for i in 0..3 {
+        events.push(Event::new(
+            session_id.clone(),
+            i,
+            agent_id.clone(),
+            EventPayload::ToolCall {
+                tool_name: "read_file".to_string(),
+                parameters: serde_json::json!({"path": "src/lib.rs"}),
+                tool_call_id: Some(format!("call-{i}")),
+            },
+        ));
+    }
+    events.push(Event::new(
+        session_id.clone(),
+        3,
+        agent_id.clone(),
+        EventPayload::Error {
+            error_type: "io".to_string(),
+            message: "disk full".to_string(),
+            stack_trace: None,
+            recoverable: Some(false),
+        },
+    ));
+
+    storage
+        .store_events(serialize_events(&events))
+        .await
+        .unwrap();
+
+    let report = diagnostics.health().await.unwrap();
+
+    // Metrics aggregated from storage
+    assert_eq!(report.agent_id, agent_id);
+    assert_eq!(report.session_id, session_id);
+    assert_eq!(report.total_events, 4);
+    assert_eq!(report.total_sessions, 1);
+    assert_eq!(report.error_rate, 0.25); // 1 error of 4 events
+    assert_eq!(report.status, HealthStatus::Healthy);
+
+    // Last error surfaced with its context
+    let last_error = report.last_error.expect("last error reported");
+    assert_eq!(last_error.message, "disk full");
+
+    // Report is serializable for transport/display
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(json.contains("\"status\":\"healthy\""));
 }
 
 /// Test that debug agent can analyze session patterns

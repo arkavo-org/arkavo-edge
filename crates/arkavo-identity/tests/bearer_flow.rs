@@ -10,6 +10,7 @@
 use arkavo_identity::{
     Clock, IdentityError, IdentitySession, LOOPBACK_PORTS, Launcher, Prompt, SessionConfig, load,
 };
+use arkavo_test_macros::spec;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -89,6 +90,7 @@ struct Fixture {
     _idp: FakeIdp,
 }
 
+#[spec("IDS-013")]
 #[tokio::test]
 async fn bearer_interactive_completes_one_ceremony() {
     let _ports = LOOPBACK.lock().await;
@@ -115,6 +117,7 @@ async fn bearer_interactive_completes_one_ceremony() {
     .expect("timed out");
 }
 
+#[spec("IDS-021")]
 #[tokio::test]
 async fn concurrent_bearers_share_one_ceremony() {
     let _ports = LOOPBACK.lock().await;
@@ -136,6 +139,7 @@ async fn concurrent_bearers_share_one_ceremony() {
     .expect("timed out");
 }
 
+#[spec("IDS-013")]
 #[tokio::test]
 async fn user_denial_is_access_denied() {
     let _ports = LOOPBACK.lock().await;
@@ -151,6 +155,35 @@ async fn user_denial_is_access_denied() {
             "expected AccessDenied"
         );
         assert_eq!(fx.launches.load(Ordering::SeqCst), 1);
+    })
+    .await
+    .expect("timed out");
+}
+
+#[spec("IDS-021")]
+#[tokio::test]
+async fn three_concurrent_bearers_launch_creator_once() {
+    let _ports = LOOPBACK.lock().await;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let fx = fixture(LaunchKind::Code).await;
+        let a = Arc::clone(&fx.session);
+        let b = Arc::clone(&fx.session);
+        let c = Arc::clone(&fx.session);
+        let (ta, tb, tc) = tokio::join!(
+            async move { a.bearer(Prompt::Interactive).await },
+            async move { b.bearer(Prompt::Interactive).await },
+            async move { c.bearer(Prompt::Interactive).await },
+        );
+        let ta = ta.expect("first concurrent bearer");
+        let tb = tb.expect("second concurrent bearer");
+        let tc = tc.expect("third concurrent bearer");
+        assert_eq!(ta, tb);
+        assert_eq!(tb, tc);
+        assert_eq!(
+            fx.launches.load(Ordering::SeqCst),
+            1,
+            "all three bearers must share a single login ceremony"
+        );
     })
     .await
     .expect("timed out");

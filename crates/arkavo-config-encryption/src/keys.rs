@@ -83,7 +83,7 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
-    #[spec("TDFS-011")]
+    #[spec("TDFS-011", "CFGE-005")]
     #[test]
     fn test_generate_key_pair() {
         let key_pair = KeyPair::generate().unwrap();
@@ -91,7 +91,7 @@ mod tests {
         assert!(!key_pair.public_key.as_bytes().is_empty());
     }
 
-    #[spec("TDFS-011")]
+    #[spec("TDFS-011", "CFGE-005")]
     #[test]
     fn test_sign_and_verify() {
         let key_pair = KeyPair::generate().unwrap();

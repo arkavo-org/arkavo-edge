@@ -71,6 +71,7 @@ impl Event {
 mod tests {
     use super::*;
     use crate::payload::FileOp;
+    use arkavo_test_macros::spec;
     use serde_json::Value;
 
     fn make_prompt_payload() -> EventPayload {
@@ -90,12 +91,14 @@ mod tests {
         )
     }
 
+    #[spec("EVENT-001")]
     #[test]
     fn new_generates_non_nil_uuid() {
         let event = make_event();
         assert!(!event.id.is_nil());
     }
 
+    #[spec("EVENT-001")]
     #[test]
     fn new_has_schema_version_1_0_0() {
         let event = make_event();
@@ -120,18 +123,21 @@ mod tests {
         assert_eq!(event.session_id, "sess-001");
     }
 
+    #[spec("EVENT-001")]
     #[test]
     fn new_stores_sequence() {
         let event = make_event();
         assert_eq!(event.sequence, 1);
     }
 
+    #[spec("EVENT-002")]
     #[test]
     fn event_type_prompt_sent() {
         let event = make_event();
         assert_eq!(event.event_type(), "prompt_sent");
     }
 
+    #[spec("EVENT-002")]
     #[test]
     fn event_type_model_response() {
         let payload = EventPayload::ModelResponse {
@@ -144,6 +150,7 @@ mod tests {
         assert_eq!(event.event_type(), "model_response");
     }
 
+    #[spec("EVENT-002")]
     #[test]
     fn event_type_tool_call() {
         let payload = EventPayload::ToolCall {
@@ -203,6 +210,7 @@ mod tests {
         assert_eq!(event.event_type(), "stream_delta");
     }
 
+    #[spec("EVENT-002")]
     #[test]
     fn event_type_error() {
         let payload = EventPayload::Error {
@@ -250,5 +258,90 @@ mod tests {
         };
         let event = Event::new("s".into(), 0, "a".into(), payload);
         assert_eq!(event.event_type(), "sequence_node");
+    }
+
+    #[spec("EVENT-001")]
+    #[test]
+    fn new_generates_uuid_v4_with_utc_now_timestamp() {
+        let before = Utc::now();
+        let event = make_event();
+        let after = Utc::now();
+
+        assert_eq!(event.id.get_version(), Some(uuid::Version::Random));
+        assert!(event.timestamp >= before && event.timestamp <= after);
+    }
+
+    #[spec("EVENT-003")]
+    #[test]
+    fn child_event_stores_parent_id_in_metadata() {
+        let parent = make_event();
+        let mut child = Event::new(
+            "sess-001".to_string(),
+            2,
+            "agent-1".to_string(),
+            make_prompt_payload(),
+        );
+        child.metadata.parent_event_id = Some(parent.id);
+
+        assert_eq!(child.metadata.parent_event_id, Some(parent.id));
+        assert_ne!(child.id, parent.id);
+    }
+
+    #[spec("EVENT-003")]
+    #[test]
+    fn parent_child_hierarchy_survives_serialization() {
+        let parent = make_event();
+        let mut child = Event::new(
+            "sess-001".to_string(),
+            2,
+            "agent-1".to_string(),
+            make_prompt_payload(),
+        );
+        child.metadata.parent_event_id = Some(parent.id);
+
+        let json = serde_json::to_string(&child).expect("serialize");
+        let restored: Event = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(restored.metadata.parent_event_id, Some(parent.id));
+        assert_eq!(restored.session_id, parent.session_id);
+        assert_eq!(restored.sequence, parent.sequence + 1);
+    }
+
+    #[spec("EVENT-004")]
+    #[test]
+    fn correlation_id_links_events_across_agents() {
+        let correlation = "req-7f3a".to_string();
+        let mut first = make_event();
+        let mut second = Event::new(
+            "sess-001".to_string(),
+            2,
+            "agent-2".to_string(),
+            make_prompt_payload(),
+        );
+        first.metadata.correlation_id = Some(correlation.clone());
+        second.metadata.correlation_id = Some(correlation.clone());
+
+        assert_eq!(
+            first.metadata.correlation_id,
+            second.metadata.correlation_id
+        );
+        assert_ne!(first.metadata.agent_id, second.metadata.agent_id);
+        assert_ne!(first.id, second.id);
+    }
+
+    #[spec("EVENT-004")]
+    #[test]
+    fn correlation_id_survives_serialization() {
+        let mut event = make_event();
+        event.metadata.correlation_id = Some("corr-42".to_string());
+
+        let json = serde_json::to_string(&event).expect("serialize");
+        let restored: Event = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(
+            restored.metadata.correlation_id,
+            Some("corr-42".to_string())
+        );
+        assert!(json.contains("\"correlation_id\":\"corr-42\""));
     }
 }

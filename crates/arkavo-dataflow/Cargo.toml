@@ -44,6 +44,7 @@ keyring = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [lints]
 workspace = true

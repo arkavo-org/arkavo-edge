@@ -357,6 +357,7 @@ fn parse_gossip_snapshot(resp: &serde_json::Value, g: &mut GossipSnapshot) {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use arkavo_test_macros::spec;
@@ -815,5 +816,113 @@ mod tests {
         assert_eq!(traces.len(), 1);
         assert_eq!(traces[0].task_category, "general"); // missing → default
         assert_eq!(traces[0].agent_id, ""); // missing → empty
+    }
+
+    // --- AGUI-011/AGUI-012: per-agent cache entries drive enrichment ---
+
+    async fn seeded_learning_module(agent_priors: &[(&str, f64, f64)]) -> LearningModule {
+        let lm = LearningModule::new();
+        for &(agent_id, alpha, beta) in agent_priors {
+            lm.seed_priors(agent_id, &[("code", alpha, beta)]).await;
+        }
+        lm
+    }
+
+    async fn request_topology(
+        learning_module: LearningModule,
+        cache_entries: Vec<(String, serde_json::Value)>,
+    ) -> AgUiEvent {
+        let learning_module = Arc::new(RwLock::new(learning_module));
+        let agents_registry = Arc::new(RwLock::new(Vec::new()));
+        let cache = Arc::new(RwLock::new(HashMap::new()));
+        {
+            let mut guard = cache.write().await;
+            for (agent_id, snapshot) in cache_entries {
+                guard.insert(agent_id, snapshot);
+            }
+        }
+        let (tx, mut rx) = mpsc::channel(4);
+        handle_request_context_topology(&learning_module, &agents_registry, &cache, None, &tx)
+            .await
+            .unwrap();
+        rx.recv().await.unwrap()
+    }
+
+    #[spec("AGUI-011", "AGUI-012")]
+    #[tokio::test]
+    async fn each_agent_enriched_from_its_own_cache_entry() {
+        let lm = seeded_learning_module(&[("agent-a", 8.0, 2.0), ("agent-b", 5.0, 5.0)]).await;
+        let event = request_topology(
+            lm,
+            vec![
+                (
+                    "agent-a".into(),
+                    serde_json::json!({"toolMemory": {"contextUtilizationPct": 42.5}}),
+                ),
+                (
+                    "agent-b".into(),
+                    serde_json::json!({"toolMemory": {"contextUtilizationPct": 77.0}}),
+                ),
+            ],
+        )
+        .await;
+
+        let AgUiEvent::ContextTopologyUpdate { agents, .. } = event else {
+            panic!("expected ContextTopologyUpdate");
+        };
+        let a = agents.iter().find(|x| x.agent_id == "agent-a").unwrap();
+        let b = agents.iter().find(|x| x.agent_id == "agent-b").unwrap();
+        // Per-agent cache entries must not bleed into each other
+        assert_eq!(a.context_utilization_pct, Some(42.5));
+        assert_eq!(b.context_utilization_pct, Some(77.0));
+    }
+
+    #[spec("AGUI-011")]
+    #[tokio::test]
+    async fn overwritten_cache_entry_yields_latest_snapshot() {
+        let lm = seeded_learning_module(&[("agent-a", 8.0, 2.0)]).await;
+        let cache = Arc::new(RwLock::new(HashMap::new()));
+        cache.write().await.insert(
+            "agent-a".to_string(),
+            serde_json::json!({"toolMemory": {"contextUtilizationPct": 10.0}}),
+        );
+        // A newer push for the same agent replaces the previous snapshot
+        cache.write().await.insert(
+            "agent-a".to_string(),
+            serde_json::json!({"toolMemory": {"contextUtilizationPct": 55.0}}),
+        );
+
+        let learning_module = Arc::new(RwLock::new(lm));
+        let agents_registry = Arc::new(RwLock::new(Vec::new()));
+        let (tx, mut rx) = mpsc::channel(4);
+        handle_request_context_topology(&learning_module, &agents_registry, &cache, None, &tx)
+            .await
+            .unwrap();
+
+        let AgUiEvent::ContextTopologyUpdate { agents, .. } = rx.recv().await.unwrap() else {
+            panic!("expected ContextTopologyUpdate");
+        };
+        assert_eq!(agents[0].context_utilization_pct, Some(55.0));
+    }
+
+    #[spec("AGUI-012")]
+    #[tokio::test]
+    async fn zero_utilization_is_not_enriched_onto_agent() {
+        let lm = seeded_learning_module(&[("agent-a", 8.0, 2.0)]).await;
+        let event = request_topology(
+            lm,
+            vec![(
+                "agent-a".into(),
+                serde_json::json!({"toolMemory": {"contextUtilizationPct": 0.0}}),
+            )],
+        )
+        .await;
+
+        let AgUiEvent::ContextTopologyUpdate { agents, .. } = event else {
+            panic!("expected ContextTopologyUpdate");
+        };
+        // A zero reading means no real measurement yet; the ring gauge must
+        // stay empty instead of reporting a bogus 0% window pressure
+        assert_eq!(agents[0].context_utilization_pct, None);
     }
 }

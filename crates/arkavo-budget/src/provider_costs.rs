@@ -233,6 +233,7 @@ pub fn new_shared_pricing() -> SharedPricing {
 mod tests {
     use super::*;
     use crate::cost::TokenUsage;
+    use arkavo_test_macros::spec;
 
     fn sample_entries() -> Vec<PricingEntry> {
         vec![
@@ -318,6 +319,7 @@ mod tests {
         assert_eq!(p1.input_cost_per_mtok, p2.input_cost_per_mtok);
     }
 
+    #[spec("BUDGET-005")]
     #[test]
     fn test_cost_estimation() {
         let mut pricing = ProviderPricing::new();
@@ -331,6 +333,7 @@ mod tests {
         assert_eq!(cost.as_cents(), 750);
     }
 
+    #[spec("BUDGET-005")]
     #[test]
     fn test_glm52_priced_at_per_mtok_resolution() {
         // GLM-5.2 is $1.40/$4.40 per MTok. In the old per-1K-cents unit these
@@ -403,6 +406,7 @@ mod tests {
         );
     }
 
+    #[spec("BUDGET-005")]
     #[test]
     fn test_register_overwrites() {
         let mut pricing = ProviderPricing::new();

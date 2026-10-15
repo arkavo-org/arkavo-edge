@@ -338,3 +338,71 @@ async fn generate_param_aliases(
 
     aliases
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    #[spec("SRV-007")]
+    #[test]
+    fn planning_response_becomes_active_goals_in_priority_order() {
+        let response = "\
+1. Survey the warehouse for intruders
+2. Report the current position to command
+- Watch the north gate camera feed
+* too short
+```rust
+ignore_code_fence();
+```
+{\"tool\": \"not_a_goal\"}
+plain prose line without a marker
+3. Escalate when the perimeter alarm trips
+4. Fourth goal with enough descriptive text
+5. Fifth goal with enough descriptive text
+6. Sixth goal is past the extraction limit";
+
+        let goals = extract_goals_from_response(response);
+
+        // Code fences, JSON blobs, and short lines are not goals, and the
+        // plan keeps at most five so the prompt budget stays bounded.
+        let descriptions: Vec<&str> = goals.iter().map(|g| g.description.as_str()).collect();
+        assert_eq!(
+            descriptions,
+            [
+                "Survey the warehouse for intruders",
+                "Report the current position to command",
+                "Watch the north gate camera feed",
+                "Escalate when the perimeter alarm trips",
+                "Fourth goal with enough descriptive text",
+            ]
+        );
+        for (index, goal) in goals.iter().enumerate() {
+            assert_eq!(goal.priority, (index + 1) as u8);
+            assert_eq!(goal.status, GoalStatus::Active);
+        }
+    }
+
+    #[spec("SRV-007")]
+    #[test]
+    fn goal_status_transitions_leave_other_goals_untouched() {
+        let mut plan = AgentPlan {
+            goals: extract_goals_from_response(
+                "1. First goal with enough descriptive text\n2. Second goal with enough descriptive text",
+            ),
+            watch_for: vec!["chat".to_string()],
+        };
+        assert_eq!(plan.goals.len(), 2);
+
+        plan.goals[0].status = GoalStatus::InProgress;
+        assert_eq!(plan.goals[0].status, GoalStatus::InProgress);
+        assert_eq!(plan.goals[1].status, GoalStatus::Active);
+
+        plan.goals[0].status = GoalStatus::Completed;
+        assert_eq!(plan.goals[0].status, GoalStatus::Completed);
+        assert_eq!(plan.goals[1].status, GoalStatus::Active);
+
+        // A failed planning call yields an empty plan, not fabricated goals.
+        assert!(AgentPlan::default().goals.is_empty());
+    }
+}

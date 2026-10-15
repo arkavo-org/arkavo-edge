@@ -327,6 +327,7 @@ pub struct ErrorDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_chat_role_serialization() {
@@ -377,6 +378,7 @@ mod tests {
     }
 
     // K2.5 Model Tests
+    #[spec("KIMI-006", "KIMI-010")]
     #[test]
     fn test_k2_5_model_serialization() {
         // Test K2.5 model serialization
@@ -402,6 +404,7 @@ mod tests {
         );
     }
 
+    #[spec("KIMI-010")]
     #[test]
     fn test_model_as_str() {
         assert_eq!(Model::MoonshotV1_8k.as_str(), "moonshot-v1-8k");
@@ -417,6 +420,7 @@ mod tests {
         );
     }
 
+    #[spec("KIMI-003", "KIMI-006")]
     #[test]
     fn test_model_context_length() {
         // Legacy V1 models
@@ -447,6 +451,7 @@ mod tests {
         assert!(Model::KimiK2ThinkingTurbo.supports_thinking());
     }
 
+    #[spec("KIMI-010")]
     #[test]
     fn test_model_is_legacy_v1() {
         assert!(Model::MoonshotV1_8k.is_legacy_v1());
@@ -461,6 +466,7 @@ mod tests {
     }
 
     // Thinking Mode Tests
+    #[spec("KIMI-007", "KIMI-008")]
     #[test]
     fn test_thinking_config_serialization() {
         let enabled = ThinkingConfig::enabled();
@@ -487,6 +493,7 @@ mod tests {
         assert!(matches!(default, ThinkingMode::Enabled));
     }
 
+    #[spec("KIMI-007")]
     #[test]
     fn test_chat_completion_request_with_thinking() {
         let request = ChatCompletionRequest {
@@ -515,5 +522,135 @@ mod tests {
         assert!(json.contains("\"thinking\""));
         assert!(json.contains("enabled"));
         assert!(json.contains("kimi-k2.5"));
+    }
+
+    #[spec("KIMI-001")]
+    #[test]
+    fn test_native_response_parsing_with_usage() {
+        let body = r#"{
+            "id": "chatcmpl-abc",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "kimi-k2.5",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hello back"},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}
+        }"#;
+
+        let response: ChatCompletionResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(response.object, "chat.completion");
+        assert_eq!(response.choices[0].message.content, "Hello back");
+        let usage = response.usage.expect("usage must be returned");
+        assert_eq!(usage.prompt_tokens, 12);
+        assert_eq!(usage.completion_tokens, 5);
+        assert_eq!(usage.total_tokens, 17);
+        assert_eq!(
+            usage.prompt_tokens + usage.completion_tokens,
+            usage.total_tokens
+        );
+    }
+
+    #[spec("KIMI-005")]
+    #[test]
+    fn test_partial_response_finish_reason_length() {
+        let body = r#"{
+            "id": "chatcmpl-len",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "moonshot-v1-8k",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Truncated partial answer"},
+                "finish_reason": "length"
+            }],
+            "usage": {"prompt_tokens": 8000, "completion_tokens": 192, "total_tokens": 8192}
+        }"#;
+
+        let response: ChatCompletionResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(response.choices[0].finish_reason.as_deref(), Some("length"));
+        assert_eq!(
+            response.choices[0].message.content,
+            "Truncated partial answer"
+        );
+        let usage = response
+            .usage
+            .expect("usage must be accurate on length cutoff");
+        assert_eq!(usage.total_tokens, 8192);
+    }
+
+    #[spec("KIMI-007")]
+    #[test]
+    fn test_response_reasoning_content_parsing() {
+        let body = r#"{
+            "id": "chatcmpl-think",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "kimi-k2-thinking",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Final answer"},
+                "finish_reason": "stop",
+                "reasoning_content": "Step 1: analyze. Step 2: conclude."
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
+        }"#;
+
+        let response: ChatCompletionResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(
+            response.choices[0].reasoning_content.as_deref(),
+            Some("Step 1: analyze. Step 2: conclude.")
+        );
+        assert_eq!(response.choices[0].message.content, "Final answer");
+    }
+
+    #[spec("KIMI-008")]
+    #[test]
+    fn test_request_thinking_disabled_and_response_without_reasoning() {
+        let request = ChatCompletionRequest {
+            model: Model::KimiK2_5.as_str().to_string(),
+            messages: vec![ChatMessage {
+                role: ChatRole::User,
+                content: "Hi".to_string(),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            tools: None,
+            tool_choice: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stream: Some(false),
+            presence_penalty: None,
+            frequency_penalty: None,
+            n: None,
+            stop: None,
+            thinking: Some(ThinkingConfig::disabled()),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(
+            json.contains("\"thinking\":{\"type\":\"disabled\"}"),
+            "disabled thinking config must be sent explicitly: {json}"
+        );
+
+        let body = r#"{
+            "id": "chatcmpl-nothink",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "kimi-k2.5",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Direct answer"},
+                "finish_reason": "stop"
+            }]
+        }"#;
+
+        let response: ChatCompletionResponse = serde_json::from_str(body).unwrap();
+        assert!(response.choices[0].reasoning_content.is_none());
+        assert_eq!(response.choices[0].message.content, "Direct answer");
     }
 }

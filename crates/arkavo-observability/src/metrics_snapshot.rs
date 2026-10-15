@@ -267,6 +267,7 @@ impl MetricsSampler {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_metrics_snapshot_size() {
@@ -303,6 +304,7 @@ mod tests {
         assert!(snapshot.validate_size().is_ok());
     }
 
+    #[spec("OBS-008")]
     #[test]
     fn test_metrics_snapshot_json_serialization() {
         let snapshot = MetricsSnapshot::new();
@@ -318,6 +320,7 @@ mod tests {
         );
     }
 
+    #[spec("OBS-008")]
     #[test]
     fn test_metrics_sampler() {
         let config = MetricsSamplerConfig::default();

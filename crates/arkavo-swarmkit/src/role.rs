@@ -372,4 +372,31 @@ mod tests {
         let round_tripped: McpToolGrant = serde_json::from_str(&serialized).unwrap();
         assert_eq!(round_tripped.tools, grant.tools);
     }
+
+    #[spec("SK-016")]
+    #[test]
+    fn custom_mcp_tool_allowlist_parses_from_yaml_role() {
+        let yaml = r#"
+id: analyst
+role_type: specialist
+agent_provisioning: {}
+mcp_tools:
+  - server: "https://mcp.example.com"
+    tools: ["acme.campaign.launch", "mcp__vendor-x__sync", "09_loud.tool"]
+    auth: delegated
+"#;
+        let role: RoleSpec = serde_yaml::from_str(yaml).unwrap();
+        let tools = &role.mcp_tools[0].tools;
+        assert_eq!(
+            tools,
+            &[
+                "acme.campaign.launch",
+                "mcp__vendor-x__sync",
+                "09_loud.tool"
+            ]
+        );
+        let round_tripped: RoleSpec =
+            serde_yaml::from_str(&serde_yaml::to_string(&role).unwrap()).unwrap();
+        assert_eq!(round_tripped.mcp_tools[0].tools, *tools);
+    }
 }

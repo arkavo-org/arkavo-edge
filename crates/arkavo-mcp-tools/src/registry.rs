@@ -782,12 +782,14 @@ impl Tool for SearchToolsTool {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     async fn create_test_registry() -> ToolRegistry {
         let storage = Arc::new(MemoryStorage::new_test().await.expect("Storage init"));
         ToolRegistry::new(storage)
     }
 
+    #[spec("MCP-001")]
     #[tokio::test]
     async fn test_registry_creation() {
         let registry = create_test_registry().await;
@@ -825,6 +827,7 @@ mod tests {
         }
     }
 
+    #[spec("MCP-001")]
     #[tokio::test]
     async fn test_categorization() {
         let registry = create_test_registry().await;
@@ -844,6 +847,7 @@ mod tests {
         assert!(schemas.get("tools").is_some());
     }
 
+    #[spec("MCP-002")]
     #[tokio::test]
     async fn test_search_tools_name_only() {
         let registry = create_test_registry().await;
@@ -868,6 +872,7 @@ mod tests {
         }
     }
 
+    #[spec("MCP-002")]
     #[tokio::test]
     async fn test_search_tools_name_and_description() {
         let registry = create_test_registry().await;
@@ -883,6 +888,7 @@ mod tests {
         }
     }
 
+    #[spec("MCP-002")]
     #[tokio::test]
     async fn test_search_tools_full_schema() {
         let registry = create_test_registry().await;

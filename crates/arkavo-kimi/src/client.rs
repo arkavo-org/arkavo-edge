@@ -342,6 +342,7 @@ impl KimiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_config_with_buffer_size() {
@@ -354,5 +355,46 @@ mod tests {
     fn test_config_default_buffer_size() {
         let config = KimiConfig::default();
         assert_eq!(config.buffer_size, 1024);
+    }
+
+    #[spec("KIMI-003")]
+    #[test]
+    fn test_from_env_model_selection() {
+        // SAFETY: this is the only test in the crate touching these variables,
+        // and it sets and clears them within a single test body.
+        unsafe {
+            std::env::set_var("MOONSHOT_API_KEY", "test-key-1234567890");
+            std::env::remove_var("KIMI_MODEL");
+        }
+
+        // Not specified: falls back to the default model
+        let config = KimiConfig::from_env().unwrap();
+        assert_eq!(config.model, Model::KimiK2_5);
+
+        // Context-length tiers map to the matching legacy models
+        unsafe { std::env::set_var("KIMI_MODEL", "moonshot-v1-8k") };
+        let config = KimiConfig::from_env().unwrap();
+        assert_eq!(config.model, Model::MoonshotV1_8k);
+        assert_eq!(config.model.context_length(), 8_192);
+
+        unsafe { std::env::set_var("KIMI_MODEL", "moonshot-v1-32k") };
+        let config = KimiConfig::from_env().unwrap();
+        assert_eq!(config.model, Model::MoonshotV1_32k);
+        assert_eq!(config.model.context_length(), 32_768);
+
+        unsafe { std::env::set_var("KIMI_MODEL", "moonshot-v1-128k") };
+        let config = KimiConfig::from_env().unwrap();
+        assert_eq!(config.model, Model::MoonshotV1_128k);
+        assert_eq!(config.model.context_length(), 131_072);
+
+        // Unknown value also falls back to the default model
+        unsafe { std::env::set_var("KIMI_MODEL", "no-such-model") };
+        let config = KimiConfig::from_env().unwrap();
+        assert_eq!(config.model, Model::KimiK2_5);
+
+        unsafe {
+            std::env::remove_var("MOONSHOT_API_KEY");
+            std::env::remove_var("KIMI_MODEL");
+        }
     }
 }

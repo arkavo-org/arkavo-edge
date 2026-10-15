@@ -195,7 +195,9 @@ impl Drop for IrohNode {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("IROH-006")]
     #[test]
     fn config_defaults() {
         let config = IrohNodeConfig::default();
@@ -205,6 +207,7 @@ mod tests {
         assert!(!direct.relay_mode);
     }
 
+    #[spec("IROH-005")]
     #[tokio::test]
     async fn node_lifecycle() {
         let node = IrohNode::with_defaults();
@@ -252,6 +255,7 @@ mod tests {
         assert!(!node.is_running().await);
     }
 
+    #[spec("IROH-005")]
     #[tokio::test]
     async fn node_double_stop() {
         let node = IrohNode::with_defaults();
@@ -261,6 +265,23 @@ mod tests {
         // Second stop should be safe
         node.stop().await.unwrap();
 
+        assert!(!node.is_running().await);
+    }
+
+    #[spec("IROH-006")]
+    #[tokio::test]
+    async fn node_with_direct_only_config_starts() {
+        let node = IrohNode::new(IrohNodeConfig::direct_only());
+        assert!(!node.is_running().await);
+
+        node.start().await.unwrap();
+        assert!(node.is_running().await);
+
+        // Configured node binds and exposes endpoint and store
+        let _endpoint = node.endpoint().await.unwrap();
+        let _store = node.store().await.unwrap();
+
+        node.stop().await.unwrap();
         assert!(!node.is_running().await);
     }
 }

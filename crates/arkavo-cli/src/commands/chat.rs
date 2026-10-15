@@ -681,6 +681,7 @@ fn read_user_input() -> Result<String, Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     use arkavo_protocol::types::MessageDelta;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_parse_new_command() {
@@ -764,6 +765,7 @@ mod tests {
     /// The check that runs ahead of first-run setup agrees with what
     /// `execute` goes on to do: help is always allowed, a refused command
     /// line is refused.
+    #[spec("CLI-004")]
     #[test]
     fn check_args_refuses_what_execute_would_refuse() {
         assert!(check_args(&strings(&["--prompt", "hi"])).is_ok());
@@ -884,6 +886,7 @@ mod tests {
     }
 
     // Tests using ChatSession from arkavo-protocol
+    #[spec("CLI-010")]
     #[test]
     fn test_chat_session_context_mode() {
         use arkavo_protocol::A2aClient;
@@ -898,6 +901,7 @@ mod tests {
         assert_eq!(session.context_mode(), ContextMode::On);
     }
 
+    #[spec("CLI-013")]
     #[test]
     fn test_chat_session_pending_context() {
         use arkavo_protocol::A2aClient;

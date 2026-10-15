@@ -38,6 +38,7 @@ arkavo-budget = { path = "../arkavo-budget" }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [build-dependencies]
 anyhow = { workspace = true }

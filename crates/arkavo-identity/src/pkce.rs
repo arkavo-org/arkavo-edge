@@ -60,7 +60,9 @@ fn encode_base32_5(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("IDS-005")]
     #[test]
     fn rfc7636_appendix_b_s256_vector() {
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
@@ -70,11 +72,14 @@ mod tests {
         );
     }
 
+    #[spec("IDS-006")]
     #[test]
     fn pairing_code_is_base32_of_first_five_sha256_bytes() {
         assert_eq!(Pkce::pairing_code("test-state"), "DFRA-BZGI");
     }
 
+    #[spec("IDS-005")]
+    #[spec("IDS-006")]
     #[test]
     fn generate_uses_unpadded_base64url_of_32_bytes() {
         let p = Pkce::generate();
@@ -91,5 +96,17 @@ mod tests {
             code.chars()
                 .all(|c| c == '-' || matches!(c, 'A'..='Z' | '2'..='7'))
         );
+    }
+
+    #[spec("IDS-005")]
+    #[test]
+    fn generate_produces_independent_ceremonies() {
+        let first = Pkce::generate();
+        let second = Pkce::generate();
+        assert_ne!(first.verifier, second.verifier);
+        assert_ne!(first.state, second.state);
+        assert_ne!(first.challenge, second.challenge);
+        assert_eq!(first.challenge, Pkce::challenge_s256(&first.verifier));
+        assert_eq!(second.challenge, Pkce::challenge_s256(&second.verifier));
     }
 }

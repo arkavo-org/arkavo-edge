@@ -7,6 +7,7 @@ use crate::spec_test::Test;
 
 pub struct TestDiscovery {
     spec_attr_pattern: Regex,
+    spec_id_pattern: Regex,
     legacy_pattern: Regex,
     doc_pattern: Regex,
     test_fn_pattern: Regex,
@@ -17,7 +18,11 @@ pub struct TestDiscovery {
 impl TestDiscovery {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            spec_attr_pattern: Regex::new(r#"#\[spec\("([A-Z]+-\d+)"\)"#)?,
+            // Match the whole attribute (plain or fully qualified) and capture
+            // its argument list; individual IDs are extracted from it below so
+            // multi-ID attributes like #[spec("A-1", "B-2")] count every ID.
+            spec_attr_pattern: Regex::new(r"#\[(?:\w+::)*spec\(([^)]+)\)\]")?,
+            spec_id_pattern: Regex::new(r#""([A-Z]+-\d+)""#)?,
             legacy_pattern: Regex::new(r"Covers\s+([A-Z]+-\d+)")?,
             // Also match doc comment patterns like "Spec: SESS-001" or "SESS-001: description"
             doc_pattern: Regex::new(r"(?:Spec:\s+)?([A-Z]+-\d+):")?,
@@ -50,8 +55,10 @@ impl TestDiscovery {
         let mut saw_test_attr = false;
 
         for (line_num, line) in content.lines().enumerate() {
-            for cap in self.spec_attr_pattern.captures_iter(line) {
-                current_scenarios.push(cap[1].to_string());
+            for attr in self.spec_attr_pattern.captures_iter(line) {
+                for id in self.spec_id_pattern.captures_iter(&attr[1]) {
+                    current_scenarios.push(id[1].to_string());
+                }
             }
             for cap in self.legacy_pattern.captures_iter(line) {
                 current_scenarios.push(cap[1].to_string());
@@ -85,5 +92,69 @@ impl TestDiscovery {
             }
         }
         Ok(tests)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(name: &str, source: &str) -> Vec<Test> {
+        let dir =
+            std::env::temp_dir().join(format!("xtask-discovery-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sample.rs");
+        std::fs::write(&path, source).unwrap();
+        let discovery = TestDiscovery::new().unwrap();
+        let tests = discovery.parse_test_file(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        tests
+    }
+
+    #[test]
+    fn single_id_attribute_counts_one_id() {
+        let tests = parse("single", "#[spec(\"ABC-001\")]\n#[test]\nfn test_a() {}\n");
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].scenarios_covered, vec!["ABC-001".to_string()]);
+    }
+
+    #[test]
+    fn multi_id_attribute_counts_every_id() {
+        // Regression: only the first ID of #[spec("A-1", "B-2")] was counted.
+        let tests = parse(
+            "multi",
+            "#[spec(\"ABC-001\", \"DEF-002\")]\n#[test]\nfn test_a() {}\n",
+        );
+        assert_eq!(tests.len(), 1);
+        assert_eq!(
+            tests[0].scenarios_covered,
+            vec!["ABC-001".to_string(), "DEF-002".to_string()]
+        );
+    }
+
+    #[test]
+    fn fully_qualified_attribute_counts_ids() {
+        let tests = parse(
+            "qualified",
+            "#[arkavo_test_macros::spec(\"ABC-001\", \"DEF-002\")]\n#[test]\nfn test_a() {}\n",
+        );
+        assert_eq!(tests.len(), 1);
+        assert_eq!(
+            tests[0].scenarios_covered,
+            vec!["ABC-001".to_string(), "DEF-002".to_string()]
+        );
+    }
+
+    #[test]
+    fn stacked_attributes_accumulate() {
+        let tests = parse(
+            "stacked",
+            "#[spec(\"ABC-001\")]\n#[spec(\"DEF-002\")]\n#[test]\nfn test_a() {}\n",
+        );
+        assert_eq!(tests.len(), 1);
+        assert_eq!(
+            tests[0].scenarios_covered,
+            vec!["ABC-001".to_string(), "DEF-002".to_string()]
+        );
     }
 }

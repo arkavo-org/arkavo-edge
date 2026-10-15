@@ -149,7 +149,9 @@ impl DecisionCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("AUTHZ-004")]
     #[test]
     fn test_cache_basic_operations() {
         let cache = DecisionCache::new(100, Duration::from_mins(1));
@@ -178,6 +180,7 @@ mod tests {
         assert!(cache.get(&entity, &action, &resource).is_none());
     }
 
+    #[spec("AUTHZ-004")]
     #[test]
     fn test_cache_expiration() {
         let cache = DecisionCache::new(100, Duration::from_mins(1));

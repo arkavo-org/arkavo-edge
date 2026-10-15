@@ -266,8 +266,10 @@ JSON:"#,
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
+    #[spec("AGUI-004")]
     fn test_parse_cef_health_stuck_command() {
         let message = "Stuck commands: Command 2 (ReplaceInnerHTML) waiting 5200ms on '#content'";
         let data = CommandHealthCollector::parse_cef_health(message, "cef");
@@ -281,6 +283,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("AGUI-004")]
     fn test_parse_cef_health_no_stuck_commands() {
         let message = "No active commands";
         let data = CommandHealthCollector::parse_cef_health(message, "cef");
@@ -289,6 +292,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("AGUI-005")]
     fn test_parse_timeout_analysis() {
         let json_response = r#"{"should_timeout": true, "user_message": "Command stuck", "severity": "warning", "reasoning": "Over 30s"}"#;
 
@@ -298,5 +302,19 @@ mod tests {
         assert_eq!(analysis.severity, "warning");
         assert_eq!(analysis.user_message.as_deref(), Some("Command stuck"));
         assert_eq!(analysis.reasoning, "Over 30s");
+    }
+
+    // The analyzer must reject malformed LLM output rather than fabricate a
+    // recommendation, so every field of the analysis contract is required.
+    #[test]
+    #[spec("AGUI-005")]
+    fn test_timeout_analysis_rejects_incomplete_payload() {
+        let missing_reasoning = r#"{"should_timeout": true, "severity": "warning"}"#;
+        let result: Result<TimeoutAnalysis, _> = serde_json::from_str(missing_reasoning);
+        assert!(result.is_err());
+
+        let missing_verdict = r#"{"severity": "info", "reasoning": "normal wait"}"#;
+        let result: Result<TimeoutAnalysis, _> = serde_json::from_str(missing_verdict);
+        assert!(result.is_err());
     }
 }

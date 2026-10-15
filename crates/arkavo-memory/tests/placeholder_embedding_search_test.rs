@@ -12,6 +12,7 @@
 //! search-backed `arkavo-session` conversation test flaky.
 
 use arkavo_memory::{HnswConfig, Memory, MemoryStorage};
+use arkavo_test_macros::spec;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -103,6 +104,7 @@ async fn zero_norm_query_orders_newest_first() {
     assert_eq!(returned, expected);
 }
 
+#[spec("MEM-002")]
 #[tokio::test]
 async fn zero_norm_query_respects_category_filter() {
     let temp = tempfile::tempdir().expect("temp dir");

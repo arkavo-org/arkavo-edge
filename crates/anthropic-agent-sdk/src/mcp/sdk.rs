@@ -97,6 +97,7 @@ impl<T: rmcp::ServerHandler> SdkMcpServer for T {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use serde::Deserialize;
 
     // Guards the re-exported surface: an rmcp upgrade that renames or drops any
@@ -144,6 +145,7 @@ mod tests {
 
     fn assert_sdk_server<T: SdkMcpServer>(_: &T) {}
 
+    #[spec("CASDK-003")]
     #[test]
     fn tool_macros_register_routes() {
         let calc = Calculator::new();
@@ -155,6 +157,7 @@ mod tests {
         assert!(calc.tool_router.has_route("add"));
     }
 
+    #[spec("CASDK-003")]
     #[test]
     fn server_config_advertises_tools_and_identity() {
         let info = Calculator::new().get_info();

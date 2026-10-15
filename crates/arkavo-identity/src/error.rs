@@ -45,7 +45,9 @@ impl IdentityError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("IDS-020")]
     #[test]
     fn kas_denied_messages_match_the_spec_table() {
         assert_eq!(
@@ -71,6 +73,19 @@ mod tests {
         assert_eq!(
             IdentityError::Transport("connection reset".into()).kas_denied_message(),
             "GGUFTDF_KAS_DENIED: connection reset"
+        );
+    }
+
+    #[spec("IDS-020")]
+    #[test]
+    fn kas_denied_passes_token_and_store_messages_verbatim() {
+        assert_eq!(
+            IdentityError::Token("missing access_token".into()).kas_denied_message(),
+            "GGUFTDF_KAS_DENIED: missing access_token"
+        );
+        assert_eq!(
+            IdentityError::Store("parse token file: bad json".into()).kas_denied_message(),
+            "GGUFTDF_KAS_DENIED: parse token file: bad json"
         );
     }
 }

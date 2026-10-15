@@ -267,6 +267,44 @@ mod tests {
     use tempfile::TempDir;
     use tokio::fs;
 
+    fn is_comby_available() -> bool {
+        std::process::Command::new("comby")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// A match template with holes matches structurally, and preview mode
+    /// reports the rewrite each match would apply without touching the file.
+    #[spec("CS-003")]
+    #[tokio::test]
+    async fn comby_preview_reports_structural_rewrite() {
+        if !is_comby_available() {
+            eprintln!("Skipping test: comby not installed");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let source = "fn main() { println!(\"hi\"); }\n";
+        let file = dir.path().join("a.rs");
+        fs::write(&file, source).await.unwrap();
+        let tool = CombyTool::with_root(dir.path());
+        let result = tool
+            .execute(json!({
+                "match_template": "println!(:[msg])",
+                "rewrite_template": "tracing::info!(:[msg])",
+                "path": "."
+            }))
+            .await
+            .expect("comby preview must succeed");
+        assert_eq!(result["mode"], "preview");
+        assert!(result["count"].as_u64().unwrap() >= 1, "{result}");
+        let rendered = result["matches"].to_string();
+        assert!(rendered.contains("tracing::info!"), "{rendered}");
+        let on_disk = fs::read_to_string(&file).await.unwrap();
+        assert_eq!(on_disk, source, "preview mode must not modify the file");
+    }
+
     /// comby reads any argument beginning with '-' as a flag and rejects `--`
     /// as an unknown flag, so such a template is refused before comby runs.
     #[spec("CS-006")]
@@ -298,7 +336,7 @@ mod tests {
 
     /// The reordered argv (flags first, then the templates and the confined
     /// absolute path) is accepted by comby and still finds matches.
-    #[spec("CS-006")]
+    #[spec("CS-006", "CS-003")]
     #[ignore = "requires comby on PATH"]
     #[tokio::test]
     async fn comby_searches_a_confined_file() {

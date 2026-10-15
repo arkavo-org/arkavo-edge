@@ -182,8 +182,10 @@ impl Stream for SseStream {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use futures::stream;
 
+    #[spec("DEEP-002")]
     #[tokio::test]
     async fn test_sse_stream_simple_content() {
         let data = r#"data: {"id":"1","object":"chat.completion.chunk","created":1234567890,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
@@ -207,6 +209,7 @@ data: [DONE]
         assert!(responses[2].done);
     }
 
+    #[spec("DEEP-003")]
     #[tokio::test]
     async fn test_sse_stream_with_reasoning() {
         let data = r#"data: {"id":"1","object":"chat.completion.chunk","created":1234567890,"model":"deepseek-reasoner","choices":[{"index":0,"delta":{"reasoning_content":"Let me think..."},"finish_reason":null}]}

@@ -324,3 +324,114 @@ fn default_use_oauth() -> bool {
     // Default to OAuth if no API key is set
     std::env::var("ANTHROPIC_API_KEY").is_err()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    #[spec("MCPC-004")]
+    #[test]
+    fn test_tool_permissions_default_deny_unspecified() {
+        let permissions = ToolPermissions::default();
+        assert!(permissions.read, "read is the one allowed default");
+        assert!(!permissions.write, "write defaults to denied");
+        assert!(!permissions.exec, "exec defaults to denied");
+        assert!(!permissions.web_search, "web_search defaults to denied");
+
+        let parsed: ToolPermissions = serde_json::from_str("{}").unwrap();
+        assert!(parsed.read);
+        assert!(!parsed.write);
+        assert!(!parsed.exec);
+        assert!(!parsed.web_search);
+    }
+
+    #[spec("MCPC-004")]
+    #[test]
+    fn test_path_globs_wildcards_and_default_deny() {
+        let config = ClaudeCodeConfig {
+            allow_globs: vec!["src/**".to_string(), "*.md".to_string()],
+            deny_globs: vec!["src/secrets/**".to_string()],
+            ..Default::default()
+        };
+
+        assert!(config.is_path_allowed("src/main.rs"));
+        assert!(config.is_path_allowed("README.md"));
+        assert!(
+            !config.is_path_allowed("src/secrets/key.pem"),
+            "deny patterns take precedence over allow patterns"
+        );
+        assert!(
+            !config.is_path_allowed("build/output.bin"),
+            "paths matching no allow pattern are denied by default"
+        );
+
+        let allow_all = ClaudeCodeConfig {
+            allow_globs: Vec::new(),
+            deny_globs: vec!["**/.git/**".to_string()],
+            ..Default::default()
+        };
+        assert!(
+            allow_all.is_path_allowed("any/where.txt"),
+            "empty allow list allows everything not denied"
+        );
+        assert!(!allow_all.is_path_allowed(".git/config"));
+    }
+
+    #[spec("MCPC-009")]
+    #[test]
+    fn test_config_load_from_json_file_applies_defaults() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("claude.json");
+        let workspace = temp_dir.path().to_string_lossy().replace('\\', "\\\\");
+        std::fs::write(
+            &config_path,
+            format!(r#"{{"workspace_root": "{workspace}"}}"#),
+        )
+        .unwrap();
+
+        let contents = std::fs::read_to_string(&config_path).unwrap();
+        let config: ClaudeCodeConfig = serde_json::from_str(&contents).unwrap();
+
+        assert_eq!(config.workspace_root, temp_dir.path());
+        assert!(config.enabled, "enabled defaults to true");
+        assert_eq!(config.anthropic_model, default_model());
+        assert_eq!(config.budget_tokens, 200_000);
+        assert_eq!(config.session_ttl_secs, 3600);
+        assert_eq!(config.retry.max_attempts, 3);
+        assert_eq!(config.retry.backoff_ms, 800);
+        assert!(config.use_bidirectional);
+        assert!(config.tools.read);
+        assert!(!config.tools.write);
+        assert!(config.validate().is_ok());
+    }
+
+    #[spec("MCPC-009")]
+    #[test]
+    fn test_config_load_reports_validation_errors() {
+        let missing_workspace = serde_json::from_str::<ClaudeCodeConfig>("{}");
+        assert!(
+            missing_workspace.is_err(),
+            "workspace_root is required; missing field must fail parsing"
+        );
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("claude.json");
+        let workspace = temp_dir.path().to_string_lossy().replace('\\', "\\\\");
+        std::fs::write(
+            &config_path,
+            format!(
+                r#"{{"workspace_root": "{workspace}", "budget_tokens": 0, "permission_mode": "yolo"}}"#
+            ),
+        )
+        .unwrap();
+
+        let contents = std::fs::read_to_string(&config_path).unwrap();
+        let config: ClaudeCodeConfig = serde_json::from_str(&contents).unwrap();
+        let error = config.validate().unwrap_err();
+        assert!(
+            matches!(error, crate::ClaudeCodeError::Configuration(_)),
+            "invalid field values must surface as Configuration errors, got {error:?}"
+        );
+    }
+}

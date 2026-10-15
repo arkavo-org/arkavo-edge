@@ -151,6 +151,7 @@ mod tests {
     /// for a kit role is the skill instructions, and relied on its caller to
     /// replace it.
     #[spec("SRV-002")]
+    #[spec("SRV-008")]
     #[tokio::test]
     async fn test_build_agent_card() {
         let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
@@ -217,6 +218,7 @@ mod tests {
     }
 
     #[spec("SRV-002")]
+    #[spec("SRV-008")]
     #[tokio::test]
     async fn test_build_agent_card_empty_endpoint_fallback() {
         let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
@@ -244,6 +246,39 @@ mod tests {
 
         assert_eq!(card.url, "http://localhost:9090");
         assert_eq!(card.description, None);
+        assert!(card.skills.is_empty());
+    }
+
+    /// The discovery document must name the running build: a stale or empty
+    /// version would mislead peers negotiating protocol features.
+    #[spec("SRV-008")]
+    #[tokio::test]
+    async fn a_card_reports_the_build_version_and_served_capabilities() {
+        let agent_metadata = Arc::new(RwLock::new(AgentMetadata {
+            name: "versioned-agent".to_string(),
+            description: Some("Reports its version".to_string()),
+            ..Default::default()
+        }));
+
+        #[allow(clippy::needless_update)]
+        let state = WellKnownState {
+            agent_metadata,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            rpc_port: 9091,
+            rate_limiter: Arc::new(IpRateLimiter::new(
+                arkavo_protocol::rate_limit::RateLimitConfig::default(),
+            )),
+            #[cfg(feature = "kas")]
+            kas_enabled: false,
+        };
+
+        let card = build_agent_card(&state).await;
+
+        assert_eq!(card.version, env!("CARGO_PKG_VERSION"));
+        assert!(card.capabilities.streaming);
+        assert!(!card.capabilities.push_notifications);
+        assert!(card.capabilities.state_transition_history);
+        // No MCP servers are connected, so no skills can be advertised.
         assert!(card.skills.is_empty());
     }
 }

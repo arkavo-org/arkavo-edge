@@ -691,4 +691,73 @@ provenance:
         .unwrap_err();
         assert!(matches!(err, LaunchError::UnknownOverrideRole(_)));
     }
+
+    #[spec("SK-014")]
+    #[tokio::test]
+    async fn launch_uses_supplied_arp_override_verbatim() {
+        let m = parse_yaml(KIT).unwrap();
+        let mut override_doc = crate::derive::derive_arp_for_role(
+            &m.roles[0],
+            &m.constraints.global_budget,
+            m.roles.len(),
+            DeriveOptions::default(),
+        );
+        // Marker a derivation would never produce, so reuse is observable.
+        override_doc.adl_ref.uri = Some("urn:hand-authored:alpha".into());
+        let expected = serde_json::to_value(&override_doc).unwrap();
+
+        let mut overrides = HashMap::new();
+        overrides.insert("alpha".to_string(), override_doc);
+        let f = SwarmFlight::launch(
+            &m,
+            LaunchOptions {
+                arp_overrides: overrides,
+                ..LaunchOptions::default()
+            },
+        )
+        .unwrap();
+
+        let alpha_doc = f.role("alpha").unwrap().arp_document();
+        assert_eq!(
+            serde_json::to_value(alpha_doc).unwrap(),
+            expected,
+            "override document must be stored verbatim, not re-derived"
+        );
+        // Roles without an override still get the derived document.
+        assert_eq!(
+            f.role("beta")
+                .unwrap()
+                .arp_document()
+                .adl_ref
+                .uri
+                .as_deref(),
+            Some("urn:swarmkit:role:beta")
+        );
+    }
+
+    #[spec("SK-015")]
+    #[tokio::test]
+    async fn every_role_trace_entry_carries_flight_id_and_role_id() {
+        let m = parse_yaml(KIT).unwrap();
+        let flight_id = Uuid::new_v4();
+        let f = SwarmFlight::launch(
+            &m,
+            LaunchOptions {
+                flight_id: Some(flight_id),
+                ..LaunchOptions::default()
+            },
+        )
+        .unwrap();
+        for (role_id, tool) in [("alpha", "tool_a"), ("beta", "tool_b")] {
+            f.record_tool_outcome(role_id, tool, true, 0.9)
+                .await
+                .unwrap();
+        }
+        for role_id in ["alpha", "beta"] {
+            let entries = f.role(role_id).unwrap().arp().decision_trace().snapshot();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].task_id, flight_id.to_string());
+            assert_eq!(entries[0].agent_id, role_id);
+        }
+    }
 }

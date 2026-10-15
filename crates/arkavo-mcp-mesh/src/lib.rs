@@ -944,6 +944,131 @@ pub fn get_tool_schemas() -> Vec<ToolSchema> {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on to enter its runtime.
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
+
+    #[spec("MESH-001")]
+    #[tokio::test]
+    async fn state_new_starts_empty_with_registry_and_address_cache_ready() {
+        let state = MeshToolsState::new();
+
+        assert!(state.registry.get_all_agents().await.is_empty());
+        assert!(state.agent_addresses.read().await.is_empty());
+        assert!(state.pending_delegations.read().await.is_empty());
+
+        state
+            .agent_addresses
+            .write()
+            .await
+            .insert("agent-1".to_string(), "http://127.0.0.1:8100".to_string());
+        state
+            .registry
+            .register_agent(
+                "agent-1".to_string(),
+                "Reviewer".to_string(),
+                "reviews code".to_string(),
+                vec!["code_review".to_string()],
+                None,
+                HashMap::new(),
+                None,
+            )
+            .await
+            .expect("registry accepts agents");
+
+        assert_eq!(
+            state.agent_addresses.read().await.get("agent-1"),
+            Some(&"http://127.0.0.1:8100".to_string())
+        );
+        assert_eq!(state.registry.get_all_agents().await.len(), 1);
+    }
+
+    #[spec("MESH-001")]
+    #[tokio::test]
+    async fn state_default_behaves_like_new() {
+        let state = MeshToolsState::default();
+
+        assert!(state.registry.get_all_agents().await.is_empty());
+        assert!(state.agent_addresses.read().await.is_empty());
+        assert!(state.collect_completed().await.is_empty());
+    }
+
+    #[spec("MESH-007")]
+    #[tokio::test]
+    async fn agent_address_cache_accepts_concurrent_writes() {
+        let state = Arc::new(MeshToolsState::new());
+
+        let mut writers = Vec::new();
+        for i in 0..16 {
+            let addresses = Arc::clone(&state.agent_addresses);
+            writers.push(tokio::spawn(async move {
+                addresses.write().await.insert(
+                    format!("agent-{i}"),
+                    format!("http://127.0.0.1:{}", 8100 + i),
+                );
+            }));
+        }
+        for writer in writers {
+            writer.await.expect("writer task completed");
+        }
+
+        let addresses = state.agent_addresses.read().await;
+        assert_eq!(addresses.len(), 16);
+        assert_eq!(
+            addresses.get("agent-7"),
+            Some(&"http://127.0.0.1:8107".to_string())
+        );
+    }
+
+    #[spec("MESH-007")]
+    #[tokio::test]
+    async fn pushed_completion_supersedes_pending_and_old_delegations_expire() {
+        let state = MeshToolsState::new();
+        state
+            .pending_delegations
+            .write()
+            .await
+            .push(PendingDelegation {
+                task_id: "task-1".to_string(),
+                agent_id: "reviewer".to_string(),
+                address: "http://127.0.0.1:8100".to_string(),
+                sent_at: std::time::Instant::now(),
+            });
+
+        state
+            .push_completed(
+                "task-1",
+                CompletedDelegation {
+                    agent_id: "reviewer".to_string(),
+                    response: "looks good".to_string(),
+                    response_latency_ms: 12,
+                    budget_snapshot: None,
+                },
+            )
+            .await;
+
+        assert!(state.pending_delegations.read().await.is_empty());
+
+        // An expired delegation is dropped without contacting its address:
+        // this one points at a port nothing listens on.
+        state
+            .pending_delegations
+            .write()
+            .await
+            .push(PendingDelegation {
+                task_id: "task-old".to_string(),
+                agent_id: "gone".to_string(),
+                address: "http://127.0.0.1:1".to_string(),
+                sent_at: std::time::Instant::now()
+                    .checked_sub(Duration::from_mins(6))
+                    .expect("six minutes ago is representable"),
+            });
+
+        let completed = state.collect_completed().await;
+
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].agent_id, "reviewer");
+        assert_eq!(completed[0].response, "looks good");
+        assert!(state.pending_delegations.read().await.is_empty());
+    }
 
     #[tokio::test]
     async fn test_list_agents_tool_schema() {
@@ -1040,6 +1165,7 @@ mod tests {
     /// Regression: a typo-matched delegation was recorded and reported under
     /// the requested spelling, which `get_task_status`'s exact lookup cannot
     /// find, and was sent with that spelling as the addressed agent.
+    #[spec("MESH-005")]
     #[tokio::test]
     async fn a_typo_matched_delegation_reports_the_agent_it_reached() {
         let state = Arc::new(MeshToolsState::new());

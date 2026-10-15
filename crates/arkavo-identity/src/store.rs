@@ -99,7 +99,9 @@ pub fn delete(path: &Path) -> Result<(), IdentityError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("IDS-014")]
     #[test]
     fn round_trip_and_mode_600_at_creation() {
         let dir = tempfile::tempdir().unwrap();
@@ -123,6 +125,7 @@ mod tests {
         assert!(load(&path).unwrap().is_none());
     }
 
+    #[spec("IDS-014")]
     #[test]
     fn token_path_is_arkavo_identity_token_under_data_dir() {
         let path = token_path().unwrap();
@@ -133,6 +136,7 @@ mod tests {
         );
     }
 
+    #[spec("IDS-014")]
     #[test]
     fn save_replaces_644_with_600_and_never_empties_dest() {
         let dir = tempfile::tempdir().unwrap();

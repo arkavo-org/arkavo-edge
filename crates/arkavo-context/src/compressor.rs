@@ -118,7 +118,9 @@ impl ContextCompressor {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CTX-004")]
     #[tokio::test]
     async fn test_empty_text() {
         let compressor = ContextCompressor::new(
@@ -138,6 +140,7 @@ mod tests {
         assert_eq!(result.unwrap(), "");
     }
 
+    #[spec("CTX-004")]
     #[test]
     #[cfg(feature = "llama-cpp")]
     fn test_compression_prompt_format() {

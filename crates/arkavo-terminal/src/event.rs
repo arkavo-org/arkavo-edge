@@ -100,3 +100,54 @@ impl EventHandler {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    #[test]
+    #[spec("TERM-002")]
+    fn crossterm_events_map_to_app_events() {
+        let key = CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert!(matches!(
+            AppEvent::from_crossterm_event(key),
+            AppEvent::KeyPress(_)
+        ));
+
+        let resize = CrosstermEvent::Resize(120, 40);
+        match AppEvent::from_crossterm_event(resize) {
+            AppEvent::Resize(w, h) => {
+                assert_eq!(w, 120);
+                assert_eq!(h, 40);
+            }
+            other => panic!("expected Resize, got {other:?}"),
+        }
+
+        // Events the app does not handle collapse to a harmless Tick
+        let focus = CrosstermEvent::FocusGained;
+        assert!(matches!(
+            AppEvent::from_crossterm_event(focus),
+            AppEvent::Tick
+        ));
+    }
+
+    #[test]
+    #[spec("TERM-002")]
+    fn event_handler_registers_shortcuts_with_help_text() {
+        let handler = EventHandler::new();
+
+        assert!(!handler.shortcuts.is_empty());
+        assert!(
+            handler
+                .shortcuts
+                .iter()
+                .any(|s| s.key == KeyCode::Char('q') && s.description.contains("Quit"))
+        );
+
+        let help = handler.get_help_text();
+        assert_eq!(help.len(), handler.shortcuts.len());
+        assert!(help.iter().any(|line| line.contains("Ctrl+c")));
+        assert!(help.iter().any(|line| line.starts_with("Tab:")));
+    }
+}

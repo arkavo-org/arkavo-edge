@@ -86,6 +86,7 @@ mod tests {
     use arkavo_test_macros::spec;
     use chrono::{Duration, Utc};
 
+    #[spec("AAUTH-003")]
     #[tokio::test]
     async fn test_token_storage_roundtrip() {
         let _guard = TEST_LOCK.lock().await;
@@ -195,6 +196,91 @@ mod tests {
         assert_eq!(parsed.delegation_jwt, token.delegation_jwt);
         assert!(parsed.stored_at <= Utc::now());
 
+        delete_token().await.unwrap();
+    }
+
+    /// Test AAUTH-003: Load stored token — not-found case.
+    ///
+    /// With nothing on disk, `load_token` must report the absence of a token
+    /// rather than fabricating one. The implementation signals this as
+    /// `Ok(None)` instead of an error variant.
+    #[spec("AAUTH-003")]
+    #[tokio::test]
+    async fn test_load_token_not_found_returns_none() {
+        let _guard = TEST_LOCK.lock().await;
+        let _ = delete_token().await;
+
+        let loaded = load_token().await.unwrap();
+        assert!(loaded.is_none(), "missing token file should load as None");
+    }
+
+    /// Test AAUTH-002: Store token securely — overwrite case.
+    ///
+    /// Storing a second token replaces the first on disk; the newly written
+    /// token and its metadata are what subsequent loads return.
+    #[spec("AAUTH-002")]
+    #[tokio::test]
+    async fn test_store_token_overwrites_existing() {
+        let _guard = TEST_LOCK.lock().await;
+        let _ = delete_token().await;
+
+        let first = StoredToken::new(
+            "first-token".to_string(),
+            "did:key:z6MkFirst".to_string(),
+            Utc::now() + Duration::hours(1),
+            vec!["agent.capability.chat".to_string()],
+        );
+        store_token(&first).await.unwrap();
+
+        let second = StoredToken::new(
+            "second-token".to_string(),
+            "did:key:z6MkSecond".to_string(),
+            Utc::now() + Duration::hours(2),
+            vec!["agent.capability.read".to_string()],
+        );
+        store_token(&second).await.unwrap();
+
+        let loaded = load_token().await.unwrap().unwrap();
+        assert_eq!(loaded.token, "second-token");
+        assert_eq!(loaded.did, "did:key:z6MkSecond");
+        assert_eq!(loaded.entitlements, vec!["agent.capability.read"]);
+
+        delete_token().await.unwrap();
+    }
+
+    /// Test AAUTH-006: Delete token on logout.
+    ///
+    /// Deleting removes the token file from platform storage and subsequent
+    /// loads fail to return a token. Deleting when nothing is stored succeeds
+    /// as a no-op.
+    #[spec("AAUTH-006")]
+    #[tokio::test]
+    async fn test_delete_token_removes_token_and_metadata() {
+        let _guard = TEST_LOCK.lock().await;
+        let _ = delete_token().await;
+
+        let token = StoredToken::new(
+            "logout-token".to_string(),
+            "did:key:z6MkLogout".to_string(),
+            Utc::now() + Duration::hours(1),
+            vec!["agent.capability.chat".to_string()],
+        )
+        .with_delegation_jwt(Some("delegation.jwt.value".to_string()));
+        store_token(&token).await.unwrap();
+
+        let path = get_token_path().unwrap();
+        assert!(path.exists());
+
+        delete_token().await.unwrap();
+        assert!(!path.exists(), "token file should be removed from storage");
+
+        let loaded = load_token().await.unwrap();
+        assert!(
+            loaded.is_none(),
+            "subsequent loads must fail to return a token"
+        );
+
+        // Logout without a stored token is a successful no-op.
         delete_token().await.unwrap();
     }
 }

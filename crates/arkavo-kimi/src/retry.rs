@@ -140,6 +140,7 @@ impl RetryClient {
 mod tests {
     use super::*;
     use crate::error::KimiError;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_retry_config_builder() {
@@ -198,6 +199,7 @@ mod tests {
         assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1); // Should not retry
     }
 
+    #[spec("KIMI-004")]
     #[tokio::test]
     async fn test_retryable_error_succeeds() {
         let client = RetryClient::new(RetryConfig {
@@ -225,6 +227,7 @@ mod tests {
         assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
+    #[spec("KIMI-004")]
     #[tokio::test]
     async fn test_max_retries_exceeded() {
         let client = RetryClient::new(RetryConfig {

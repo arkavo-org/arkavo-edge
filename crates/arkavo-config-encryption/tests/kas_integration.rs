@@ -13,9 +13,11 @@ mod kas_tests {
         AgentCredential, ConfigBundleDecryptor, ConfigBundleEncryptor, KasConfig, Policy,
         PolicyAttribute,
     };
+    use arkavo_test_macros::spec;
     use std::collections::HashMap;
 
     /// Test encryption with production KAS URL
+    #[spec("CFGE-001", "CFGE-002")]
     #[test]
     fn test_encrypt_with_production_kas() {
         let mut bundle = ConfigurationBundle::new(
@@ -57,6 +59,7 @@ mod kas_tests {
     }
 
     /// Test that decryption without KAS client fails appropriately
+    #[spec("CFGE-003")]
     #[test]
     fn test_decrypt_without_kas_fails() {
         let mut bundle = ConfigurationBundle::new(
@@ -100,6 +103,7 @@ mod kas_tests {
 
     /// Test async decryption with KAS client (requires OAuth token)
     /// This test is ignored by default as it requires network access and credentials
+    #[spec("CFGE-003")]
     #[tokio::test]
     #[ignore]
     async fn test_decrypt_with_kas_client() {
@@ -197,6 +201,7 @@ mod kas_tests {
     }
 
     /// Test attribute verification during decryption
+    #[spec("CFGE-003")]
     #[test]
     fn test_attribute_verification() {
         let mut bundle = ConfigurationBundle::new(

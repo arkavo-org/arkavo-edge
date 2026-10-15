@@ -547,3 +547,46 @@ fn load_budget_config_from_kit() -> arkavo_budget::BudgetConfig {
         None => arkavo_budget::BudgetConfig::default(),
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    #[tokio::test]
+    #[spec("AGUI-001")]
+    async fn gateway_new_initializes_empty_state() {
+        let gateway = AgUiGateway::new(7700);
+
+        assert_eq!(gateway.port, 7700);
+        assert!(gateway.discovered_agents.read().await.is_empty());
+        assert!(gateway.connections.read().await.is_empty());
+        assert!(gateway.agent_connections.read().await.is_empty());
+        // Telemetry channel is wired and ready for the event bridge
+        assert!(gateway.telemetry_rx.is_some());
+        assert!(gateway.initial_prompt.is_none());
+        assert!(gateway.debug_handler.is_none());
+    }
+
+    #[tokio::test]
+    #[spec("AGUI-001")]
+    async fn gateway_instances_are_independent() {
+        let mut gateway_a = AgUiGateway::new(7701);
+        let gateway_b = AgUiGateway::new(7702);
+
+        gateway_a.set_initial_prompt("hello".to_string());
+        gateway_a
+            .discovered_agents
+            .write()
+            .await
+            .push(serde_json::json!({"id": "agent-a"}));
+
+        assert_eq!(gateway_a.initial_prompt.as_deref(), Some("hello"));
+        assert_eq!(gateway_a.discovered_agents.read().await.len(), 1);
+        // A second gateway must not share registries or prompt state
+        assert!(gateway_b.initial_prompt.is_none());
+        assert!(gateway_b.discovered_agents.read().await.is_empty());
+        assert_eq!(gateway_b.port, 7702);
+    }
+}

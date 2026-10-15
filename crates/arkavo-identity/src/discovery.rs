@@ -63,6 +63,7 @@ fn pin_host(url: &str, identity_host: &str) -> Result<(), IdentityError> {
 #[allow(clippy::disallowed_methods)] // #[tokio::test] expands to Runtime::block_on
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     async fn serve_well_known(
         body: serde_json::Value,
@@ -103,6 +104,7 @@ mod tests {
         (addr, handle)
     }
 
+    #[spec("IDS-004")]
     #[tokio::test]
     async fn pins_identity_host_and_rejects_a_foreign_idp() {
         let (addr, handle) = serve_well_known(serde_json::json!({
@@ -125,6 +127,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-003")]
     #[tokio::test]
     async fn accepts_matching_identity_host() {
         let (addr, handle) = serve_well_known(serde_json::json!({
@@ -151,6 +154,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-003")]
     #[tokio::test]
     async fn missing_idp_is_transport() {
         let (addr, handle) = serve_well_known(serde_json::json!({
@@ -168,6 +172,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-004")]
     #[tokio::test]
     async fn accepts_case_insensitive_identity_host() {
         let (addr, handle) = serve_well_known(serde_json::json!({
@@ -193,6 +198,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-004")]
     #[tokio::test]
     async fn rejects_when_only_token_endpoint_is_foreign() {
         let (addr, handle) = serve_well_known(serde_json::json!({
@@ -230,6 +236,7 @@ mod tests {
         ));
     }
 
+    #[spec("IDS-004")]
     #[test]
     fn pin_host_refuses_http_identity_arkavo_net() {
         let err = pin_host(

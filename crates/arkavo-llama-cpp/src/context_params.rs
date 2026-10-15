@@ -193,6 +193,7 @@ pub fn single_sequence_params(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn scaling_keeps_small_windows_and_caps_large_ones() {

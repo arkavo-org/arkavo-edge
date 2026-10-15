@@ -1,6 +1,8 @@
 use crate::ui::diff::{DiffHunk, DiffLine, DiffLineType, DiffView};
+use arkavo_test_macros::spec;
 
 #[test]
+#[spec("TERM-006")]
 fn test_parse_unified_diff() {
     let mut diff_view = DiffView::new();
 

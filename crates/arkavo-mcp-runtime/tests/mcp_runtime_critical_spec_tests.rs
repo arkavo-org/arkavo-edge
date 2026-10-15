@@ -3,7 +3,9 @@
 #![allow(clippy::disallowed_methods)]
 
 use arkavo_mcp_runtime::tools::EchoTool;
-use arkavo_mcp_runtime::{McpRuntime, McpServer, McpServerConfig, RpcRequest, ToolRequest};
+use arkavo_mcp_runtime::{
+    McpRuntime, McpServer, McpServerConfig, RpcRequest, RuntimeError, ToolRequest,
+};
 use arkavo_test_macros::spec;
 use std::path::Path;
 use std::sync::Arc;
@@ -99,4 +101,109 @@ async fn mcp_runtime_accepts_client_connection_and_tracks_state() {
         .await
         .expect("removing server should succeed");
     assert!(!runtime.is_connected("fake-mcp").await);
+}
+
+#[spec("MCPR-001")]
+#[tokio::test]
+async fn mcp_server_tracks_registry_state_and_answers_unknown_rpc_methods() {
+    let server = McpServer::new();
+
+    server
+        .register_tool("echo".to_string(), Arc::new(EchoTool::new()))
+        .await
+        .expect("first registration succeeds");
+
+    // State is tracked: a duplicate registration is rejected.
+    let err = server
+        .register_tool("echo".to_string(), Arc::new(EchoTool::new()))
+        .await
+        .expect_err("duplicate registration must fail");
+    assert!(err.to_string().contains("already registered"), "{err}");
+
+    // The server answers JSON-RPC, including methods it does not know.
+    let response = server
+        .handle_rpc_request(RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(9)),
+            method: "no/such_method".to_string(),
+            params: None,
+        })
+        .await;
+    assert_eq!(response.id, Some(serde_json::json!(9)));
+    let error = response.error.expect("unknown method yields an error");
+    assert_eq!(
+        error.code,
+        arkavo_mcp_runtime::error_codes::METHOD_NOT_FOUND
+    );
+}
+
+#[cfg(unix)]
+#[spec("MCPR-002")]
+#[tokio::test]
+async fn mcp_runtime_rejects_a_duplicate_client_id() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_mcp_server.py");
+    let config = || {
+        McpServerConfig::stdio(
+            "fake-mcp",
+            "python3",
+            vec!["-u".to_string(), fixture.to_string_lossy().to_string()],
+        )
+    };
+
+    let runtime = McpRuntime::new();
+    runtime
+        .add_server(config())
+        .await
+        .expect("first connection should succeed");
+
+    let err = runtime
+        .add_server(config())
+        .await
+        .expect_err("a duplicate client id must be rejected");
+    assert!(matches!(err, RuntimeError::AlreadyExists(ref n) if n == "fake-mcp"));
+
+    // The original connection is untouched by the rejected duplicate.
+    assert!(runtime.is_connected("fake-mcp").await);
+    runtime.shutdown().await.expect("shutdown");
+}
+
+#[cfg(unix)]
+#[spec("MCPR-003")]
+#[tokio::test]
+async fn mcp_runtime_executes_a_remote_tool_and_returns_its_result() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_mcp_server.py");
+    let config = McpServerConfig::stdio(
+        "fake-mcp",
+        "python3",
+        vec!["-u".to_string(), fixture.to_string_lossy().to_string()],
+    );
+
+    let runtime = McpRuntime::new();
+    runtime
+        .add_server(config)
+        .await
+        .expect("add_server should connect to the fake MCP server");
+
+    // The proxied tool executes on the remote server and the result comes back.
+    let server = runtime.server().await;
+    let response = server
+        .execute_tool(ToolRequest {
+            tool_name: "echo".to_string(),
+            params: serde_json::json!({"text": "hello"}),
+        })
+        .await;
+    assert!(response.success, "{response:?}");
+    assert_eq!(response.result, serde_json::json!("done"));
+
+    // A tool the runtime does not know fails as a tool error, not a panic.
+    let response = server
+        .execute_tool(ToolRequest {
+            tool_name: "ghost".to_string(),
+            params: serde_json::json!({}),
+        })
+        .await;
+    assert!(!response.success);
+    drop(server);
+
+    runtime.shutdown().await.expect("shutdown");
 }

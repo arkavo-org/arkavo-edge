@@ -1,7 +1,9 @@
 use super::*;
+use arkavo_test_macros::spec;
 use crossterm::event::KeyCode;
 
 #[test]
+#[spec("TERM-007")]
 fn test_vim_mode_transitions() {
     let mut state = VimState::new();
 
@@ -18,6 +20,7 @@ fn test_vim_mode_transitions() {
 }
 
 #[test]
+#[spec("TERM-007")]
 fn test_vim_keybindings() {
     let bindings = VimKeyBinding::normal_mode_bindings();
 

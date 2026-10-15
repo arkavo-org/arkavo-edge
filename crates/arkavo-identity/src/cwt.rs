@@ -67,6 +67,7 @@ fn claim_sub(map: &[(Value, Value)]) -> Option<String> {
 mod tests {
     use super::sub;
     use crate::error::IdentityError;
+    use arkavo_test_macros::spec;
     use base64::Engine;
     use ciborium::value::Value;
 
@@ -92,15 +93,51 @@ mod tests {
         B64.encode(bytes)
     }
 
+    #[spec("IDS-019")]
     #[test]
     fn sub_reads_rfc8392_claim_from_tagged_cose_sign1() {
         let token = tagged_cose_sign1_with_sub("arkavo:test-sub");
         assert_eq!(sub(&token).unwrap(), "arkavo:test-sub");
     }
 
+    #[spec("IDS-019")]
     #[test]
     fn garbage_access_token_has_no_sub() {
         match sub("not-a-cwt") {
+            Err(IdentityError::Token(msg)) => assert_eq!(msg, "access token has no sub"),
+            other => panic!("expected Token(\"access token has no sub\"), got {other:?}"),
+        }
+    }
+
+    #[spec("IDS-019")]
+    #[test]
+    fn claims_map_without_sub_key_has_no_sub() {
+        let claims = Value::Map(vec![(
+            Value::Integer(1.into()),
+            Value::Text("issuer-only".to_string()),
+        )]);
+        let mut payload = Vec::new();
+        ciborium::into_writer(&claims, &mut payload).unwrap();
+        let cose = Value::Array(vec![
+            Value::Bytes(vec![]),
+            Value::Map(vec![]),
+            Value::Bytes(payload),
+            Value::Bytes(vec![]),
+        ]);
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&cose, &mut bytes).unwrap();
+        let token = B64.encode(bytes);
+        match sub(&token) {
+            Err(IdentityError::Token(msg)) => assert_eq!(msg, "access token has no sub"),
+            other => panic!("expected Token(\"access token has no sub\"), got {other:?}"),
+        }
+    }
+
+    #[spec("IDS-019")]
+    #[test]
+    fn empty_sub_text_has_no_sub() {
+        let token = tagged_cose_sign1_with_sub("");
+        match sub(&token) {
             Err(IdentityError::Token(msg)) => assert_eq!(msg, "access token has no sub"),
             other => panic!("expected Token(\"access token has no sub\"), got {other:?}"),
         }

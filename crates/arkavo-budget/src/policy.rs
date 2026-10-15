@@ -286,6 +286,7 @@ use arkavo_dataflow::nodes::model_registry::ModelInfo;
 mod tests {
     use super::*;
     use arkavo_dataflow::nodes::model_registry::ModelCapabilities;
+    use arkavo_test_macros::spec;
     use chrono::Utc;
 
     fn create_test_models() -> Vec<ModelInfo> {
@@ -413,6 +414,7 @@ mod tests {
         ]
     }
 
+    #[spec("BUDGET-003")]
     #[test]
     fn test_model_selection_lowest_cost() {
         let policy = ModelSelectionPolicy::new();
@@ -437,6 +439,7 @@ mod tests {
         assert!(selected.estimated_cost <= TokenCost::from_dollars(1.0));
     }
 
+    #[spec("BUDGET-003")]
     #[test]
     fn test_model_selection_with_capability_filter() {
         let policy = ModelSelectionPolicy::new();
@@ -460,6 +463,7 @@ mod tests {
         assert_eq!(selected.model_id, "claude-3-haiku-20240307");
     }
 
+    #[spec("BUDGET-003")]
     #[test]
     fn test_model_selection_budget_constraint() {
         let policy = ModelSelectionPolicy::new();

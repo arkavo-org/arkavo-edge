@@ -552,6 +552,7 @@ mod tests {
         assert!(result.get("examples").is_some());
     }
 
+    #[spec("MCP-010")]
     #[tokio::test]
     async fn test_encrypt_and_info_roundtrip() {
         let temp_dir = TempDir::new().unwrap();
@@ -589,6 +590,7 @@ mod tests {
         assert_eq!(info["encryption"]["algorithm"], "AES-256-GCM");
     }
 
+    #[spec("MCP-010")]
     #[tokio::test]
     async fn test_encrypt_missing_input() {
         let tool = TdfEncryptTool::new();

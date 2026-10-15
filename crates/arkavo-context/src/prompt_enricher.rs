@@ -309,6 +309,7 @@ impl PromptEnricher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn create_test_problem() -> ProblemStatement {
         ProblemStatement {
@@ -333,6 +334,7 @@ mod tests {
         }
     }
 
+    #[spec("CTX-006")]
     #[test]
     fn test_enrich_basic() {
         let enricher = PromptEnricher::default();
@@ -368,6 +370,7 @@ mod tests {
         assert!(truncated.total_tokens <= 50);
     }
 
+    #[spec("CTX-006")]
     #[test]
     fn test_without_dependencies() {
         let enricher = PromptEnricher::default().with_dependencies(false);

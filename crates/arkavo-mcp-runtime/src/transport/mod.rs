@@ -110,3 +110,54 @@ pub async fn create_transport(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::disallowed_methods)]
+
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    /// create_transport is the runtime client's spawn path: the server must
+    /// start with the resolved environment only, not this process's.
+    #[spec("MCPR-008")]
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn create_transport_stdio_server_sees_only_the_resolved_environment() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dump = dir.path().join("env");
+        let spec = EnvSpec {
+            set: [("ENV_DUMP_OUT".to_string(), dump.display().to_string())].into(),
+            passthrough: Vec::new(),
+        };
+
+        let transport = create_transport(
+            TransportConfig::Stdio {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), r#"env > "$ENV_DUMP_OUT""#.to_string()],
+                cwd: None,
+            },
+            &spec,
+        )
+        .await
+        .expect("spawn environment dump");
+
+        for _ in 0..50 {
+            if dump.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let seen = std::fs::read_to_string(&dump).expect("environment dump written");
+        assert!(
+            seen.lines().any(|l| l.starts_with("ENV_DUMP_OUT=")),
+            "{seen}"
+        );
+        assert!(
+            !seen.lines().any(|l| l.starts_with("CARGO_MANIFEST_DIR=")),
+            "this process's own environment leaked into the MCP server: {seen}"
+        );
+
+        transport.close().await.expect("close");
+    }
+}

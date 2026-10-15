@@ -288,6 +288,7 @@ mod tests {
             .unwrap_or(false)
     }
 
+    #[spec("CS-002")]
     #[tokio::test]
     async fn test_codegrep_files() {
         if !is_ripgrep_available() {
@@ -314,6 +315,7 @@ mod tests {
         }
     }
 
+    #[spec("CS-002")]
     #[tokio::test]
     async fn test_codegrep_content() {
         if !is_ripgrep_available() {

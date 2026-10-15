@@ -9,7 +9,7 @@ use arkavo_test_macros::spec;
 use std::io::Cursor;
 
 /// Verify IrohTransport implements BlobTransport trait correctly.
-#[spec("TDF-007")]
+#[spec("TDF-007", "IROH-001")]
 #[tokio::test]
 async fn iroh_implements_blob_transport() {
     let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
@@ -26,6 +26,7 @@ async fn iroh_implements_blob_transport() {
 
 /// Test composed workflow: encrypt -> stage -> fetch -> decrypt.
 /// Uses mock encryptor + real Iroh transport.
+#[spec("IROH-008")]
 #[tokio::test]
 async fn composed_encrypt_stage_fetch_decrypt() {
     let tdf_service = MockTdfService::default();
@@ -157,6 +158,7 @@ async fn health_check_lifecycle() {
 }
 
 /// Test end-to-end encryption workflow with decryption.
+#[spec("IROH-008")]
 #[tokio::test]
 async fn full_encrypt_transport_decrypt_workflow() {
     let tdf_service = MockTdfService::new(0xAB); // Use specific key
@@ -184,4 +186,23 @@ async fn full_encrypt_transport_decrypt_workflow() {
     assert_eq!(decrypted, plaintext);
 
     transport.shutdown().await.unwrap();
+}
+
+/// Fetch a blob from a separate peer node using only the ticket.
+/// Exercises the real P2P path: ticket parsed for hash and node info,
+/// direct connection to the provider, blob retrieved over the network stack.
+#[spec("IROH-003")]
+#[tokio::test]
+async fn fetch_blob_from_peer_node() {
+    let provider = IrohTransport::new(IrohNode::memory().await.unwrap());
+    let fetcher = IrohTransport::new(IrohNode::memory().await.unwrap());
+
+    let data = b"Blob served by a separate provider node";
+    let ticket = provider.stage(data).await.unwrap();
+
+    let fetched = fetcher.fetch(&ticket).await.unwrap();
+    assert_eq!(fetched, data);
+
+    provider.shutdown().await.unwrap();
+    fetcher.shutdown().await.unwrap();
 }

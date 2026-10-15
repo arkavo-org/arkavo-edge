@@ -394,6 +394,7 @@ mod tests {
     use tempfile::TempDir;
     use tokio;
 
+    #[spec("MCP-004")]
     #[tokio::test]
     async fn test_read_file() {
         let temp_dir = TempDir::new().unwrap();
@@ -425,6 +426,7 @@ mod tests {
         assert!(result["error"].as_str().unwrap().contains("not found"));
     }
 
+    #[spec("MCP-004")]
     #[tokio::test]
     async fn test_list_directory() {
         let temp_dir = TempDir::new().unwrap();
@@ -464,6 +466,7 @@ mod tests {
         assert_eq!(result["size"], 5);
     }
 
+    #[spec("MCP-004")]
     #[tokio::test]
     async fn test_write_file() {
         let temp_dir = TempDir::new().unwrap();

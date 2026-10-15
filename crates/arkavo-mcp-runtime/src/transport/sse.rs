@@ -263,3 +263,60 @@ impl Transport for SseTransport {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::disallowed_methods)]
+
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    #[spec("MCPR-005")]
+    #[tokio::test]
+    async fn sse_transport_starts_connected_and_refuses_requests_after_close() {
+        let transport = SseTransport::new("http://127.0.0.1:1/sse".to_string(), HashMap::new())
+            .await
+            .expect("creating an SSE transport should succeed");
+
+        assert!(transport.is_connected());
+
+        transport.close().await.expect("close should succeed");
+        assert!(!transport.is_connected());
+
+        let err = transport
+            .send_request("tools/list", None)
+            .await
+            .expect_err("a closed transport must refuse requests");
+        assert!(matches!(err, TransportError::ConnectionClosed), "{err}");
+
+        let err = transport
+            .send_notification("notifications/initialized", None)
+            .await
+            .expect_err("a closed transport must refuse notifications");
+        assert!(matches!(err, TransportError::ConnectionClosed), "{err}");
+    }
+
+    /// The port is bound and immediately released, so nothing listens on it:
+    /// the initial SSE GET fails fast with a connection error, offline.
+    #[spec("MCPR-005")]
+    #[tokio::test]
+    async fn sse_transport_reports_connection_failure_for_unreachable_endpoint() {
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        };
+
+        let transport = SseTransport::new(
+            format!("http://127.0.0.1:{port}/sse"),
+            HashMap::from([("authorization".to_string(), "Bearer test".to_string())]),
+        )
+        .await
+        .expect("transport creation does not connect yet");
+
+        let err = transport
+            .send_request("tools/list", None)
+            .await
+            .expect_err("an unreachable endpoint must fail the request");
+        assert!(matches!(err, TransportError::ConnectionFailed(_)), "{err}");
+    }
+}

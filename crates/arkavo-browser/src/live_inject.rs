@@ -13,23 +13,8 @@ impl LiveInjector {
     }
 
     pub async fn inject_html(&self, html: &str) -> Result<()> {
-        let script = format!(
-            r#"
-            (function() {{
-                const container = document.querySelector('#dynamic-ui-container') ||
-                                document.createElement('div');
-                container.id = 'dynamic-ui-container';
-                container.innerHTML = `{}`;
-                if (!document.body.contains(container)) {{
-                    document.body.appendChild(container);
-                }}
-            }})();
-            "#,
-            html.replace('`', "\\`")
-        );
-
         self.page
-            .evaluate(script)
+            .evaluate(html_injection_script(html))
             .await
             .map_err(|e| BrowserError::Playwright(format!("Failed to inject HTML: {e}")))?;
 
@@ -37,23 +22,8 @@ impl LiveInjector {
     }
 
     pub async fn inject_css(&self, css: &str) -> Result<()> {
-        let script = format!(
-            r#"
-            (function() {{
-                let style = document.querySelector('#dynamic-ui-styles');
-                if (!style) {{
-                    style = document.createElement('style');
-                    style.id = 'dynamic-ui-styles';
-                    document.head.appendChild(style);
-                }}
-                style.textContent = `{}`;
-            }})();
-            "#,
-            css.replace('`', "\\`")
-        );
-
         self.page
-            .evaluate(script)
+            .evaluate(css_injection_script(css))
             .await
             .map_err(|e| BrowserError::Playwright(format!("Failed to inject CSS: {e}")))?;
 
@@ -174,4 +144,74 @@ pub async fn create_injector_for_browser(browser: &Browser) -> Result<LiveInject
         .map_err(|e| BrowserError::Playwright(format!("Failed to create page: {e}")))?;
 
     Ok(LiveInjector::new(page))
+}
+
+/// Backticks are escaped so the payload cannot close the template literal
+/// and break out of the script.
+fn html_injection_script(html: &str) -> String {
+    format!(
+        r#"
+            (function() {{
+                const container = document.querySelector('#dynamic-ui-container') ||
+                                document.createElement('div');
+                container.id = 'dynamic-ui-container';
+                container.innerHTML = `{}`;
+                if (!document.body.contains(container)) {{
+                    document.body.appendChild(container);
+                }}
+            }})();
+            "#,
+        html.replace('`', "\\`")
+    )
+}
+
+fn css_injection_script(css: &str) -> String {
+    format!(
+        r#"
+            (function() {{
+                let style = document.querySelector('#dynamic-ui-styles');
+                if (!style) {{
+                    style = document.createElement('style');
+                    style.id = 'dynamic-ui-styles';
+                    document.head.appendChild(style);
+                }}
+                style.textContent = `{}`;
+            }})();
+            "#,
+        css.replace('`', "\\`")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    /// The injected script must carry the HTML into the shared container
+    /// without a backtick in the payload closing the template literal.
+    #[spec("BROWS-003")]
+    #[test]
+    fn test_html_injection_script_targets_the_container_and_escapes_backticks() {
+        let script = html_injection_script("<p>`hello`</p>");
+        assert!(script.contains("#dynamic-ui-container"), "{script}");
+        assert!(
+            script.contains("container.innerHTML = `<p>\\`hello\\`</p>`;"),
+            "{script}"
+        );
+        assert!(script.starts_with('\n'));
+        assert!(script.contains("(function() {"), "{script}");
+    }
+
+    /// The injected script must install the CSS into the shared style
+    /// element, again with backticks escaped.
+    #[spec("BROWS-003")]
+    #[test]
+    fn test_css_injection_script_targets_the_style_element_and_escapes_backticks() {
+        let script = css_injection_script("a::after { content: \"`\"; }");
+        assert!(script.contains("#dynamic-ui-styles"), "{script}");
+        assert!(
+            script.contains("style.textContent = `a::after { content: \"\\`\"; }`;"),
+            "{script}"
+        );
+    }
 }

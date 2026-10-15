@@ -185,6 +185,7 @@ pub mod session_observability {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_default_config() {
@@ -195,6 +196,7 @@ mod tests {
         assert!(!config.enable_otlp);
     }
 
+    #[spec("OBS-001")]
     #[tokio::test]
     async fn test_observability_init() {
         let config = ObservabilityConfig {

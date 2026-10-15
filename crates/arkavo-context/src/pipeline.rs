@@ -85,7 +85,9 @@ impl CompressionPipeline {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CTX-005")]
     #[tokio::test]
     async fn test_pipeline_creation() {
         let result = CompressionPipeline::new(
@@ -109,6 +111,7 @@ mod tests {
         assert!(tokens < 50);
     }
 
+    #[spec("CTX-005")]
     #[tokio::test]
     async fn test_empty_text_compression() {
         let pipeline = CompressionPipeline::new(

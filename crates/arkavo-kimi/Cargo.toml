@@ -34,6 +34,7 @@ bytes = { workspace = true }
 # when used through arkavo-llm with the kimi feature enabled
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 wiremock = "0.6"
 criterion = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }

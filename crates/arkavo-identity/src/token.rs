@@ -104,6 +104,7 @@ fn unix_now() -> i64 {
 mod tests {
     use super::*;
     use crate::error::IdentityError;
+    use arkavo_test_macros::spec;
     use std::collections::HashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -207,6 +208,7 @@ mod tests {
         let _ = stream.shutdown().await;
     }
 
+    #[spec("IDS-012")]
     #[tokio::test]
     async fn exchange_sends_verifier_and_exact_redirect_uri() {
         let (addr, form_rx, handle) = serve_token(
@@ -258,6 +260,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-012")]
     #[tokio::test]
     async fn refresh_returns_rotated_refresh_token() {
         let (addr, form_rx, handle) = serve_token(
@@ -288,6 +291,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-012")]
     #[tokio::test]
     async fn non_2xx_is_token_error_containing_body() {
         let (addr, _form_rx, handle) = serve_token(400, r#"{"error":"invalid_grant"}"#).await;
@@ -313,6 +317,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-012")]
     #[tokio::test]
     async fn missing_access_token_is_token_error() {
         let (addr, _form_rx, handle) =

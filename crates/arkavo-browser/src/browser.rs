@@ -290,6 +290,66 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
+    #[spec("BROWS-001")]
+    #[test]
+    fn test_new_browser_tool_is_initialized_with_its_schema() {
+        let tool = BrowserTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "browser_cdp");
+        assert!(!schema.description.is_empty());
+        assert_eq!(schema.parameters["type"], "object");
+        assert_eq!(schema.parameters["required"], json!(["action"]));
+    }
+
+    #[spec("BROWS-001")]
+    #[test]
+    fn test_default_browser_tool_offers_every_action() {
+        let tool = BrowserTool::default();
+        let actions = tool.schema().parameters["properties"]["action"]["enum"]
+            .as_array()
+            .expect("action enum");
+        for action in [
+            "navigate",
+            "screenshot",
+            "evaluate",
+            "content",
+            "console",
+            "network",
+        ] {
+            assert!(actions.iter().any(|a| a == action), "missing {action}");
+        }
+    }
+
+    /// A navigate without a URL is refused before Chrome is launched: the
+    /// missing-parameter check runs ahead of `launch_config`.
+    #[spec("BROWS-002")]
+    #[tokio::test]
+    async fn test_navigate_without_a_url_is_an_invalid_params_error() {
+        let err = BrowserTool::new()
+            .execute_browser(&json!({"action": "navigate"}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, BrowserError::InvalidParams(ref msg) if msg.contains("Missing url")),
+            "{err}"
+        );
+    }
+
+    /// A URL that does not parse is rejected as invalid before any launch,
+    /// with the offending URL named in the error.
+    #[spec("BROWS-002")]
+    #[tokio::test]
+    async fn test_navigate_with_an_unparsable_url_is_rejected() {
+        let policy = EgressPolicy::strict();
+        for url in ["not a url", "://no-scheme", "http://"] {
+            let err = vet_navigation(url, &policy).await.unwrap_err();
+            assert!(
+                matches!(err, BrowserError::InvalidParams(ref msg) if msg.contains("Invalid url")),
+                "{url}: {err}"
+            );
+        }
+    }
+
     // These tests pass a strict policy, so an operator's ARKAVO_EGRESS_ALLOW
     // cannot change what they prove.
     #[spec("BROWS-009")]

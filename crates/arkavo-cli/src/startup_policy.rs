@@ -77,6 +77,7 @@ fn first_run_action_for(skip_env: Option<String>, stdin_is_tty: bool) -> FirstRu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|v| (*v).to_owned()).collect()
@@ -159,6 +160,7 @@ mod tests {
         }
     }
 
+    #[spec("CLI-002")]
     #[test]
     fn first_run_action_non_tty_never_prompts() {
         // Regression: in a container stdin is at EOF, which read_line reports
@@ -176,6 +178,7 @@ mod tests {
         }
     }
 
+    #[spec("CLI-002")]
     #[test]
     fn first_run_action_tty_prompts_unless_skipped() {
         assert_eq!(first_run_action_for(None, true), FirstRunAction::Prompt);

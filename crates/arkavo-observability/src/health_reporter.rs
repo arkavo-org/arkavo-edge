@@ -140,6 +140,7 @@ impl Default for HealthRegistry {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     struct TestReporter {
         name: String,
@@ -175,6 +176,7 @@ mod tests {
         assert_eq!(unhealthy.status, HealthStatus::Unhealthy);
     }
 
+    #[spec("OBS-004")]
     #[tokio::test]
     async fn test_registry() {
         let registry = HealthRegistry::new();
@@ -197,5 +199,40 @@ mod tests {
 
         let overall = registry.get_overall_status().await;
         assert_eq!(overall, HealthStatus::Degraded);
+    }
+
+    #[spec("OBS-004")]
+    #[tokio::test]
+    async fn test_registry_overall_status_and_component_lookup() {
+        let registry = HealthRegistry::new();
+
+        // No components registered -> overall status unknown
+        assert_eq!(registry.get_overall_status().await, HealthStatus::Unknown);
+
+        registry
+            .register(Arc::new(TestReporter {
+                name: "database".to_string(),
+                status: HealthStatus::Healthy,
+            }))
+            .await;
+        registry
+            .register(Arc::new(TestReporter {
+                name: "llm-backend".to_string(),
+                status: HealthStatus::Unhealthy,
+            }))
+            .await;
+
+        // A single unhealthy component makes the overall status unhealthy
+        assert_eq!(registry.get_overall_status().await, HealthStatus::Unhealthy);
+
+        // Individual component check returns its report; unknown components return None
+        let report = registry.check_component("llm-backend").await.unwrap();
+        assert_eq!(report.component, "llm-backend");
+        assert_eq!(report.status, HealthStatus::Unhealthy);
+        assert!(registry.check_component("nonexistent").await.is_none());
+
+        // Unregistered components no longer contribute to the overall status
+        registry.unregister("llm-backend").await;
+        assert_eq!(registry.get_overall_status().await, HealthStatus::Healthy);
     }
 }

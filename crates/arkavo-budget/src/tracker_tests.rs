@@ -190,6 +190,7 @@ mod tests {
         assert_eq!(status.session_usage_percent, 20.0);
     }
 
+    #[spec("BUDGET-004")]
     #[tokio::test]
     async fn test_budget_alerts() {
         let config = BudgetConfig {
@@ -329,6 +330,7 @@ mod tests {
         assert_eq!(agent1_history.len(), 1);
     }
 
+    #[spec("BUDGET-004")]
     #[tokio::test]
     async fn test_budget_exhaustion() {
         let config = BudgetConfig {

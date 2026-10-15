@@ -67,7 +67,9 @@ impl From<IrohError> for arkavo_tdf::TransportError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("IROH-007")]
     #[test]
     fn iroh_error_display() {
         let err = IrohError::EndpointInit("bind failed".to_string());
@@ -77,6 +79,7 @@ mod tests {
         assert_eq!(err.to_string(), "Node not running");
     }
 
+    #[spec("IROH-007")]
     #[test]
     fn iroh_error_to_transport_error() {
         let iroh_err = IrohError::StoreAdd("disk full".to_string());

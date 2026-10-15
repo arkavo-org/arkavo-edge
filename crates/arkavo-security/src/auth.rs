@@ -229,7 +229,7 @@ mod tests {
         assert!(!backend.validate_scopes(&auth, &["admin".to_string()]).await);
     }
 
-    #[spec("SEC-001")]
+    #[spec("SEC-001", "NET-001", "NET-004")]
     #[tokio::test]
     async fn test_jwt_rejects_expired_and_tampered_tokens() {
         let secret = "test_secret";
@@ -275,6 +275,46 @@ mod tests {
             backend.validate_token(&valid_token).await.is_err(),
             "tampered JWT must be rejected"
         );
+    }
+
+    #[spec("NET-001")]
+    #[tokio::test]
+    async fn test_jwt_backend_rejects_missing_and_wrong_secret_tokens() {
+        let backend = JwtAuthBackend::new("correct_secret");
+
+        // Requests presenting no credentials are refused, not admitted as anonymous
+        assert!(backend.validate_token("").await.is_err());
+        assert!(backend.validate_token("not-a-jwt").await.is_err());
+
+        // A token signed with a different secret is refused
+        let claims = JwtClaims {
+            sub: "user123".to_string(),
+            exp: Some(chrono::Utc::now().timestamp() + 3600),
+            iat: Some(chrono::Utc::now().timestamp()),
+            scopes: Some(vec!["read".to_string()]),
+            additional: serde_json::Map::new(),
+        };
+        let forged = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(b"wrong_secret"),
+        )
+        .unwrap();
+        assert!(backend.validate_token(&forged).await.is_err());
+    }
+
+    #[spec("NET-004")]
+    #[tokio::test]
+    async fn test_no_localhost_trust_exemption() {
+        // validate_token takes only the presented token: there is no source-address
+        // parameter, so an unauthenticated request is rejected identically whether
+        // it originates from loopback or from a remote host.
+        let backend = JwtAuthBackend::new("secret");
+        let result = backend.validate_token("").await;
+        assert!(matches!(result.unwrap_err(), SecurityError::Auth(_)));
+
+        let chained = MultiAuthBackend::new().add_backend(Arc::new(JwtAuthBackend::new("secret")));
+        assert!(chained.validate_token("").await.is_err());
     }
 
     #[spec("SEC-006")]

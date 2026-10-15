@@ -79,6 +79,7 @@ mod tests {
     use super::*;
     use crate::discovery::IdentityEndpoints;
     use crate::pkce::Pkce;
+    use arkavo_test_macros::spec;
 
     #[cfg(not(target_os = "macos"))]
     use crate::error::IdentityError;
@@ -93,6 +94,7 @@ mod tests {
         assert!(!u.contains("https://"));
     }
 
+    #[spec("IDS-007")]
     #[test]
     fn authorize_url_includes_pkce_and_offline_access() {
         let ep = IdentityEndpoints {
@@ -124,5 +126,48 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, IdentityError::Unsupported));
+    }
+
+    #[spec("IDS-007")]
+    #[test]
+    fn authorize_url_appends_query_and_encodes_unreserved_only() {
+        let ep = IdentityEndpoints {
+            authorization_endpoint: "https://identity.arkavo.net/oauth/authorize?prompt=consent"
+                .into(),
+            token_endpoint: "https://identity.arkavo.net/oauth/token".into(),
+        };
+        let pkce = Pkce {
+            verifier: "v".into(),
+            challenge: "c".into(),
+            state: "s".into(),
+        };
+        let url = authorize_url(&ep, &pkce, "http://127.0.0.1:52171/cb");
+        let (base, query) = url.split_once('?').expect("query present");
+        assert_eq!(base, "https://identity.arkavo.net/oauth/authorize");
+        let params: std::collections::HashMap<&str, &str> = query
+            .split('&')
+            .map(|p| p.split_once('=').unwrap())
+            .collect();
+        assert_eq!(params["prompt"], "consent");
+        assert_eq!(params["response_type"], "code");
+        assert_eq!(params["client_id"], "arkavo-edge");
+        assert_eq!(
+            params["redirect_uri"], "http%3A%2F%2F127.0.0.1%3A52171%2Fcb",
+            "redirect_uri must be percent-encoded verbatim"
+        );
+        assert_eq!(params["scope"], "openid%20offline_access");
+        assert_eq!(params["code_challenge"], "c");
+        assert_eq!(params["code_challenge_method"], "S256");
+        assert_eq!(params["state"], "s");
+        for encoded in params.values() {
+            for (i, b) in encoded.bytes().enumerate() {
+                assert!(
+                    b.is_ascii_alphanumeric()
+                        || matches!(b, b'-' | b'_' | b'.' | b'~')
+                        || b == b'%',
+                    "byte {b} at {i} of {encoded} must be unreserved or %"
+                );
+            }
+        }
     }
 }

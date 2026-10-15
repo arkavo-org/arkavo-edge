@@ -194,6 +194,7 @@ pub fn parse_sse_line(line: &str) -> Option<Result<StreamChunk>> {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_parse_sse_done() {
@@ -277,6 +278,7 @@ mod tests {
         }
     }
 
+    #[spec("KIMI-002")]
     #[tokio::test]
     async fn test_sse_parser_with_mixed_content() {
         use futures::stream;
@@ -315,6 +317,7 @@ mod tests {
         assert!(matches!(&responses[2], Ok(resp) if resp.content.is_empty() && resp.done));
     }
 
+    #[spec("KIMI-002")]
     #[tokio::test]
     async fn test_sse_parser_partial_lines() {
         use futures::stream;
@@ -344,5 +347,66 @@ mod tests {
         assert_eq!(responses.len(), 2);
         assert!(matches!(&responses[0], Ok(resp) if resp.content == "Split" && !resp.done));
         assert!(matches!(&responses[1], Ok(resp) if resp.done));
+    }
+
+    #[spec("KIMI-009")]
+    #[test]
+    fn test_parse_sse_reasoning_content_delta() {
+        let line = r#"data: {"id":"chatcmpl-r1","object":"chat.completion.chunk","created":1234567890,"model":"kimi-k2-thinking","choices":[{"index":0,"delta":{"reasoning_content":"Thinking step one"},"finish_reason":null}]}"#;
+
+        match parse_sse_line(line) {
+            Some(Ok(chunk)) => {
+                let delta = &chunk.choices[0].delta;
+                assert_eq!(
+                    delta.reasoning_content.as_deref(),
+                    Some("Thinking step one")
+                );
+                assert!(delta.content.is_none());
+            }
+            _ => panic!("Failed to parse reasoning_content SSE line"),
+        }
+    }
+
+    #[spec("KIMI-009")]
+    #[tokio::test]
+    async fn test_sse_parser_reasoning_and_content_streams() {
+        use futures::stream;
+
+        let chunks = vec![
+            Ok(bytes::Bytes::from(
+                "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"kimi-k2-thinking\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Reasoning part. \"},\"finish_reason\":null}]}\n",
+            )),
+            Ok(bytes::Bytes::from(
+                "data: {\"id\":\"2\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"kimi-k2-thinking\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"More reasoning.\"},\"finish_reason\":null}]}\n",
+            )),
+            Ok(bytes::Bytes::from(
+                "data: {\"id\":\"3\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"kimi-k2-thinking\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Visible \"},\"finish_reason\":null}]}\n",
+            )),
+            Ok(bytes::Bytes::from(
+                "data: {\"id\":\"4\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"kimi-k2-thinking\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}\n",
+            )),
+        ];
+
+        let body_stream = stream::iter(chunks);
+        let mut parser = SseParser::new(body_stream, 1024);
+
+        let mut reasoning = String::new();
+        let mut content = String::new();
+        let mut saw_done = false;
+        while let Some(result) = parser.next().await {
+            let resp = result.unwrap();
+            if resp.done {
+                saw_done = true;
+            } else {
+                if let Some(r) = &resp.reasoning_content {
+                    reasoning.push_str(r);
+                }
+                content.push_str(&resp.content);
+            }
+        }
+
+        assert_eq!(reasoning, "Reasoning part. More reasoning.");
+        assert_eq!(content, "Visible answer");
+        assert!(saw_done, "stream completion must be signaled");
     }
 }

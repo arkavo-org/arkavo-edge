@@ -345,6 +345,46 @@ mod tests {
         assert!(policy_str.contains("admin"));
     }
 
+    #[spec("TDF-001")]
+    #[tokio::test]
+    async fn encrypt_returns_a_self_describing_manifest_without_integrity_information() {
+        let service = OpenTdfService::with_kas_url("https://kas.example.com");
+        let policy = PolicyBuilder::new()
+            .attribute("https://arkavo.net/attr/role", &["admin"])
+            .dissemination(&["user@example.com"])
+            .build()
+            .unwrap();
+        let plaintext = b"manifest shape";
+
+        let manifest = service.encrypt(plaintext, &policy).await.unwrap();
+
+        // Exactly one key access object, pointing at the configured KAS
+        assert_eq!(manifest.encryption_information.key_access.len(), 1);
+        assert_eq!(
+            manifest.encryption_information.key_access[0].url,
+            "https://kas.example.com"
+        );
+
+        // The embedded policy is the policy the caller supplied
+        let policy_json = BASE64
+            .decode(&manifest.encryption_information.policy)
+            .expect("policy is base64");
+        let policy_text = String::from_utf8(policy_json).expect("policy is UTF-8 JSON");
+        assert!(policy_text.contains("admin"));
+        assert!(policy_text.contains("user@example.com"));
+
+        // AES-256-GCM appends a 16-byte tag, so the ciphertext is at least
+        // plaintext + tag long regardless of where the IV is carried
+        let ciphertext = BASE64
+            .decode(&manifest.payload.value)
+            .expect("payload is base64");
+        assert!(ciphertext.len() >= plaintext.len() + 16);
+
+        // Integrity information is not carried on the wire form
+        let wire = serde_json::to_value(&manifest).unwrap().to_string();
+        assert!(!wire.contains("integrityInformation"));
+    }
+
     #[spec("TDFS-001")]
     #[tokio::test]
     async fn encrypt_basic() {

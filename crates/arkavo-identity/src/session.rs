@@ -279,6 +279,7 @@ mod tests {
     use super::{Clock, IdentitySession, Launcher, SessionConfig};
     use crate::error::{IdentityError, Prompt};
     use crate::store::StoredTokens;
+    use arkavo_test_macros::spec;
     use std::future::Future;
     use std::pin::Pin;
     use std::sync::Arc;
@@ -453,6 +454,7 @@ mod tests {
         (addr, posts, handle)
     }
 
+    #[spec("IDS-015")]
     #[tokio::test]
     async fn never_prompt_without_tokens_is_login_required() {
         let dir = tempfile::tempdir().unwrap();
@@ -488,6 +490,7 @@ mod tests {
         );
     }
 
+    #[spec("IDS-015", "IDS-016")]
     #[tokio::test]
     async fn refresh_before_expiry_uses_injected_clock_and_persists_rotation() {
         let dir = tempfile::tempdir().unwrap();
@@ -526,6 +529,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-015", "IDS-018")]
     #[tokio::test]
     async fn invalidate_drops_cached_access_but_refresh_still_works() {
         let dir = tempfile::tempdir().unwrap();
@@ -605,6 +609,7 @@ mod tests {
         (addr, posts, handle)
     }
 
+    #[spec("IDS-016")]
     #[tokio::test]
     async fn transport_error_on_refresh_keeps_token_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -652,6 +657,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-016")]
     #[tokio::test]
     async fn dead_refresh_never_prompt_is_login_required_and_file_gone() {
         let dir = tempfile::tempdir().unwrap();
@@ -701,6 +707,7 @@ mod tests {
         handle.abort();
     }
 
+    #[spec("IDS-017")]
     #[tokio::test]
     async fn corrupt_store_never_prompt_is_login_required_and_file_gone() {
         let dir = tempfile::tempdir().unwrap();
@@ -726,6 +733,171 @@ mod tests {
             other => panic!("expected LoginRequired, got {other:?}"),
         }
         assert!(!path.exists(), "corrupt store must delete the token file");
+        assert!(!called.load(Ordering::SeqCst));
+    }
+
+    async fn serve_idp_token_without_rotation(
+        access: &str,
+    ) -> (
+        std::net::SocketAddr,
+        Arc<AtomicUsize>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let posts = Arc::new(AtomicUsize::new(0));
+        let posts_task = posts.clone();
+        let well_known = serde_json::json!({
+            "idp": {
+                "issuer": format!("http://{addr}"),
+                "authorization_endpoint": format!("http://{addr}/oauth/authorize"),
+                "token_endpoint": format!("http://{addr}/oauth/token"),
+            },
+            "kas": { "uri": "https://platform.arkavo.net" }
+        })
+        .to_string();
+        let token_body = serde_json::json!({
+            "access_token": access,
+            "expires_in": 3600,
+        })
+        .to_string();
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let well_known = well_known.clone();
+                let token_body = token_body.clone();
+                let posts_task = posts_task.clone();
+                tokio::spawn(async move {
+                    let req = read_request(&mut stream).await;
+                    if req.starts_with("POST ") {
+                        posts_task.fetch_add(1, Ordering::SeqCst);
+                        write_json(&mut stream, &token_body).await;
+                    } else {
+                        write_json(&mut stream, &well_known).await;
+                    }
+                });
+            }
+        });
+        (addr, posts, handle)
+    }
+
+    #[spec("IDS-016")]
+    #[tokio::test]
+    async fn refresh_without_rotated_refresh_token_keeps_previous() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity_token");
+        crate::store::save(
+            &StoredTokens {
+                access_token: "old".into(),
+                refresh_token: Some("r1".into()),
+                expires_at: 1000,
+            },
+            &path,
+        )
+        .unwrap();
+        let (addr, posts, handle) = serve_idp_token_without_rotation("new").await;
+        let called = Arc::new(AtomicBool::new(false));
+        let launcher = Arc::new(FlagLauncher {
+            called: called.clone(),
+        });
+        let session = session(
+            path.clone(),
+            950,
+            launcher,
+            format!("http://{addr}"),
+            "127.0.0.1".into(),
+        );
+        let token = session.bearer(Prompt::Never).await.expect("refresh");
+        assert_eq!(token, "new");
+        let stored = crate::store::load(&path).unwrap().unwrap();
+        assert_eq!(
+            stored.refresh_token.as_deref(),
+            Some("r1"),
+            "a response omitting refresh_token must keep the previous one"
+        );
+        // force_refresh cleared and the new access cached: no second POST.
+        let again = session.bearer(Prompt::Never).await.unwrap();
+        assert_eq!(again, "new");
+        assert_eq!(posts.load(Ordering::SeqCst), 1);
+        assert!(!called.load(Ordering::SeqCst));
+        handle.abort();
+    }
+
+    #[spec("IDS-017")]
+    #[tokio::test]
+    async fn unreadable_token_file_propagates_without_deletion() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity_token");
+        // A directory at the token path fails read_to_string, a Store error
+        // that is not "parse token file" and must not self-heal.
+        std::fs::create_dir(&path).unwrap();
+        let called = Arc::new(AtomicBool::new(false));
+        let launcher = Arc::new(FlagLauncher {
+            called: called.clone(),
+        });
+        let session = session(
+            path.clone(),
+            0,
+            launcher,
+            "http://127.0.0.1:1".into(),
+            "127.0.0.1".into(),
+        );
+        let err = session
+            .bearer(Prompt::Never)
+            .await
+            .expect_err("read failure must propagate");
+        match err {
+            IdentityError::Store(msg) => {
+                assert!(msg.contains("read token file"), "got {msg}");
+            }
+            other => panic!("expected Store, got {other:?}"),
+        }
+        assert!(
+            path.exists(),
+            "non-parse store errors must not delete the token path"
+        );
+        assert!(!called.load(Ordering::SeqCst));
+    }
+
+    #[spec("IDS-018")]
+    #[tokio::test]
+    async fn invalidate_skips_fresh_stored_access_and_keeps_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity_token");
+        crate::store::save(
+            &StoredTokens {
+                access_token: "old".into(),
+                refresh_token: None,
+                expires_at: 1_000_000_000,
+            },
+            &path,
+        )
+        .unwrap();
+        let called = Arc::new(AtomicBool::new(false));
+        let launcher = Arc::new(FlagLauncher {
+            called: called.clone(),
+        });
+        let session = session(
+            path.clone(),
+            100,
+            launcher,
+            "http://127.0.0.1:1".into(),
+            "127.0.0.1".into(),
+        );
+        let first = session.bearer(Prompt::Never).await.unwrap();
+        assert_eq!(first, "old", "fresh stored access is served as-is");
+        session.invalidate();
+        let err = session
+            .bearer(Prompt::Never)
+            .await
+            .expect_err("fresh stored access must be skipped after invalidate");
+        assert!(
+            matches!(err, IdentityError::LoginRequired(_)),
+            "expected LoginRequired, got {err:?}"
+        );
+        assert!(path.exists(), "invalidate must leave the token file intact");
         assert!(!called.load(Ordering::SeqCst));
     }
 }
