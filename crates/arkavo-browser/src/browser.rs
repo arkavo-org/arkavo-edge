@@ -290,7 +290,6 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
-    #[spec("BROWS-001")]
     #[test]
     fn test_new_browser_tool_is_initialized_with_its_schema() {
         let tool = BrowserTool::new();
@@ -301,7 +300,6 @@ mod tests {
         assert_eq!(schema.parameters["required"], json!(["action"]));
     }
 
-    #[spec("BROWS-001")]
     #[test]
     fn test_default_browser_tool_offers_every_action() {
         let tool = BrowserTool::default();
@@ -322,7 +320,6 @@ mod tests {
 
     /// A navigate without a URL is refused before Chrome is launched: the
     /// missing-parameter check runs ahead of `launch_config`.
-    #[spec("BROWS-002")]
     #[tokio::test]
     async fn test_navigate_without_a_url_is_an_invalid_params_error() {
         let err = BrowserTool::new()
@@ -337,7 +334,6 @@ mod tests {
 
     /// A URL that does not parse is rejected as invalid before any launch,
     /// with the offending URL named in the error.
-    #[spec("BROWS-002")]
     #[tokio::test]
     async fn test_navigate_with_an_unparsable_url_is_rejected() {
         let policy = EgressPolicy::strict();

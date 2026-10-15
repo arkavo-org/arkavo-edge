@@ -146,26 +146,32 @@ pub async fn create_injector_for_browser(browser: &Browser) -> Result<LiveInject
     Ok(LiveInjector::new(page))
 }
 
-/// Backticks are escaped so the payload cannot close the template literal
-/// and break out of the script.
+/// JSON string literal. A JS template literal is not safe here: a
+/// backslash followed by a backtick ends it, and `${...}` is interpolated.
+/// `serde_json` escapes both.
+fn js_string_literal(value: &str) -> String {
+    serde_json::to_string(value).expect("a str serializes to JSON")
+}
+
 fn html_injection_script(html: &str) -> String {
+    let literal = js_string_literal(html);
     format!(
         r#"
             (function() {{
                 const container = document.querySelector('#dynamic-ui-container') ||
                                 document.createElement('div');
                 container.id = 'dynamic-ui-container';
-                container.innerHTML = `{}`;
+                container.innerHTML = {literal};
                 if (!document.body.contains(container)) {{
                     document.body.appendChild(container);
                 }}
             }})();
-            "#,
-        html.replace('`', "\\`")
+            "#
     )
 }
 
 fn css_injection_script(css: &str) -> String {
+    let literal = js_string_literal(css);
     format!(
         r#"
             (function() {{
@@ -175,43 +181,48 @@ fn css_injection_script(css: &str) -> String {
                     style.id = 'dynamic-ui-styles';
                     document.head.appendChild(style);
                 }}
-                style.textContent = `{}`;
+                style.textContent = {literal};
             }})();
-            "#,
-        css.replace('`', "\\`")
+            "#
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_test_macros::spec;
 
-    /// The injected script must carry the HTML into the shared container
-    /// without a backtick in the payload closing the template literal.
-    #[spec("BROWS-003")]
-    #[test]
-    fn test_html_injection_script_targets_the_container_and_escapes_backticks() {
-        let script = html_injection_script("<p>`hello`</p>");
-        assert!(script.contains("#dynamic-ui-container"), "{script}");
+    fn assert_embeds_json(script: &str, field: &str, payload: &str) {
+        let literal = js_string_literal(payload);
         assert!(
-            script.contains("container.innerHTML = `<p>\\`hello\\`</p>`;"),
+            script.contains(&format!("{field} = {literal};")),
             "{script}"
         );
-        assert!(script.starts_with('\n'));
-        assert!(script.contains("(function() {"), "{script}");
+        assert!(
+            !script.contains(&format!("{field} = `")),
+            "payload must not sit in a template literal: {script}"
+        );
     }
 
-    /// The injected script must install the CSS into the shared style
-    /// element, again with backticks escaped.
-    #[spec("BROWS-003")]
     #[test]
-    fn test_css_injection_script_targets_the_style_element_and_escapes_backticks() {
-        let script = css_injection_script("a::after { content: \"`\"; }");
-        assert!(script.contains("#dynamic-ui-styles"), "{script}");
-        assert!(
-            script.contains("style.textContent = `a::after { content: \"\\`\"; }`;"),
-            "{script}"
-        );
+    fn test_html_injection_script_embeds_payload_as_a_json_string() {
+        for payload in [
+            "<p>`hello`</p>",
+            r#"\`${alert(1)}`"#,
+            "a\\`b",
+            "<div>${document.cookie}</div>",
+        ] {
+            let script = html_injection_script(payload);
+            assert!(script.contains("#dynamic-ui-container"), "{script}");
+            assert_embeds_json(&script, "container.innerHTML", payload);
+        }
+    }
+
+    #[test]
+    fn test_css_injection_script_embeds_payload_as_a_json_string() {
+        for payload in ["a::after { content: \"`\"; }", r#"\`${alert(1)}`"#] {
+            let script = css_injection_script(payload);
+            assert!(script.contains("#dynamic-ui-styles"), "{script}");
+            assert_embeds_json(&script, "style.textContent", payload);
+        }
     }
 }

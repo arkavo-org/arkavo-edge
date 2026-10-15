@@ -242,7 +242,7 @@ mod tests {
         assert_eq!(encrypted.policy_manifest.dissemination.len(), 1);
     }
 
-    #[spec("TDFS-002", "CFGE-003")]
+    #[spec("TDFS-002")]
     #[test]
     fn test_decrypt_requires_kas() {
         let mut bundle = ConfigurationBundle::new(

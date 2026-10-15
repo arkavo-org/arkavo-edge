@@ -59,7 +59,6 @@ mod kas_tests {
     }
 
     /// Test that decryption without KAS client fails appropriately
-    #[spec("CFGE-003")]
     #[test]
     fn test_decrypt_without_kas_fails() {
         let mut bundle = ConfigurationBundle::new(
@@ -201,7 +200,6 @@ mod kas_tests {
     }
 
     /// Test attribute verification during decryption
-    #[spec("CFGE-003")]
     #[test]
     fn test_attribute_verification() {
         let mut bundle = ConfigurationBundle::new(

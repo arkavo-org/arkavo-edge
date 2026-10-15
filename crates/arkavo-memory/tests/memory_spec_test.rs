@@ -139,7 +139,6 @@ async fn search_returns_top_k_most_recent_results() {
 }
 
 #[spec("MEM-003")]
-#[spec("CTX-009")]
 #[spec("CTX-010")]
 #[tokio::test]
 async fn offload_appends_turn_and_preserves_prior_context() {

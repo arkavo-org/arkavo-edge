@@ -361,7 +361,7 @@ mod tests {
         ));
     }
 
-    #[spec("SEC-003", "NET-010")]
+    #[spec("SEC-003")]
     #[test]
     fn test_ip_rate_limiter() {
         let config = RateLimitConfig {
@@ -386,7 +386,6 @@ mod tests {
         assert!(limiter.check_rate_limit(ip2).is_ok());
     }
 
-    #[spec("NET-010")]
     #[tokio::test]
     async fn test_rate_limit_exceeded_applies_backoff() {
         let config = RateLimitConfig {

@@ -8,7 +8,7 @@ use arkavo_test_macros::spec;
 ///
 /// Single test on purpose: the global subscriber is process-wide, so parallel
 /// tests initializing it would race.
-#[spec("OBS-001", "OBS-007")]
+#[spec("OBS-001")]
 #[test]
 fn test_init_observability_with_otlp_enabled() {
     let config = ObservabilityConfig {

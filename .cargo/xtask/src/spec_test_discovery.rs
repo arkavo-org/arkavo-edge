@@ -13,15 +13,16 @@ pub struct TestDiscovery {
     test_fn_pattern: Regex,
     fn_pattern: Regex,
     test_attr_pattern: Regex,
+    ignore_attr_pattern: Regex,
 }
 
 impl TestDiscovery {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            // Match the whole attribute (plain or fully qualified) and capture
-            // its argument list; individual IDs are extracted from it below so
-            // multi-ID attributes like #[spec("A-1", "B-2")] count every ID.
-            spec_attr_pattern: Regex::new(r"#\[(?:\w+::)*spec\(([^)]+)\)\]")?,
+            // The attribute has to be the first token on the line. An unanchored
+            // match treats a doc-comment example, such as the one on
+            // `arkavo_test_macros::spec`, as a real test.
+            spec_attr_pattern: Regex::new(r"^\s*#\[(?:\w+::)*spec\(([^)]+)\)\]")?,
             spec_id_pattern: Regex::new(r#""([A-Z]+-\d+)""#)?,
             legacy_pattern: Regex::new(r"Covers\s+([A-Z]+-\d+)")?,
             // Also match doc comment patterns like "Spec: SESS-001" or "SESS-001: description"
@@ -32,6 +33,8 @@ impl TestDiscovery {
             fn_pattern: Regex::new(r"(async\s+)?fn\s+(\w+)")?,
             // Detect #[test] or #[tokio::test] attributes
             test_attr_pattern: Regex::new(r"#\[(tokio::)?test")?,
+            // #[ignore] and #[ignore = "reason"] are not part of the default run.
+            ignore_attr_pattern: Regex::new(r"#\[\s*ignore\b")?,
         })
     }
 
@@ -53,11 +56,24 @@ impl TestDiscovery {
         let mut tests = Vec::new();
         let mut current_scenarios = Vec::new();
         let mut saw_test_attr = false;
+        let mut ignored = false;
 
         for (line_num, line) in content.lines().enumerate() {
-            for attr in self.spec_attr_pattern.captures_iter(line) {
-                for id in self.spec_id_pattern.captures_iter(&attr[1]) {
-                    current_scenarios.push(id[1].to_string());
+            // "Spec: ID" notes live in comments and stay attached to the next
+            // test. A comment is not itself an attribute or a function, so a
+            // documented example cannot become a test.
+            let is_comment = line.trim_start().starts_with("//");
+            if !is_comment {
+                for attr in self.spec_attr_pattern.captures_iter(line) {
+                    for id in self.spec_id_pattern.captures_iter(&attr[1]) {
+                        current_scenarios.push(id[1].to_string());
+                    }
+                }
+                if self.ignore_attr_pattern.is_match(line) {
+                    ignored = true;
+                }
+                if self.test_attr_pattern.is_match(line) {
+                    saw_test_attr = true;
                 }
             }
             for cap in self.legacy_pattern.captures_iter(line) {
@@ -66,8 +82,8 @@ impl TestDiscovery {
             for cap in self.doc_pattern.captures_iter(line) {
                 current_scenarios.push(cap[1].to_string());
             }
-            if self.test_attr_pattern.is_match(line) {
-                saw_test_attr = true;
+            if is_comment {
+                continue;
             }
             // Match fn test_* (always) or any fn preceded by #[test]/#[tokio::test]
             let matched = if let Some(cap) = self.test_fn_pattern.captures(line) {
@@ -80,15 +96,22 @@ impl TestDiscovery {
                 None
             };
             if let Some((is_async, name)) = matched {
-                tests.push(Test {
-                    name,
-                    file: path.to_path_buf(),
-                    line: line_num + 1,
-                    scenarios_covered: current_scenarios.clone(),
-                    is_async,
-                });
+                // An ignored test is not part of the default run, so its IDs
+                // must not move coverage, and must not leak onto the next test.
+                if !ignored {
+                    tests.push(Test {
+                        name,
+                        file: path.to_path_buf(),
+                        line: line_num + 1,
+                        scenarios_covered: current_scenarios.clone(),
+                        is_async,
+                    });
+                }
                 current_scenarios.clear();
                 saw_test_attr = false;
+                ignored = false;
+            } else if self.fn_pattern.is_match(line) {
+                ignored = false;
             }
         }
         Ok(tests)
@@ -156,5 +179,47 @@ mod tests {
             tests[0].scenarios_covered,
             vec!["ABC-001".to_string(), "DEF-002".to_string()]
         );
+    }
+
+    #[test]
+    fn doc_comment_example_contributes_no_scenarios() {
+        // Regression: the unanchored attribute regex recorded the
+        // arkavo-test-macros doc example as a test of GOSSIP-005 and GOSSIP-006.
+        let tests = parse(
+            "docs",
+            r#"
+/// ```ignore
+/// #[spec("GOSSIP-005", "GOSSIP-006")]
+/// #[tokio::test]
+/// async fn test_anti_entropy() { }
+/// ```
+#[spec("ABC-001")]
+#[test]
+fn test_real() {}
+"#,
+        );
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].name, "test_real");
+        assert_eq!(tests[0].scenarios_covered, vec!["ABC-001".to_string()]);
+    }
+
+    #[test]
+    fn ignored_test_does_not_count_and_does_not_leak() {
+        let tests = parse(
+            "ignore",
+            "#[spec(\"ABC-001\")]\n#[test]\n#[ignore]\nfn test_skipped() {}\n#[spec(\"DEF-002\")]\n#[test]\nfn test_kept() {}\n",
+        );
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].name, "test_kept");
+        assert_eq!(tests[0].scenarios_covered, vec!["DEF-002".to_string()]);
+    }
+
+    #[test]
+    fn ignore_with_reason_does_not_count() {
+        let tests = parse(
+            "ignore-reason",
+            "#[spec(\"ABC-001\")]\n#[ignore = \"needs network\"]\n#[tokio::test]\nasync fn test_skipped() {}\n",
+        );
+        assert!(tests.is_empty());
     }
 }

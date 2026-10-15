@@ -225,14 +225,22 @@ mod tests {
         assert!(!transport.health_check().await.unwrap());
     }
 
-    #[spec("TDF-007", "IROH-007")]
+    #[spec("TDF-007")]
     #[tokio::test]
     async fn transport_invalid_ticket() {
         let node = IrohNode::memory().await.unwrap();
         let transport = IrohTransport::new(node);
 
-        let result = transport.fetch("invalid-ticket").await;
-        assert!(result.is_err());
+        let err = transport.fetch("invalid-ticket").await.unwrap_err();
+        match err {
+            TransportError::InvalidTicket(msg) => {
+                assert!(
+                    msg.contains("Failed to parse ticket"),
+                    "ticket parse context must be preserved, got {msg}"
+                );
+            }
+            other => panic!("expected InvalidTicket, got {other}"),
+        }
 
         transport.shutdown().await.unwrap();
     }

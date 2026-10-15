@@ -267,23 +267,12 @@ mod tests {
     use tempfile::TempDir;
     use tokio::fs;
 
-    fn is_comby_available() -> bool {
-        std::process::Command::new("comby")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-
     /// A match template with holes matches structurally, and preview mode
     /// reports the rewrite each match would apply without touching the file.
     #[spec("CS-003")]
+    #[ignore = "requires comby on PATH"]
     #[tokio::test]
     async fn comby_preview_reports_structural_rewrite() {
-        if !is_comby_available() {
-            eprintln!("Skipping test: comby not installed");
-            return;
-        }
         let dir = TempDir::new().unwrap();
         let source = "fn main() { println!(\"hi\"); }\n";
         let file = dir.path().join("a.rs");
@@ -336,7 +325,7 @@ mod tests {
 
     /// The reordered argv (flags first, then the templates and the confined
     /// absolute path) is accepted by comby and still finds matches.
-    #[spec("CS-006", "CS-003")]
+    #[spec("CS-006")]
     #[ignore = "requires comby on PATH"]
     #[tokio::test]
     async fn comby_searches_a_confined_file() {

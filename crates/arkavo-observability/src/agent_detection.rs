@@ -108,7 +108,6 @@ impl ObservabilityDetector {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use arkavo_test_macros::spec;
 
     #[test]
     fn test_development_detection() {
@@ -133,7 +132,6 @@ mod tests {
         assert_eq!(level, "info");
     }
 
-    #[spec("OBS-007")]
     #[tokio::test]
     async fn test_otlp_detection() {
         // This test will only find OTLP if one is actually running
@@ -146,7 +144,6 @@ mod tests {
         }
     }
 
-    #[spec("OBS-007")]
     #[tokio::test]
     async fn test_otlp_detection_with_local_collector() {
         // Stand up a TCP listener on the default OTLP gRPC port so the
@@ -161,7 +158,6 @@ mod tests {
         drop(listener);
     }
 
-    #[spec("OBS-007")]
     #[tokio::test]
     async fn test_auto_configure_falls_back_without_collector() {
         // With no collector listening, auto-configure must leave OTLP disabled

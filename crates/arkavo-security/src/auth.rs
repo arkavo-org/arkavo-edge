@@ -229,7 +229,7 @@ mod tests {
         assert!(!backend.validate_scopes(&auth, &["admin".to_string()]).await);
     }
 
-    #[spec("SEC-001", "NET-001", "NET-004")]
+    #[spec("SEC-001")]
     #[tokio::test]
     async fn test_jwt_rejects_expired_and_tampered_tokens() {
         let secret = "test_secret";
@@ -277,7 +277,6 @@ mod tests {
         );
     }
 
-    #[spec("NET-001")]
     #[tokio::test]
     async fn test_jwt_backend_rejects_missing_and_wrong_secret_tokens() {
         let backend = JwtAuthBackend::new("correct_secret");
@@ -303,7 +302,6 @@ mod tests {
         assert!(backend.validate_token(&forged).await.is_err());
     }
 
-    #[spec("NET-004")]
     #[tokio::test]
     async fn test_no_localhost_trust_exemption() {
         // validate_token takes only the presented token: there is no source-address

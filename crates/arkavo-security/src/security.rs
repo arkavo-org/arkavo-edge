@@ -287,7 +287,7 @@ mod tests {
     use super::*;
     use arkavo_test_macros::spec;
 
-    #[spec("SEC-005", "NET-009")]
+    #[spec("SEC-005")]
     #[test]
     fn test_default_security_config() {
         let config = SecurityConfig::default();
@@ -297,7 +297,6 @@ mod tests {
         assert!(matches!(config.authentication.method, AuthMethod::None));
     }
 
-    #[spec("NET-009")]
     #[test]
     fn test_tls_configuration_enforcement() {
         // TLS is mandatory by default, with certificate verification and a floor of TLS 1.2
