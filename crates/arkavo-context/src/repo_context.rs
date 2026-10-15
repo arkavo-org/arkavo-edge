@@ -193,7 +193,9 @@ pub fn compress_repo_context(full_content: &str, max_tokens: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CTX-014")]
     #[test]
     fn test_should_attach_context_mode_off() {
         assert!(!should_attach_repo_context(
@@ -202,11 +204,13 @@ mod tests {
         ));
     }
 
+    #[spec("CTX-014")]
     #[test]
     fn test_should_attach_context_mode_on() {
         assert!(should_attach_repo_context("hello", RepoContextMode::On));
     }
 
+    #[spec("CTX-014")]
     #[test]
     fn test_should_attach_context_auto_code_keywords() {
         assert!(should_attach_repo_context(
@@ -223,6 +227,7 @@ mod tests {
         ));
     }
 
+    #[spec("CTX-014")]
     #[test]
     fn test_should_attach_context_auto_greetings() {
         assert!(!should_attach_repo_context("hello", RepoContextMode::Auto));
@@ -234,6 +239,7 @@ mod tests {
         assert!(!should_attach_repo_context("2+2", RepoContextMode::Auto));
     }
 
+    #[spec("CTX-015")]
     #[test]
     fn test_compress_repo_context() {
         let full_context = "# Project\n".repeat(1000);
@@ -281,7 +287,8 @@ mod tests {
         assert!(!is_debug());
     }
 
-    /// CTX-015: Verify compressed output has the expected header and footer
+    /// Compressed output must carry the digest header and the docs footer
+    #[spec("CTX-015")]
     #[test]
     fn test_compress_output_format() {
         // Build content large enough to trigger compression (>1000 tokens ~ >4000 chars)
@@ -297,7 +304,8 @@ mod tests {
         );
     }
 
-    /// CTX-015: Compression preserves section headers from input
+    /// Compression preserves section headers from the input
+    #[spec("CTX-015")]
     #[test]
     fn test_compress_preserves_headers() {
         let input = "# Authentication\ncode here\n# Database\nmore code\n";
@@ -314,7 +322,8 @@ mod tests {
         );
     }
 
-    /// CTX-014: Auto mode detects all expected code-related keywords
+    /// Auto mode detects the expected code-related keywords
+    #[spec("CTX-014")]
     #[test]
     fn test_auto_detects_code_keywords_comprehensive() {
         let keywords = [

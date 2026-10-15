@@ -297,3 +297,46 @@ impl MultiplexerSupport {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    fn valid_config() -> TerminalSpawnConfig {
+        TerminalSpawnConfig {
+            session_id: Uuid::new_v4(),
+            task_id: "task-123".to_string(),
+            task_type: TaskType::CodeEditing,
+            title: "Edit main.rs".to_string(),
+        }
+    }
+
+    #[test]
+    #[spec("TERM-005")]
+    fn spawn_config_carries_task_type_and_validates() {
+        let config = valid_config();
+        config.validate().unwrap();
+        assert_eq!(config.task_type.as_str(), "code");
+
+        assert_eq!(TaskType::ChainOfThought.as_str(), "cot");
+        assert_eq!(TaskType::TestOutput.as_str(), "test");
+        assert_eq!(TaskType::DiffPreview.as_str(), "diff");
+    }
+
+    #[test]
+    #[spec("TERM-005")]
+    fn spawn_config_rejects_shell_injection() {
+        let mut config = valid_config();
+        config.task_id = "task; rm -rf /".to_string();
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.task_id = "task$(whoami)".to_string();
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.title = "line one\nline two".to_string();
+        assert!(config.validate().is_err());
+    }
+}

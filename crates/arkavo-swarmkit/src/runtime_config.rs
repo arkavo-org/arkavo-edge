@@ -422,6 +422,78 @@ mcp_servers:
         assert!(err.is_err());
     }
 
+    #[spec("SK-101")]
+    #[test]
+    fn agent_runtime_config_exposes_model_and_skill_instructions() {
+        let yaml = r#"
+spec_version: "1.0.0"
+kit:
+  id: ""
+  name: "lint-kit"
+  version: "0.1.0"
+  authors: [{did: "did:web:example.com"}]
+  created: "2026-04-29T00:00:00Z"
+  expires: "2026-05-29T00:00:00Z"
+  nonce: "thz1Cz8aWOUURbyQQfvA0Q"
+objective:
+  goal: "lint markdown"
+  success_criteria: ["clean lint"]
+inputs: []
+deliverables: [{name: "report", type: "json"}]
+roles:
+  - id: "linter"
+    role_type: "specialist"
+    agent_provisioning:
+      model: {family: "ministral", size: "3B"}
+    skills:
+      - id: "md-lint"
+        version: "1.0.0"
+        source: inline
+        payload:
+          name: "md-lint"
+          description: "Markdown linting rules"
+          instructions: "Always lint markdown before publishing."
+coordination:
+  topology: "hub-spoke"
+  protocol: "a2a-jsonrpc-2.0"
+  routing: {strategy: "static"}
+constraints:
+  global_budget: {max_wallclock_seconds: 60, max_total_tokens: 8000, max_cost_usd: 0.10}
+  data_classifications: ["public"]
+  network: {egress_allowed: false, egress_allowlist: []}
+completion:
+  rules: ["all deliverables present"]
+  on_failure: "abort"
+  max_retries: 0
+provenance:
+  signatures: [{signer_did: "did:web:example.com", algorithm: "ed25519", signature: "AAA"}]
+"#;
+        let m = crate::parse_yaml(yaml).unwrap();
+        let cfg = agent_runtime_config_from_manifest(&m);
+        assert_eq!(cfg.kit_name, "lint-kit");
+        assert_eq!(cfg.objective_goal, "lint markdown");
+
+        let primary = cfg.primary_role().unwrap();
+        assert_eq!(primary.role_id, "linter");
+        assert_eq!(primary.model_family.as_deref(), Some("ministral"));
+        assert_eq!(primary.model_size.as_deref(), Some("3B"));
+        assert_eq!(
+            primary.skill_instructions,
+            "Always lint markdown before publishing."
+        );
+
+        let purpose = cfg.purpose_text();
+        assert!(purpose.contains("lint markdown"));
+        assert!(purpose.contains("Always lint markdown before publishing."));
+
+        // No runtime block in the manifest: derived defaults apply.
+        assert_eq!(cfg.runtime.mode_or_default(), RuntimeMode::Orchestrator);
+        assert_eq!(
+            cfg.runtime.cloud_policy_or_default(),
+            CloudPolicyKind::AskBeforeCloud
+        );
+    }
+
     #[spec("SK-100")]
     #[test]
     fn duplicate_preflight_policy_id_rejected() {

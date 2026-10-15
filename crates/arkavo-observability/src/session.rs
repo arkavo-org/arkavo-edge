@@ -258,10 +258,12 @@ impl SessionTtlCleaner {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::collections::HashMap;
     use std::time::Duration;
     use tokio::time::sleep;
 
+    #[spec("OBS-002")]
     #[test]
     fn test_session_metrics() {
         let metrics = SessionMetrics::new("test-session".to_string());
@@ -279,6 +281,7 @@ mod tests {
         assert_eq!(metrics.errors_count.load(Ordering::Relaxed), 1);
     }
 
+    #[spec("OBS-002")]
     #[test]
     fn test_session_state_transitions() {
         let mut metrics = SessionMetrics::new("test-session".to_string());

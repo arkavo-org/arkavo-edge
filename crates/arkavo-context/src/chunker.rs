@@ -66,7 +66,10 @@ impl Default for SemanticChunker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CTX-001")]
+    #[spec("CTX-002")]
     #[test]
     fn test_small_text() {
         let chunker = SemanticChunker::new(1000, 100);
@@ -77,6 +80,7 @@ mod tests {
         assert_eq!(chunks[0], text);
     }
 
+    #[spec("CTX-002")]
     #[test]
     fn test_paragraph_splitting() {
         let chunker = SemanticChunker::new(100, 20);
@@ -86,6 +90,7 @@ mod tests {
         assert!(chunks.len() >= 2);
     }
 
+    #[spec("CTX-002")]
     #[test]
     fn test_overlap() {
         let chunker = SemanticChunker::new(50, 10);
@@ -102,6 +107,7 @@ mod tests {
         assert!(chunks.is_empty());
     }
 
+    #[spec("CTX-001")]
     #[test]
     fn test_default_impl() {
         let chunker = SemanticChunker::default();

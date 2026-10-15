@@ -267,6 +267,33 @@ mod tests {
     use tempfile::TempDir;
     use tokio::fs;
 
+    /// A match template with holes matches structurally, and preview mode
+    /// reports the rewrite each match would apply without touching the file.
+    #[spec("CS-003")]
+    #[ignore = "requires comby on PATH"]
+    #[tokio::test]
+    async fn comby_preview_reports_structural_rewrite() {
+        let dir = TempDir::new().unwrap();
+        let source = "fn main() { println!(\"hi\"); }\n";
+        let file = dir.path().join("a.rs");
+        fs::write(&file, source).await.unwrap();
+        let tool = CombyTool::with_root(dir.path());
+        let result = tool
+            .execute(json!({
+                "match_template": "println!(:[msg])",
+                "rewrite_template": "tracing::info!(:[msg])",
+                "path": "."
+            }))
+            .await
+            .expect("comby preview must succeed");
+        assert_eq!(result["mode"], "preview");
+        assert!(result["count"].as_u64().unwrap() >= 1, "{result}");
+        let rendered = result["matches"].to_string();
+        assert!(rendered.contains("tracing::info!"), "{rendered}");
+        let on_disk = fs::read_to_string(&file).await.unwrap();
+        assert_eq!(on_disk, source, "preview mode must not modify the file");
+    }
+
     /// comby reads any argument beginning with '-' as a flag and rejects `--`
     /// as an unknown flag, so such a template is refused before comby runs.
     #[spec("CS-006")]

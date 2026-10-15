@@ -43,3 +43,84 @@ impl HealthReport {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    fn sample_report(status: HealthStatus) -> HealthReport {
+        HealthReport {
+            status,
+            agent_id: "agent-1".to_string(),
+            session_id: "session-1".to_string(),
+            uptime_seconds: 120,
+            total_events: 42,
+            total_sessions: 3,
+            error_rate: 0.02,
+            last_error: Some(LastError {
+                timestamp: Utc::now(),
+                error_type: "timeout".to_string(),
+                message: "request timed out".to_string(),
+            }),
+        }
+    }
+
+    #[spec("DBG-004")]
+    #[test]
+    fn test_health_report_aggregation_and_format() {
+        let report = sample_report(HealthStatus::Healthy);
+
+        // Aggregated metrics are present on the report
+        assert_eq!(report.total_events, 42);
+        assert_eq!(report.total_sessions, 3);
+        assert!(report.is_healthy());
+
+        // Report is formatted as structured JSON with snake_case status
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["status"], "healthy");
+        assert_eq!(json["agent_id"], "agent-1");
+        assert_eq!(json["last_error"]["error_type"], "timeout");
+
+        let roundtrip: HealthReport = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtrip.status, HealthStatus::Healthy);
+        assert_eq!(roundtrip.total_events, 42);
+    }
+
+    #[spec("DBG-005")]
+    #[test]
+    fn test_calculate_status_healthy() {
+        assert_eq!(
+            HealthReport::calculate_status(0.0, 0),
+            HealthStatus::Healthy
+        );
+        assert_eq!(
+            HealthReport::calculate_status(0.05, 5),
+            HealthStatus::Healthy
+        );
+    }
+
+    #[spec("DBG-005")]
+    #[test]
+    fn test_calculate_status_degraded_and_failed() {
+        // Subsystem degraded: elevated error rate or too many recent errors
+        assert_eq!(
+            HealthReport::calculate_status(0.06, 0),
+            HealthStatus::Degraded
+        );
+        assert_eq!(
+            HealthReport::calculate_status(0.0, 6),
+            HealthStatus::Degraded
+        );
+
+        // Critical failure: high error rate or excessive recent errors
+        assert_eq!(
+            HealthReport::calculate_status(0.11, 0),
+            HealthStatus::Unhealthy
+        );
+        assert_eq!(
+            HealthReport::calculate_status(0.0, 11),
+            HealthStatus::Unhealthy
+        );
+    }
+}

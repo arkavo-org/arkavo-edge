@@ -8,11 +8,13 @@ use arkavo_deepseek::{
     ChatMessage, DeepSeekClient, DeepSeekConfig, DeepSeekProvider, Message, MessageContent,
     MessageRole, Provider, ResponseFormat, Role, Tool, ToolChoice, ToolFunction,
 };
+use arkavo_test_macros::spec;
 use serde_json::json;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Test 1: Anthropic basic - system+user → assistant text
+#[spec("DEEP-001")]
 #[tokio::test]
 async fn test_anthropic_basic() {
     let mock_server = MockServer::start().await;
@@ -249,6 +251,7 @@ async fn test_function_calling_standard() {
 }
 
 /// Test 5: Strict mode (valid) - base_url=/beta, strict:true
+#[spec("DEEP-005")]
 #[tokio::test]
 async fn test_strict_mode_valid() {
     let mock_server = MockServer::start().await;
@@ -328,6 +331,7 @@ async fn test_strict_mode_valid() {
 }
 
 /// Test 6: Strict mode (invalid) - omit additionalProperties:false → server error
+#[spec("DEEP-005")]
 #[tokio::test]
 async fn test_strict_mode_invalid() {
     use arkavo_deepseek::strict_mode::validate_strict_schema;
@@ -414,6 +418,7 @@ async fn test_reasoner_tools_fallback() {
 }
 
 /// Test 8: Streaming - verify chunked deltas and [DONE]
+#[spec("DEEP-002")]
 #[tokio::test]
 async fn test_streaming() {
     let mock_server = MockServer::start().await;

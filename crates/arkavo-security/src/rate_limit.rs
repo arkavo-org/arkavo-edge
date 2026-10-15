@@ -386,6 +386,31 @@ mod tests {
         assert!(limiter.check_rate_limit(ip2).is_ok());
     }
 
+    #[tokio::test]
+    async fn test_rate_limit_exceeded_applies_backoff() {
+        let config = RateLimitConfig {
+            max_requests_per_second: 100,
+            burst_size: 1,
+            enabled: true,
+            max_ip_entries: 100,
+            ip_entry_ttl_seconds: 3600,
+        };
+        let limiter = RateLimiter::new(config);
+
+        // First request consumes the single-token burst budget
+        assert!(limiter.check_rate_limit().is_ok());
+
+        // Exceeding the budget is rejected with RateLimitExceeded after a
+        // jittered backoff delay, so abusive clients are slowed down
+        let start = Instant::now();
+        let result = limiter.check_rate_limit_with_jitter().await;
+        assert!(matches!(
+            result.unwrap_err(),
+            SecurityError::RateLimitExceeded
+        ));
+        assert!(start.elapsed() > Duration::from_millis(1));
+    }
+
     #[spec("SEC-003")]
     #[test]
     fn test_rate_limit_status() {

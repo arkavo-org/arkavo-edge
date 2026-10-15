@@ -225,7 +225,8 @@ fn format_invariant(val: &serde_yaml::Value) -> String {
             // YAML parsed "Key: value" as a mapping — rejoin as "Key: value"
             m.iter()
                 .map(|(k, v)| {
-                    let key = k.as_str().unwrap_or("");
+                    // noyalib mapping keys are String, not serde_yaml::Value.
+                    let key = k.as_str();
                     let val = v.as_str().unwrap_or("");
                     format!("{key}: {val}")
                 })

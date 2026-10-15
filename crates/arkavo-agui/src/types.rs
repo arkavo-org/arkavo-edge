@@ -1461,3 +1461,67 @@ pub struct ArpDecisionTraceEntry {
     pub denied_reason: Option<String>,
     pub timestamp: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    fn entity_with_distilled() -> ArpAdaptationEntity {
+        ArpAdaptationEntity {
+            id: "agent-a/code".into(),
+            alpha: 9.5,
+            beta: 1.5,
+            mean: 0.8636,
+            observations: 42,
+            in_warmup: false,
+            live_alpha: 7.5,
+            live_beta: 1.5,
+            distilled_alpha: Some(2.0),
+            distilled_beta: Some(0.0),
+            distilled_weight: Some(0.25),
+        }
+    }
+
+    #[test]
+    #[spec("AGUI-015")]
+    fn adaptation_entity_exposes_live_and_distilled_mass() {
+        let json = serde_json::to_value(entity_with_distilled()).unwrap();
+
+        // The bandit health view interpolates only these numeric fields
+        assert_eq!(json["alpha"], 9.5);
+        assert_eq!(json["beta"], 1.5);
+        assert_eq!(json["liveAlpha"], 7.5);
+        assert_eq!(json["liveBeta"], 1.5);
+        assert_eq!(json["distilledAlpha"], 2.0);
+        assert_eq!(json["distilledWeight"], 0.25);
+        assert_eq!(json["observations"], 42);
+        assert_eq!(json["inWarmup"], false);
+
+        let parsed: ArpAdaptationEntity = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.alpha, 9.5);
+        assert_eq!(parsed.distilled_alpha, Some(2.0));
+        assert_eq!(parsed.distilled_weight, Some(0.25));
+    }
+
+    #[test]
+    #[spec("AGUI-015")]
+    fn adaptation_entity_omits_absent_distilled_mass() {
+        let mut entity = entity_with_distilled();
+        entity.distilled_alpha = None;
+        entity.distilled_beta = None;
+        entity.distilled_weight = None;
+
+        let json = serde_json::to_value(&entity).unwrap();
+        // No distilled mass seeded: the evidence split keys stay absent so the
+        // view renders a live-only curve rather than a zero-mass one
+        assert!(json.get("distilledAlpha").is_none());
+        assert!(json.get("distilledBeta").is_none());
+        assert!(json.get("distilledWeight").is_none());
+
+        let parsed: ArpAdaptationEntity = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.live_alpha, entity.live_alpha);
+        assert_eq!(parsed.mean, entity.mean);
+        assert!(parsed.distilled_alpha.is_none());
+    }
+}

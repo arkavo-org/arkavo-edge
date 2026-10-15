@@ -231,3 +231,44 @@ pub enum RuntimeError {
     #[error("Transport error: {0}")]
     Transport(#[from] TransportError),
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
+
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    #[spec("MCPR-007")]
+    #[tokio::test]
+    async fn removing_an_unknown_server_is_a_not_found_error() {
+        let runtime = McpRuntime::new();
+
+        let err = runtime
+            .remove_server("ghost")
+            .await
+            .expect_err("removing an unknown server must fail");
+        assert!(matches!(err, RuntimeError::NotFound(ref name) if name == "ghost"));
+    }
+
+    #[spec("MCPR-007")]
+    #[test]
+    fn transport_errors_are_classified_as_runtime_transport_errors() {
+        let err: RuntimeError = TransportError::Timeout.into();
+        assert!(matches!(
+            err,
+            RuntimeError::Transport(TransportError::Timeout)
+        ));
+        assert_eq!(err.to_string(), "Transport error: Timeout");
+
+        let err: RuntimeError = TransportError::ConnectionFailed("refused".to_string()).into();
+        assert!(matches!(
+            err,
+            RuntimeError::Transport(TransportError::ConnectionFailed(_))
+        ));
+
+        // The non-transport variants keep their own identity and message.
+        let err = RuntimeError::AlreadyExists("dup".to_string());
+        assert_eq!(err.to_string(), "Server 'dup' already exists");
+    }
+}

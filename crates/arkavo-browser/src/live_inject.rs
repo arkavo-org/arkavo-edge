@@ -13,23 +13,8 @@ impl LiveInjector {
     }
 
     pub async fn inject_html(&self, html: &str) -> Result<()> {
-        let script = format!(
-            r#"
-            (function() {{
-                const container = document.querySelector('#dynamic-ui-container') ||
-                                document.createElement('div');
-                container.id = 'dynamic-ui-container';
-                container.innerHTML = `{}`;
-                if (!document.body.contains(container)) {{
-                    document.body.appendChild(container);
-                }}
-            }})();
-            "#,
-            html.replace('`', "\\`")
-        );
-
         self.page
-            .evaluate(script)
+            .evaluate(html_injection_script(html))
             .await
             .map_err(|e| BrowserError::Playwright(format!("Failed to inject HTML: {e}")))?;
 
@@ -37,23 +22,8 @@ impl LiveInjector {
     }
 
     pub async fn inject_css(&self, css: &str) -> Result<()> {
-        let script = format!(
-            r#"
-            (function() {{
-                let style = document.querySelector('#dynamic-ui-styles');
-                if (!style) {{
-                    style = document.createElement('style');
-                    style.id = 'dynamic-ui-styles';
-                    document.head.appendChild(style);
-                }}
-                style.textContent = `{}`;
-            }})();
-            "#,
-            css.replace('`', "\\`")
-        );
-
         self.page
-            .evaluate(script)
+            .evaluate(css_injection_script(css))
             .await
             .map_err(|e| BrowserError::Playwright(format!("Failed to inject CSS: {e}")))?;
 
@@ -174,4 +144,85 @@ pub async fn create_injector_for_browser(browser: &Browser) -> Result<LiveInject
         .map_err(|e| BrowserError::Playwright(format!("Failed to create page: {e}")))?;
 
     Ok(LiveInjector::new(page))
+}
+
+/// JSON string literal. A JS template literal is not safe here: a
+/// backslash followed by a backtick ends it, and `${...}` is interpolated.
+/// `serde_json` escapes both.
+fn js_string_literal(value: &str) -> String {
+    serde_json::to_string(value).expect("a str serializes to JSON")
+}
+
+fn html_injection_script(html: &str) -> String {
+    let literal = js_string_literal(html);
+    format!(
+        r#"
+            (function() {{
+                const container = document.querySelector('#dynamic-ui-container') ||
+                                document.createElement('div');
+                container.id = 'dynamic-ui-container';
+                container.innerHTML = {literal};
+                if (!document.body.contains(container)) {{
+                    document.body.appendChild(container);
+                }}
+            }})();
+            "#
+    )
+}
+
+fn css_injection_script(css: &str) -> String {
+    let literal = js_string_literal(css);
+    format!(
+        r#"
+            (function() {{
+                let style = document.querySelector('#dynamic-ui-styles');
+                if (!style) {{
+                    style = document.createElement('style');
+                    style.id = 'dynamic-ui-styles';
+                    document.head.appendChild(style);
+                }}
+                style.textContent = {literal};
+            }})();
+            "#
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_embeds_json(script: &str, field: &str, payload: &str) {
+        let literal = js_string_literal(payload);
+        assert!(
+            script.contains(&format!("{field} = {literal};")),
+            "{script}"
+        );
+        assert!(
+            !script.contains(&format!("{field} = `")),
+            "payload must not sit in a template literal: {script}"
+        );
+    }
+
+    #[test]
+    fn test_html_injection_script_embeds_payload_as_a_json_string() {
+        for payload in [
+            "<p>`hello`</p>",
+            r#"\`${alert(1)}`"#,
+            "a\\`b",
+            "<div>${document.cookie}</div>",
+        ] {
+            let script = html_injection_script(payload);
+            assert!(script.contains("#dynamic-ui-container"), "{script}");
+            assert_embeds_json(&script, "container.innerHTML", payload);
+        }
+    }
+
+    #[test]
+    fn test_css_injection_script_embeds_payload_as_a_json_string() {
+        for payload in ["a::after { content: \"`\"; }", r#"\`${alert(1)}`"#] {
+            let script = css_injection_script(payload);
+            assert!(script.contains("#dynamic-ui-styles"), "{script}");
+            assert_embeds_json(&script, "style.textContent", payload);
+        }
+    }
 }

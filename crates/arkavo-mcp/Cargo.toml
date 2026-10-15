@@ -22,6 +22,7 @@ regex = { workspace = true }
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true

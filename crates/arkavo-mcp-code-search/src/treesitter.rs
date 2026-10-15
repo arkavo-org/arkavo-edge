@@ -224,6 +224,7 @@ mod tests {
     use arkavo_test_macros::spec;
     use tempfile::TempDir;
 
+    #[spec("CS-004")]
     #[tokio::test]
     async fn test_parse_rust() {
         let tool = TreeSitterTool::new();
@@ -235,6 +236,35 @@ mod tests {
 
         let result = tool.execute(params).await;
         assert!(result.is_ok());
+    }
+
+    #[spec("CS-004")]
+    #[tokio::test]
+    async fn query_executes_and_returns_captures_with_node_info() {
+        let ws = TempDir::new().unwrap();
+        std::fs::write(ws.path().join("lib.rs"), "fn alpha() {}\nfn beta() {}\n").unwrap();
+        let tool = TreeSitterTool::with_root(ws.path());
+        let result = tool
+            .execute(json!({
+                "file_path": "lib.rs",
+                "language": "rust",
+                "output_format": "captures",
+                "query": "(function_item name: (identifier) @fn_name)"
+            }))
+            .await
+            .expect("query must execute");
+        assert_eq!(result["format"], "captures");
+        assert_eq!(result["language"], "rust");
+        let captures = result["captures"].as_array().unwrap();
+        let names: Vec<&str> = captures.iter().filter_map(|c| c["text"].as_str()).collect();
+        assert!(
+            names.contains(&"alpha") && names.contains(&"beta"),
+            "{names:?}"
+        );
+        let first = &captures[0];
+        assert_eq!(first["kind"], "identifier");
+        assert!(first["start"]["row"].is_u64());
+        assert!(first["end"]["column"].is_u64());
     }
 
     #[spec("CS-006")]

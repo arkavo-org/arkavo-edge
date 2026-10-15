@@ -1059,4 +1059,54 @@ mod tests {
             assert!(result.is_err(), "DID '{did}' should be rejected");
         }
     }
+
+    /// Test CRYPTO-011: ECDH key agreement derives the same 32-byte secret on both sides
+    #[spec("CRYPTO-011")]
+    #[test]
+    fn test_kas_ecdh_shared_secret_symmetry() {
+        let local = KasEcKeypair::generate();
+        let peer = KasEcKeypair::generate();
+
+        let local_secret = local.diffie_hellman(&peer.public_key());
+        let peer_secret = peer.diffie_hellman(&local.public_key());
+
+        assert_eq!(local_secret.len(), 32, "shared secret must be 32 bytes");
+        assert_eq!(
+            local_secret, peer_secret,
+            "both parties must derive the identical shared secret"
+        );
+    }
+
+    /// Test CRYPTO-011: ECDH secret is stable across public key encodings and distinct per peer
+    #[spec("CRYPTO-011")]
+    #[test]
+    fn test_kas_ecdh_secret_depends_on_peer_key_not_encoding() {
+        let local = KasEcKeypair::generate();
+        let peer = KasEcKeypair::generate();
+        let third = KasEcKeypair::generate();
+
+        let expected = local.diffie_hellman(&peer.public_key());
+
+        // KAS peers exchange SEC1-encoded public keys; the encoding chosen on
+        // the wire must not change the derived secret.
+        for encoded in [peer.public_key_sec1(), peer.public_key_sec1_compressed()] {
+            let decoded = KasEcPublicKey::from_sec1_bytes(&encoded)
+                .expect("peer public key must decode from SEC1");
+            assert_eq!(
+                local.diffie_hellman(&decoded),
+                expected,
+                "SEC1 encoding must not affect the shared secret"
+            );
+        }
+
+        let via_base64 = KasEcPublicKey::from_base64(&peer.public_key_base64())
+            .expect("peer public key must decode from base64");
+        assert_eq!(local.diffie_hellman(&via_base64), expected);
+
+        let other = local.diffie_hellman(&third.public_key());
+        assert_ne!(
+            expected, other,
+            "a different peer must yield a different shared secret"
+        );
+    }
 }

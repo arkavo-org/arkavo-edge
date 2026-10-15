@@ -449,6 +449,7 @@ impl Tool for WebSearchTool {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_schema() {
@@ -489,6 +490,33 @@ mod tests {
             WebSearchTool::strip_html_tags("No tags here"),
             "No tags here"
         );
+    }
+
+    #[spec("MCP-009")]
+    #[test]
+    fn test_parse_results_extracts_titles_urls_and_snippets() {
+        let tool = WebSearchTool::new();
+        // DuckDuckGo HTML layout: a result anchor carries href and
+        // class="result__a"; its snippet anchor follows with
+        // class="result__snippet".
+        let html = concat!(
+            "<html><body>",
+            r#"<a href="https://a.co" class="result__a">Rust Async</a>"#,
+            r#"<a class="result__snippet">Learn <b>async</b> Rust &amp; more</a>"#,
+            r#"<a href="https://b.co" class="result__a">Tokio</a>"#,
+            r#"<a class="result__snippet">A runtime</a>"#,
+            "</body></html>"
+        );
+
+        let results = tool.parse_results(html, 5);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].title, "Rust Async");
+        assert_eq!(results[0].url, "https://a.co");
+        assert_eq!(results[0].snippet, "Learn async Rust & more");
+        assert_eq!(results[1].title, "Tokio");
+
+        // max_results caps the list.
+        assert_eq!(tool.parse_results(html, 1).len(), 1);
     }
 
     #[test]
@@ -533,6 +561,7 @@ mod tests {
 
     /// NET-007: the search request goes through the egress client, so an
     /// endpoint on a blocked address is refused and never connected to.
+    #[spec("MCP-009")]
     #[tokio::test]
     async fn test_search_never_reaches_a_loopback_endpoint() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

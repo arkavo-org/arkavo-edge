@@ -181,6 +181,7 @@ pub struct SessionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::collections::HashMap;
 
     fn roundtrip(payload: &EventPayload) -> EventPayload {
@@ -188,6 +189,7 @@ mod tests {
         serde_json::from_str(&json).expect("deserialize")
     }
 
+    #[spec("EVENT-006")]
     #[test]
     fn roundtrip_prompt_sent() {
         let mut params = HashMap::new();
@@ -221,6 +223,7 @@ mod tests {
             _ => panic!("wrong variant"),
         }
     }
+    #[spec("EVENT-006")]
     #[test]
     fn roundtrip_model_response() {
         let payload = EventPayload::ModelResponse {
@@ -253,6 +256,8 @@ mod tests {
         }
     }
 
+    #[spec("EVENT-006")]
+    #[spec("EVENT-008")]
     #[test]
     fn roundtrip_tool_call() {
         let payload = EventPayload::ToolCall {
@@ -275,6 +280,8 @@ mod tests {
         }
     }
 
+    #[spec("EVENT-006")]
+    #[spec("EVENT-008")]
     #[test]
     fn roundtrip_tool_result() {
         let payload = EventPayload::ToolResult {
@@ -423,6 +430,8 @@ mod tests {
         }
     }
 
+    #[spec("EVENT-006")]
+    #[spec("EVENT-007")]
     #[test]
     fn roundtrip_session_started() {
         let payload = EventPayload::SessionStarted {
@@ -443,6 +452,8 @@ mod tests {
         }
     }
 
+    #[spec("EVENT-006")]
+    #[spec("EVENT-007")]
     #[test]
     fn roundtrip_session_ended() {
         let payload = EventPayload::SessionEnded {

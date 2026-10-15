@@ -30,6 +30,7 @@ url = { workspace = true }
 
 [dev-dependencies]
 wiremock = "0.6"
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 
 [lints]
 workspace = true

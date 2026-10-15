@@ -83,14 +83,14 @@ mod tests {
         let transport_err: arkavo_tdf::TransportError = iroh_err.into();
         assert!(matches!(
             transport_err,
-            arkavo_tdf::TransportError::Stage(_)
+            arkavo_tdf::TransportError::Stage(msg) if msg == "disk full"
         ));
 
         let iroh_err = IrohError::InvalidTicket("bad format".to_string());
         let transport_err: arkavo_tdf::TransportError = iroh_err.into();
         assert!(matches!(
             transport_err,
-            arkavo_tdf::TransportError::InvalidTicket(_)
+            arkavo_tdf::TransportError::InvalidTicket(msg) if msg == "bad format"
         ));
     }
 }

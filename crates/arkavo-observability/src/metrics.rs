@@ -356,7 +356,9 @@ impl MetricsReporter {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("OBS-003")]
     #[test]
     fn test_metrics_collector() {
         let collector = MetricsCollector::new();
@@ -388,6 +390,7 @@ mod tests {
         assert_eq!(collector.total_requests.load(Ordering::Relaxed), 1);
     }
 
+    #[spec("OBS-003")]
     #[test]
     fn test_metrics_snapshot() {
         let collector = MetricsCollector::new();

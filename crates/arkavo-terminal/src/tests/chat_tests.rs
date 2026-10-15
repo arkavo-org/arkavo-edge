@@ -1,4 +1,5 @@
 use crate::ui::chat::{ChatView, MessageRole};
+use arkavo_test_macros::spec;
 
 #[test]
 fn test_chat_message_storage() {
@@ -35,6 +36,7 @@ fn test_chat_max_messages() {
 }
 
 #[test]
+#[spec("TERM-004")]
 fn test_streaming_message() {
     let mut chat = ChatView::new();
 

@@ -561,6 +561,7 @@ mod tests {
         );
     }
 
+    #[spec("MCP-008")]
     #[tokio::test]
     async fn test_execute_safe_command() {
         let tool = ShellExecTool::new();
@@ -574,6 +575,7 @@ mod tests {
         assert!(result["stdout"].as_str().unwrap().contains("hello"));
     }
 
+    #[spec("MCP-008")]
     #[tokio::test]
     async fn test_execute_blocked_command() {
         let tool = ShellExecTool::new();

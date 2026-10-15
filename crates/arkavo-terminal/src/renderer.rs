@@ -94,3 +94,57 @@ pub trait Renderable {
     fn render(&mut self, frame: &mut ratatui::Frame, area: Rect);
     fn needs_redraw(&self) -> bool;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+    use ratatui::layout::Rect;
+
+    fn buffer_with(area: Rect, symbol: &str) -> Buffer {
+        let mut buf = Buffer::empty(area);
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)].set_symbol(symbol);
+            }
+        }
+        buf
+    }
+
+    #[test]
+    #[spec("TERM-006")]
+    fn first_render_marks_all_cells_changed() {
+        let area = Rect::new(0, 0, 4, 3);
+        let mut renderer = DiffRenderer::new();
+        let buf = buffer_with(area, "a");
+
+        let changed = renderer.render_diff(&buf, area);
+        assert_eq!(changed.len(), 12);
+
+        // Metrics are recorded for every render
+        let metrics = renderer.get_metrics();
+        assert_eq!(metrics.frames_rendered, 1);
+        assert!(metrics.is_within_budget(1000));
+    }
+
+    #[test]
+    #[spec("TERM-006")]
+    fn subsequent_render_highlights_only_changed_cells() {
+        let area = Rect::new(0, 0, 4, 3);
+        let mut renderer = DiffRenderer::new();
+        let buf = buffer_with(area, "a");
+
+        renderer.render_diff(&buf, area);
+
+        // Identical frame: nothing changed
+        let changed = renderer.render_diff(&buf, area);
+        assert_eq!(changed, Vec::<(u16, u16)>::new());
+
+        // Mutate one cell: exactly that cell is reported
+        let mut modified = buf.clone();
+        modified[(2, 1)].set_symbol("b");
+        let changed = renderer.render_diff(&modified, area);
+        assert_eq!(changed, vec![(2, 1)]);
+        assert_eq!(renderer.get_metrics().frames_rendered, 3);
+    }
+}

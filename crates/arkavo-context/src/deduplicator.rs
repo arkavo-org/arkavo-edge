@@ -73,7 +73,9 @@ impl Default for Deduplicator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CTX-003")]
     #[test]
     fn test_exact_duplicates() {
         let dedup = Deduplicator::default();
@@ -87,6 +89,7 @@ mod tests {
         assert_eq!(result.len(), 2);
     }
 
+    #[spec("CTX-003")]
     #[test]
     fn test_similar_chunks() {
         let dedup = Deduplicator::new(0.8);
@@ -100,6 +103,7 @@ mod tests {
         assert_eq!(result.len(), 2);
     }
 
+    #[spec("CTX-003")]
     #[test]
     fn test_no_duplicates() {
         let dedup = Deduplicator::default();

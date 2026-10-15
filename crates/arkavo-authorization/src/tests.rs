@@ -3,7 +3,7 @@
 use crate::types::McpToolMapping;
 use crate::*;
 use arkavo_test_macros::spec;
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
@@ -117,6 +117,7 @@ async fn test_get_decision_deny() {
     assert_eq!(decision, Decision::Deny);
 }
 
+#[spec("AUTHZ-002")]
 #[tokio::test]
 async fn test_bulk_authorization() {
     let mock_server = MockServer::start().await;
@@ -294,6 +295,7 @@ async fn test_server_error_retry() {
     assert_eq!(decision, Decision::Permit);
 }
 
+#[spec("AUTHZ-006")]
 #[test]
 fn test_mcp_tool_mapping() {
     let resource = McpToolMapping::tool_to_resource("git_commit");
@@ -479,4 +481,129 @@ async fn test_authz_001_get_decision_caches_with_ttl() {
         .await
         .unwrap();
     assert_eq!(decision2, Decision::Permit);
+}
+
+#[spec("AUTHZ-002")]
+#[tokio::test]
+async fn test_authz_002_bulk_partial_permissions_single_batch() {
+    let mock_server = MockServer::start().await;
+
+    // Entity resolution happens once for the whole batch.
+    Mock::given(method("POST"))
+        .and(path(
+            "/entityresolution.v2.EntityResolutionService/CreateEntityChainsFromTokens",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "entity_chains": [{
+                "id": "chain1",
+                "entities": [{
+                    "id": "user123",
+                    "type": "subject"
+                }]
+            }]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    // All tools are authorized in a single batch request (expect(1) proves the
+    // client does not fall back to individual GetDecision calls).
+    Mock::given(method("POST"))
+        .and(path("/authorization.v2.AuthorizationService/GetDecisionBulk"))
+        .and(header("Connect-Protocol-Version", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "decision_responses": [
+                {
+                    "entity_identifier": {"id": "user123", "type": "subject"},
+                    "action": {"name": "execute_tool"},
+                    "resource": {"attribute_value_fqns": ["https://arkavo.net/attr/mcp-tool/value/git.commit"]},
+                    "decision": "permit"
+                },
+                {
+                    "entity_identifier": {"id": "user123", "type": "subject"},
+                    "action": {"name": "execute_tool"},
+                    "resource": {"attribute_value_fqns": ["https://arkavo.net/attr/mcp-tool/value/git.push"]},
+                    "decision": "deny"
+                },
+                {
+                    "entity_identifier": {"id": "user123", "type": "subject"},
+                    "action": {"name": "execute_tool"},
+                    "resource": {"attribute_value_fqns": ["https://arkavo.net/attr/mcp-tool/value/filesystem.read"]},
+                    "decision": "permit"
+                }
+            ]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let config = AuthorizationConfig::default()
+        .with_base_url(&mock_server.uri())
+        .unwrap();
+    let client = AuthorizationClient::new(config).unwrap();
+
+    let tools = vec!["git.commit", "git.push", "filesystem.read"];
+    let results = client
+        .authorize_mcp_tools_bulk("test_token", tools)
+        .await
+        .unwrap();
+
+    // A decision is returned for every requested resource.
+    assert_eq!(results.len(), 3);
+    for (name, expected) in [
+        ("git.commit", Decision::Permit),
+        ("git.push", Decision::Deny),
+        ("filesystem.read", Decision::Permit),
+    ] {
+        let (_, decision) = results.iter().find(|(n, _)| n == name).unwrap();
+        assert_eq!(*decision, expected, "unexpected decision for {name}");
+    }
+}
+
+#[spec("AUTHZ-006")]
+#[tokio::test]
+async fn test_authz_006_resource_attributes_sent_in_decision_request() {
+    let mock_server = MockServer::start().await;
+
+    // The decision request must carry the resource with its attribute FQNs.
+    Mock::given(method("POST"))
+        .and(path("/authorization.v2.AuthorizationService/GetDecision"))
+        .and(body_partial_json(serde_json::json!({
+            "resource": {
+                "attribute_value_fqns": [
+                    "https://arkavo.net/attr/mcp-tool/value/git.commit",
+                    "https://arkavo.net/attr/team/value/platform"
+                ]
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "decision": "permit"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let config = AuthorizationConfig::default()
+        .with_base_url(&mock_server.uri())
+        .unwrap();
+    let client = AuthorizationClient::new(config).unwrap();
+
+    let entity = EntityIdentifier {
+        id: "user123".to_string(),
+        entity_type: types::EntityType::Subject,
+        attributes: None,
+    };
+    let action = Action::execute_tool();
+    let resource = Resource::new(vec![
+        "https://arkavo.net/attr/mcp-tool/value/git.commit".to_string(),
+        "https://arkavo.net/attr/team/value/platform".to_string(),
+    ]);
+
+    assert_eq!(resource.attribute_value_fqns.len(), 2);
+
+    let decision = client
+        .get_decision(&entity, &action, &resource)
+        .await
+        .unwrap();
+    assert_eq!(decision, Decision::Permit);
 }

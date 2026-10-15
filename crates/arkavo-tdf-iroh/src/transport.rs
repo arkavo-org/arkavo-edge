@@ -174,7 +174,7 @@ mod tests {
     use arkavo_test_macros::spec;
     use std::io::Cursor;
 
-    #[spec("TDF-007")]
+    #[spec("TDF-007", "IROH-002", "IROH-003")]
     #[tokio::test]
     async fn transport_stage_fetch_roundtrip() {
         let node = IrohNode::memory().await.unwrap();
@@ -231,8 +231,16 @@ mod tests {
         let node = IrohNode::memory().await.unwrap();
         let transport = IrohTransport::new(node);
 
-        let result = transport.fetch("invalid-ticket").await;
-        assert!(result.is_err());
+        let err = transport.fetch("invalid-ticket").await.unwrap_err();
+        match err {
+            TransportError::InvalidTicket(msg) => {
+                assert!(
+                    msg.contains("Failed to parse ticket"),
+                    "ticket parse context must be preserved, got {msg}"
+                );
+            }
+            other => panic!("expected InvalidTicket, got {other}"),
+        }
 
         transport.shutdown().await.unwrap();
     }
@@ -250,5 +258,68 @@ mod tests {
 
         // Shutdown via node directly
         node.stop().await.unwrap();
+    }
+
+    #[spec("IROH-001")]
+    #[tokio::test]
+    async fn transport_new_node_started_and_ready() {
+        let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
+
+        // Embedded node started: endpoint and blob store are initialized
+        let node = transport.node();
+        assert!(node.is_running().await);
+        let _endpoint_id = node.endpoint_id().await.unwrap();
+        let _store = node.store().await.unwrap();
+
+        // Transport ready for operations
+        assert!(transport.health_check().await.unwrap());
+
+        transport.shutdown().await.unwrap();
+    }
+
+    #[spec("IROH-002")]
+    #[tokio::test]
+    async fn stage_empty_blob_produces_valid_ticket() {
+        let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
+
+        let ticket = transport.stage(b"").await.unwrap();
+        assert!(!ticket.is_empty());
+        assert!(ticket.starts_with("blob"));
+
+        // Zero-length blob is fetchable and content-addressed
+        let fetched = transport.fetch(&ticket).await.unwrap();
+        assert!(fetched.is_empty());
+
+        // Same empty content yields the same content hash
+        let ticket_again = transport.stage(b"").await.unwrap();
+        let parsed = IrohTicket::from_string(&ticket).unwrap();
+        let parsed_again = IrohTicket::from_string(&ticket_again).unwrap();
+        assert_eq!(parsed.hash(), parsed_again.hash());
+
+        transport.shutdown().await.unwrap();
+    }
+
+    #[spec("IROH-004")]
+    #[tokio::test]
+    async fn ticket_string_roundtrip_preserves_hash() {
+        let transport = IrohTransport::new(IrohNode::memory().await.unwrap());
+
+        let data = b"Ticket round-trip test";
+        let ticket = transport.stage_bytes(data).await.unwrap();
+
+        // Serialize to string and reconstruct
+        let ticket_string = ticket.to_string();
+        assert!(ticket_string.starts_with("blob"));
+        let parsed = IrohTicket::from_string(&ticket_string).unwrap();
+
+        // Round-trip preserves the content hash and node info
+        assert_eq!(parsed.hash(), ticket.hash());
+        assert_eq!(parsed.inner().addr().id, ticket.inner().addr().id);
+
+        // Reconstructed ticket is usable for fetch
+        let fetched = transport.fetch_bytes(&parsed).await.unwrap();
+        assert_eq!(fetched, data);
+
+        transport.shutdown().await.unwrap();
     }
 }

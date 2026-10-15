@@ -422,6 +422,7 @@ mod tests {
     #![allow(clippy::disallowed_methods)]
 
     use super::*;
+    use arkavo_test_macros::spec;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     async fn create_test_store() -> PlanStateStore {
@@ -439,6 +440,7 @@ mod tests {
         PlanStateStore::new(&db_path).await.unwrap()
     }
 
+    #[spec("MEM-005")]
     #[tokio::test]
     async fn test_save_and_get_plan() {
         let store = create_test_store().await;
@@ -462,6 +464,48 @@ mod tests {
         assert_eq!(retrieved.original_prompt, "Build a web server");
         assert_eq!(retrieved.status, PlanStatus::Executing);
         assert_eq!(retrieved.total_subtasks, 3);
+    }
+
+    #[spec("MEM-005")]
+    #[tokio::test]
+    async fn test_plan_recoverable_after_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("plan_state.db");
+
+        let plan_id = Uuid::new_v4();
+        {
+            let store = PlanStateStore::new(&db_path).await.unwrap();
+            let plan = PersistedPlan {
+                id: plan_id,
+                original_prompt: "Refactor module".to_string(),
+                plan_json: r#"{"subtasks":["a","b"]}"#.to_string(),
+                status: PlanStatus::Executing,
+                current_subtask: 1,
+                total_subtasks: 2,
+                completed_results_json: Some(r#"[{"a":"done"}]"#.to_string()),
+                error_message: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            store.save_plan(&plan).await.unwrap();
+        }
+
+        let reopened = PlanStateStore::new(&db_path).await.unwrap();
+        let recovered = reopened.get_plan(plan_id).await.unwrap().unwrap();
+        assert_eq!(recovered.original_prompt, "Refactor module");
+        assert_eq!(recovered.status, PlanStatus::Executing);
+        assert_eq!(recovered.current_subtask, 1);
+        assert_eq!(recovered.total_subtasks, 2);
+        assert_eq!(
+            recovered.completed_results_json.as_deref(),
+            Some(r#"[{"a":"done"}]"#)
+        );
+
+        let resumable = reopened.get_resumable_plans().await.unwrap();
+        assert!(
+            resumable.iter().any(|p| p.id == plan_id),
+            "an executing plan must be resumable after a restart"
+        );
     }
 
     #[tokio::test]

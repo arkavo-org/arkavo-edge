@@ -1,11 +1,12 @@
 use super::*;
 use crate::ToolCall;
+use arkavo_test_macros::spec;
 
 fn completed(output: Value) -> Value {
     json!({"status":"completed", "output":output,"usage":{"input_tokens":100,"output_tokens":60,"input_tokens_details":{"cached_tokens":75,"cache_write_tokens":10},"output_tokens_details":{"reasoning_tokens":40}}})
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[test]
 fn astra_request_omits_incompatible_sampling_and_keeps_system_order() {
     let body = request(
@@ -34,7 +35,7 @@ fn astra_request_omits_incompatible_sampling_and_keeps_system_order() {
     }
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[test]
 fn tools_are_flattened_without_losing_optional_mcp_parameters() {
     for tool in [
@@ -60,7 +61,7 @@ fn tools_are_flattened_without_losing_optional_mcp_parameters() {
     }
 }
 
-#[arkavo_test_macros::spec("ASTRA-002")]
+#[spec("ASTRA-002")]
 #[test]
 fn reasoning_and_parallel_call_ids_roundtrip_without_duplicate_calls() {
     let output = json!([
@@ -97,7 +98,7 @@ fn reasoning_and_parallel_call_ids_roundtrip_without_duplicate_calls() {
     assert_eq!(body["input"][3]["type"], "function_call_output");
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[test]
 fn usage_subsets_are_not_double_counted() {
     let result = response(completed(json!([]))).unwrap();
@@ -109,7 +110,7 @@ fn usage_subsets_are_not_double_counted() {
     assert_eq!(timing.n_thinking_eval, Some(40));
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[test]
 fn refusal_incomplete_invalid_calls_and_usage_fail_visibly() {
     for output in [
@@ -128,7 +129,7 @@ fn refusal_incomplete_invalid_calls_and_usage_fail_visibly() {
     assert!(response(inconsistent).is_err());
 }
 
-#[arkavo_test_macros::spec("ASTRA-002")]
+#[spec("ASTRA-002")]
 #[test]
 fn replay_without_call_ids_fails_before_network() {
     let assistant = Message::assistant_with_tool_calls(
@@ -152,7 +153,7 @@ fn replay_without_call_ids_fails_before_network() {
     );
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[test]
 fn schema_uses_responses_text_format() {
     let body = request(&OpenAIResponsesConfig::default(), vec![], None, Some(json!({"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]})), None, false).unwrap();
@@ -165,7 +166,7 @@ fn schema_uses_responses_text_format() {
     assert!(body.get("response_format").is_none());
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[test]
 fn only_documented_efforts_and_secure_configuration_are_accepted() {
     for effort in ["low", "medium", "high", "xhigh", "max"] {
@@ -193,7 +194,7 @@ fn only_documented_efforts_and_secure_configuration_are_accepted() {
     }
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[test]
 fn incomplete_and_refusal_retain_billable_usage() {
     let mut value = completed(json!([]));
@@ -206,7 +207,7 @@ fn incomplete_and_refusal_retain_billable_usage() {
     assert_eq!(error.inference_timing().unwrap().n_thinking_eval, Some(40));
 }
 
-#[arkavo_test_macros::spec("ASTRA-002")]
+#[spec("ASTRA-002")]
 #[test]
 fn opaque_state_is_persisted_but_not_debug_logged() {
     let result = response(completed(
@@ -223,7 +224,7 @@ fn opaque_state_is_persisted_but_not_debug_logged() {
     );
 }
 
-#[arkavo_test_macros::spec("ASTRA-002")]
+#[spec("ASTRA-002")]
 #[test]
 fn historical_assistant_text_uses_easy_input_message() {
     let body = request(
@@ -241,7 +242,7 @@ fn historical_assistant_text_uses_easy_input_message() {
     );
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[test]
 fn raw_png_images_retain_their_actual_media_type() {
     let encoded = crate::encode_image_bytes(b"\x89PNG\r\n\x1a\n").unwrap();
@@ -264,7 +265,7 @@ fn raw_png_images_retain_their_actual_media_type() {
 /// A caller has to tell a retryable truncation from a policy refusal, and the
 /// provider's own `message` may quote the prompt back, so only the identifier
 /// travels.
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[test]
 fn incomplete_and_failed_responses_name_their_code_without_the_message() {
     let mut truncated = completed(json!([]));
@@ -313,7 +314,7 @@ fn incomplete_and_failed_responses_name_their_code_without_the_message() {
 /// Astra may add output items and content parts at any time. They replay
 /// verbatim through `provider_state`, so ignoring them costs nothing while
 /// failing the turn would take the whole session down.
-#[arkavo_test_macros::spec("ASTRA-002")]
+#[spec("ASTRA-002")]
 #[test]
 fn unknown_output_items_and_parts_are_ignored_but_still_replayed() {
     let output = json!([
@@ -336,7 +337,7 @@ fn unknown_output_items_and_parts_are_ignored_but_still_replayed() {
 
 /// A half-formed call is not an unknown item: acting on it, or dropping it
 /// while the model waits for its result, is worse than failing the turn.
-#[arkavo_test_macros::spec("ASTRA-002")]
+#[spec("ASTRA-002")]
 #[test]
 fn malformed_function_calls_still_fail_hard() {
     for item in [

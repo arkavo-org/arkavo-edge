@@ -20,4 +20,5 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 url = { workspace = true }
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }

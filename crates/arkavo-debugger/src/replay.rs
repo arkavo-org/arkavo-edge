@@ -179,6 +179,7 @@ impl SessionSummary {
 mod tests {
     use super::*;
     use arkavo_events::{Event, EventMetadata, EventPayload};
+    use arkavo_test_macros::spec;
     use uuid::Uuid;
 
     fn create_test_event(sequence: u64, event_type: &str) -> Event {
@@ -210,6 +211,7 @@ mod tests {
         }
     }
 
+    #[spec("DBG-002")]
     #[test]
     fn test_replay_navigation() {
         let events = vec![
@@ -244,6 +246,7 @@ mod tests {
         assert_eq!(replay.position(), 0);
     }
 
+    #[spec("DBG-002")]
     #[test]
     fn test_replay_summary() {
         let events = vec![

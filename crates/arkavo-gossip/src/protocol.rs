@@ -907,6 +907,7 @@ mod tests {
         assert_eq!(protocol.patch_count().await, 1);
     }
 
+    #[spec("GOSSIP-003")]
     #[tokio::test]
     async fn test_duplicate_announcement() {
         let protocol = create_test_protocol("agent-1");
@@ -932,6 +933,52 @@ mod tests {
             .handle_message(GossipMessage::PatchAnnounce(announcement))
             .await;
         assert!(matches!(result, Err(GossipError::Duplicate(_))));
+    }
+
+    /// A repeated lesson announcement must be dropped by the seen-set before
+    /// it propagates again, or lessons would loop around the swarm forever.
+    #[spec("GOSSIP-003")]
+    #[tokio::test]
+    async fn test_duplicate_lesson_announcement_dropped() {
+        use crate::learning_message::LessonAnnouncement;
+        use crate::verification::sign_lesson_announcement;
+
+        let protocol = create_test_protocol("agent-1");
+
+        let keypair = AgentKeypair::generate();
+        protocol
+            .register_key("origin".to_string(), keypair.public_key().clone())
+            .await
+            .unwrap();
+
+        let lesson_id = Uuid::new_v4();
+        let mut announcement = LessonAnnouncement::new(
+            lesson_id,
+            [0u8; 32],
+            "origin".to_string(),
+            "test-swarm".to_string(),
+            "general".to_string(),
+            0.9,
+        );
+        sign_lesson_announcement(&mut announcement, &keypair).unwrap();
+
+        // First sight propagates the announcement to peers.
+        let first = protocol
+            .handle_message(GossipMessage::LessonAnnounce(announcement.clone()))
+            .await
+            .unwrap();
+        assert!(
+            first
+                .iter()
+                .any(|m| matches!(m, GossipMessage::LessonAnnounce(_))),
+            "first announcement should propagate"
+        );
+
+        // The repeat is dropped: no propagation, no state change.
+        let result = protocol
+            .handle_message(GossipMessage::LessonAnnounce(announcement))
+            .await;
+        assert!(matches!(result, Err(GossipError::Duplicate(id)) if id == lesson_id));
     }
 
     #[tokio::test]

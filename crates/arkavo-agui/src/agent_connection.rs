@@ -1397,3 +1397,41 @@ impl Drop for AgentConnection {
 
 // Re-export for convenience
 pub use jsonrpsee::rpc_params;
+
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod tests {
+    use super::*;
+    use arkavo_test_macros::spec;
+
+    fn test_connection(endpoint: &str) -> AgentConnection {
+        let (telemetry_tx, _telemetry_rx) = mpsc::channel(16);
+        AgentConnection::new("test-agent".to_string(), endpoint.to_string(), telemetry_tx)
+    }
+
+    #[tokio::test]
+    #[spec("AGUI-003")]
+    async fn new_connection_starts_disconnected() {
+        let conn = test_connection("127.0.0.1:18341");
+
+        assert_eq!(conn.agent_id, "test-agent");
+        assert_eq!(conn.endpoint, "127.0.0.1:18341");
+        // No channel is ready until connect() completes the handshake
+        assert!(!conn.is_connected().await);
+        assert_eq!(conn.get_status().await, ConnectionStatus::Connecting);
+    }
+
+    #[tokio::test]
+    #[spec("AGUI-003")]
+    async fn connect_to_unreachable_endpoint_errors_without_channel() {
+        // Port 9 (discard) is closed on loopback, so the WebSocket handshake
+        // must fail fast rather than leave a half-open channel behind.
+        let conn = test_connection("127.0.0.1:9");
+
+        let result = conn.connect().await;
+
+        assert!(result.is_err());
+        assert!(!conn.is_connected().await);
+        assert!(conn.client.read().await.is_none());
+    }
+}

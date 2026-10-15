@@ -390,4 +390,81 @@ mod tests {
         assert!(matches!(events[0], EventPayload::ToolCallArgs(_)));
         assert!(matches!(events[1], EventPayload::ToolCallEnd(_)));
     }
+
+    #[test]
+    #[spec("AGUI-017")]
+    fn translator_closes_previous_message_when_next_starts() {
+        let mut t = Translator::new("t".into(), "r".into());
+        t.apply(MessageDelta {
+            session_id: "s".into(),
+            message_id: "m1".into(),
+            sequence: 1,
+            delta: MessageDeltaContent::Text {
+                text: "first".into(),
+            },
+            timestamp: chrono::Utc::now(),
+        });
+
+        // A delta for a different message id must end m1 before starting m2
+        let events = t.apply(MessageDelta {
+            session_id: "s".into(),
+            message_id: "m2".into(),
+            sequence: 2,
+            delta: MessageDeltaContent::Text {
+                text: "second".into(),
+            },
+            timestamp: chrono::Utc::now(),
+        });
+        assert_eq!(events.len(), 3);
+        match &events[0] {
+            EventPayload::TextMessageEnd(f) => assert_eq!(f.message_id, "m1"),
+            other => panic!("expected TextMessageEnd for m1, got {other:?}"),
+        }
+        match &events[1] {
+            EventPayload::TextMessageStart(f) => assert_eq!(f.message_id, "m2"),
+            other => panic!("expected TextMessageStart for m2, got {other:?}"),
+        }
+        assert!(matches!(events[2], EventPayload::TextMessageContent(_)));
+    }
+
+    #[test]
+    #[spec("AGUI-018")]
+    fn translator_emits_tool_result_after_call_end() {
+        let mut t = Translator::new("t".into(), "r".into());
+        let events = t.apply(MessageDelta {
+            session_id: "s".into(),
+            message_id: "m1".into(),
+            sequence: 1,
+            delta: MessageDeltaContent::ToolCall {
+                tool_call_id: "tc1".into(),
+                name: Some("write".into()),
+                args_json_fragment: "{}".into(),
+                done: true,
+            },
+            timestamp: chrono::Utc::now(),
+        });
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[2], EventPayload::ToolCallEnd(_)));
+
+        let events = t.apply(MessageDelta {
+            session_id: "s".into(),
+            message_id: "m1".into(),
+            sequence: 2,
+            delta: MessageDeltaContent::ToolResult {
+                tool_call_id: "tc1".into(),
+                content: "file written".into(),
+                is_error: false,
+            },
+            timestamp: chrono::Utc::now(),
+        });
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EventPayload::ToolCallResult(f) => {
+                assert_eq!(f.tool_call_id, "tc1");
+                assert_eq!(f.content, "file written");
+                assert_eq!(f.is_error, Some(false));
+            }
+            other => panic!("expected ToolCallResult, got {other:?}"),
+        }
+    }
 }

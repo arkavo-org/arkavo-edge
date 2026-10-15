@@ -216,8 +216,10 @@ pub fn from_ordered_delta(ordered: OrderedMessageDelta) -> MessageDelta {
 mod tests {
     use super::*;
     use arkavo_protocol::types::MessageDeltaContent;
+    use arkavo_test_macros::spec;
 
     #[tokio::test]
+    #[spec("AGUI-008")]
     async fn test_stream_ordering() {
         let ordering = StreamOrdering::new();
         let message_id = "test-message".to_string();
@@ -283,6 +285,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[spec("AGUI-008")]
     async fn test_latency_tracking() {
         let tracker = LatencyTracker::new();
         let trace_id = "test-trace".to_string();

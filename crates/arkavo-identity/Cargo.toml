@@ -23,6 +23,7 @@ opentdf = { version = "0.16.0", default-features = false, features = ["rustls-tl
 ciborium = "0.2"
 
 [dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 reqwest = { workspace = true }

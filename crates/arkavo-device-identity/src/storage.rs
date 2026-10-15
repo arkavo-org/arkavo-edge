@@ -340,6 +340,7 @@ pub fn delete() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::sync::Mutex;
 
     // Mutex to serialize tests that access the system keychain
@@ -362,6 +363,7 @@ mod tests {
         assert!(path.starts_with(std::env::temp_dir()), "{}", path.display());
     }
 
+    #[spec("DEVICE-001")]
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_get_or_create() {
@@ -380,6 +382,7 @@ mod tests {
         let _ = delete();
     }
 
+    #[spec("DEVICE-002")]
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_store_and_retrieve() {
@@ -400,6 +403,7 @@ mod tests {
         let _ = delete();
     }
 
+    #[spec("DEVICE-006")]
     #[test]
     #[cfg(any(
         target_os = "macos",
@@ -428,6 +432,7 @@ mod tests {
         fs::remove_file(&storage_path).ok();
     }
 
+    #[spec("DEVICE-006")]
     #[test]
     #[cfg(any(
         target_os = "macos",
@@ -452,6 +457,101 @@ mod tests {
         let err = result.unwrap_err();
         assert!(matches!(err, DeviceIdentityError::InvalidFormat(_)));
         assert!(err.to_string().contains("Expected 16 bytes"));
+
+        fs::remove_file(&storage_path).ok();
+    }
+
+    #[spec("DEVICE-001")]
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn test_get_or_create_generates_uuid_v4_and_persists() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _ = delete();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let created = get_or_create().expect("Failed to create device ID");
+        assert_eq!(
+            created.to_uuid().get_version_num(),
+            4,
+            "first launch must generate a UUID v4"
+        );
+
+        let stored = get()
+            .expect("Failed to read storage")
+            .expect("Device ID must be persisted after creation");
+        assert_eq!(created, stored);
+
+        let _ = delete();
+    }
+
+    #[spec("DEVICE-002")]
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn test_get_returns_stored_id_consistently() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _ = delete();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let original = DeviceId::new();
+        store(original).expect("Failed to store device ID");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let first = get().expect("Failed to get device ID");
+        let second = get().expect("Failed to get device ID again");
+        assert_eq!(first, Some(original));
+        assert_eq!(first, second, "repeated get() must not change the ID");
+
+        let _ = delete();
+    }
+
+    #[spec("DEVICE-003")]
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn test_store_overwrites_existing() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _ = delete();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let first = DeviceId::new();
+        let second = DeviceId::new();
+        store(first).expect("First store must succeed");
+        store(second).expect("Second store must succeed");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let retrieved = get()
+            .expect("Failed to get device ID")
+            .expect("Device ID not found");
+        assert_eq!(retrieved, second, "store() must overwrite the existing ID");
+        assert_ne!(retrieved, first);
+
+        let _ = delete();
+    }
+
+    #[spec("DEVICE-003")]
+    #[test]
+    #[cfg(any(
+        target_os = "macos",
+        all(target_os = "linux", not(feature = "linux-keyring"))
+    ))]
+    fn test_store_persists_hex_encoding() {
+        use std::fs;
+
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
+        let _ = delete();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let device_id = DeviceId::new();
+        store(device_id).expect("Failed to store device ID");
+
+        // Through the storage module, so the file lands in this process's
+        // test directory and never overwrites the developer's device ID.
+        let storage_path = platform::get_storage_path().unwrap();
+        let contents = fs::read_to_string(&storage_path).expect("Failed to read stored file");
+        assert_eq!(
+            contents.trim(),
+            hex::encode(device_id.as_bytes()),
+            "device ID must persist as hex-encoded bytes"
+        );
 
         fs::remove_file(&storage_path).ok();
     }

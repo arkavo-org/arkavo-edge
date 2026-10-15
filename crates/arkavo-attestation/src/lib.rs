@@ -115,10 +115,36 @@ mod tests {
     const TEST_APP_VERSION: &str = "0.38.2";
 
     #[test]
+    #[spec("ATT-001")]
     fn test_detect_platform_code() {
         let platform = detect_platform_code();
         assert!(!platform.is_empty());
         assert_ne!(platform, "unknown");
+    }
+
+    #[test]
+    #[spec("ATT-001")]
+    fn test_detect_platform_code_matches_os_and_arch() {
+        let platform = detect_platform_code();
+
+        let expected = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            "macos-arm64"
+        } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+            "macos-x86_64"
+        } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            "linux-x86_64"
+        } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+            "linux-aarch64"
+        } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            "windows-x86_64"
+        } else {
+            "unknown"
+        };
+
+        assert_eq!(
+            platform, expected,
+            "platform code must identify both OS and architecture"
+        );
     }
 
     #[test]
@@ -168,6 +194,32 @@ mod tests {
         assert!(
             evidence.timestamp >= before && evidence.timestamp <= after,
             "Timestamp recorded"
+        );
+    }
+
+    #[test]
+    #[spec("ATT-002")]
+    fn test_platform_evidence_device_id_stable_per_identity() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let platform_code = detect_platform_code();
+
+        let first = PlatformEvidence::from_agent_identity(identity.clone(), platform_code.clone());
+        let second = PlatformEvidence::from_agent_identity(identity.clone(), platform_code.clone());
+
+        assert_eq!(
+            first.device_id, second.device_id,
+            "same identity yields the same device ID"
+        );
+        assert_eq!(first.platform_state, SecurityState::Unknown);
+        assert_eq!(second.platform_state, SecurityState::Unknown);
+
+        let other = PlatformEvidence::from_agent_identity(
+            AgentIdentity::new(TEST_APP_VERSION.to_string()),
+            platform_code,
+        );
+        assert_ne!(
+            first.device_id, other.device_id,
+            "a distinct identity yields a distinct device ID"
         );
     }
 }

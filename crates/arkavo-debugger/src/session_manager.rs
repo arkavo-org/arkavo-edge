@@ -169,7 +169,10 @@ impl Default for SessionManager {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_events::EventPayload;
+    use arkavo_test_macros::spec;
 
+    #[spec("DBG-001")]
     #[tokio::test]
     async fn test_session_registration() {
         let manager = SessionManager::new();
@@ -215,5 +218,43 @@ mod tests {
 
         let sessions = manager.get_active_sessions().await;
         assert_eq!(sessions.len(), 0);
+    }
+
+    #[spec("DBG-001")]
+    #[tokio::test]
+    async fn test_start_recording_captures_events() {
+        let manager = SessionManager::new();
+        let writer = Arc::new(EventWriter::new(arkavo_events::EventWriterConfig::default()));
+
+        manager
+            .register_session(
+                "rec-session".to_string(),
+                "agent-1".to_string(),
+                "RecordingAgent".to_string(),
+                "localhost:8080".to_string(),
+                vec!["debug".to_string()],
+                Some(writer),
+            )
+            .await
+            .unwrap();
+
+        // Storage allocated: the session has an event writer attached
+        assert!(manager.get_event_writer("rec-session").await.is_some());
+
+        // Events captured: writing an event succeeds and updates session activity
+        let event = Event::new(
+            "rec-session".to_string(),
+            0,
+            "agent-1".to_string(),
+            EventPayload::SessionStarted {
+                capabilities: Some(vec!["debug".to_string()]),
+                metadata: None,
+            },
+        );
+        manager.write_event(event).await.unwrap();
+
+        let session = manager.get_session("rec-session").await.unwrap();
+        assert_eq!(session.event_count, 1);
+        assert!(session.last_activity >= session.start_time);
     }
 }

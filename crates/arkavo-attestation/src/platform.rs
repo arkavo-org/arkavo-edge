@@ -144,6 +144,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("ATT-005")]
     fn test_fallback_attestor_creation() {
         let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
         let platform_code = detect_platform_code();
@@ -153,6 +154,90 @@ mod tests {
         assert_eq!(caps.attestation_type, AttestationType::SoftwareFingerprint);
         assert!(!caps.supports_freshness);
         assert!(!caps.supports_hardware_binding);
+    }
+
+    #[test]
+    #[spec("ATT-005")]
+    fn test_capabilities_report_type_freshness_and_hardware_binding() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let attestor = create_attestor(identity, detect_platform_code());
+
+        let caps = attestor.get_capabilities();
+
+        // The reported type must match what collected evidence actually carries.
+        let evidence = attestor
+            .collect_evidence()
+            .expect("collect_evidence should succeed");
+        assert_eq!(
+            caps.attestation_type, evidence.attestation_type,
+            "capabilities must report the attestation type the attestor produces"
+        );
+
+        // Freshness and hardware-binding support must be reported honestly:
+        // no backend this crate selects signs nonce-bound quotes yet.
+        assert!(!caps.supports_freshness);
+        assert!(!caps.supports_hardware_binding);
+    }
+
+    #[test]
+    #[spec("ATT-003")]
+    fn test_create_attestor_collects_evidence_through_trait_object() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let attestor = create_attestor(identity, detect_platform_code());
+
+        let evidence = attestor
+            .collect_evidence()
+            .expect("selected attestor must collect evidence");
+
+        assert!(
+            !evidence.evidence_blob.is_empty(),
+            "Evidence blob populated"
+        );
+        assert_eq!(
+            evidence.attestation_type,
+            attestor.get_capabilities().attestation_type,
+            "evidence type matches reported capabilities"
+        );
+        assert!(
+            matches!(
+                evidence.platform_state,
+                SecurityState::Trusted
+                    | SecurityState::Suspicious
+                    | SecurityState::Compromised
+                    | SecurityState::Unknown
+            ),
+            "Security state assessed"
+        );
+    }
+
+    #[test]
+    #[spec("ATT-004")]
+    fn test_get_security_state_is_stable_across_calls() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let attestor = FallbackAttestor::new(identity, detect_platform_code());
+
+        let first = attestor.get_security_state();
+        let second = attestor.get_security_state();
+        assert_eq!(
+            first, second,
+            "repeated queries return the same evaluated state"
+        );
+    }
+
+    #[test]
+    #[spec("ATT-004")]
+    fn test_collected_evidence_carries_reported_security_state() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let attestor = FallbackAttestor::new(identity, detect_platform_code());
+
+        let evidence = attestor
+            .collect_evidence()
+            .expect("collect_evidence should succeed");
+        assert_eq!(
+            evidence.platform_state,
+            attestor.get_security_state(),
+            "collected evidence reflects the attestor's evaluated state"
+        );
     }
 
     #[test]

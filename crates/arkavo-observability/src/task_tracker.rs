@@ -241,9 +241,11 @@ impl SessionTaskManager {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::time::Duration;
     use tokio::time::sleep;
 
+    #[spec("OBS-005")]
     #[tokio::test]
     async fn test_observable_task_tracker() {
         let tracker = ObservableTaskTracker::new("test-tracker");
@@ -259,6 +261,7 @@ mod tests {
         tracker.close().await;
     }
 
+    #[spec("OBS-005")]
     #[tokio::test]
     async fn test_named_task() {
         let tracker = ObservableTaskTracker::new("test-tracker");

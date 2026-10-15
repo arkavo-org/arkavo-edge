@@ -314,8 +314,10 @@ impl ROICalculator {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
+    #[spec("AGUI-006")]
     fn test_roi_dashboard_calculation() {
         let mut routing_metrics = RoutingMetrics::new();
         routing_metrics.total_routes = 100;
@@ -337,6 +339,7 @@ mod tests {
     }
 
     #[test]
+    #[spec("AGUI-006")]
     fn test_budget_health_status() {
         let routing_metrics = RoutingMetrics::new();
         let orch_metrics = OrchestratorMetrics::new();

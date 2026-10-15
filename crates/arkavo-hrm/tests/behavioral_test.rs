@@ -4,6 +4,7 @@ use arkavo_hrm::{
     BurstResult, Conductor, ContinuationHint, InMemoryTaskStore, TaskBudget, TaskStatus, TaskStore,
 };
 use arkavo_test_macros::spec;
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -22,6 +23,51 @@ fn tight_budget(max_cost: f64, max_tokens: u64) -> TaskBudget {
         max_wall_time: Duration::from_secs(3600),
         elapsed: Duration::ZERO,
     }
+}
+
+// --- HRM-001: Create conductor with task store ---
+
+#[spec("HRM-001")]
+#[tokio::test]
+async fn test_conductor_new_connects_store_and_manages_state() {
+    let store = Arc::new(InMemoryTaskStore::new());
+    let conductor = Conductor::with_shared_store(Arc::clone(&store));
+
+    // Conductor ready: state management works end-to-end
+    let task = conductor
+        .create_task("Orchestrate release".into(), TaskBudget::default())
+        .await
+        .unwrap();
+    assert_eq!(task.status, TaskStatus::Pending);
+
+    // Store connected: the shared store instance sees the persisted task
+    assert_eq!(store.len().await, 1);
+    assert!(store.exists(task.id).await.unwrap());
+    let ids = store.list_ids().await.unwrap();
+    assert_eq!(ids, vec![task.id]);
+
+    let loaded = conductor.get_task(task.id).await.unwrap();
+    assert_eq!(loaded.objective, "Orchestrate release");
+}
+
+#[spec("HRM-001")]
+#[tokio::test]
+async fn test_conductor_new_with_fresh_store_is_ready() {
+    let store = InMemoryTaskStore::new();
+    assert!(store.is_empty().await);
+    let conductor = Conductor::new(store);
+
+    // Ready: the first task gets a fresh GlobalTaskState, persisted through
+    // the conductor's own store handle
+    let task = conductor
+        .create_task("First task".into(), TaskBudget::default())
+        .await
+        .unwrap();
+    assert!(conductor.store().exists(task.id).await.unwrap());
+
+    let loaded = conductor.get_task(task.id).await.unwrap();
+    assert_eq!(loaded.id, task.id);
+    assert_eq!(loaded.status, TaskStatus::Pending);
 }
 
 // --- HRM-003: Budget enforcement ---
@@ -338,6 +384,28 @@ async fn test_continuation_hint_preserved() {
 }
 
 // --- HRM-002: MaxSubtasksExceeded error includes correct counts ---
+
+#[spec("HRM-002")]
+#[tokio::test]
+async fn test_create_task_initializes_state_budget_and_persists() {
+    let conductor = setup();
+    let task = conductor
+        .create_task("Refactor auth module".into(), tight_budget(1.50, 50_000))
+        .await
+        .unwrap();
+
+    // GlobalTaskState initialized with the provided budget allocated
+    assert_eq!(task.status, TaskStatus::Pending);
+    assert_eq!(task.budget.max_cost_usd, 1.50);
+    assert_eq!(task.budget.max_tokens, 50_000);
+    assert!(task.budget.has_remaining());
+    assert!(task.subtasks.is_empty());
+
+    // Task persisted before create_task returned (crash recovery requirement)
+    let loaded = conductor.get_task(task.id).await.unwrap();
+    assert_eq!(loaded.objective, "Refactor auth module");
+    assert_eq!(loaded.budget.max_tokens, 50_000);
+}
 
 #[spec("HRM-002")]
 #[tokio::test]

@@ -204,8 +204,10 @@ fn from_hex(b: u8) -> Option<u8> {
 #[allow(clippy::disallowed_methods)] // #[tokio::test] expands to Runtime::block_on
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
     use std::time::Duration;
 
+    #[spec("IDS-010")]
     #[tokio::test]
     async fn matching_code_unblocks_and_mismatch_stays_open() {
         let bound = bind_ephemeral_for_test(); // test-only bind on 127.0.0.1:0, record port
@@ -228,6 +230,7 @@ mod tests {
         }
     }
 
+    #[spec("IDS-010")]
     #[tokio::test]
     async fn error_callback_with_matching_state_is_accepted() {
         let bound = bind_ephemeral_for_test();
@@ -243,6 +246,7 @@ mod tests {
         }
     }
 
+    #[spec("IDS-011")]
     #[tokio::test]
     async fn deadline_without_callback_is_timed_out() {
         let bound = bind_ephemeral_for_test();
@@ -252,6 +256,7 @@ mod tests {
         assert!(matches!(err, IdentityError::TimedOut));
     }
 
+    #[spec("IDS-010")]
     #[tokio::test]
     async fn percent_decodes_query_values() {
         let bound = bind_ephemeral_for_test();
@@ -270,6 +275,7 @@ mod tests {
         }
     }
 
+    #[spec("IDS-010")]
     #[tokio::test]
     async fn matching_request_writes_close_window_body() {
         let bound = bind_ephemeral_for_test();
@@ -284,6 +290,7 @@ mod tests {
         assert!(body.contains(CLOSE_WINDOW));
     }
 
+    #[spec("IDS-010")]
     #[tokio::test]
     async fn mismatch_is_http_400_then_match_unblocks() {
         let bound = bind_ephemeral_for_test();
@@ -298,6 +305,7 @@ mod tests {
         waiter.await.unwrap().unwrap();
     }
 
+    #[spec("IDS-010")]
     #[tokio::test]
     async fn non_cb_path_stays_open() {
         let bound = bind_ephemeral_for_test();
@@ -315,6 +323,7 @@ mod tests {
         }
     }
 
+    #[spec("IDS-009", "IDS-011")]
     #[test]
     fn registered_loopback_uris_and_deadline() {
         assert_eq!(
@@ -326,6 +335,43 @@ mod tests {
             format!("http://127.0.0.1:{}/cb", LOOPBACK_PORTS[0]),
             "http://127.0.0.1:52171/cb"
         );
+    }
+
+    #[spec("IDS-009")]
+    #[tokio::test]
+    async fn bind_skips_busy_registered_ports_in_order() {
+        let held: Vec<std::net::TcpListener> = LOOPBACK_PORTS[..2]
+            .iter()
+            .filter_map(|port| std::net::TcpListener::bind(("127.0.0.1", *port)).ok())
+            .collect();
+        assert_eq!(
+            held.len(),
+            2,
+            "test requires 52171 and 52172 to be bindable"
+        );
+        let bound = bind().expect("later registered port must be free");
+        assert!(
+            LOOPBACK_PORTS[2..].contains(&bound.port),
+            "first two ports are busy; got port {}",
+            bound.port
+        );
+        assert_eq!(
+            bound.listener.local_addr().unwrap().ip(),
+            std::net::Ipv4Addr::LOCALHOST,
+            "listener must bind numeric 127.0.0.1"
+        );
+        assert_eq!(
+            bound.redirect_uri,
+            format!("http://127.0.0.1:{}/cb", bound.port)
+        );
+        assert!(
+            bound
+                .redirect_uri
+                .chars()
+                .all(|c| "http://127.0.0.1:0123456789/cb".contains(c)),
+            "redirect_uri must satisfy ^http://127\\.0\\.0\\.1:\\d+/cb$"
+        );
+        drop(held);
     }
 
     async fn send_get(port: u16, path: &str) -> std::io::Result<String> {

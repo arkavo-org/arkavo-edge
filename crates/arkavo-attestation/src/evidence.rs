@@ -85,9 +85,11 @@ mod tests {
     use super::*;
     use crate::detect_platform_code;
     use arkavo_device_identity::AgentIdentity;
+    use arkavo_test_macros::spec;
 
     const TEST_APP_VERSION: &str = "0.38.2";
 
+    #[spec("ATT-006")]
     #[test]
     fn test_validate_evidence_success() {
         let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
@@ -112,6 +114,7 @@ mod tests {
         );
     }
 
+    #[spec("ATT-006")]
     #[test]
     fn test_validate_evidence_old_timestamp() {
         let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
@@ -144,6 +147,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[spec("ATT-006")]
     #[test]
     fn test_validate_evidence_future_timestamp() {
         let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());

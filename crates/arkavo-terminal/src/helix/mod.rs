@@ -98,8 +98,10 @@ impl HelixEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
+    #[spec("TERM-008")]
     fn test_helix_detection() {
         let helix = HelixEditor::new().unwrap();
         // This test will pass/fail based on whether helix is installed
@@ -107,5 +109,17 @@ mod tests {
         if let Some(path) = helix.get_binary_info() {
             println!("Helix binary at: {path}");
         }
+    }
+
+    #[test]
+    #[spec("TERM-008")]
+    fn test_helix_editor_initializes_scratch_dir() {
+        let helix = HelixEditor::new().unwrap();
+
+        // Editing sessions stage content in a scratch dir the editor owns
+        let scratch_dir = std::env::temp_dir().join("arkavo-helix");
+        assert!(scratch_dir.is_dir());
+        // Availability and binary info must agree
+        assert_eq!(helix.is_available(), helix.get_binary_info().is_some());
     }
 }

@@ -697,6 +697,7 @@ mod tests {
     #![allow(clippy::disallowed_methods)]
 
     use super::*;
+    use arkavo_test_macros::spec;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     async fn create_test_store() -> OrchestratorStateStore {
@@ -745,6 +746,7 @@ mod tests {
         assert_eq!(retrieved.issues_processed, 10);
     }
 
+    #[spec("MEM-006")]
     #[tokio::test]
     async fn test_mark_issue_processed() {
         let store = create_test_store().await;
@@ -777,6 +779,7 @@ mod tests {
         assert_eq!(retrieved_task_id, task_id);
     }
 
+    #[spec("MEM-006")]
     #[tokio::test]
     async fn test_org_stats() {
         let store = create_test_store().await;

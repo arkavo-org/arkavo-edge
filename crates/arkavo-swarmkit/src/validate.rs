@@ -808,6 +808,122 @@ mod tests {
         validate(&m).expect("custom data_classifications should validate");
         assert_eq!(m.constraints.data_classifications.len(), 3);
     }
+
+    #[spec("SK-006")]
+    #[test]
+    fn domain_specific_role_types_validate_and_are_retained() {
+        let mut m = minimal_manifest();
+        m.roles[0].role_type = "campaign_lead".into();
+        let mut second = m.roles[0].clone();
+        second.id = "r2".into();
+        second.role_type = "asset_analyst".into();
+        m.roles.push(second);
+        validate(&m).expect("domain-specific role_type values must validate");
+        assert_eq!(m.roles[0].role_type, "campaign_lead");
+        assert_eq!(m.roles[1].role_type, "asset_analyst");
+    }
+
+    #[spec("SK-007")]
+    #[test]
+    fn custom_dimension_names_still_weight_checked() {
+        // Dimension names are free-form, but the §4.6 sum-of-weights rule
+        // still applies to them.
+        let mut m = minimal_manifest();
+        m.evaluation = Some(EvaluationSpec {
+            rubric: EvaluationRubric {
+                reference: None,
+                dimensions: vec![
+                    EvaluationDimension {
+                        name: "spec_compliance".into(),
+                        weight: 0.3,
+                        threshold: 0.95,
+                    },
+                    EvaluationDimension {
+                        name: "prompt_fidelity".into(),
+                        weight: 0.3,
+                        threshold: 0.7,
+                    },
+                ],
+            },
+            critic_role: "r1".into(),
+            sample_size: None,
+        });
+        let err = validate(&m).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::RubricWeightsDoNotSumToOne { .. }
+        ));
+    }
+
+    #[spec("SK-008")]
+    #[test]
+    fn custom_tdf_attributes_survive_parse_yaml() {
+        let custom = vec![
+            "https://attr.arkavo.com/audit_authority/true".to_string(),
+            "https://attr.arkavo.com/program/night-market".to_string(),
+        ];
+        let mut m = minimal_manifest();
+        m.roles[0].tdf_attribute_release_policy = Some(TdfAttributeReleasePolicy {
+            attributes: custom.clone(),
+            rule: TdfReleaseRule::AnyOf,
+        });
+        let yaml = serde_yaml::to_string(&m).unwrap();
+        let parsed =
+            crate::parse_yaml(&yaml).expect("custom attribute strings must parse and validate");
+        let policy = parsed.roles[0]
+            .tdf_attribute_release_policy
+            .as_ref()
+            .unwrap();
+        assert_eq!(policy.attributes, custom);
+        assert_eq!(policy.rule, TdfReleaseRule::AnyOf);
+    }
+
+    #[spec("SK-009")]
+    #[test]
+    fn custom_data_classifications_survive_parse_yaml() {
+        let mut m = minimal_manifest();
+        m.constraints.data_classifications = vec!["restricted".into(), "tactical".into()];
+        let yaml = serde_yaml::to_string(&m).unwrap();
+        let parsed =
+            crate::parse_yaml(&yaml).expect("custom classifications must parse and validate");
+        assert_eq!(
+            parsed.constraints.data_classifications,
+            ["restricted", "tactical"]
+        );
+    }
+
+    #[spec("SK-017")]
+    #[test]
+    fn custom_did_methods_survive_parse_yaml() {
+        let mut m = minimal_manifest();
+        m.kit.authors = vec![
+            Author {
+                did: "did:web:arkavo.com".into(),
+                name: None,
+            },
+            Author {
+                did: "did:key:z6MkfTeBJZNQUNhNuRHmwCqKMs8oP1y3WX5z2Ai93iyz5XuC".into(),
+                name: None,
+            },
+            Author {
+                did: "did:plc:abcdefghijklmnop".into(),
+                name: None,
+            },
+        ];
+        let yaml = serde_yaml::to_string(&m).unwrap();
+        let parsed =
+            crate::parse_yaml(&yaml).expect("any DID method must deserialize as an opaque string");
+        let dids: Vec<&str> = parsed.kit.authors.iter().map(|a| a.did.as_str()).collect();
+        assert_eq!(
+            dids,
+            [
+                "did:web:arkavo.com",
+                "did:key:z6MkfTeBJZNQUNhNuRHmwCqKMs8oP1y3WX5z2Ai93iyz5XuC",
+                "did:plc:abcdefghijklmnop"
+            ]
+        );
+    }
+
     #[test]
     fn governance_with_known_roles_validates() {
         use crate::governance::{

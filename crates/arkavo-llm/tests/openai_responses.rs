@@ -3,6 +3,7 @@
 
 use arkavo_llm::providers::{OpenAIResponsesConfig, OpenAIResponsesProvider};
 use arkavo_llm::{Message, Provider, ProviderStateTag};
+use arkavo_test_macros::spec;
 use futures::StreamExt;
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -81,7 +82,7 @@ fn completed(text: &str) -> Value {
     json!({"status":"completed", "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}],"usage":{"input_tokens":100,"output_tokens":30,"input_tokens_details":{"cached_tokens":50},"output_tokens_details":{"reasoning_tokens":20}}})
 }
 
-#[arkavo_test_macros::spec("ASTRA-002")]
+#[spec("ASTRA-002")]
 #[tokio::test]
 async fn tool_completion_preserves_opaque_state_and_actual_usage() {
     let mut response = completed("");
@@ -119,7 +120,7 @@ async fn tool_completion_preserves_opaque_state_and_actual_usage() {
     task.await.unwrap();
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[tokio::test]
 async fn structured_completion_retains_usage() {
     let (provider, request, task) =
@@ -137,7 +138,7 @@ async fn structured_completion_retains_usage() {
     task.await.unwrap();
 }
 
-#[arkavo_test_macros::spec("ASTRA-003")]
+#[spec("ASTRA-003")]
 #[tokio::test]
 async fn stream_reassembles_utf8_and_emits_terminal_tail_and_usage_once() {
     let delta = json!({"type":"response.output_text.delta","delta":"🌍"});
@@ -170,7 +171,7 @@ async fn stream_reassembles_utf8_and_emits_terminal_tail_and_usage_once() {
     task.await.unwrap();
 }
 
-#[arkavo_test_macros::spec("ASTRA-003")]
+#[spec("ASTRA-003")]
 #[tokio::test]
 async fn http_errors_and_truncated_streams_fail_without_echoing_body() {
     let (provider, request, task) = fixture(401, "sensitive echoed prompt".into(), false).await;
@@ -195,7 +196,7 @@ async fn http_errors_and_truncated_streams_fail_without_echoing_body() {
     task.await.unwrap();
 }
 
-#[arkavo_test_macros::spec("ASTRA-003")]
+#[spec("ASTRA-003")]
 #[tokio::test]
 async fn dropping_stream_closes_the_http_body_without_background_generation() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -231,7 +232,7 @@ async fn dropping_stream_closes_the_http_body_without_background_generation() {
 
 /// Run only with an explicitly supplied OpenAI key. Synthetic prompts, five
 /// requests, low effort and a fixed token cap keep the opt-in probe bounded.
-#[arkavo_test_macros::spec("ASTRA-003")]
+#[spec("ASTRA-003")]
 #[tokio::test]
 #[ignore = "requires explicitly authorized live OpenAI credentials"]
 async fn live_astra_text_tools_schema_and_stream() {
@@ -347,7 +348,7 @@ impl arkavo_llm::ReleaseGateFactory for DenyPrivate {
     }
 }
 
-#[arkavo_test_macros::spec("ASTRA-006")]
+#[spec("ASTRA-006")]
 #[tokio::test]
 async fn release_gate_inspects_native_tool_arguments_and_retains_denied_usage() {
     let mut response = completed("");
@@ -365,7 +366,7 @@ async fn release_gate_inspects_native_tool_arguments_and_retains_denied_usage() 
     task.await.unwrap();
 }
 
-#[arkavo_test_macros::spec("ASTRA-006")]
+#[spec("ASTRA-006")]
 #[tokio::test]
 async fn schema_response_cannot_bypass_release_policy() {
     let (provider, request, task) =
@@ -382,7 +383,7 @@ async fn schema_response_cannot_bypass_release_policy() {
     task.await.unwrap();
 }
 
-#[arkavo_test_macros::spec("ASTRA-001")]
+#[spec("ASTRA-001")]
 #[tokio::test]
 async fn legacy_factory_selects_responses_for_astra() {
     use arkavo_llm::providers::{
@@ -429,7 +430,7 @@ async fn legacy_factory_selects_responses_for_astra() {
     );
 }
 
-#[arkavo_test_macros::spec("ASTRA-006")]
+#[spec("ASTRA-006")]
 #[tokio::test]
 async fn final_stream_policy_denial_retains_usage_and_withholds_state() {
     let done = json!({"type":"response.completed","response":completed("private-value")});
@@ -448,7 +449,7 @@ async fn final_stream_policy_denial_retains_usage_and_withholds_state() {
 /// A caller must be able to tell a retryable cap from a policy refusal, a spent
 /// quota or a bad credential — and the body that names them may also quote the
 /// prompt back, so nothing but the code is reported.
-#[arkavo_test_macros::spec("ASTRA-003")]
+#[spec("ASTRA-003")]
 #[tokio::test]
 async fn http_refusals_report_their_code_and_never_the_body() {
     for (status, body, expected) in [
@@ -491,7 +492,7 @@ async fn http_refusals_report_their_code_and_never_the_body() {
 
 /// A connection that accepts the request and then goes quiet must fail on its
 /// own evidence instead of holding the agent for the whole request budget.
-#[arkavo_test_macros::spec("ASTRA-003")]
+#[spec("ASTRA-003")]
 #[tokio::test]
 async fn a_silent_stream_fails_on_the_idle_budget() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -522,7 +523,7 @@ async fn a_silent_stream_fails_on_the_idle_budget() {
 
 /// The perf line reported `0ms` for both phases because the provider reports
 /// token counts and no latencies. Measured wall time fills them in.
-#[arkavo_test_macros::spec("ASTRA-003")]
+#[spec("ASTRA-003")]
 #[tokio::test]
 async fn measured_wall_time_populates_the_perf_fields() {
     let (provider, request, task) = fixture(200, completed("done").to_string(), false).await;
@@ -570,7 +571,7 @@ async fn measured_wall_time_populates_the_perf_fields() {
 /// without the error-body budget the transport eventually gives up too and the
 /// status still yields `http_503`. Only the elapsed time discriminates, so this
 /// pins the effort tier whose budget the wait has to beat.
-#[arkavo_test_macros::spec("ASTRA-003")]
+#[spec("ASTRA-003")]
 #[tokio::test]
 async fn a_stalled_error_body_gives_up_long_before_the_request_budget() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

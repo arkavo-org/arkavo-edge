@@ -58,8 +58,10 @@ impl Default for UiHandler {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[tokio::test]
+    #[spec("AGUI-007")]
     async fn test_ui_generation() {
         let request = UiGenerateRequest {
             prompt: "Create a chart".to_string(),
@@ -67,5 +69,31 @@ mod tests {
         };
 
         let _result = UiHandler::handle_generate(Json(request)).await;
+    }
+
+    #[tokio::test]
+    #[spec("AGUI-007")]
+    async fn test_ui_generation_response_contents() {
+        let request = UiGenerateRequest {
+            prompt: "Show agent status".to_string(),
+            context: Some(UiGenerationContext {
+                agent_ids: vec!["agent-a".to_string()],
+                telemetry_snapshot: None,
+            }),
+        };
+
+        let response = UiHandler::handle_generate(Json(request))
+            .await
+            .into_response();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let generated: UiGenerateResponse = serde_json::from_slice(&body).unwrap();
+
+        // The rendered response must reflect the routed request
+        assert!(generated.html.contains("Show agent status"));
+        assert!(uuid::Uuid::parse_str(&generated.version_id).is_ok());
+        assert!(!generated.css.is_empty());
+        assert!(!generated.javascript.is_empty());
     }
 }

@@ -143,4 +143,37 @@ mod tests {
             assert!(ep.starts_with("http://"));
         }
     }
+
+    #[tokio::test]
+    async fn test_otlp_detection_with_local_collector() {
+        // Stand up a TCP listener on the default OTLP gRPC port so the
+        // reachability check succeeds; if the port is already taken, a
+        // collector-equivalent service is present and detection must find it.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:4317").await.ok();
+
+        let endpoint = ObservabilityDetector::detect_otlp_collector().await;
+
+        assert_eq!(endpoint.as_deref(), Some("http://localhost:4317"));
+
+        drop(listener);
+    }
+
+    #[tokio::test]
+    async fn test_auto_configure_falls_back_without_collector() {
+        // With no collector listening, auto-configure must leave OTLP disabled
+        // and continue with console logging only.
+        if ObservabilityDetector::detect_otlp_collector()
+            .await
+            .is_some()
+        {
+            // A real collector is reachable in this environment; the fallback
+            // path is not exercisable here.
+            return;
+        }
+
+        let config = ObservabilityDetector::auto_configure().await;
+        assert!(!config.enable_otlp);
+        assert!(config.otlp_endpoint.is_none());
+        assert!(config.console_logging);
+    }
 }

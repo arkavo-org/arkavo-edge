@@ -284,6 +284,128 @@ pub mod mdns {
             *existing = agent_info;
         }
     }
+
+    #[cfg(test)]
+    #[allow(clippy::disallowed_methods)]
+    mod tests {
+        use super::*;
+        use arkavo_test_macros::spec;
+
+        fn test_service_info(instance: &str, properties: HashMap<String, String>) -> ServiceInfo {
+            ServiceInfo::new(
+                "_a2a._tcp.local.",
+                instance,
+                &format!("{instance}.local."),
+                "127.0.0.1",
+                18340,
+                properties,
+            )
+            .expect("valid service info")
+        }
+
+        type Fixtures = (
+            Arc<RwLock<Vec<serde_json::Value>>>,
+            Arc<RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>>,
+            mpsc::Sender<crate::agent_connection::TelemetryEvent>,
+            Arc<RwLock<HashMap<String, crate::gateway::ConnectionInfo>>>,
+            Arc<RwLock<crate::security_handler::SecurityHandler>>,
+            Arc<RwLock<HashMap<String, serde_json::Value>>>,
+        );
+
+        fn test_fixtures() -> Fixtures {
+            let (telemetry_tx, _telemetry_rx) = mpsc::channel(16);
+            (
+                Arc::new(RwLock::new(Vec::new())),
+                Arc::new(RwLock::new(HashMap::new())),
+                telemetry_tx,
+                Arc::new(RwLock::new(HashMap::new())),
+                Arc::new(RwLock::new(crate::security_handler::SecurityHandler::new())),
+                Arc::new(RwLock::new(HashMap::new())),
+            )
+        }
+
+        #[tokio::test]
+        #[spec("AGUI-002")]
+        async fn discovered_service_registers_agent_with_properties() {
+            let (agents, connections, telemetry_tx, browsers, security, topo_cache) =
+                test_fixtures();
+
+            let mut properties = HashMap::new();
+            // An explicit agent_id TXT property wins over the service name
+            properties.insert("agent_id".to_string(), "reviewer".to_string());
+            properties.insert("purpose".to_string(), "Runs code review".to_string());
+            properties.insert("model".to_string(), "gemma-4".to_string());
+            let info = test_service_info("arkavo-agent-reviewer", properties);
+
+            handle_service_discovered(
+                info,
+                agents.clone(),
+                connections,
+                telemetry_tx,
+                browsers,
+                security,
+                topo_cache,
+            )
+            .await;
+
+            let list = agents.read().await;
+            assert_eq!(list.len(), 1);
+            let agent = &list[0];
+            assert_eq!(agent.get("id").and_then(|v| v.as_str()), Some("reviewer"));
+            assert_eq!(
+                agent.get("purpose").and_then(|v| v.as_str()),
+                Some("Runs code review")
+            );
+            assert_eq!(agent.get("model").and_then(|v| v.as_str()), Some("gemma-4"));
+            assert_eq!(
+                agent.get("endpoint").and_then(|v| v.as_str()),
+                Some("127.0.0.1:18340")
+            );
+        }
+
+        #[tokio::test]
+        #[spec("AGUI-002")]
+        async fn rediscovered_service_updates_existing_entry() {
+            let (agents, connections, telemetry_tx, browsers, security, topo_cache) =
+                test_fixtures();
+
+            let mut first = HashMap::new();
+            first.insert("model".to_string(), "gemma-4".to_string());
+            let info = test_service_info("arkavo-agent-reviewer", first);
+            handle_service_discovered(
+                info,
+                agents.clone(),
+                connections.clone(),
+                telemetry_tx.clone(),
+                browsers.clone(),
+                security.clone(),
+                topo_cache.clone(),
+            )
+            .await;
+
+            let mut second = HashMap::new();
+            second.insert("model".to_string(), "ministral-8b".to_string());
+            let info = test_service_info("arkavo-agent-reviewer", second);
+            handle_service_discovered(
+                info,
+                agents.clone(),
+                connections,
+                telemetry_tx,
+                browsers,
+                security,
+                topo_cache,
+            )
+            .await;
+
+            let list = agents.read().await;
+            // Rediscovery refreshes the registry entry instead of duplicating it
+            assert_eq!(list.len(), 1);
+            assert_eq!(
+                list[0].get("model").and_then(|v| v.as_str()),
+                Some("ministral-8b")
+            );
+        }
+    }
 }
 
 #[cfg(not(feature = "mdns"))]

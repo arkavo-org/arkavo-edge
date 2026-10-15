@@ -622,6 +622,7 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    #[spec("MCP-005")]
     #[tokio::test]
     async fn test_git_commit_with_attribution() {
         let temp_dir = TempDir::new().unwrap();
@@ -656,6 +657,65 @@ mod tests {
         assert!(message.contains("Add test file"));
         assert!(message.contains("🤖 Generated with [Arkavo Edge]"));
         assert!(message.contains("Co-Authored-By: Arkavo Edge <edge@arkavo.com>"));
+    }
+
+    #[spec("MCP-005")]
+    #[tokio::test]
+    async fn git_status_diff_log_and_branch_kits_on_a_workspace_repository() {
+        let ws = TempDir::new().unwrap();
+        let repo = git2::Repository::init(ws.path()).unwrap();
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+        fs::write(ws.path().join("tracked.txt"), "v1").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("tracked.txt")).unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        index.write().unwrap();
+        // Commit through git2 rather than a kit so a resolver regression can
+        // never make a test commit in a real checkout.
+        repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+            .unwrap();
+
+        // Status shows the working tree on the current branch.
+        let status = GitStatusKit::with_root(ws.path())
+            .execute(json!({}))
+            .await
+            .unwrap();
+        assert!(status["branch"].is_string());
+
+        // Diff shows the unstaged modification.
+        fs::write(ws.path().join("tracked.txt"), "v2").unwrap();
+        let diff = GitDiffKit::with_root(ws.path())
+            .execute(json!({}))
+            .await
+            .unwrap();
+        assert!(diff["diff"].as_str().unwrap().contains("v2"));
+
+        // Log shows the history.
+        let log = GitLogKit::with_root(ws.path())
+            .execute(json!({}))
+            .await
+            .unwrap();
+        let commits = log["commits"].as_array().unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0]["message"], "initial commit");
+
+        // Branch list marks the current branch; create adds a new one.
+        let branches = GitBranchKit::with_root(ws.path())
+            .execute(json!({ "action": "list" }))
+            .await
+            .unwrap();
+        assert!(
+            branches["branches"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|b| b["current"] == true)
+        );
+        let created = GitBranchKit::with_root(ws.path())
+            .execute(json!({ "action": "create", "name": "feature-x" }))
+            .await
+            .unwrap();
+        assert_eq!(created["created"], "feature-x");
     }
 
     #[spec("MCP-011")]

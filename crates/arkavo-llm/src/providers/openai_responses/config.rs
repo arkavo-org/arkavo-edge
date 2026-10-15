@@ -148,10 +148,11 @@ impl OpenAIResponsesConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     /// A stuck low-effort agent loop must fail long before a `max`-effort
     /// deliberation would, and no tier may wait longer than the hour ceiling.
-    #[arkavo_test_macros::spec("ASTRA-001")]
+    #[spec("ASTRA-001")]
     #[test]
     fn request_timeout_grows_with_effort_and_bounds_the_idle_budget() {
         let efforts = [
@@ -177,7 +178,7 @@ mod tests {
         }
     }
 
-    #[arkavo_test_macros::spec("ASTRA-001")]
+    #[spec("ASTRA-001")]
     #[test]
     fn configured_timeouts_follow_the_effort_unless_overridden() {
         let config = OpenAIResponsesConfig {
@@ -194,7 +195,7 @@ mod tests {
     }
 
     /// An idle budget above the request budget could never fire.
-    #[arkavo_test_macros::spec("ASTRA-001")]
+    #[spec("ASTRA-001")]
     #[test]
     fn unusable_idle_budgets_and_output_caps_are_rejected() {
         for idle in [Duration::ZERO, Duration::from_secs(4000)] {

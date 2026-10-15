@@ -114,7 +114,9 @@ impl ContextSummarizer {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
+    #[spec("CTX-011")]
     #[tokio::test]
     async fn test_empty_content() {
         let summarizer = ContextSummarizer::new("test-model".to_string()).await;
@@ -145,6 +147,7 @@ mod tests {
         }
     }
 
+    #[spec("CTX-011")]
     #[test]
     #[cfg(feature = "llama-cpp")]
     fn test_clean_summary() {

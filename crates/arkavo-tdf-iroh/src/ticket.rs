@@ -109,6 +109,7 @@ impl From<&IrohTicket> for SerializableTicket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn serializable_ticket_roundtrip() {
@@ -120,6 +121,7 @@ mod tests {
         assert!(serialized.contains("test-ticket-string"));
     }
 
+    #[spec("IROH-004")]
     #[test]
     fn invalid_ticket_error() {
         let result = IrohTicket::from_string("not-a-valid-ticket");

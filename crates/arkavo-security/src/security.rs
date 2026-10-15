@@ -293,7 +293,46 @@ mod tests {
         let config = SecurityConfig::default();
         assert!(config.tls.enabled);
         assert!(config.tls.verify_certificates);
+        assert!(matches!(config.tls.minimum_tls_version, TlsVersion::Tls12));
         assert!(matches!(config.authentication.method, AuthMethod::None));
+    }
+
+    #[test]
+    fn test_tls_configuration_enforcement() {
+        // TLS is mandatory by default, with certificate verification and a floor of TLS 1.2
+        let tls = TlsSettings::default();
+        assert!(tls.enabled);
+        assert!(tls.verify_certificates);
+        assert!(matches!(
+            tls.minimum_tls_version,
+            TlsVersion::Tls12 | TlsVersion::Tls13
+        ));
+
+        assert_eq!(TlsVersion::Tls10.as_str(), "TLS 1.0");
+        assert_eq!(TlsVersion::Tls12.as_str(), "TLS 1.2");
+        assert_eq!(TlsVersion::Tls13.as_str(), "TLS 1.3");
+
+        // Nonexistent certificate files are rejected instead of silently ignored
+        let result = SecurityConfig::builder()
+            .client_certificates(
+                "/nonexistent/cert.pem".to_string(),
+                "/nonexistent/key.pem".to_string(),
+            )
+            .build();
+        assert!(result.is_err());
+
+        // A certificate present without its key is rejected
+        let dir = tempfile::tempdir().unwrap();
+        let cert_path = dir.path().join("cert.pem");
+        std::fs::write(
+            &cert_path,
+            "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+        let mut config = SecurityConfig::default();
+        config.tls.client_cert_path = Some(cert_path.to_string_lossy().to_string());
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("client key is missing"));
     }
 
     #[spec("SEC-005")]

@@ -286,4 +286,73 @@ mod tests {
             "this process's own environment leaked into the MCP server"
         );
     }
+
+    /// `cat` echoes each request line back unchanged: the transport writes
+    /// one JSON-RPC object per line and matches the echoed line by id.
+    #[spec("MCPR-004")]
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn stdio_transport_frames_requests_as_single_json_lines() {
+        let transport = StdioTransport::new(
+            "cat".to_string(),
+            vec![],
+            None,
+            &ChildEnv::isolated_from_current(&EnvSpec::default()),
+        )
+        .await
+        .expect("failed to spawn cat stub");
+
+        assert!(transport.is_connected());
+
+        // cat echoes the request, which has no "result" field, so the
+        // transport resolves it as a null result rather than an error.
+        let result = transport
+            .send_request("tools/list", Some(json!({"cursor": null})))
+            .await
+            .expect("echoed request should parse as a response");
+        assert_eq!(result, Value::Null);
+
+        // A second request takes the next id and still resolves.
+        let result = transport
+            .send_request("ping", None)
+            .await
+            .expect("second request should resolve");
+        assert_eq!(result, Value::Null);
+
+        transport.close().await.unwrap();
+        assert!(!transport.is_connected());
+    }
+
+    #[spec("MCPR-004")]
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn stdio_transport_reports_spawn_failure_and_closed_connection() {
+        let result = StdioTransport::new(
+            "arkavo-nonexistent-binary-xyz".to_string(),
+            vec![],
+            None,
+            &ChildEnv::isolated_from_current(&EnvSpec::default()),
+        )
+        .await;
+        let err = match result {
+            Ok(_) => panic!("spawning a missing binary must fail"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, TransportError::ConnectionFailed(_)), "{err}");
+
+        let transport = StdioTransport::new(
+            "cat".to_string(),
+            vec![],
+            None,
+            &ChildEnv::isolated_from_current(&EnvSpec::default()),
+        )
+        .await
+        .expect("failed to spawn cat stub");
+        transport.close().await.unwrap();
+        let err = transport
+            .send_request("ping", None)
+            .await
+            .expect_err("a closed transport must refuse requests");
+        assert!(matches!(err, TransportError::ConnectionClosed), "{err}");
+    }
 }

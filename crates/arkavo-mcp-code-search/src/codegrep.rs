@@ -288,13 +288,10 @@ mod tests {
             .unwrap_or(false)
     }
 
+    #[spec("CS-002")]
+    #[ignore = "requires ripgrep on PATH"]
     #[tokio::test]
     async fn test_codegrep_files() {
-        if !is_ripgrep_available() {
-            eprintln!("Skipping test: ripgrep not installed");
-            return;
-        }
-
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "async fn test() {}\n").await.unwrap();
@@ -314,13 +311,10 @@ mod tests {
         }
     }
 
+    #[spec("CS-002")]
+    #[ignore = "requires ripgrep on PATH"]
     #[tokio::test]
     async fn test_codegrep_content() {
-        if !is_ripgrep_available() {
-            eprintln!("Skipping test: ripgrep not installed");
-            return;
-        }
-
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "use std::collections::HashMap;\nfn main() {}\n")

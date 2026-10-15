@@ -137,6 +137,7 @@ impl AgentIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[test]
     fn test_device_id_creation() {
@@ -145,6 +146,7 @@ mod tests {
         assert_ne!(id1, id2);
     }
 
+    #[spec("DEVICE-005")]
     #[test]
     fn test_device_id_roundtrip() {
         let original = DeviceId::new();
@@ -153,6 +155,7 @@ mod tests {
         assert_eq!(original, restored);
     }
 
+    #[spec("DEVICE-005")]
     #[test]
     fn test_device_id_uuid_conversion() {
         let uuid = Uuid::new_v4();
@@ -190,6 +193,29 @@ mod tests {
         let deserialized: AgentIdentity = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.did, Some("did:key:z6MkTest123".to_string()));
         assert_eq!(deserialized.device_id, identity.device_id);
+    }
+
+    #[spec("DEVICE-004")]
+    #[test]
+    fn test_agent_identity_new_includes_device_id_and_version() {
+        let identity = AgentIdentity::new("0.57.2".to_string());
+        assert_eq!(identity.device_id.to_uuid().get_version_num(), 4);
+        assert_eq!(identity.app_version, "0.57.2");
+        assert!(identity.agent_id.is_some());
+    }
+
+    #[spec("DEVICE-004")]
+    #[test]
+    fn test_agent_identity_new_generates_distinct_ids() {
+        let first = AgentIdentity::new("1.0.0".to_string());
+        let second = AgentIdentity::new("1.0.0".to_string());
+        assert_ne!(first.device_id, second.device_id);
+        assert_ne!(first.agent_id, second.agent_id);
+        assert_eq!(
+            first.agent_id.unwrap().get_version_num(),
+            4,
+            "agent ID must be a fresh UUID v4"
+        );
     }
 
     #[test]

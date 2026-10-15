@@ -206,7 +206,7 @@ mod tests {
     use arkavo_config_bundle::{AgentRole, BundleTarget};
     use arkavo_test_macros::spec;
 
-    #[spec("TDFS-002")]
+    #[spec("TDFS-002", "CFGE-001", "CFGE-002")]
     #[test]
     fn test_encrypt_bundle() {
         let mut bundle = ConfigurationBundle::new(
@@ -280,6 +280,31 @@ mod tests {
         let result = decryptor.decrypt_bundle(&encrypted);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("KAS integration"));
+    }
+
+    #[spec("CFGE-002")]
+    #[test]
+    fn test_encrypt_rejects_invalid_bundle() {
+        let bundle = ConfigurationBundle::new(
+            BundleTarget::Role("test-agent".to_string()),
+            AgentRole {
+                name: "test-agent".to_string(),
+                purpose: "Testing".to_string(),
+                capabilities: vec!["test".to_string()],
+            },
+            "admin".to_string(),
+            "test".to_string(),
+        );
+
+        let encryptor = ConfigBundleEncryptor::new("https://kas.example.com".to_string());
+
+        let policy = Policy {
+            attributes: vec![],
+            dissemination: vec![],
+        };
+
+        let result = encryptor.encrypt_bundle(&bundle, policy);
+        assert!(matches!(result, Err(Error::Validation(_))));
     }
 
     #[spec("TDFS-011")]

@@ -523,4 +523,70 @@ mod tests {
         let unique: std::collections::HashSet<_> = names.iter().collect();
         assert_eq!(unique.len(), names.len());
     }
+
+    #[spec("QREG-003")]
+    #[test]
+    fn test_entitlements_comma_separated_and_url_encoded() {
+        let entitlements = vec![
+            "https://arkavo.ai/attr/tdf/value/decrypt".to_string(),
+            "https://arkavo.ai/attr/action/value/read".to_string(),
+        ];
+        let descriptor = AgentDescriptor::new(
+            AgentKeypair::generate().public_key(),
+            "http://192.168.1.100:8342".to_string(),
+            None,
+            "ent123".to_string(),
+        )
+        .with_entitlements(entitlements.clone());
+
+        let url = descriptor.to_authorization_url();
+        let encoded = url
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("entitlements="))
+            .unwrap_or_else(|| panic!("URL must carry entitlements: {url}"));
+
+        // Both FQNs ride in one parameter, comma-separated; the comma and the
+        // FQN slashes are percent-encoded so the app parses the link.
+        let joined = entitlements.join(",");
+        let expected: String = joined
+            .bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect();
+        assert_eq!(encoded, expected);
+        assert!(encoded.contains("%2C"), "{url}");
+    }
+
+    #[spec("QREG-005")]
+    #[test]
+    fn test_descriptor_round_trip_preserves_optional_fields() {
+        let keypair = AgentKeypair::generate();
+        let descriptor = AgentDescriptor::new(
+            keypair.public_key(),
+            "http://192.168.1.100:8342".to_string(),
+            Some("agent._a2a._tcp.local.".to_string()),
+            "roundtrip".to_string(),
+        )
+        .with_name("field-agent")
+        .with_entitlements(default_entitlements());
+
+        let restored = AgentDescriptor::from_json(&descriptor.to_json().unwrap()).unwrap();
+
+        assert_eq!(restored.public_key, descriptor.public_key);
+        assert_eq!(restored.endpoint, descriptor.endpoint);
+        assert_eq!(restored.mdns_service, descriptor.mdns_service);
+        assert_eq!(restored.agent_id_short_sha, descriptor.agent_id_short_sha);
+        assert_eq!(restored.did_key, descriptor.did_key);
+        assert_eq!(restored.name, descriptor.name);
+        assert_eq!(restored.entitlements, descriptor.entitlements);
+        // The encoded key still parses back to the same key material.
+        assert_eq!(
+            restored.public_key().unwrap().to_bytes(),
+            keypair.public_key().to_bytes()
+        );
+    }
 }
