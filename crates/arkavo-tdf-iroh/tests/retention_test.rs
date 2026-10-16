@@ -1,5 +1,5 @@
 //! Blobs staged for another party live for their retention window, within
-//! a bound on staged bytes (IROH-009, IROH-010).
+//! a bound on staged bytes (IROH-010, IROH-011).
 
 // `#[tokio::test]` expands to `Runtime::block_on`, which the workspace lint
 // set disallows in library code.
@@ -22,9 +22,9 @@ async fn node(staged_limit: u64) -> IrohTransport {
     IrohTransport::new(node)
 }
 
-/// IROH-009: another node fetches a retained blob inside its window; after
+/// IROH-010: another node fetches a retained blob inside its window; after
 /// the window the blob is gone from the store that staged it.
-#[spec("IROH-009")]
+#[spec("IROH-010")]
 #[tokio::test]
 async fn retained_blobs_expire_after_their_window() {
     let provider = node(1 << 20).await;
@@ -49,9 +49,9 @@ async fn retained_blobs_expire_after_their_window() {
     }
 }
 
-/// IROH-010: staging past the bound fails, and blobs still in their window
+/// IROH-011: staging past the bound fails, and blobs still in their window
 /// are not evicted to make room.
-#[spec("IROH-010")]
+#[spec("IROH-011")]
 #[tokio::test]
 async fn staging_past_the_bound_fails_without_evicting() {
     let provider = node(16).await;

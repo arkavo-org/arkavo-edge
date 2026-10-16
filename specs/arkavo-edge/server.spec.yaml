@@ -206,7 +206,7 @@ scenarios:
       - The agent's long-lived data-plane node
     when: The state is broadcast
     then:
-      - "The full state is staged as a reference named state, text/plain, fetchable for 10 minutes (IROH-009) within the store bound (IROH-010)"
+      - "The full state is staged as a reference named state, text/plain, fetchable for 10 minutes (IROH-010) within the store bound (IROH-011)"
       - "Each specialist's advisory task carries the summary and the iroh_fetch arguments holding the reference (MCP-018)"
     edge_cases:
       - condition: No data-plane node, or staging fails

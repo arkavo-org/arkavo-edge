@@ -317,7 +317,7 @@ scenarios:
       - tdf_stage called with a file inside the workspace (MCP-012)
     when: It stages the file
     then:
-      - "The file is staged on the agent's long-lived data-plane node (IROH-009)"
+      - "The file is staged on the agent's long-lived data-plane node (IROH-010)"
       - "The returned ticket can be fetched by another agent after the call returns, for the retention window"
     refs:
       - crates/arkavo-mcp-tools/src/tdf.rs:389
@@ -330,8 +330,8 @@ scenarios:
       - The agent's long-lived data-plane node, registered with iroh_stage and iroh_fetch
     when: iroh_stage stages data and another agent passes the reference to iroh_fetch
     then:
-      - "iroh_stage returns a reference (IROH-011): the name given, default data; the ticket; the content hash; the size; and text/plain for a string or application/json for an object"
-      - "The data stays fetchable for 1 hour (IROH-009) and counts against the store bound (IROH-010)"
+      - "iroh_stage returns a reference (IROH-012): the name given, default data; the ticket; the content hash; the size; and text/plain for a string or application/json for an object"
+      - "The data stays fetchable for 1 hour (IROH-010) and counts against the store bound (IROH-011)"
       - "iroh_fetch fetches exactly what the reference names and returns the data with the reference's name and media type"
     edge_cases:
       - condition: The reference's size or content hash does not match the blob
@@ -351,7 +351,7 @@ scenarios:
       - tdf_share called with a file to encrypt
     when: It stages the encrypted manifest and the recipient calls tdf_receive with the reference
     then:
-      - "tdf_share returns a reference (IROH-011) to the manifest, named after the file with .tdf.json, as application/json, next to its policy and KAS URL"
+      - "tdf_share returns a reference (IROH-012) to the manifest, named after the file with .tdf.json, as application/json, next to its policy and KAS URL"
       - "tdf_receive fetches exactly what the reference names, checks that it parses as a TDF manifest, and writes it to the output path"
       - "The tdf.share RPC keeps its ticket, content hash and size fields, so agents on either side of this change still exchange offers"
     edge_cases:

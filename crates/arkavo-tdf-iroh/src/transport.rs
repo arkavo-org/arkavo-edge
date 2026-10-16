@@ -73,9 +73,9 @@ impl IrohTransport {
     }
 
     /// Stage data for another party, fetchable for `retention` and then
-    /// released to the garbage collector (IROH-009). Fails rather than evict
+    /// released to the garbage collector (IROH-010). Fails rather than evict
     /// a blob still in its window when the staged bytes would pass the
-    /// node's bound (IROH-010).
+    /// node's bound (IROH-011).
     #[instrument(skip(self, data), fields(data_len = data.len()))]
     pub async fn stage_retained(
         &self,

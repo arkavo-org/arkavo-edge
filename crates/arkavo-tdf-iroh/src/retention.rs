@@ -1,6 +1,6 @@
 //! Blobs staged for another party: kept for their retention window, then
 //! untagged for the garbage collector, within a bound on staged bytes
-//! (IROH-009, IROH-010).
+//! (IROH-010, IROH-011).
 
 // The node and the transport share this state inside the crate; plain `pub`
 // in a private module would trip `unreachable_pub`.

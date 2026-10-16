@@ -1,7 +1,7 @@
 //! Assets as they travel: their manifest, and one data-plane reference per
 //! file (ASSET-005, ASSET-006, ASSET-007).
 //!
-//! Moving the bytes is the data plane's job (IROH-011); this module only
+//! Moving the bytes is the data plane's job (IROH-012); this module only
 //! pairs each reference with its manifest entry and checks what arrives
 //! against that entry.
 

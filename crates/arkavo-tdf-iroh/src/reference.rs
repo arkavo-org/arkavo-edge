@@ -1,5 +1,5 @@
 //! References to staged data, as the control plane carries them in place of
-//! the data (PROTO-020, IROH-011).
+//! the data (PROTO-020, IROH-012).
 //!
 //! A reference names what it delivers, the ticket to fetch it with, the
 //! BLAKE3 hash the ticket names, its size and its media type. It means the
@@ -61,7 +61,7 @@ impl Default for FetchPolicy {
 
 impl IrohTransport {
     /// Stage `data` for another party for `retention` and describe it
-    /// (IROH-009, IROH-010).
+    /// (IROH-010, IROH-011).
     pub async fn stage_ref(
         &self,
         name: &str,
@@ -79,7 +79,7 @@ impl IrohTransport {
         })
     }
 
-    /// Fetch exactly the data `reference` names (IROH-011).
+    /// Fetch exactly the data `reference` names (IROH-012).
     ///
     /// The ticket must name the reference's hash, and the provider's
     /// verified size must be the reference's before anything is downloaded,

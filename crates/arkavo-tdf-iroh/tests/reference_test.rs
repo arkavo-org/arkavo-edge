@@ -1,4 +1,4 @@
-//! A reference fetches exactly the data it names, or nothing (IROH-011).
+//! A reference fetches exactly the data it names, or nothing (IROH-012).
 
 // `#[tokio::test]` expands to `Runtime::block_on`, which the workspace lint
 // set disallows in library code.
@@ -21,9 +21,9 @@ const QUICK: FetchPolicy = FetchPolicy {
     backoff: Duration::from_millis(10),
 };
 
-/// IROH-011: a staged reference names its size, hash and media type, and
+/// IROH-012: a staged reference names its size, hash and media type, and
 /// fetches back the same bytes.
-#[spec("IROH-011")]
+#[spec("IROH-012")]
 #[tokio::test]
 async fn references_fetch_what_they_name() {
     let (provider, fetcher) = (node().await, node().await);
@@ -50,10 +50,10 @@ async fn references_fetch_what_they_name() {
     fetcher.shutdown().await.unwrap();
 }
 
-/// IROH-011: a provider offering more than the reference names is refused
+/// IROH-012: a provider offering more than the reference names is refused
 /// before the blob is downloaded, and a ticket for another blob is refused
 /// without contacting anyone.
-#[spec("IROH-011")]
+#[spec("IROH-012")]
 #[tokio::test]
 async fn mismatched_references_are_refused() {
     let (provider, fetcher) = (node().await, node().await);
@@ -85,10 +85,10 @@ async fn mismatched_references_are_refused() {
     fetcher.shutdown().await.unwrap();
 }
 
-/// IROH-011 edge: a reference to a blob this node already holds is read
+/// IROH-012 edge: a reference to a blob this node already holds is read
 /// here, since iroh never connects a node to itself; its size is still
 /// checked against the reference.
-#[spec("IROH-011")]
+#[spec("IROH-012")]
 #[tokio::test]
 async fn references_held_here_are_read_here() {
     let node = node().await;
@@ -113,9 +113,9 @@ async fn references_held_here_are_read_here() {
     node.shutdown().await.unwrap();
 }
 
-/// IROH-011: a provider that is gone is tried again, then reported as
+/// IROH-012: a provider that is gone is tried again, then reported as
 /// unreachable, naming the reference.
-#[spec("IROH-011")]
+#[spec("IROH-012")]
 #[tokio::test]
 async fn a_gone_provider_is_unreachable() {
     let (provider, fetcher) = (node().await, node().await);
@@ -137,8 +137,8 @@ async fn a_gone_provider_is_unreachable() {
     fetcher.shutdown().await.unwrap();
 }
 
-/// IROH-010: staging a reference past the bound fails without staging.
-#[spec("IROH-010")]
+/// IROH-011: staging a reference past the bound fails without staging.
+#[spec("IROH-011")]
 #[tokio::test]
 async fn references_respect_the_staging_bound() {
     let node = Arc::new(IrohNode::new(IrohNodeConfig {

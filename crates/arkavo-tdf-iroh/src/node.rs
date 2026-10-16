@@ -25,7 +25,7 @@ pub struct IrohNodeConfig {
     /// How often expired retained blobs are untagged and unreferenced blobs
     /// are collected.
     pub gc_interval: Duration,
-    /// Bytes that may be staged for other parties at once (IROH-010).
+    /// Bytes that may be staged for other parties at once (IROH-011).
     pub staged_limit: u64,
 }
 

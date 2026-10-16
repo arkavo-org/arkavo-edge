@@ -90,7 +90,7 @@ async fn a_gone_producer_is_reported_unreachable() {
 }
 
 /// ASSET-005 edge: staging past the data-plane bound fails with
-/// data_plane_full (IROH-010).
+/// data_plane_full (IROH-011).
 #[spec("ASSET-005")]
 #[tokio::test]
 async fn staging_past_the_bound_is_data_plane_full() {

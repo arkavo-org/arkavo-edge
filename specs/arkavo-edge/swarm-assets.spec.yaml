@@ -11,7 +11,7 @@ version: 0.103.0
 # The control plane is A2A JSON-RPC: message/send, tasks/get, progress and
 # gossip. The data plane is the agent's existing long-lived Iroh node
 # (tdf-iroh.spec.yaml), which knows nothing about images: it stages bytes
-# and hands out references (IROH-011). Assets are one of its payloads. The
+# and hands out references (IROH-012). Assets are one of its payloads. The
 # control plane carries requests, manifests and references, and bytes take
 # the data plane (PROTO-020, IROH-008).
 #
@@ -31,7 +31,7 @@ version: 0.103.0
 # that asked.
 
 invariants:
-  - "Asset bytes never cross the control plane: messages, task results, progress and gossip carry the manifest and data-plane references (IROH-011), and the bytes move over Iroh"
+  - "Asset bytes never cross the control plane: messages, task results, progress and gossip carry the manifest and data-plane references (IROH-012), and the bytes move over Iroh"
   - "Tickets for staged assets appear only in the task result written for the party that asked for them"
   - "Tickets are issued only by the agent's long-lived data-plane node"
   - "Image work goes only to members that report image_generation over the member channel; announcements carry no capability"
@@ -56,7 +56,7 @@ scenarios:
         expected: "agent.capabilities.get answers any caller that reaches the endpoint, as it does today, so the descriptor discloses chip and memory to the link"
     refs:
       - crates/arkavo-server/src/server/handlers/discovery.rs:240
-      - crates/arkavo-server/src/server/well_known.rs:38
+      - crates/arkavo-server/src/server/well_known.rs:110-128
       - crates/arkavo-server/src/server/assets.rs
       - crates/arkavo-image-gen/src/descriptor.rs
     changed: "2026-10-11"
@@ -147,15 +147,15 @@ scenarios:
       - Verified assets (IMG-010) held for a reply
     when: They are staged
     then:
-      - "Each file is read and checked against its manifest entry again, then staged as a data-plane reference (IROH-011) on the node the A2A server starts for the agent's lifetime"
+      - "Each file is read and checked against its manifest entry again, then staged as a data-plane reference (IROH-012) on the node the A2A server starts for the agent's lifetime"
       - "Its reference holds the asset name, the ticket, the BLAKE3 content hash, the size and media type image/png; the manifest entry of the same name holds its size, SHA-256, width, height, has_alpha, tileable and seed"
-      - "References stay fetchable for 1 hour, the TDF offer TTL, and their blobs are then dropped (IROH-009)"
+      - "References stay fetchable for 1 hour, the TDF offer TTL, and their blobs are then dropped (IROH-010)"
       - "The message carrying the references stays within the 64 KiB inline bound (PROTO-020); a delivery that would not fit is refused"
       - "Generated files stay on disk until every reply that could deliver them has staged them or given up, and are then deleted"
     edge_cases:
       - condition: The agent restarts within the hour
         expected: "The in-memory blob store is gone, and a fetch fails with asset_unreachable naming the asset: to the fetcher an expired reference and an unreachable producer look the same"
-      - condition: Staging would pass the data-plane store bound (IROH-010)
+      - condition: Staging would pass the data-plane store bound (IROH-011)
         expected: Fails with data_plane_full; references within their hour are not evicted
       - condition: A file changed on disk after it was generated
         expected: It is not staged
@@ -172,7 +172,7 @@ scenarios:
       - Agent A, asked by requester H, delegated to capable member B (ASSET-002)
     when: B's references reach A
     then:
-      - "A fetches each asset by its reference (IROH-011) into a directory of its own, then checks it against B's manifest: size, SHA-256 and PNG dimensions"
+      - "A fetches each asset by its reference (IROH-012) into a directory of its own, then checks it against B's manifest: size, SHA-256 and PNG dimensions"
       - "A stages the asset on its own node (ASSET-005) for H"
       - "A's references to H carry B's manifest, which names B's did:key as producer, and B's tickets are not passed on"
       - "No asset byte appears in any message between H, A and B"
@@ -193,7 +193,7 @@ scenarios:
     when: The requester takes delivery
     then:
       - "Each reference must name a manifest entry, with media type image/png and the entry's size"
-      - "Each is fetched by its reference (IROH-011), which refuses a different blob or size before downloading; the SHA-256, PNG signature, width and height are then checked against the manifest entry"
+      - "Each is fetched by its reference (IROH-012), which refuses a different blob or size before downloading; the SHA-256, PNG signature, width and height are then checked against the manifest entry"
       - "A file that fails a check is not written and is reported, and the others are kept"
       - "A name that could leave the destination directory is refused, and an existing file is never overwritten"
     edge_cases:

@@ -1,7 +1,7 @@
 # Arkavo Edge Behavior Specification Index
 
 version: 0.94.0
-last_updated: 2026-10-12
+last_updated: 2026-10-16
 
 components:
   - name: astra
@@ -383,7 +383,7 @@ components:
     module: arkavo_tdf_iroh
     description: TDF blob transport via Iroh P2P
     criticality: critical
-    scenario_count: 11
+    scenario_count: 12
     invariants:
       - Raw bytes only, no encryption
       - Tickets self-contained

@@ -165,7 +165,7 @@ scenarios:
     refs: [crates/arkavo-tdf-iroh/src/node.rs, crates/arkavo-tdf-iroh/tests/push_policy_test.rs, crates/arkavo-tdf-iroh/tests/integration_test.rs]
     changed: "2026-10-16"
 
-  - id: IROH-009
+  - id: IROH-010
     name: Handed-out tickets live for their retention window
     criticality: high
     given:
@@ -183,7 +183,7 @@ scenarios:
       - crates/arkavo-tdf-iroh/src/transport.rs:80
     changed: "2026-10-11"
 
-  - id: IROH-010
+  - id: IROH-011
     name: Staged data is bounded
     criticality: medium
     given:
@@ -197,7 +197,7 @@ scenarios:
       - crates/arkavo-tdf-iroh/src/node.rs:20-41
     changed: "2026-10-11"
 
-  - id: IROH-011
+  - id: IROH-012
     name: A reference fetches exactly the data it names
     criticality: high
     given:
@@ -210,9 +210,9 @@ scenarios:
       - "A provider that does not answer within the attempt's timeout is tried 3 times with backoff, then reported as unreachable, naming the reference"
       - "The reference means the same whatever the bytes are; what they must be beyond that is the caller's check"
     edge_cases:
-      - condition: A reference past its retention window (IROH-009)
+      - condition: A reference past its retention window (IROH-010)
         expected: "Reported as unreachable: to the fetcher an expired reference and a gone provider look the same"
-      - condition: Staging a reference past the store bound (IROH-010)
+      - condition: Staging a reference past the store bound (IROH-011)
         expected: Fails with the bound, and nothing is staged
       - condition: "The fetching node already holds the whole blob: it staged it, as agents sharing one node in a process do, or fetched it before"
         expected: "Read from its own store without contacting the provider, since iroh never connects a node to itself; a held size other than the reference's is refused"
