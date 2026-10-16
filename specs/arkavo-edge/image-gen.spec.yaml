@@ -269,12 +269,14 @@ scenarios:
       - "It waits in a queue of at most 4 requests, served in arrival order"
       - "Agent processes on the same host take turns as well: each holds an advisory lock file in the generator's directory while sd-cli runs, so a kit that runs several roles on one Mac still loads one model at a time"
       - "Each run writes to a new temporary directory of its own, so no other agent's start or run touches its files"
+      - "A request that waits for another agent process on the host, for its run or for its download of the runtime or weights, reports that it is waiting behind other generations, as one in this process's queue does. A request that reported nothing would look stalled to the agent that delegated it (ASSET-009)"
       - "A request beyond that fails at once with busy, so its requester can try another member"
       - "The queue depth is reported with the capability"
     refs:
       - crates/arkavo-image-gen/src/generator.rs
+      - crates/arkavo-image-gen/src/generator/fetches.rs
       - crates/arkavo-image-gen/src/lock.rs
-    changed: "2026-10-11"
+    changed: "2026-10-16"
 
   - id: IMG-012
     name: Requests stop at their deadline

@@ -8,7 +8,7 @@ use futures::future::{BoxFuture, Shared};
 use tokio::sync::watch;
 use tokio::time::Instant;
 
-use super::{Generator, lock};
+use super::{Generator, lock, take_turn};
 use crate::args::ModelPaths;
 use crate::catalog::WeightSet;
 use crate::error::{ImageGenError, Result};
@@ -20,7 +20,7 @@ type FetchResult = std::result::Result<ModelPaths, Arc<ImageGenError>>;
 /// A fetch of one weight set, as every request waiting on it sees it.
 pub(super) struct InFlight {
     result: Shared<BoxFuture<'static, FetchResult>>,
-    progress: watch::Receiver<(u64, u64)>,
+    progress: watch::Receiver<Progress>,
 }
 
 impl Generator {
@@ -40,8 +40,7 @@ impl Generator {
                 outcome = &mut result => break outcome,
                 changed = watched.changed() => {
                     if changed.is_ok() {
-                        let (fetched, needed) = *watched.borrow_and_update();
-                        progress(Progress::Fetching { fetched, needed });
+                        progress(watched.borrow_and_update().clone());
                     }
                 }
                 () = tokio::time::sleep_until(deadline) => return Err(ImageGenError::TimedOut),
@@ -64,7 +63,7 @@ impl Generator {
         set: &'static WeightSet,
     ) -> (
         Shared<BoxFuture<'static, FetchResult>>,
-        watch::Receiver<(u64, u64)>,
+        watch::Receiver<Progress>,
     ) {
         let mut fetches = lock(&self.fetches);
         let in_flight = fetches.entry(key).or_insert_with(|| self.spawn_fetch(set));
@@ -74,16 +73,21 @@ impl Generator {
     }
 
     fn spawn_fetch(&self, set: &'static WeightSet) -> InFlight {
-        let (tx, rx) = watch::channel((0, self.store.missing_bytes(set)));
+        let needed = self.store.missing_bytes(set);
+        let (tx, rx) = watch::channel(Progress::Fetching { fetched: 0, needed });
         let (store, lock) = (self.store.clone(), self.fetch_lock.clone());
         let task = tokio::spawn(async move {
-            let _fetching = lock.lock().await;
-            let _host = HostLock::acquire(store.root(), crate::lock::FETCH, None)
+            // Another fetch here, or another agent's on this host, goes first.
+            let queued = || {
+                tx.send_replace(Progress::Queued);
+            };
+            let _fetching = take_turn(&lock, queued).await;
+            let _host = HostLock::acquire(store.root(), crate::lock::FETCH, None, queued)
                 .await
                 .map_err(Arc::new)?;
             store
                 .fetch_set(set, &|fetched, needed| {
-                    tx.send_replace((fetched, needed));
+                    tx.send_replace(Progress::Fetching { fetched, needed });
                 })
                 .await
                 .map_err(Arc::new)

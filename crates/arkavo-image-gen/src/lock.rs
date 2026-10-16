@@ -35,8 +35,14 @@ pub(crate) struct HostLock {
 
 impl HostLock {
     /// Wait for the lock `name` under `dir`, until `deadline` when one is
-    /// given.
-    pub(crate) async fn acquire(dir: &Path, name: &str, deadline: Option<Instant>) -> Result<Self> {
+    /// given. `waiting` runs once if another holder has it: a request that
+    /// waits without saying so looks stalled to its delegator (ASSET-009).
+    pub(crate) async fn acquire(
+        dir: &Path,
+        name: &str,
+        deadline: Option<Instant>,
+        waiting: impl FnOnce(),
+    ) -> Result<Self> {
         tokio::fs::create_dir_all(dir).await?;
         let path = dir.join(name);
         let file = std::fs::OpenOptions::new()
@@ -44,9 +50,13 @@ impl HostLock {
             .truncate(false)
             .write(true)
             .open(&path)?;
+        let mut waiting = Some(waiting);
         loop {
             if try_lock(&file)? {
                 return Ok(Self { _file: file });
+            }
+            if let Some(waiting) = waiting.take() {
+                waiting();
             }
             if deadline.is_some_and(|d| Instant::now() + RETRY >= d) {
                 return Err(ImageGenError::TimedOut);
@@ -88,21 +98,32 @@ mod tests {
     use super::*;
 
     /// IMG-011: a second holder waits for the first, across open files as
-    /// across processes, and gives up at its deadline.
+    /// across processes, says once that it is waiting, and gives up at its
+    /// deadline.
     #[arkavo_test_macros::spec("IMG-011")]
     #[tokio::test]
     async fn a_second_holder_waits_for_the_first() {
         let dir = tempfile::tempdir().unwrap();
-        let first = HostLock::acquire(dir.path(), GENERATE, None).await.unwrap();
+        let free = std::cell::Cell::new(0);
+        let first = HostLock::acquire(dir.path(), GENERATE, None, || free.set(free.get() + 1))
+            .await
+            .unwrap();
+        assert_eq!(free.get(), 0, "a free lock is taken without waiting");
         let soon = Instant::now() + Duration::from_millis(600);
-        let waited = HostLock::acquire(dir.path(), GENERATE, Some(soon)).await;
+        let held = std::cell::Cell::new(0);
+        let waited = HostLock::acquire(dir.path(), GENERATE, Some(soon), || {
+            held.set(held.get() + 1);
+        })
+        .await;
         assert!(matches!(waited, Err(ImageGenError::TimedOut)), "{waited:?}");
+        assert_eq!(held.get(), 1, "told once, however long it waits");
 
-        let other = HostLock::acquire(dir.path(), FETCH, None).await;
+        let other = HostLock::acquire(dir.path(), FETCH, None, || {}).await;
         assert!(other.is_ok(), "locks with other names are independent");
 
         let path = dir.path().to_path_buf();
-        let second = tokio::spawn(async move { HostLock::acquire(&path, GENERATE, None).await });
+        let second =
+            tokio::spawn(async move { HostLock::acquire(&path, GENERATE, None, || {}).await });
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(!second.is_finished(), "still held by the first");
         drop(first);

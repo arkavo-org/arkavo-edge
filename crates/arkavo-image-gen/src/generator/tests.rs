@@ -158,6 +158,69 @@ fn the_queue_admits_four() {
     assert_eq!(waiting.load(Ordering::SeqCst), 0);
 }
 
+/// Generate one image while another agent on the host holds the lock
+/// `name`, releasing it once the request says it is queued. Returns what
+/// the request reported.
+async fn generate_behind(generator: &Generator, name: &str) -> Vec<Progress> {
+    let held = HostLock::acquire(generator.store.root(), name, None, || {})
+        .await
+        .unwrap();
+    let seen = Mutex::new(Vec::new());
+    let (one, record) = (request(1), |p| seen.lock().unwrap().push(p));
+    let generating = generator.generate(&one, soon(60), &record);
+    let release = async {
+        while !seen.lock().unwrap().contains(&Progress::Queued) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        drop(held);
+    };
+    let (generated, ()) = tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::join!(generating, release)
+    })
+    .await
+    .expect("the request said it was queued");
+    generated.unwrap();
+    seen.into_inner().unwrap()
+}
+
+/// IMG-011, ASSET-009: a request waiting on another agent's generation says
+/// it is queued, so a delegator does not take the wait for a stall.
+#[arkavo_test_macros::spec("IMG-011", "ASSET-009")]
+#[tokio::test]
+async fn waiting_on_another_agents_run_reports_queued() {
+    let f = fake_generator(1, Duration::ZERO).await;
+    f.generator.prefetch("qwen-image", &|_| {}).await.unwrap();
+    let seen = generate_behind(&f.generator, lock::GENERATE).await;
+    let queued = seen.iter().position(|p| *p == Progress::Queued).unwrap();
+    assert!(
+        seen[queued..]
+            .iter()
+            .any(|p| matches!(p, Progress::Step { .. })),
+        "{seen:?}"
+    );
+}
+
+/// IMG-011, ASSET-009: a request waiting on another agent's download, of
+/// the runtime or of weights, says it is queued.
+#[arkavo_test_macros::spec("IMG-011", "ASSET-009")]
+#[tokio::test]
+async fn waiting_on_another_agents_fetch_reports_queued() {
+    let f = fake_generator(1, Duration::ZERO).await;
+    let seen = generate_behind(&f.generator, lock::FETCH).await;
+    assert!(seen.iter().any(|p| matches!(p, Progress::Step { .. })));
+
+    let f = fake_generator(1, Duration::ZERO).await;
+    f.generator.runtime(&|_| {}).await.unwrap();
+    let seen = generate_behind(&f.generator, lock::FETCH).await;
+    let queued = seen.iter().position(|p| *p == Progress::Queued).unwrap();
+    assert!(
+        seen[queued..]
+            .iter()
+            .any(|p| matches!(p, Progress::Fetching { .. })),
+        "{seen:?}"
+    );
+}
+
 #[arkavo_test_macros::spec("IMG-005", "CLI-020")]
 #[tokio::test]
 async fn prefetch_readies_an_entry() {

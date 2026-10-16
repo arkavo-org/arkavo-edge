@@ -74,7 +74,7 @@ roles:
     tools: [generate_image]
 ```
 
-Start each role as its own process, from its own directory (`arkavo agent -c <kit> -n <role>`), the artist first. The writer's `generate_image` calls go to the artist over the mesh and the data plane, and the artist runs one generation at a time for all of them. Only the `image_generation` grant is read on this path; other tool grants are still not enforced there (docs/SWARMKIT.md).
+Start each role as its own process, from its own directory (`arkavo agent -c <kit> -n <role>`), the artist first. The writer's `generate_image` calls go to the artist over the mesh and the data plane, and the artist runs one generation at a time for all of them. Roles that each host generation, such as several with no `mcp_tools`, take turns through a lock file. A request waiting on another role's run or download reports that it is waiting, so the agent that delegated it waits to its deadline instead of failing it as stalled. Only the `image_generation` grant is read on this path; other tool grants are still not enforced there (docs/SWARMKIT.md).
 
 Editing a kit changes its content hash: `arkavo kit validate <path>` names the `kit.id` the edited file needs.
 

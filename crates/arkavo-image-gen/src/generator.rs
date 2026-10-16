@@ -154,7 +154,7 @@ impl Generator {
         let offer = *self.offer(job.entry.id).ok_or(ImageGenError::NotOffered {
             entry: job.entry.id,
         })?;
-        self.runtime().await?;
+        self.runtime(progress).await?;
         let far = Instant::now() + std::time::Duration::from_hours(7 * 24);
         self.models(offer.set, far, progress).await.map(drop)
     }
@@ -199,7 +199,7 @@ impl Generator {
         })?;
         offer.check(job.pixels(), job.guided())?;
         let admitted = Admission::enter(&self.waiting)?;
-        let runtime = self.runtime().await?.clone();
+        let runtime = self.runtime(progress).await?.clone();
         let models = self.models(offer.set, deadline, progress).await?;
         if self.gate.available_permits() == 0 {
             progress(Progress::Queued);
@@ -210,7 +210,10 @@ impl Generator {
             .map_err(|_| ImageGenError::Canceled)?;
         drop(admitted);
         // Other agents on this host take turns with this one (IMG-011).
-        let _host = HostLock::acquire(self.store.root(), lock::GENERATE, Some(deadline)).await?;
+        let _host = HostLock::acquire(self.store.root(), lock::GENERATE, Some(deadline), || {
+            progress(Progress::Queued);
+        })
+        .await?;
         runtime.verify().await?;
         // A directory of this run's own: another agent's start or run on
         // this host never touches it.
@@ -278,11 +281,12 @@ impl Generator {
             .or_insert(normalized);
     }
 
-    async fn runtime(&self) -> Result<&Runtime> {
+    async fn runtime(&self, progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<&Runtime> {
         self.runtime
             .get_or_try_init(|| async {
-                let _fetching = self.fetch_lock.lock().await;
-                let _host = HostLock::acquire(self.store.root(), lock::FETCH, None).await?;
+                let queued = || progress(Progress::Queued);
+                let _fetching = take_turn(&self.fetch_lock, queued).await;
+                let _host = HostLock::acquire(self.store.root(), lock::FETCH, None, queued).await?;
                 install(&self.store, &self.fetcher, self.runtime_pin).await
             })
             .await
@@ -307,6 +311,19 @@ impl Drop for Admission<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
     }
+}
+
+/// This process's turn at `mutex`, calling `waiting` first if another
+/// request has it.
+async fn take_turn(
+    mutex: &tokio::sync::Mutex<()>,
+    waiting: impl FnOnce(),
+) -> tokio::sync::MutexGuard<'_, ()> {
+    if let Ok(guard) = mutex.try_lock() {
+        return guard;
+    }
+    waiting();
+    mutex.lock().await
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
