@@ -284,6 +284,9 @@ jobs:
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo test --locked -p arkavo-mcp-tools
             cargo test --locked -p arkavo-mcp-mesh
+            cargo test --locked -p arkavo-image-gen
+            # The data plane's retention and references (IROH-010 to IROH-012).
+            cargo test --locked -p arkavo-tdf-iroh --test retention_test --test reference_test
             cargo test --locked -p arkavo-mcp-code-search --lib
             cargo test --locked -p arkavo-browser --lib
           elif [ "${{ matrix.group }}" = "routing" ]; then
@@ -332,6 +335,8 @@ jobs:
             # arkavo-server artifacts with the line above so this group does
             # not build the crate a second time.
             cargo test --locked -p arkavo-server --features taint,kas --lib llm_intent_analyzer
+            # Asset requests, delegation and data-plane delivery, on the same build.
+            cargo test --locked -p arkavo-server --features taint,kas --lib assets
             # KAS delegation regression (trusted roots from kit runtime.kas). Same
             # taint,kas feature set as the two lines above so it shares their
             # arkavo-server build instead of a new feature unification.
@@ -391,6 +396,7 @@ jobs:
             cargo clippy --locked -p arkavo-process-env --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-image-gen --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-mcp-code-search --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "routing" ]; then
             cargo clippy --locked -p arkavo-router --lib --bins --no-default-features --features llm-remote,gemini -- -D warnings

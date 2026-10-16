@@ -90,6 +90,8 @@ pub struct A2aServer {
     /// Shared Iroh P2P node for TDF blob transport (one per agent)
     #[cfg(feature = "iroh")]
     iroh_node: Arc<tokio::sync::RwLock<Option<Arc<arkavo_tdf_iroh::IrohNode>>>>,
+    /// Image generation and delivery, set up once the data plane is up
+    assets: Arc<tokio::sync::RwLock<Option<Arc<super::assets::AssetService>>>>,
 }
 
 impl A2aServer {
@@ -145,6 +147,7 @@ impl A2aServer {
             context_snapshot: Arc::new(tokio::sync::RwLock::new(None)),
             #[cfg(feature = "iroh")]
             iroh_node: Arc::new(tokio::sync::RwLock::new(None)),
+            assets: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -294,6 +297,12 @@ impl A2aServer {
         self.agent_metadata.write().await.role_id = role_id;
     }
 
+    /// Whether this agent may host image generation, from its kit role's
+    /// grants (ASSET-010). Takes effect when the server starts.
+    pub async fn set_image_generation_hosting(&self, hosting: super::assets::Hosting) {
+        self.agent_metadata.write().await.image_generation = hosting;
+    }
+
     /// Set the URL clients are told to connect to. `start_with_addr` sets
     /// it to the bound address; a caller that bound a wildcard address
     /// replaces it with an address other machines can reach.
@@ -400,6 +409,39 @@ impl A2aServer {
     /// Returns the model specified in the agent's configuration. The router's
     /// ModelSelector memory budget (set from hint size) prevents Thompson
     /// Sampling from exploring models far beyond this hint.
+    /// The asset service for this agent, given its data-plane node. The
+    /// memory budget leaves room for the chat model the agent keeps
+    /// resident: the one its config names, else the router's default.
+    async fn start_assets(
+        &self,
+        node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
+        router: Option<&Arc<arkavo_router::Router>>,
+    ) -> Option<Arc<super::assets::AssetService>> {
+        let resident = self
+            .resolve_model_hint()
+            .await
+            .map(|m| m.size_bytes())
+            .filter(|&bytes| bytes > 0)
+            .or_else(|| router.map(|r| r.default_chat_model().size_bytes()))
+            .unwrap_or(0);
+        let (identity, hosting) = {
+            let metadata = self.agent_metadata.read().await;
+            let identity = super::assets::Identity {
+                agent_id: metadata.name.clone(),
+                did: metadata.did.clone(),
+            };
+            (identity, metadata.image_generation)
+        };
+        super::assets::AssetService::for_agent(
+            node,
+            Some(self.mesh_state.clone()),
+            identity,
+            resident,
+            hosting,
+        )
+        .await
+    }
+
     async fn resolve_model_hint(&self) -> Option<arkavo_router::ModelChoice> {
         let metadata = self.agent_metadata.read().await;
         let choice = arkavo_router::ModelChoice::from_name(&metadata.model)?;
@@ -1210,6 +1252,13 @@ impl A2aServer {
             }
         }
 
+        #[cfg(feature = "iroh")]
+        let node = self.iroh_node.read().await.clone();
+        #[cfg(not(feature = "iroh"))]
+        let node = None;
+        let assets = self.start_assets(node, router.as_ref()).await;
+        self.assets.write().await.clone_from(&assets);
+
         let trust_init = super::trust_init::init_trust_service().await;
         let trust_service = trust_init.as_ref().map(|t| t.service.clone());
         let learning_bus_for_rpc = self.learning_bus.read().await.clone();
@@ -1296,6 +1345,7 @@ impl A2aServer {
             context_snapshot: self.context_snapshot.clone(),
             #[cfg(feature = "iroh")]
             iroh_node: self.iroh_node.read().await.clone(),
+            assets,
         };
 
         if let Err(e) = self.start_file_watcher().await {
@@ -1399,6 +1449,7 @@ impl A2aServer {
             agent_metadata: self.agent_metadata.clone(),
             #[cfg(feature = "iroh")]
             iroh_node,
+            assets: self.assets.read().await.clone(),
         };
 
         tokio::spawn(async move {

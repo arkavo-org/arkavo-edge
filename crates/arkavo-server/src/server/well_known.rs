@@ -17,6 +17,8 @@ pub struct WellKnownState {
     /// Whether KAS capability is enabled
     #[cfg(feature = "kas")]
     pub kas_enabled: bool,
+    /// Whether this host generates images (ASSET-001)
+    pub image_generation: bool,
 }
 
 /// What the agent tells a caller it does: the kit role's short description,
@@ -105,6 +107,26 @@ pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
         });
     }
 
+    if state.image_generation {
+        skills.push(AgentSkill {
+            id: arkavo_image_gen::CAPABILITY.to_string(),
+            name: "Image Generation".to_string(),
+            description: Some(
+                "Generate game assets, sprites and textures with a local Qwen-Image model; \
+                 files are delivered over the data plane"
+                    .to_string(),
+            ),
+            tags: vec![
+                "image".to_string(),
+                "assets".to_string(),
+                "local".to_string(),
+            ],
+            examples: vec![],
+            input_modes: vec!["application/json".to_string()],
+            output_modes: vec!["image/png".to_string()],
+        });
+    }
+
     // Build capabilities from agent features
     let capabilities = AgentCapabilities {
         streaming: true,
@@ -174,6 +196,7 @@ mod tests {
             )),
             #[cfg(feature = "kas")]
             kas_enabled: false,
+            image_generation: false,
         };
 
         let card = build_agent_card(&state).await;
@@ -211,6 +234,7 @@ mod tests {
                 )),
                 #[cfg(feature = "kas")]
                 kas_enabled: false,
+                image_generation: false,
             };
 
             assert_eq!(build_agent_card(&state).await.description, None);
@@ -240,6 +264,7 @@ mod tests {
             )),
             #[cfg(feature = "kas")]
             kas_enabled: false,
+            image_generation: false,
         };
 
         let card = build_agent_card(&state).await;
@@ -270,6 +295,7 @@ mod tests {
             )),
             #[cfg(feature = "kas")]
             kas_enabled: false,
+            image_generation: false,
         };
 
         let card = build_agent_card(&state).await;
@@ -280,5 +306,30 @@ mod tests {
         assert!(card.capabilities.state_transition_history);
         // No MCP servers are connected, so no skills can be advertised.
         assert!(card.skills.is_empty());
+    }
+
+    /// ASSET-001: a host that generates lists the skill, with PNG output.
+    #[spec("ASSET-001")]
+    #[tokio::test]
+    async fn a_generating_host_lists_the_image_skill() {
+        #[allow(clippy::needless_update)]
+        let state = WellKnownState {
+            agent_metadata: Arc::new(RwLock::new(AgentMetadata::default())),
+            mcp_registry: Arc::new(McpRegistry::new()),
+            rpc_port: 9090,
+            rate_limiter: Arc::new(IpRateLimiter::new(
+                arkavo_protocol::rate_limit::RateLimitConfig::default(),
+            )),
+            #[cfg(feature = "kas")]
+            kas_enabled: false,
+            image_generation: true,
+        };
+        let card = build_agent_card(&state).await;
+        let skill = card
+            .skills
+            .iter()
+            .find(|s| s.id == "image_generation")
+            .expect("the skill is listed");
+        assert_eq!(skill.output_modes, ["image/png"]);
     }
 }

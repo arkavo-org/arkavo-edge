@@ -12,7 +12,7 @@ categories = ["network-programming", "asynchronous"]
 [dependencies]
 arkavo-tdf = { path = "../arkavo-tdf" }
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["sync", "rt", "io-util"] }
+tokio = { workspace = true, features = ["sync", "rt", "io-util", "time"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }

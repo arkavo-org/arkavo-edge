@@ -10,6 +10,7 @@
 //! (turn an answer into a terminal task state the poller can read).
 
 use super::agent_event::{CycleId, CycleOutcome, CycleReceipt, MessageDisposition, PendingMessage};
+use super::assets::Assets;
 use arkavo_protocol::types::{Message, MessagePart, TaskError};
 use arkavo_tasks::task_executor::TaskExecutor;
 use std::sync::Arc;
@@ -74,9 +75,10 @@ pub(super) fn answer_waiters(waiters: Vec<oneshot::Sender<CycleOutcome>>, outcom
         return;
     }
     match outcome {
-        CycleOutcome::Completed { text } => info!(
+        CycleOutcome::Completed { text, assets } => info!(
             requesters = waiters.len(),
             chars = text.len(),
+            with_assets = !assets.is_empty(),
             "Answering cycle requesters"
         ),
         CycleOutcome::Failed { error } => warn!(
@@ -90,14 +92,20 @@ pub(super) fn answer_waiters(waiters: Vec<oneshot::Sender<CycleOutcome>>, outcom
     }
 }
 
-/// Turn a cycle's conductor result into the answer its requesters receive.
+/// Turn a cycle's conductor result into the answer its requesters receive,
+/// with the assets the cycle produced.
 ///
 /// An empty result means the cycle produced neither text nor tool activity to
 /// summarise. That is a failure from the requester's point of view, and saying
-/// so beats echoing an unrelated summary of earlier cycles.
-pub(super) fn outcome_for_cycle(result: &Result<String, String>) -> CycleOutcome {
+/// so beats echoing an unrelated summary of earlier cycles. A failed cycle
+/// attaches nothing; its generations are dropped with `assets`, which deletes
+/// their files once they finish (ASSET-008).
+pub(super) fn outcome_for_cycle(result: &Result<String, String>, assets: Assets) -> CycleOutcome {
     match result {
-        Ok(text) if !text.trim().is_empty() => CycleOutcome::Completed { text: text.clone() },
+        Ok(text) if !text.trim().is_empty() => CycleOutcome::Completed {
+            text: text.clone(),
+            assets,
+        },
         Ok(_) => CycleOutcome::Failed {
             error: "agent cycle produced no output".to_string(),
         },
@@ -195,11 +203,13 @@ pub(super) async fn apply_outcome(
     outcome: &CycleOutcome,
 ) {
     match outcome {
-        CycleOutcome::Completed { text } => {
+        CycleOutcome::Completed { text, assets } => {
+            let mut parts = vec![MessagePart::Text {
+                content: text.clone(),
+            }];
+            parts.extend(assets.parts(task_executor, task_id).await);
             let message = Message {
-                parts: vec![MessagePart::Text {
-                    content: text.clone(),
-                }],
+                parts,
                 metadata: None,
             };
             let result = serde_json::to_value(&message).unwrap_or(serde_json::Value::Null);
@@ -289,11 +299,15 @@ mod tests {
 
         answer_waiters(
             drained.waiters,
-            &outcome_for_cycle(&Ok("Completed 1 tool call(s). Last result: ok".to_string())),
+            &outcome_for_cycle(
+                &Ok("Completed 1 tool call(s). Last result: ok".to_string()),
+                Assets::default(),
+            ),
         );
 
         let expected = CycleOutcome::Completed {
             text: "Completed 1 tool call(s). Last result: ok".to_string(),
+            assets: Assets::default(),
         };
         assert_eq!(rx_a.try_recv().expect("answered"), expected);
         assert_eq!(rx_b.try_recv().expect("answered"), expected);
@@ -304,7 +318,7 @@ mod tests {
     fn cycle_failure_carries_the_underlying_message() {
         let refusal = "Budget exceeded: shared budget cannot fund router".to_string();
         assert_eq!(
-            outcome_for_cycle(&Err(refusal.clone())),
+            outcome_for_cycle(&Err(refusal.clone()), Assets::default()),
             CycleOutcome::Failed { error: refusal }
         );
     }
@@ -313,7 +327,7 @@ mod tests {
     #[test]
     fn empty_cycle_result_is_an_explicit_failure() {
         assert_eq!(
-            outcome_for_cycle(&Ok("   ".to_string())),
+            outcome_for_cycle(&Ok("   ".to_string()), Assets::default()),
             CycleOutcome::Failed {
                 error: "agent cycle produced no output".to_string()
             }
@@ -354,6 +368,7 @@ mod tests {
         outcome_tx
             .send(CycleOutcome::Completed {
                 text: "Completed 1 tool call(s). Last result: 2 agents".to_string(),
+                assets: Assets::default(),
             })
             .expect("outcome");
 

@@ -55,7 +55,7 @@ pub enum RecommendedModel {
 
 impl RecommendedModel {
     /// Corresponding ModelChoice for metadata delegation
-    fn model_choice(self) -> arkavo_router::decision::ModelChoice {
+    pub(crate) fn model_choice(self) -> arkavo_router::decision::ModelChoice {
         use arkavo_router::decision::ModelChoice;
         match self {
             Self::Gemma4E2B => ModelChoice::LocalGemma4E2B,

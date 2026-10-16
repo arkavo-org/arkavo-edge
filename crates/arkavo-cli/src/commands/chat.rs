@@ -130,7 +130,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 "--pack gates the local router; it cannot be combined with --agent-id".into(),
             );
         }
-        return execute_a2a_direct_chat(&id, flags.prompt.as_deref());
+        let out = flags
+            .out
+            .unwrap_or_else(|| super::assets::DEFAULT_DIR.into());
+        return execute_a2a_direct_chat(&id, flags.prompt.as_deref(), &out);
     }
 
     // Default: route through local in-process Router
@@ -167,6 +170,9 @@ fn print_usage() {
     );
     println!("    --gguf <PATH>          Alias of --model for a .gguf / .gguf.tdf file");
     println!("    --agent-id <ID>        Chat directly with a mesh agent via A2A");
+    println!(
+        "    --out <DIR>            Where a mesh agent's delivered assets are saved (default ./arkavo-assets)"
+    );
     println!("    --prompt <TEXT>         One-shot query (exits after response)");
     println!("    --pack <DIR>            Enforce a sealed knowledge pack on every completion");
     println!(
@@ -313,6 +319,7 @@ fn execute_a2a_chat(
 fn execute_a2a_direct_chat(
     agent_id: &str,
     prompt: Option<&str>,
+    out: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_protocol::transport::A2aTransport;
 
@@ -357,7 +364,7 @@ fn execute_a2a_direct_chat(
 
         // One-shot mode
         if let Some(text) = prompt {
-            let outcome = direct_exchange(&transport, text, &mut io::stdout()).await;
+            let outcome = direct_exchange(&transport, text, out, &mut io::stdout()).await;
             transport.close().await.ok();
             return outcome;
         }
@@ -372,7 +379,7 @@ fn execute_a2a_direct_chat(
             if input == "/exit" || input == "/quit" || input == "/q" {
                 break;
             }
-            if let Err(e) = direct_exchange(&transport, &input, &mut io::stdout()).await {
+            if let Err(e) = direct_exchange(&transport, &input, out, &mut io::stdout()).await {
                 eprintln!("Error: {e}");
             }
         }
@@ -419,15 +426,28 @@ async fn agent_transport(
 }
 
 /// One exchange with a mesh agent: writes the agent's answer to `out`, and
-/// nothing at all when the exchange fails.
-async fn direct_exchange<W: Write>(
+/// nothing of it when the exchange fails. Progress goes to standard error as
+/// it arrives. Assets the answer references are saved under `assets_dir`
+/// (CLI-018).
+async fn direct_exchange<W: Write + Send>(
     transport: &arkavo_protocol::http::HttpTransport,
     text: &str,
+    assets_dir: &std::path::Path,
     out: &mut W,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let answer = super::mesh::send_and_poll_agent(transport, text).await?;
-    if !answer.is_empty() {
-        writeln!(out, "{answer}")?;
+    let answer = super::mesh::send_and_poll_agent(transport, text, &mut |p| {
+        emit_stderr(&format!("  → {p}\n"));
+    })
+    .await?;
+    let reply = answer.text();
+    if !reply.is_empty() {
+        writeln!(out, "{reply}")?;
+    }
+    let deliveries = arkavo_server::server::assets::deliveries_in(&answer.parts);
+    if !deliveries.is_empty() {
+        let dir = super::assets::task_dir(assets_dir, &answer.task_id);
+        writeln!(out, "Assets saved to {}:", dir.display())?;
+        super::assets::save(&deliveries, &dir, out).await?;
     }
     Ok(())
 }
@@ -855,7 +875,8 @@ mod tests {
             .expect("recording an endpoint makes no request");
 
         let mut out = Vec::new();
-        let outcome = direct_exchange(&transport, "hello", &mut out).await;
+        let assets = tempfile::tempdir().unwrap();
+        let outcome = direct_exchange(&transport, "hello", assets.path(), &mut out).await;
 
         assert!(outcome.is_err(), "an unreachable agent must be an error");
         assert_eq!(String::from_utf8(out).unwrap(), "");

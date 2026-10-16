@@ -2,7 +2,7 @@
 
 feature: A2A Protocol and Agent Communication
 module: arkavo_protocol
-version: 0.57.2
+version: 0.58.0
 
 invariants:
   - A2A protocol enables agent-to-agent communication
@@ -12,6 +12,7 @@ invariants:
   - mDNS discovery for local agents
   - Peer manager handles multiple concurrent peer connections
   - Transport auto-upgrade for streaming methods
+  - "Large payloads take the data plane: a control-plane message carries references to file data, never the data (PROTO-020)"
 
 scenarios:
   - id: PROTO-001
@@ -310,3 +311,27 @@ scenarios:
       - Returns Ok even if some fail
     refs: [crates/arkavo-protocol/src/peer_manager.rs:102-113]
     changed: "2025-02-05"
+
+  - id: PROTO-020
+    name: Large payloads take the data plane
+    criticality: high
+    wip: true
+    issue: "Inline file data is accepted today: handle_message_send_from passes base64 image File parts to the model (messaging.rs:170-183), and arkavo-llm takes inline images up to 10 MB (image.rs:6)"
+    given:
+      - A2A message/send requests and the task results an agent writes
+    when: A message or a result would carry file data
+    then:
+      - "A File part with is_uri false holds at most 64 KiB once decoded"
+      - "Larger data is staged on the agent's data-plane node and carried as a reference: name, ticket, content hash, size and media type (IROH-010, IROH-012)"
+      - "A message/send with a larger inline File part is refused with an error that names the data plane"
+      - "A result the agent writes never carries more than 64 KiB inline"
+    edge_cases:
+      - condition: An image sent for an agent's vision model
+        expected: Staged and referenced; the agent fetches it before the model call
+      - condition: Generated assets (swarm-assets.spec.yaml)
+        expected: Delivered only as references (ASSET-005)
+    refs:
+      - crates/arkavo-server/src/server/handlers/messaging.rs:170-183
+      - crates/arkavo-llm/src/image.rs:6
+      - crates/arkavo-protocol/src/types.rs:772-791
+    changed: "2026-10-11"

@@ -17,7 +17,7 @@ use std::time::Duration;
 use arkavo_llm::{ParsedToolCall, ProviderResponse};
 use arkavo_protocol::agent_config::AgentMode;
 use arkavo_server::server::{
-    AgentEvent, AgentLoopConfig, CorrelationId, CycleOutcome, run_agent_loop,
+    AgentEvent, AgentLoopConfig, AssetService, CorrelationId, CycleOutcome, run_agent_loop,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -26,10 +26,15 @@ pub use model::{Script, text};
 
 /// A reply that says nothing and calls `tool_name`.
 pub fn tool_call(tool_name: &str) -> ProviderResponse {
+    tool_call_with(tool_name, serde_json::json!({}))
+}
+
+/// A reply that says nothing and calls `tool_name` with `arguments`.
+pub fn tool_call_with(tool_name: &str, arguments: serde_json::Value) -> ProviderResponse {
     ProviderResponse {
         tool_calls: vec![ParsedToolCall {
             tool_name: tool_name.to_string(),
-            arguments: serde_json::json!({}),
+            arguments,
             call_id: None,
         }],
         ..Default::default()
@@ -46,6 +51,16 @@ pub struct RunningAgent {
 
 impl RunningAgent {
     pub async fn start(mode: AgentMode, has_mcp_tools: bool, script: Arc<Script>) -> Self {
+        Self::start_with_assets(mode, has_mcp_tools, script, None).await
+    }
+
+    /// The loop with image generation and delivery from `assets`.
+    pub async fn start_with_assets(
+        mode: AgentMode,
+        has_mcp_tools: bool,
+        script: Arc<Script>,
+        assets: Option<Arc<AssetService>>,
+    ) -> Self {
         let tick = Arc::new(AtomicU64::new(0));
         let (events, event_rx) = mpsc::channel(32);
         let metadata = arkavo_server::AgentMetadata {
@@ -77,6 +92,7 @@ impl RunningAgent {
             agent_metadata: Arc::new(tokio::sync::RwLock::new(metadata)),
             #[cfg(feature = "iroh")]
             iroh_node: None,
+            assets,
         };
         let handle = tokio::spawn(run_agent_loop(config, event_rx));
         Self {

@@ -36,10 +36,13 @@
 
 mod error;
 mod node;
+mod reference;
+mod retention;
 mod ticket;
 mod transport;
 
 pub use error::IrohError;
 pub use node::{IrohNode, IrohNodeConfig};
+pub use reference::{DataRef, FetchPolicy, INLINE_LIMIT, RETENTION};
 pub use ticket::{IrohTicket, SerializableTicket};
 pub use transport::IrohTransport;

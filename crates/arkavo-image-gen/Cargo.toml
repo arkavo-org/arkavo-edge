@@ -1,0 +1,53 @@
+[package]
+name = "arkavo-image-gen"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Local Qwen-Image generation on Apple Silicon through a pinned stable-diffusion.cpp runtime"
+repository.workspace = true
+keywords = ["image-generation", "qwen-image", "diffusion", "local-inference", "agent"]
+categories = ["multimedia::images"]
+
+[dependencies]
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools", default-features = false }
+arkavo-process-env = { path = "../arkavo-process-env" }
+async-trait = { workspace = true }
+dirs = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+# Weights go in the Hugging Face cache, beside the chat models.
+hf-hub = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt", "sync", "time"] }
+tracing = { workspace = true }
+# The runtime ships as a deflated zip. zip's deflate feature also builds the
+# zopfli compressor, which inflating never needs, so the decoder is enabled
+# alone and flate2 is given its pure-Rust backend here.
+zip = { version = "2.4", default-features = false, features = ["deflate-flate2", "flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Each process's outputs live in a temporary directory of their own.
+tempfile = { workspace = true }
+# Fixtures for other crates' tests (feature `testing`).
+wiremock = { version = "0.6", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+tokio = { workspace = true, features = ["full"] }
+wiremock = "0.6"
+
+[features]
+# The sd-cli stand-in and a generator that runs it, for tests elsewhere.
+testing = ["dep:wiremock"]
+
+[lints]
+workspace = true

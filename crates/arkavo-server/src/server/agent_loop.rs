@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 use crate::server::tool_memory::ToolMemory;
+use arkavo_tdf_iroh::DataRef;
 
 mod completions;
 mod cycle_prompt;
@@ -42,12 +43,18 @@ pub struct AgentLoopConfig {
     pub agent_metadata: Arc<tokio::sync::RwLock<crate::server::config_helpers::AgentMetadata>>,
     #[cfg(feature = "iroh")]
     pub iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
+    /// Image generation and delivery, when the agent has a data plane.
+    pub assets: Option<Arc<super::assets::AssetService>>,
 }
 
 // --- Registry build helpers ---
 
-/// Build the full (unfiltered) tool registry from config sources.
-async fn build_full_registry(config: &AgentLoopConfig) -> arkavo_mcp_tools::ToolRegistry {
+/// Build the full (unfiltered) tool registry from config sources. The
+/// images generate_image starts go to `outbox`, for the cycle's reply.
+async fn build_full_registry(
+    config: &AgentLoopConfig,
+    outbox: &Arc<arkavo_image_gen::Outbox>,
+) -> arkavo_mcp_tools::ToolRegistry {
     use arkavo_mcp_tools::ToolRegistry;
     let mut registry = ToolRegistry::empty();
     if let Ok(mcp_tools) = config.mcp_registry.list_all_tools().await {
@@ -58,6 +65,9 @@ async fn build_full_registry(config: &AgentLoopConfig) -> arkavo_mcp_tools::Tool
         }
     }
     arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
+    if let Some(assets) = &config.assets {
+        assets.register_tools(&mut registry, outbox.clone());
+    }
     #[cfg(feature = "iroh")]
     if let Some(ref node) = config.iroh_node {
         arkavo_mcp_tools::iroh_data::register_iroh_tools(&mut registry, node.clone());
@@ -82,11 +92,27 @@ async fn build_full_registry(config: &AgentLoopConfig) -> arkavo_mcp_tools::Tool
 /// Derive a registry filtered to the SwarmKit grant set.
 async fn derive_filtered_registry(
     config: &AgentLoopConfig,
+    outbox: &Arc<arkavo_image_gen::Outbox>,
     granted: &std::collections::HashSet<String>,
 ) -> Arc<arkavo_mcp_tools::ToolRegistry> {
-    let mut registry = build_full_registry(config).await;
+    let mut registry = build_full_registry(config, outbox).await;
     registry.retain_granted(granted);
     Arc::new(registry)
+}
+
+/// The images this cycle's generate_image calls started, taken so the next
+/// cycle starts with none.
+fn cycle_assets(
+    config: &AgentLoopConfig,
+    outbox: &arkavo_image_gen::Outbox,
+) -> super::assets::Assets {
+    let jobs = outbox.take();
+    config
+        .assets
+        .as_ref()
+        .map_or_else(super::assets::Assets::default, |service| {
+            super::assets::Assets::of(service, jobs)
+        })
 }
 
 // --- Main event loop ---
@@ -142,7 +168,10 @@ pub async fn run_agent_loop(
 
     // Build initial tool registry (unfiltered). Filtering by grant set is done
     // lazily on first cycle after specialization (design D9).
-    let full_registry = build_full_registry(&config).await;
+    // Every cycle's generate_image calls land here; the cycle's reply takes
+    // them, so a reply never carries another cycle's images (ASSET-008).
+    let outbox = Arc::new(arkavo_image_gen::Outbox::default());
+    let full_registry = build_full_registry(&config, &outbox).await;
     info!(
         "Agent loop: cached {} tools for reuse across cycles",
         full_registry.list_tools().len()
@@ -231,7 +260,8 @@ pub async fn run_agent_loop(
                     h.finish()
                 };
                 if specialized && grant_hash != active_grant_hash {
-                    active_registry = derive_filtered_registry(&config, &granted_set).await;
+                    active_registry =
+                        derive_filtered_registry(&config, &outbox, &granted_set).await;
                     active_grant_hash = grant_hash;
                     info!(
                         granted = granted_set.len(),
@@ -526,20 +556,20 @@ pub async fn run_agent_loop(
                                 );
                                 if !data.is_empty() {
                                     #[cfg(feature = "iroh")]
-                                    let iroh_ticket = if data.len() > 4000 {
+                                    let reference = if data.len() > 4000 {
                                         stage_on_iroh(iroh_for_broadcast.as_ref(), &data).await
                                     } else {
                                         None
                                     };
                                     #[cfg(not(feature = "iroh"))]
-                                    let iroh_ticket: Option<String> = None;
+                                    let reference: Option<DataRef> = None;
 
                                     broadcast_state_to_peers(
                                         &mesh,
                                         &data,
                                         per_agent_bytes,
                                         &own_id,
-                                        iroh_ticket.as_deref(),
+                                        reference.as_ref(),
                                     )
                                     .await;
                                 } else {
@@ -608,7 +638,10 @@ pub async fn run_agent_loop(
                             elapsed.as_secs_f64(),
                             result.len(),
                         );
-                        answer_waiters(cycle_waiters, &outcome_for_cycle(&Ok(cycle_answer)));
+                        answer_waiters(
+                            cycle_waiters,
+                            &outcome_for_cycle(&Ok(cycle_answer), cycle_assets(&config, &outbox)),
+                        );
                     }
                     Err(e) => {
                         // User msg already pushed (step 7), no assistant response
@@ -617,7 +650,10 @@ pub async fn run_agent_loop(
                         }
                         consecutive_timeouts += 1;
                         warn!("Agent cycle {cycle} failed: {e}");
-                        answer_waiters(cycle_waiters, &outcome_for_cycle(&Err(e)));
+                        answer_waiters(
+                            cycle_waiters,
+                            &outcome_for_cycle(&Err(e), cycle_assets(&config, &outbox)),
+                        );
                     }
                 }
                 config.inference_active.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -860,28 +896,64 @@ pub(super) async fn refresh_specialist_budgets(
     }
 }
 
-/// Stage data on Iroh P2P network for peer fetching.
+/// How long a broadcast state stays fetchable: specialists fetch it in
+/// their next cycle, and a newer broadcast supersedes it within minutes.
+#[cfg(feature = "iroh")]
+const BROADCAST_RETENTION: std::time::Duration = std::time::Duration::from_mins(10);
+
+/// Stage state on the Iroh data plane for peers to fetch by reference.
 #[cfg(feature = "iroh")]
 pub(super) async fn stage_on_iroh(
     iroh_node: Option<&Arc<arkavo_tdf_iroh::IrohNode>>,
     data: &str,
-) -> Option<String> {
+) -> Option<DataRef> {
     let node = iroh_node?;
     let transport = arkavo_tdf_iroh::IrohTransport::new(node.clone());
-    match transport.stage_bytes(data.as_bytes()).await {
-        Ok(ticket) => {
-            let ticket_str = ticket.to_string();
+    match transport
+        .stage_ref(
+            "state",
+            "text/plain; charset=utf-8",
+            data.as_bytes(),
+            BROADCAST_RETENTION,
+        )
+        .await
+    {
+        Ok(reference) => {
             info!(
                 data_len = data.len(),
-                ticket_len = ticket_str.len(),
+                ticket_len = reference.ticket.len(),
                 "Staged data on Iroh for P2P fetch"
             );
-            Some(ticket_str)
+            Some(reference)
         }
         Err(e) => {
             warn!("Iroh stage failed, falling back to A2A: {e}");
             None
         }
+    }
+}
+
+/// The advisory task a specialist gets for `observation`: its summary, and
+/// the reference to the full state when it was staged.
+fn advisory_task(observation: &str, reference: Option<&DataRef>) -> String {
+    let compacted = compact_observation(observation, 2000);
+    match reference.and_then(|r| serde_json::to_string(r).ok()) {
+        Some(reference) => format!(
+            "{PROACTIVE_ANALYSIS_MARKER} — Full state available via Iroh P2P.\n\
+             Call iroh_fetch with these arguments to get the full data: \
+             {{\"reference\": {reference}}}\n\n\
+             Summary: {compacted}\n\n\
+             Respond with urgent action recommendations ONLY if you see \
+             problems in your domain. If everything looks fine, respond \
+             with 'No issues detected.'"
+        ),
+        None => format!(
+            "{PROACTIVE_ANALYSIS_MARKER} — Review this state update and respond \
+             with urgent action recommendations ONLY if you see problems \
+             in your domain of expertise.\n\
+             If everything looks fine, respond with 'No issues detected.'\n\n\
+             {compacted}"
+        ),
     }
 }
 
@@ -894,7 +966,7 @@ pub(super) async fn broadcast_state_to_peers(
     observation: &str,
     per_agent_bytes: u64,
     self_agent_id: &str,
-    iroh_ticket: Option<&str>,
+    reference: Option<&DataRef>,
 ) {
     let peer_ids: Vec<String> = mesh_state
         .agent_addresses
@@ -924,26 +996,7 @@ pub(super) async fn broadcast_state_to_peers(
     info!(peer_count = peer_ids.len(), peers = ?peer_ids, "Broadcasting state to specialists");
 
     let urgency = detect_urgency(observation);
-    let compacted = compact_observation(observation, 2000);
-
-    let task = if let Some(ticket) = iroh_ticket {
-        format!(
-            "{PROACTIVE_ANALYSIS_MARKER} — Full state available via Iroh P2P.\n\
-             Use iroh_fetch with this ticket to get full data: {ticket}\n\n\
-             Summary: {compacted}\n\n\
-             Respond with urgent action recommendations ONLY if you see \
-             problems in your domain. If everything looks fine, respond \
-             with 'No issues detected.'"
-        )
-    } else {
-        format!(
-            "{PROACTIVE_ANALYSIS_MARKER} — Review this state update and respond \
-             with urgent action recommendations ONLY if you see problems \
-             in your domain of expertise.\n\
-             If everything looks fine, respond with 'No issues detected.'\n\n\
-             {compacted}"
-        )
-    };
+    let task = advisory_task(observation, reference);
 
     for agent_id in &peer_ids {
         let pending = mesh_state
@@ -1110,6 +1163,56 @@ mod broadcast_tests {
 
         broadcast_state_to_peers(&mesh, r#"{"state":"test"}"#, 0, "self", None).await;
         assert!(mesh.pending_delegations.read().await.is_empty());
+    }
+
+    /// SRV-013: a staged state reaches specialists as the iroh_fetch
+    /// arguments carrying its reference, next to the summary.
+    #[spec("SRV-013")]
+    #[test]
+    fn test_advisory_task_carries_the_reference() {
+        let reference = DataRef {
+            name: "state".to_string(),
+            ticket: "blobticket".to_string(),
+            content_hash: "a".repeat(64),
+            size: 5000,
+            media_type: "text/plain; charset=utf-8".to_string(),
+        };
+        let task = advisory_task("hp: 3/10", Some(&reference));
+        let args = task
+            .split("full data: ")
+            .nth(1)
+            .and_then(|rest| rest.lines().next())
+            .unwrap();
+        let args: serde_json::Value = serde_json::from_str(args).unwrap();
+        assert_eq!(
+            serde_json::from_value::<DataRef>(args["reference"].clone()).unwrap(),
+            reference
+        );
+        assert!(task.contains("Summary: hp: 3/10"), "{task}");
+        assert!(!advisory_task("hp: 3/10", None).contains("iroh_fetch"));
+    }
+
+    /// SRV-013: the full state is staged as a reference that fetches it
+    /// back; with no data-plane node there is nothing to stage.
+    #[cfg(feature = "iroh")]
+    #[spec("SRV-013")]
+    #[tokio::test]
+    async fn test_stage_on_iroh_hands_out_a_reference() {
+        let state = "x".repeat(5000);
+        assert!(stage_on_iroh(None, &state).await.is_none());
+
+        let node = arkavo_tdf_iroh::IrohNode::memory().await.unwrap();
+        let reference = stage_on_iroh(Some(&node), &state).await.unwrap();
+        assert_eq!(reference.name, "state");
+        assert_eq!(reference.size, 5000);
+        assert_eq!(reference.media_type, "text/plain; charset=utf-8");
+        let transport = arkavo_tdf_iroh::IrohTransport::new(node.clone());
+        let fetched = transport
+            .fetch_ref(&reference, arkavo_tdf_iroh::FetchPolicy::default())
+            .await
+            .unwrap();
+        assert_eq!(fetched, state.as_bytes());
+        node.stop().await.unwrap();
     }
 
     #[spec("SRV-001")]

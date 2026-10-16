@@ -891,6 +891,22 @@ impl LlamaCppProvider {
                 let mut breaker = self.gpu_breaker.lock().unwrap_or_else(|p| p.into_inner());
                 breaker.reset();
             }
+            // The template's output parser was recorded on the provider that
+            // streamed; complete_with_tools reads it from this one. Without
+            // it a Gemma 4 call falls to the text fallback, which cannot read
+            // `<|"|>`-quoted arguments and drops them.
+            if !std::ptr::eq(provider, self) {
+                let streamed = provider
+                    .template_parse_info
+                    .lock()
+                    .ok()
+                    .and_then(|g| g.clone());
+                if streamed.is_some()
+                    && let Ok(mut guard) = self.template_parse_info.lock()
+                {
+                    *guard = streamed;
+                }
+            }
             return Ok((full_response, timing));
         }
     }

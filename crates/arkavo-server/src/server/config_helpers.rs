@@ -56,6 +56,10 @@ pub struct AgentMetadata {
     /// filtering applied). When non-empty, the agent loop filters its
     /// `ToolRegistry` to exactly this set — least-privilege (design D9).
     pub granted_tools: Vec<String>,
+    /// Whether the agent may host image generation, from its kit role's
+    /// `mcp_tools` grants (ASSET-010). Read once, when the asset service
+    /// starts.
+    pub image_generation: super::assets::Hosting,
     /// Whether this agent has been specialized into a SwarmKit role.
     /// Distinguishes "unspecialized" from "specialized with zero tool grants"
     /// so a zero-grant role yields zero tools, not the full registry.

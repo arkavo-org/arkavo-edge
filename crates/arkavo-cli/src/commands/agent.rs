@@ -1,4 +1,5 @@
 use arkavo_config_encryption::AgentCredential;
+use arkavo_server::server::assets::Hosting;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
@@ -338,6 +339,10 @@ pub struct AgentConfig {
     pub a2a_enabled: bool,                // Default: true
     pub a2a_service_type: Option<String>, // Custom mDNS service type
     pub swarm: Option<String>,            // Domain/swarm identifier for learning isolation
+    /// Whether this agent may host local image generation when its host
+    /// qualifies. Withheld only for a kit role that declares `mcp_tools`
+    /// grants and leaves `image_generation` out of them (ASSET-010).
+    pub image_generation: Hosting,
 }
 
 impl Default for AgentConfig {
@@ -358,6 +363,7 @@ impl Default for AgentConfig {
             a2a_enabled: true,
             a2a_service_type: None,
             swarm: None,
+            image_generation: Hosting::WhereQualified,
         }
     }
 }
@@ -509,6 +515,9 @@ pub async fn start_agent_server(
         .await;
 
     server.set_agent_role(config.role_id.clone()).await;
+    server
+        .set_image_generation_hosting(config.image_generation)
+        .await;
     server
         .set_agent_description(config.description.clone())
         .await;

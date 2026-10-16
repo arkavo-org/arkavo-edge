@@ -6,15 +6,21 @@
 use crate::server::Tool;
 use arkavo_mcp::ToolSchema;
 use arkavo_tdf::{OpenTdfService, PolicyBuilder, TdfEncryptor, TdfManifest};
-use arkavo_tdf_iroh::{IrohNode, IrohTransport};
+use arkavo_tdf_iroh::{IrohNode, IrohTransport, RETENTION};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+use crate::iroh_data::{Fetched, fetch, reference_schema};
+
+/// A TDF manifest travels as its JSON serialization.
+const TDF_MANIFEST: &str = "application/json";
+
 /// MCP tool for securely sharing TDF-encrypted data with another agent via Iroh P2P.
 ///
-/// Orchestrates: read file -> encrypt with TDF -> stage to Iroh -> return ticket + metadata.
-/// The caller is responsible for sending the ticket to the target agent via `tdf.share` RPC.
+/// Orchestrates: read file -> encrypt with TDF -> stage to Iroh -> return a
+/// data-plane reference + metadata. The caller sends the reference to the
+/// target agent, for `tdf_receive` or as a `tdf.share` offer.
 pub struct TdfShareTool {
     schema: ToolSchema,
     iroh_node: Option<Arc<IrohNode>>,
@@ -26,8 +32,10 @@ impl TdfShareTool {
             schema: ToolSchema {
                 name: "tdf_share".to_string(),
                 aliases: Some(vec!["tdf_send".to_string()]),
-                description: "Encrypt a file with TDF and stage it to the Iroh P2P network. \
-                    Returns a ticket and metadata that can be sent to a target agent via tdf.share RPC."
+                description: "Encrypt a file with TDF and stage it on the Iroh P2P network \
+                    for an hour. Returns a reference to the encrypted data (name, ticket, content \
+                    hash, size, media type) and its policy, for a target agent to fetch with \
+                    tdf_receive or to offer via tdf.share RPC."
                     .to_string(),
                 parameters: json!({
                     "type": "object",
@@ -123,20 +131,21 @@ impl Tool for TdfShareTool {
         };
         let transport = IrohTransport::new(node);
 
-        let ticket = transport
-            .stage_bytes(&manifest_json)
+        let name = format!(
+            "{}.tdf.json",
+            path.file_name()
+                .map_or_else(|| "data".into(), |n| n.to_string_lossy())
+        );
+        let reference = transport
+            .stage_ref(&name, TDF_MANIFEST, &manifest_json, RETENTION)
             .await
             .map_err(|e| crate::ToolError::Execution(format!("Failed to stage: {e}")))?;
-
-        let hash = ticket.hash().to_string();
 
         Ok(json!({
             "success": true,
             "input_path": input_path,
             "plaintext_size": plaintext.len(),
-            "encrypted_size": manifest_json.len(),
-            "content_hash": hash,
-            "ticket": ticket.to_string(),
+            "reference": reference,
             "kas_url": kas_url,
             "policy_attributes": [namespace],
             "algorithm": manifest.encryption_information.method.algorithm
@@ -146,7 +155,8 @@ impl Tool for TdfShareTool {
 
 /// MCP tool for receiving and decrypting TDF-encrypted data from Iroh P2P.
 ///
-/// Orchestrates: fetch from Iroh -> parse manifest -> write encrypted manifest to disk.
+/// Orchestrates: fetch by reference from Iroh -> parse manifest -> write
+/// encrypted manifest to disk.
 /// Full decryption requires KAS rewrap (handled separately).
 pub struct TdfReceiveTool {
     schema: ToolSchema,
@@ -159,22 +169,26 @@ impl TdfReceiveTool {
             schema: ToolSchema {
                 name: "tdf_receive".to_string(),
                 aliases: Some(vec!["tdf_accept".to_string()]),
-                description: "Fetch TDF-encrypted data from Iroh P2P network using a ticket. \
-                    Retrieves and saves the TDF manifest for later decryption via KAS."
+                description: "Fetch TDF-encrypted data from the Iroh P2P network by the \
+                    reference tdf_share returned. Retrieves and saves the TDF manifest for later \
+                    decryption via KAS."
                     .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
+                        "reference": reference_schema(
+                            "The reference tdf_share returned, as it was given"
+                        ),
                         "ticket": {
                             "type": "string",
-                            "description": "Iroh blob ticket from a tdf.share offer"
+                            "description": "A bare Iroh blob ticket, as a tdf.share offer lists it"
                         },
                         "output_path": {
                             "type": "string",
                             "description": "Path to write the TDF manifest file"
                         }
                     },
-                    "required": ["ticket", "output_path"]
+                    "required": ["output_path"]
                 }),
             },
             iroh_node,
@@ -189,10 +203,6 @@ impl Tool for TdfReceiveTool {
     }
 
     async fn execute(&self, args: Value) -> crate::Result<Value> {
-        let ticket_str = args["ticket"]
-            .as_str()
-            .ok_or_else(|| crate::ToolError::InvalidParams("Missing ticket".to_string()))?;
-
         let output_path = args["output_path"]
             .as_str()
             .ok_or_else(|| crate::ToolError::InvalidParams("Missing output_path".to_string()))?;
@@ -216,15 +226,9 @@ impl Tool for TdfReceiveTool {
             })?,
         };
         let transport = IrohTransport::new(node);
-
-        let ticket: arkavo_tdf_iroh::IrohTicket = ticket_str
-            .parse()
-            .map_err(|e| crate::ToolError::InvalidParams(format!("Invalid ticket: {e}")))?;
-
-        let data = transport
-            .fetch_bytes(&ticket)
-            .await
-            .map_err(|e| crate::ToolError::Execution(format!("Failed to fetch: {e}")))?;
+        let Fetched {
+            data, content_hash, ..
+        } = fetch(&transport, &args).await?;
 
         // Parse as TDF manifest to validate
         let manifest: TdfManifest = serde_json::from_slice(&data)
@@ -251,7 +255,7 @@ impl Tool for TdfReceiveTool {
             "algorithm": manifest.encryption_information.method.algorithm,
             "key_access_count": key_access_count,
             "kas_url": kas_url,
-            "content_hash": ticket.hash().to_string()
+            "content_hash": content_hash
         }))
     }
 }
@@ -260,6 +264,7 @@ impl Tool for TdfReceiveTool {
 #[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
+    use arkavo_test_macros::spec;
 
     #[tokio::test]
     async fn test_share_tool_schema() {
@@ -316,6 +321,9 @@ mod tests {
         assert!(err.contains("Path traversal"), "Got: {err}");
     }
 
+    /// MCP-019: the encrypted manifest is staged as a reference named after
+    /// the file, and the reference fetches it back for tdf_receive.
+    #[spec("MCP-019")]
     #[tokio::test]
     async fn test_share_and_receive_roundtrip() {
         let temp_dir = tempfile::TempDir::new().unwrap();
@@ -338,15 +346,18 @@ mod tests {
             .unwrap();
 
         assert!(share_result["success"].as_bool().unwrap());
-        let ticket = share_result["ticket"].as_str().unwrap();
-        assert!(!ticket.is_empty());
+        let reference = &share_result["reference"];
+        assert_eq!(reference["name"], "secret.txt.tdf.json");
+        assert_eq!(reference["media_type"], TDF_MANIFEST);
+        assert!(!reference["ticket"].as_str().unwrap().is_empty());
+        assert!(share_result.get("ticket").is_none());
 
         // Receive: fetch + save manifest
         let receive_tool = TdfReceiveTool::new(Some(node.clone()));
 
         let receive_result = receive_tool
             .execute(json!({
-                "ticket": ticket,
+                "reference": reference,
                 "output_path": output_path.to_str().unwrap()
             }))
             .await
@@ -355,11 +366,62 @@ mod tests {
         assert!(receive_result["success"].as_bool().unwrap());
         assert_eq!(receive_result["version"], "3.0.0");
         assert_eq!(receive_result["algorithm"], "AES-256-GCM");
+        assert_eq!(receive_result["content_hash"], reference["content_hash"]);
+        assert_eq!(receive_result["size_bytes"], reference["size"]);
 
         // Verify file was written
         let saved = tokio::fs::read_to_string(&output_path).await.unwrap();
         let manifest: TdfManifest = serde_json::from_str(&saved).unwrap();
         assert_eq!(manifest.version, "3.0.0");
+
+        node.stop().await.unwrap();
+    }
+
+    /// MCP-019: a reference that does not match the staged blob is refused
+    /// and nothing is written; a bare ticket from a tdf.share offer still
+    /// fetches.
+    #[spec("MCP-019")]
+    #[tokio::test]
+    async fn test_receive_checks_the_reference() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let input_path = temp_dir.path().join("secret.txt");
+        tokio::fs::write(&input_path, b"Top secret agent data")
+            .await
+            .unwrap();
+        let node = IrohNode::memory().await.unwrap();
+        let share_result = TdfShareTool::new(Some(node.clone()))
+            .execute(json!({"input_path": input_path.to_str().unwrap()}))
+            .await
+            .unwrap();
+        let receive_tool = TdfReceiveTool::new(Some(node.clone()));
+
+        let mut understated = share_result["reference"].clone();
+        understated["size"] = json!(16);
+        let refused = temp_dir.path().join("refused.tdf.json");
+        let err = receive_tool
+            .execute(json!({
+                "reference": understated,
+                "output_path": refused.to_str().unwrap()
+            }))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("bytes held, 16 referenced"), "{err}");
+        assert!(!refused.exists());
+
+        let offered = temp_dir.path().join("offered.tdf.json");
+        let receive_result = receive_tool
+            .execute(json!({
+                "ticket": share_result["reference"]["ticket"],
+                "output_path": offered.to_str().unwrap()
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            receive_result["content_hash"],
+            share_result["reference"]["content_hash"]
+        );
+        assert!(offered.exists());
 
         node.stop().await.unwrap();
     }

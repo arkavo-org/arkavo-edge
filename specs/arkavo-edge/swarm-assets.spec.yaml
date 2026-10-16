@@ -1,0 +1,268 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: Swarm Asset Requests and Data-Plane Delivery
+module: arkavo-server, arkavo-mcp-mesh, arkavo-tdf-iroh, arkavo-cli
+version: 0.103.0
+
+# A person asks any member of a swarm for assets, such as game art. The
+# member that can generate them does so locally (image-gen.spec.yaml), and
+# the assets reach the person.
+#
+# The control plane is A2A JSON-RPC: message/send, tasks/get, progress and
+# gossip. The data plane is the agent's existing long-lived Iroh node
+# (tdf-iroh.spec.yaml), which knows nothing about images: it stages bytes
+# and hands out references (IROH-012). Assets are one of its payloads. The
+# control plane carries requests, manifests and references, and bytes take
+# the data plane (PROTO-020, IROH-008).
+#
+# Each hop stages assets for the party it hands them to. An agent that
+# delegated fetches and re-stages for its own requester: the agent loop
+# folds several requesters' messages into one cycle, and only the step that
+# writes each reply knows which requester it serves.
+#
+# Capabilities follow the trust model (docs/swarm-trust-model.md,
+# "Discovery"): members read them over the member channel, and mDNS
+# announces none (INGRESS-007).
+#
+# Sealing each asset to its party (ASSET-004) needs a TDF path that
+# decrypts, which TDF-002 tracks, and stays wip until then. Until it lands a
+# ticket is a bearer reference: whoever holds it can fetch the PNG within
+# its hour, so tickets are written only into the task result for the party
+# that asked.
+
+invariants:
+  - "Asset bytes never cross the control plane: messages, task results, progress and gossip carry the manifest and data-plane references (IROH-012), and the bytes move over Iroh"
+  - "Tickets for staged assets appear only in the task result written for the party that asked for them"
+  - "Tickets are issued only by the agent's long-lived data-plane node"
+  - "Image work goes only to members that report image_generation over the member channel; announcements carry no capability"
+  - "No step of an asset request uses a cloud inference service"
+
+scenarios:
+  - id: ASSET-001
+    name: Image capability reported to members, not announced
+    criticality: high
+    given:
+      - An agent on a host that qualifies (IMG-001), with its data-plane node running
+    when: A peer reads its capabilities with agent.capabilities.get or its agent card
+    then:
+      - "capabilities include image_generation, and image_generation holds the descriptor: chip, unified memory in GiB, runtime build, queue depth, and one row per catalog entry the host offers (IMG-002)"
+      - "Each row holds the entry id and the aliases that resolve to it here, the weight set, state (ready, or bytes still to download), the largest pixel count the host can render with guidance 1 and above 1 (IMG-018), the entry's steps, and the seconds per step at 1 MP measured on this host, null until its first run"
+      - "The agent card lists an image_generation skill whose output mode is image/png"
+      - "The mDNS TXT record does not change; image_generation is never added to its capabilities key, which INGRESS-007 removes"
+      - "The capability comes from the hardware check, never from the agent's name or purpose"
+      - "An agent on a host that does not qualify, or without a data plane to deliver over, reports no image_generation"
+    edge_cases:
+      - condition: Before member envelopes exist (INGRESS-002)
+        expected: "agent.capabilities.get answers any caller that reaches the endpoint, as it does today, so the descriptor discloses chip and memory to the link"
+    refs:
+      - crates/arkavo-server/src/server/handlers/discovery.rs:240
+      - crates/arkavo-server/src/server/well_known.rs:110-128
+      - crates/arkavo-server/src/server/assets.rs
+      - crates/arkavo-image-gen/src/descriptor.rs
+    changed: "2026-10-11"
+
+  - id: ASSET-002
+    name: Work that cannot run here goes to a capable member
+    criticality: critical
+    given:
+      - An agent on a host that does not qualify, or that refuses the request for capacity, which must produce images for generate_image
+    when: It chooses where the work runs
+    then:
+      - "It reads the capabilities of the members discovery found (MESH-010) and keeps those, other than itself, that report image_generation"
+      - "It keeps members whose descriptor offers the entry the request names, as an id or an alias the member resolves, with a largest pixel count at least the request's for its guidance"
+      - "Among them it prefers state ready, then the larger weight set, then the shorter estimated time (steps times seconds per step times megapixels, for the images queued and requested), then the shorter queue"
+      - "It sends that member one message/send whose data part has schema urn:arkavo:asset:request:v1: the items to generate, each with the IMG-007 fields, the seconds left to its deadline, and its own did:key as requester"
+      - "A member refuses before accepting with a JSON-RPC error whose message starts with the IMG code (busy, no_capable_member, too_large_for_host, invalid_params), and no task is opened; such a member, or one that cannot be reached, is passed over for the next candidate"
+      - "Once a member accepts, its failure is the task's failure"
+      - "When no member reports the capability, the work fails with no_capable_member (IMG-015)"
+    edge_cases:
+      - condition: The agent's own host qualifies and offers the entry
+        expected: It generates here and sends nothing, unless this host refuses for capacity
+      - condition: More than 16 images in one request
+        expected: Refused with invalid_params before any member is asked
+      - condition: The request names an id that only members on a newer arkavo release offer
+        expected: Only those members are candidates; with none, the request fails with no_capable_member naming the id
+      - condition: The request names the alias qwen-image and members on different releases resolve it to different entries
+        expected: "Accepted; the manifest records the entry used (IMG-019). A requester that needs one exact version names its id"
+      - condition: A 2048x2048 request for the full model that no member's budget fits with the requested guidance
+        expected: Fails with too_large_for_host naming the largest size any member offers
+      - condition: Every capable member refuses
+        expected: Fails with no_capable_member listing each member's refusal
+    refs:
+      - crates/arkavo-server/src/server/assets/delegate.rs
+      - crates/arkavo-image-gen/src/descriptor.rs
+      - crates/arkavo-image-gen/src/tool.rs
+    changed: "2026-10-11"
+
+  - id: ASSET-003
+    name: A capable member answers an asset request without its model
+    criticality: high
+    given:
+      - An agent receiving message/send with a urn:arkavo:asset:request:v1 data part
+    when: handle_message_send_from routes the message
+    then:
+      - "Preflight moderation checks the message text and every prompt and negative prompt in the request before anything else runs"
+      - "The request goes to the generator directly, not to the agent loop, a pipeline or a model call"
+      - "Before a task is opened the request is checked against what the host can take now (IMG-007, IMG-018, IMG-011); a request it cannot take is refused as ASSET-002 describes"
+      - "Progress is reported on the task over the control plane: weight bytes fetched of bytes needed, then step s of S for image i of n, prefixed with the item when the request has several"
+      - "The task completes with a text part naming each file with its size and alpha and the license line, then one data part with schema urn:arkavo:asset:manifest:v1 per item, holding its manifest and one reference per asset (ASSET-005)"
+      - "A failure after acceptance fails the task with the IMG error code"
+      - "An agent that does not generate images fails the task with IMAGE_GENERATION_UNAVAILABLE and does not hand it to its model"
+    edge_cases:
+      - condition: A data part with the request schema that does not parse
+        expected: Refused with invalid_params naming the problem
+    refs:
+      - crates/arkavo-server/src/server/handlers/messaging.rs:298-324
+      - crates/arkavo-server/src/server/assets/serve.rs
+    changed: "2026-10-11"
+
+  - id: ASSET-004
+    name: Each asset sealed to the party it is handed to
+    criticality: critical
+    wip: true
+    issue: "Needs a TDF path that decrypts: OpenTdfService cannot produce decryptable payloads today (TDF-002). Until then tickets are bearer references (see the header)"
+    given:
+      - Verified assets (IMG-010), and the did:key and TDF key statement digest of the party that asked for them
+    when: The assets are prepared for delivery
+    then:
+      - "An asset request carries the requester's TDF key statement digest beside its did:key"
+      - "The key statement is verified against the digest before anything is sealed to it (INGRESS-006)"
+      - "Each PNG is wrapped as a TDF whose policy dissemination list names only that party's did:key"
+      - "The plaintext files are deleted once sealed"
+      - "A delegating agent unwraps what its member sealed to it with its own key before re-sealing to its requester (ASSET-006)"
+      - "A requester unwraps each fetched TDF with its key before checking the PNG (ASSET-007)"
+    edge_cases:
+      - condition: The request names no key, or a statement that fails verification
+        expected: Refused before generation starts, since the assets could not be delivered
+      - condition: Another party presents the ticket
+        expected: It fetches ciphertext it cannot unwrap
+    refs:
+      - crates/arkavo-protocol/src/agent_specialization.rs:212
+    changed: "2026-10-11"
+
+  - id: ASSET-005
+    name: Assets staged on the agent's data-plane node
+    criticality: critical
+    given:
+      - Verified assets (IMG-010) held for a reply
+    when: They are staged
+    then:
+      - "Each file is read and checked against its manifest entry again, then staged as a data-plane reference (IROH-012) on the node the A2A server starts for the agent's lifetime"
+      - "Its reference holds the asset name, the ticket, the BLAKE3 content hash, the size and media type image/png; the manifest entry of the same name holds its size, SHA-256, width, height, has_alpha, tileable and seed"
+      - "References stay fetchable for 1 hour, the TDF offer TTL, and their blobs are then dropped (IROH-010)"
+      - "The message carrying the references stays within the 64 KiB inline bound (PROTO-020); a delivery that would not fit is refused"
+      - "Generated files stay on disk until every reply that could deliver them has staged them or given up, and are then deleted"
+    edge_cases:
+      - condition: The agent restarts within the hour
+        expected: "The in-memory blob store is gone, and a fetch fails with asset_unreachable naming the asset: to the fetcher an expired reference and an unreachable producer look the same"
+      - condition: Staging would pass the data-plane store bound (IROH-011)
+        expected: Fails with data_plane_full; references within their hour are not evicted
+      - condition: A file changed on disk after it was generated
+        expected: It is not staged
+    refs:
+      - crates/arkavo-server/src/server/a2a_server.rs:1233-1252
+      - crates/arkavo-tdf-iroh/src/reference.rs
+      - crates/arkavo-server/src/server/assets/delivery.rs
+    changed: "2026-10-11"
+
+  - id: ASSET-006
+    name: A delegating agent re-stages for its own requester
+    criticality: high
+    given:
+      - Agent A, asked by requester H, delegated to capable member B (ASSET-002)
+    when: B's references reach A
+    then:
+      - "A fetches each asset by its reference (IROH-012) into a directory of its own, then checks it against B's manifest: size, SHA-256 and PNG dimensions"
+      - "A stages the asset on its own node (ASSET-005) for H"
+      - "A's references to H carry B's manifest, which names B's did:key as producer, and B's tickets are not passed on"
+      - "No asset byte appears in any message between H, A and B"
+    edge_cases:
+      - condition: A fetch from B fails
+        expected: Retried 3 times with backoff, then the task fails naming B and the asset
+      - condition: B's task completes without a manifest, or with no assets
+        expected: The task fails naming B
+    refs:
+      - crates/arkavo-server/src/server/assets/delegate.rs
+    changed: "2026-10-11"
+
+  - id: ASSET-007
+    name: Requester fetches and verifies assets
+    criticality: high
+    given:
+      - A task result with a urn:arkavo:asset:manifest:v1 data part
+    when: The requester takes delivery
+    then:
+      - "Each reference must name a manifest entry, with media type image/png and the entry's size"
+      - "Each is fetched by its reference (IROH-012), which refuses a different blob or size before downloading; the SHA-256, PNG signature, width and height are then checked against the manifest entry"
+      - "A file that fails a check is not written and is reported, and the others are kept"
+      - "A name that could leave the destination directory is refused, and an existing file is never overwritten"
+    edge_cases:
+      - condition: A ticket past its hour
+        expected: Fails with asset_unreachable, naming the asset
+      - condition: Producer unreachable
+        expected: Retried 3 times with backoff, then reported as asset_unreachable
+    refs:
+      - crates/arkavo-server/src/server/assets/delivery.rs
+      - crates/arkavo-image-gen/src/delivery.rs
+    changed: "2026-10-11"
+
+  - id: ASSET-008
+    name: An agent's reply carries the references its cycle produced
+    criticality: high
+    given:
+      - A cycle of the agent loop, a specialist's direct execution or a pipeline step, in which generate_image started generations
+    when: The answer is written to each waiting requester's task
+    then:
+      - "The reply waits for each generation, copying its progress onto the task, then stages its assets for that requester (ASSET-005) and lists them in a urn:arkavo:asset:manifest:v1 data part after the text part"
+      - "A generation that fails is reported in a text part naming its prompt and error code, and nothing of it is attached"
+      - "Assets produced in another cycle are not attached"
+      - "A cycle that fails attaches nothing, and the files it produced are deleted once its generations end"
+    edge_cases:
+      - condition: Two requesters' messages folded into one cycle
+        expected: "Each gets the same assets, staged separately for it, as each already gets the same text"
+      - condition: A direct execution inside a pipeline driver's own run
+        expected: generate_image is not offered, since no reply would deliver what it made
+    refs:
+      - crates/arkavo-server/src/server/agent_cycle_reply.rs:200-220
+      - crates/arkavo-server/src/server/agent_loop.rs:102-116
+      - crates/arkavo-server/src/server/handlers/messaging/specialist.rs
+      - crates/arkavo-server/src/server/pipeline/step.rs
+      - crates/arkavo-server/src/server/assets.rs
+    changed: "2026-10-11"
+
+  - id: ASSET-009
+    name: Waiting on a member follows its progress
+    criticality: medium
+    given:
+      - An agent waiting on a member's asset task (ASSET-002)
+    when: The member is fetching weights or generating
+    then:
+      - "The wait lasts until the request's deadline, not a fixed per-call timeout"
+      - "The member's progress, down to step s of S (IMG-005), is copied onto the agent's own task, so the requester sees it"
+      - "A member whose task reports nothing new for 5 minutes, or stops answering for that long, is treated as stalled, and the task fails with step_stalled naming it"
+      - "Time the member answers that the request is waiting behind other generations (IMG-011) is not a stall: it is working through its queue, and one job ahead can take an hour at 4.3 MP. That wait runs to the request's deadline"
+    refs:
+      - crates/arkavo-server/src/server/assets/delegate.rs
+    changed: "2026-10-12"
+
+  - id: ASSET-010
+    name: A kit role's tool grants decide whether it hosts generation
+    criticality: high
+    given:
+      - An agent started as a SwarmKit role (arkavo agent -c <kit> -n <role>) on a host that qualifies (IMG-001)
+    when: Its asset service starts
+    then:
+      - "A role that lists no mcp_tools grants hosts image generation wherever the host qualifies: the zero-config default"
+      - "A role that lists mcp_tools grants hosts it only when they include image_generation, the capability name (ASSET-001)"
+      - "A role that does not host it builds no generator, fetches nothing, reports no image_generation capability and fails asset requests sent to it with IMAGE_GENERATION_UNAVAILABLE; its generate_image tool asks members (ASSET-002)"
+      - "The generate_image grant alone does not make a role host generation: a role that only asks members needs that tool too"
+      - "Only this grant is read on this path; the role's other tool grants are still not enforced here (docs/SWARMKIT.md)"
+    edge_cases:
+      - condition: Several roles of one kit on one Mac, one granted image_generation
+        expected: Only that role generates; the others delegate to it over the mesh and the data plane
+      - condition: A kit reloaded while the agent runs
+        expected: Hosting stays as it was decided at start
+    refs:
+      - crates/arkavo-cli/src/commands/agent_kit.rs
+      - crates/arkavo-server/src/server/assets.rs
+    changed: "2026-10-12"

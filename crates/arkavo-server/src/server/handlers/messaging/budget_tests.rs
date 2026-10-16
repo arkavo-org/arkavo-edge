@@ -59,6 +59,7 @@ async fn send_with_allocation(
         Arc::new(tokio::sync::Mutex::new(None)),
         #[cfg(feature = "iroh")]
         None,
+        None,
         request,
     )
     .await

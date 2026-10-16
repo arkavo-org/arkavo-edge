@@ -6,8 +6,10 @@
 //! another run's step. A marked message is answered here instead, from the
 //! agent's purpose and the message alone.
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use arkavo_image_gen::Outbox;
 use arkavo_protocol::types::TaskStatus;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -34,7 +36,8 @@ pub(in crate::server) async fn answer_step(
     }
     info!(task_id = %task_id, "Answering a pipeline step on its own, outside the agent loop");
 
-    let work = direct.answer(Request::isolated(content, Some(task_id)));
+    let outbox = Arc::new(Outbox::default());
+    let work = direct.answer(Request::isolated(content, Some(task_id)).delivering_to(&outbox));
     let answer = match allowed {
         Some(allowed) => tokio::time::timeout(allowed, work)
             .await
@@ -46,5 +49,6 @@ pub(in crate::server) async fn answer_step(
             }),
         None => work.await,
     };
-    apply_outcome(&executor, &task_id, &outcome_for_cycle(&answer)).await;
+    let assets = direct.assets_in(&outbox);
+    apply_outcome(&executor, &task_id, &outcome_for_cycle(&answer, assets)).await;
 }

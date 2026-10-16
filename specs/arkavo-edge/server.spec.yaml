@@ -2,7 +2,7 @@
 
 feature: A2A Server and Runtime Orchestration
 module: arkavo_server
-version: 0.67.1
+version: 0.68.0
 
 invariants:
   - Server binds to configured address
@@ -197,3 +197,20 @@ scenarios:
       - A budget_exhausted BudgetEvent is traced
     refs: [crates/arkavo-server/src/server/consolidation_teacher.rs]
     changed: "2026-06-10"
+
+  - id: SRV-013
+    name: Large state broadcasts hand specialists a data-plane reference
+    criticality: medium
+    given:
+      - The agent loop broadcasting an observation over 4000 bytes to its specialists
+      - The agent's long-lived data-plane node
+    when: The state is broadcast
+    then:
+      - "The full state is staged as a reference named state, text/plain, fetchable for 10 minutes (IROH-010) within the store bound (IROH-011)"
+      - "Each specialist's advisory task carries the summary and the iroh_fetch arguments holding the reference (MCP-018)"
+    edge_cases:
+      - condition: No data-plane node, or staging fails
+        expected: "The advisory task carries the summary alone"
+    refs:
+      - crates/arkavo-server/src/server/agent_loop.rs
+    changed: "2026-10-12"

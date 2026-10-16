@@ -1,6 +1,6 @@
 feature: TDF Iroh P2P Transport
 module: crate::tdf_iroh
-version: 0.57.2
+version: 0.58.0
 
 invariants:
   - Transport handles raw bytes; encryption occurs before handoff to Iroh
@@ -164,3 +164,58 @@ scenarios:
       - Serving blobs to peers that fetch them is unaffected
     refs: [crates/arkavo-tdf-iroh/src/node.rs, crates/arkavo-tdf-iroh/tests/push_policy_test.rs, crates/arkavo-tdf-iroh/tests/integration_test.rs]
     changed: "2026-10-16"
+
+  - id: IROH-010
+    name: Handed-out tickets live for their retention window
+    criticality: high
+    given:
+      - The agent's data-plane node, started with the A2A server for the agent's lifetime
+    when: A blob is staged for another party
+    then:
+      - "It stays fetchable for its retention window, 1 hour unless the caller staging it sets a shorter one"
+      - "After the window the blob is deleted from the store, and a fetch fails with not found"
+    edge_cases:
+      - condition: The agent restarts
+        expected: "The in-memory store is gone with every blob in it; fetches of its tickets fail"
+    refs:
+      - crates/arkavo-server/src/server/a2a_server.rs:1233-1252
+      - crates/arkavo-tdf-iroh/src/retention.rs
+      - crates/arkavo-tdf-iroh/src/transport.rs:80
+    changed: "2026-10-11"
+
+  - id: IROH-011
+    name: Staged data is bounded
+    criticality: medium
+    given:
+      - The agent's in-memory blob store (MemStore)
+    when: Staging would take the staged bytes past 1 GiB
+    then:
+      - "Staging fails with an error naming the bound"
+      - "Blobs within their retention window are never evicted to make room"
+    refs:
+      - crates/arkavo-tdf-iroh/src/retention.rs:50-71
+      - crates/arkavo-tdf-iroh/src/node.rs:20-41
+    changed: "2026-10-11"
+
+  - id: IROH-012
+    name: A reference fetches exactly the data it names
+    criticality: high
+    given:
+      - "A reference to staged data, as the control plane carries it in place of the data (PROTO-020): name, ticket, BLAKE3 content hash, size and media type"
+    when: A party fetches it
+    then:
+      - "The ticket must name the reference's content hash; otherwise the fetch is refused without contacting the provider"
+      - "The provider's verified size is read before any byte is downloaded, and a size other than the reference's is refused, so a provider cannot hand over more than was agreed"
+      - "The bytes are fetched over Iroh, which checks them against the hash, and their length is checked against the reference"
+      - "A provider that does not answer within the attempt's timeout is tried 3 times with backoff, then reported as unreachable, naming the reference"
+      - "The reference means the same whatever the bytes are; what they must be beyond that is the caller's check"
+    edge_cases:
+      - condition: A reference past its retention window (IROH-010)
+        expected: "Reported as unreachable: to the fetcher an expired reference and a gone provider look the same"
+      - condition: Staging a reference past the store bound (IROH-011)
+        expected: Fails with the bound, and nothing is staged
+      - condition: "The fetching node already holds the whole blob: it staged it, as agents sharing one node in a process do, or fetched it before"
+        expected: "Read from its own store without contacting the provider, since iroh never connects a node to itself; a held size other than the reference's is refused"
+    refs:
+      - crates/arkavo-tdf-iroh/src/reference.rs
+    changed: "2026-10-12"

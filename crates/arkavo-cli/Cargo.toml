@@ -84,6 +84,10 @@ arkavo-permit = { path = "../arkavo-permit" }
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-session = { path = "../arkavo-session" }
 arkavo-server = { path = "../arkavo-server" }
+# `arkavo model download` for the image catalog.
+arkavo-image-gen = { path = "../arkavo-image-gen" }
+# A data-plane node for taking delivery of what an agent's answer references.
+arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["persistence"] }
 arkavo-critic = { path = "../arkavo-critic" }
@@ -154,6 +158,7 @@ serde_json = { workspace = true }
 arkavo-kimi = { path = "../arkavo-kimi" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-image-gen = { path = "../arkavo-image-gen", features = ["testing"] }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-knowledge-pack = { path = "../arkavo-knowledge-pack" }
 

@@ -174,6 +174,7 @@ async fn a_text_answer_is_the_result_of_the_task() {
         Arc::new(tokio::sync::Mutex::new(None)),
         #[cfg(feature = "iroh")]
         None,
+        None,
         MessageSendRequest {
             message: Message {
                 parts: vec![MessagePart::Text {
