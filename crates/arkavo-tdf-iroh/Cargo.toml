@@ -19,8 +19,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 # Iroh dependencies
-iroh = { version = "1.0.3", default-features = false, features = ["tls-aws-lc-rs"] }
-iroh-base = { version = "1.0.3", default-features = false }
+iroh = { version = "1.3.0", default-features = false, features = ["tls-aws-lc-rs"] }
+iroh-base = { version = "1.3.0", default-features = false }
 # 0.103.0 is yanked: a connected peer could push into the provider store.
 iroh-blobs = { version = "0.103.1", default-features = false }
 

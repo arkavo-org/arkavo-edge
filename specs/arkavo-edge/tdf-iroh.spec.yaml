@@ -150,3 +150,17 @@ scenarios:
       - Decryption by recipient
     refs: [crates/arkavo-tdf-iroh/src/lib.rs:15-34]
     changed: "2025-01-31"
+
+  - id: IROH-009
+    name: Refuse blobs pushed by peers
+    criticality: critical
+    given:
+      - Node runs with the default provider settings
+      - A peer can connect to it over the blob protocol
+    when: The peer sends a push request for a blob
+    then:
+      - The request is refused
+      - The blob never reaches the node's store
+      - Serving blobs to peers that fetch them is unaffected
+    refs: [crates/arkavo-tdf-iroh/src/node.rs, crates/arkavo-tdf-iroh/tests/push_policy_test.rs, crates/arkavo-tdf-iroh/tests/integration_test.rs]
+    changed: "2026-10-16"

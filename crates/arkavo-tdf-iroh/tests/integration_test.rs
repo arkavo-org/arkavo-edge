@@ -191,7 +191,7 @@ async fn full_encrypt_transport_decrypt_workflow() {
 /// Fetch a blob from a separate peer node using only the ticket.
 /// Exercises the real P2P path: ticket parsed for hash and node info,
 /// direct connection to the provider, blob retrieved over the network stack.
-#[spec("IROH-003")]
+#[spec("IROH-003", "IROH-009")]
 #[tokio::test]
 async fn fetch_blob_from_peer_node() {
     let provider = IrohTransport::new(IrohNode::memory().await.unwrap());
