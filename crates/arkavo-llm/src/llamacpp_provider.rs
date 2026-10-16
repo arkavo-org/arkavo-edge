@@ -2,8 +2,6 @@ use crate::gpu_fault::GpuCircuitBreaker;
 use crate::tool_parser::ToolParser;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 
-/// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
-type TemplateParseTuple = (i32, Option<String>, Option<String>);
 #[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::multimodal::MtmdContext;
 #[cfg(feature = "llama-cpp")]
@@ -47,12 +45,6 @@ pub struct SamplingConfig {
     /// Tool choice for native template rendering
     #[cfg(feature = "llama-cpp")]
     pub chat_tool_choice: arkavo_llama_cpp::ToolChoice,
-    /// Chat format from llama.cpp Jinja template (for native output parsing)
-    #[cfg(feature = "llama-cpp")]
-    pub chat_format: i32,
-    /// Serialized PEG parser from Jinja template (for native output parsing)
-    #[cfg(feature = "llama-cpp")]
-    pub chat_parser_str: Option<String>,
     /// Enable NGRAM self-speculative decoding for this provider. The router
     /// flips this per-request based on rolling accept-rate stats; default
     /// false so existing callers keep their exact sampling path.
@@ -76,10 +68,6 @@ impl Default for SamplingConfig {
             chat_tools: Vec::new(),
             #[cfg(feature = "llama-cpp")]
             chat_tool_choice: arkavo_llama_cpp::ToolChoice::Auto,
-            #[cfg(feature = "llama-cpp")]
-            chat_format: 0,
-            #[cfg(feature = "llama-cpp")]
-            chat_parser_str: None,
             use_spec_decoding: false,
         }
     }
@@ -118,10 +106,9 @@ pub struct LlamaCppProvider {
     context_wait: std::time::Duration,
     /// GPU fault circuit breaker for retry/fallback logic
     gpu_breaker: std::sync::Mutex<GpuCircuitBreaker>,
-    /// Template-generated format and PEG parser string, stored after generate_streaming
-    /// so complete_with_tools can pass them to the output parser.
-    /// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
-    template_parse_info: std::sync::Mutex<Option<TemplateParseTuple>>,
+    /// The template's native output parser, stored by generate_streaming so
+    /// complete_with_tools can parse the tool calls it produced.
+    template_parse_info: std::sync::Mutex<Option<arkavo_llama_cpp::ChatParser>>,
 }
 
 #[cfg(not(feature = "llama-cpp"))]
@@ -481,8 +468,7 @@ impl LlamaCppProvider {
             template_triggers,
             _thinking_forced_open,
             template_stops,
-            template_chat_format,
-            template_chat_parser_str,
+            template_chat_parser,
             template_generation_prompt,
         ) = match model.chat_templates() {
             Ok(tmpls) => {
@@ -557,8 +543,7 @@ impl LlamaCppProvider {
                             triggers,
                             result.thinking_forced_open,
                             result.additional_stops,
-                            result.format,
-                            result.parser_str,
+                            result.parser,
                             result.generation_prompt,
                         )
                     }
@@ -594,8 +579,7 @@ impl LlamaCppProvider {
                                     None,
                                     result.thinking_forced_open,
                                     result.additional_stops,
-                                    result.format,
-                                    result.parser_str,
+                                    result.parser,
                                     result.generation_prompt,
                                 ),
                                 Err(e2) => {
@@ -609,7 +593,7 @@ impl LlamaCppProvider {
                                                     "Failed to apply chat template: {e}"
                                                 ))
                                             })?;
-                                    (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                                    (bytes, None, false, None, false, Vec::new(), None, None)
                                 }
                             }
                         } else {
@@ -621,7 +605,7 @@ impl LlamaCppProvider {
                                     .map_err(|e| {
                                         Error::Config(format!("Failed to apply chat template: {e}"))
                                     })?;
-                            (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                            (bytes, None, false, None, false, Vec::new(), None, None)
                         }
                     }
                 }
@@ -630,7 +614,7 @@ impl LlamaCppProvider {
                 tracing::warn!("Chat templates init failed: {e}, falling back to legacy");
                 let bytes = apply_chat_template_with_format(&llama_messages, true, format)
                     .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
-                (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                (bytes, None, false, None, false, Vec::new(), None, None)
             }
         };
 
@@ -650,14 +634,10 @@ impl LlamaCppProvider {
 
         // Merge template grammar with config grammar (template takes precedence)
         // Store template parse info for complete_with_tools to use later
-        if (template_chat_format != 0 || template_chat_parser_str.is_some())
+        if let Some(parser) = template_chat_parser
             && let Ok(mut guard) = self.template_parse_info.lock()
         {
-            *guard = Some((
-                template_chat_format,
-                template_chat_parser_str,
-                template_generation_prompt.clone(),
-            ));
+            *guard = Some(parser);
         }
 
         let grammar = template_grammar.or_else(|| self.config.grammar.clone());
@@ -1292,36 +1272,14 @@ impl Provider for LlamaCppProvider {
                 .unwrap_or_default();
 
             // Try llama.cpp's native PEG parser first (handles Gemma 4, etc.),
-            // then fall back to our custom parser chain.
-            // Use template parse info if available (has PEG parser for correct arg extraction),
-            // otherwise fall back to format-based detection.
-            let (native_format, native_parser_str, gen_prompt) =
-                if let Some((fmt, ref ps, ref gp)) = template_parse_info {
-                    (fmt, ps.as_deref(), gp.clone())
-                } else {
-                    let fmt = match format {
-                        ModelFormat::Gemma4 => 3i32, // COMMON_CHAT_FORMAT_PEG_GEMMA4
-                        _ => 0,
-                    };
-                    (fmt, None, None)
-                };
+            // then fall back to our custom parser chain. Without a template
+            // parser there is no native format to parse.
             let parsed = {
                 let mut native_parsed: Vec<crate::tool_parser::ParsedToolCall> = Vec::new();
 
-                if native_format > 0 {
-                    // Prepend generation_prompt if available — the PEG parser_str grammar
-                    // expects the full output including the template-injected prefix.
-                    let parse_input = if let Some(ref gp) = gen_prompt {
-                        format!("{gp}{content}")
-                    } else {
-                        content.clone()
-                    };
+                if let Some(ref parser) = template_parse_info {
                     let (native_content, _native_reasoning, native_calls) =
-                        arkavo_llama_cpp::parse_tool_calls(
-                            &parse_input,
-                            native_format,
-                            native_parser_str,
-                        );
+                        arkavo_llama_cpp::parse_tool_calls(&content, parser);
                     if !native_calls.is_empty() {
                         content = native_content;
                         native_parsed = native_calls
