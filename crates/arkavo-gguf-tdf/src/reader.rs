@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn invalid_zip_magic_is_not_zip() {
         let err = map_member_open_error(opentdf::TdfError::ZipError(
-            zip::result::ZipError::InvalidArchive("Invalid zip header"),
+            zip::result::ZipError::InvalidArchive("Invalid zip header".into()),
         ));
         assert_eq!(err.code(), "GGUFTDF_NOT_ZIP");
     }

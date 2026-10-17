@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-arp"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-llm",
  "async-trait",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-critic"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-evofabric",
  "arkavo-llm",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-crypto"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "base64",
  "bs58",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -313,7 +313,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "chrono",
  "serde",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-evofabric"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "bytes",
  "dashmap",
@@ -378,7 +378,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-process-env",
  "git2",
@@ -388,7 +388,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gossip"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-hrm"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-budget",
  "arkavo-events",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "anyhow",
  "arkavo-deepseek",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -487,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-code-search"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -508,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-workspace"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -590,11 +590,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-process-env"
-version = "0.103.0"
+version = "0.103.1"
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-swarmkit"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-budget",
  "arkavo-process-env",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf-iroh"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-tdf",
  "async-trait",
@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test-macros"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-torg-circuits"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "parking_lot",
  "torg-core",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-validation"
-version = "0.103.0"
+version = "0.103.1"
 dependencies = [
  "arkavo-arp",
  "ipnet",
@@ -1657,7 +1657,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 2.0.114",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1771,7 +1771,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2016,7 +2016,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2104,6 +2104,7 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+ "zlib-rs",
 ]
 
 [[package]]
@@ -2832,7 +2833,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "system-configuration 0.7.0",
  "tokio",
  "tower-service",
@@ -2852,7 +2853,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -3731,9 +3732,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
-version = "0.2.180"
+version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
+checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -3951,7 +3952,7 @@ dependencies = [
  "combine",
  "libc",
  "mach2",
- "nix",
+ "nix 0.26.4",
  "sysctl",
  "thiserror 1.0.69",
  "widestring",
@@ -4205,6 +4206,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nonzero_ext"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4224,7 +4237,7 @@ dependencies = [
  "pin-project-lite",
  "rustc-hash 2.1.3",
  "rustls",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -4267,7 +4280,7 @@ checksum = "4dc50afea61aff926e150a36c31f06094608848e114a3fe667d76ec233163b1c"
 dependencies = [
  "cfg_aliases",
  "libc",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -4338,7 +4351,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4591,9 +4604,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "opentdf"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db8d31427eaf7bc23114c69902cf201ae05cf2da733974411ea86e8133527b98"
+checksum = "d6cdf218e31da440b5a2c44354dcdc3d3b3105335e21a83b71719bedf3c75c1a"
 dependencies = [
  "aes-gcm",
  "base64",
@@ -4610,9 +4623,9 @@ dependencies = [
 
 [[package]]
 name = "opentdf-crypto"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239dd608cd12e408f02cd09257ee331dc2ef0c02436e823c2ebde09fc80f65e1"
+checksum = "4ece044e93ba63f65b94186b6fa9cd65784ab0be9056776c47808b670de1f8c4"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4631,9 +4644,9 @@ dependencies = [
 
 [[package]]
 name = "opentdf-protocol"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd60629604eb5fa733b742e7331b91c82043dc6082536ae35dcadea8a1fa0e8a"
+checksum = "6bed4b2cda25f5beb2e48827f2f685be15c007789c9ad3cc43ed1a32ce3e7541"
 dependencies = [
  "base64",
  "chrono",
@@ -5090,7 +5103,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5128,9 +5141,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5564,7 +5577,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5644,7 +5657,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.6",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5777,7 +5790,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6547,7 +6560,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7089,6 +7102,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "typed-path"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
+
+[[package]]
 name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7524,7 +7543,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -8295,20 +8314,24 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "2.4.2"
+version = "9.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
+checksum = "a954114b47a54df49f83d2722814e86b23d4bb1b54a1b90fb7d92b41619ddc22"
 dependencies = [
- "arbitrary",
  "crc32fast",
- "crossbeam-utils",
- "displaydoc",
  "flate2",
  "indexmap",
  "memchr",
- "thiserror 2.0.18",
+ "nix 0.31.3",
+ "typed-path",
  "zopfli",
 ]
+
+[[package]]
+name = "zlib-rs"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"
