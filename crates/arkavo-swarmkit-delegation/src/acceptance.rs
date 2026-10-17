@@ -121,24 +121,31 @@ pub(crate) fn check_envelope(
 mod tests {
     use super::*;
 
+    use crate::envelope::new_nonce;
+
     #[test]
     fn a_full_cache_lets_the_soonest_to_lapse_go() {
         let now = Utc::now();
+        let (a, b, c) = (new_nonce(), new_nonce(), new_nonce());
         let mut cache = NonceCache::new(2);
-        cache.record("o", "a", now + TimeDelta::minutes(1), now);
-        cache.record("o", "b", now + TimeDelta::minutes(9), now);
-        cache.record("o", "c", now + TimeDelta::minutes(5), now);
-        assert!(!cache.seen("o", "a", now));
-        assert!(cache.seen("o", "b", now));
-        assert!(cache.seen("o", "c", now));
-        assert!(!cache.seen("p", "b", now), "nonces are per orchestrator");
-        assert!(!cache.seen("o", "b", now + TimeDelta::minutes(10)));
+        cache.record("o", &a, now + TimeDelta::minutes(1), now);
+        cache.record("o", &b, now + TimeDelta::minutes(9), now);
+        cache.record("o", &c, now + TimeDelta::minutes(5), now);
+        assert!(!cache.seen("o", &a, now));
+        assert!(cache.seen("o", &b, now));
+        assert!(cache.seen("o", &c, now));
+        assert!(!cache.seen("p", &b, now), "nonces are per orchestrator");
+        assert!(!cache.seen("o", &b, now + TimeDelta::minutes(10)));
     }
 
     #[test]
     fn nonces_are_22_base64url_characters() {
-        assert!(well_formed_nonce("AAAAAAAAAAAAAAAAAAAA-_"));
-        assert!(!well_formed_nonce("AAAAAAAAAAAAAAAAAAAA+/"));
-        assert!(!well_formed_nonce("short"));
+        let nonce = new_nonce();
+        assert!(well_formed_nonce(&nonce));
+        // Standard base64's alphabet, padding and a short value are refused.
+        let standard = nonce.replace(|c: char| c.is_ascii_alphanumeric(), "+");
+        assert!(!well_formed_nonce(&standard));
+        assert!(!well_formed_nonce(&format!("{}==", &nonce[..20])));
+        assert!(!well_formed_nonce(&nonce[..10]));
     }
 }

@@ -58,6 +58,8 @@ struct Host {
     load: f64,
     /// Commits a role, then loses the acknowledgement, as a timeout does.
     drops_acks: bool,
+    /// Loses the connection before it reads the envelope.
+    unreachable: bool,
     _dir: tempfile::TempDir,
 }
 
@@ -77,6 +79,7 @@ impl Host {
             generates,
             load,
             drops_acks: false,
+            unreachable: false,
             _dir: dir,
         }
     }
@@ -84,6 +87,13 @@ impl Host {
     fn dropping_acks(self) -> Self {
         Self {
             drops_acks: true,
+            ..self
+        }
+    }
+
+    fn unreachable(self) -> Self {
+        Self {
+            unreachable: true,
             ..self
         }
     }
@@ -138,6 +148,9 @@ impl Net {
 impl Net {
     fn take_role(&self, address: &str, envelope: serde_json::Value) -> Result<Ready, Failure> {
         let host = &self.0[address];
+        if host.unreachable {
+            return Err(Failure::Unreachable("connection reset".into()));
+        }
         let mut specialist = host.specialist.lock().unwrap();
         let admitted = specialist
             .admit(envelope, Utc::now())
@@ -188,6 +201,13 @@ impl Specialists for Net {
         revocation: serde_json::Value,
     ) -> impl Future<Output = Result<(), Failure>> + Send {
         std::future::ready(self.give_back(address, revocation))
+    }
+
+    fn status(
+        &self,
+        address: &str,
+    ) -> impl Future<Output = Result<SpecialistStatus, Failure>> + Send {
+        std::future::ready(Ok(self.0[address].status()))
     }
 }
 
@@ -372,6 +392,39 @@ async fn a_failed_reapply_gives_back_the_earlier_role() {
         }
     );
     assert_eq!(net.0["a"].role(), None);
+}
+
+/// Review finding: an agent that never got this flight's role still holds
+/// its earlier one from another kit, so undoing does not report it lost.
+#[spec("SKD-012")]
+#[tokio::test]
+async fn an_agent_that_never_took_the_role_keeps_its_other_kits_role() {
+    let me = AgentKeypair::generate();
+    let did = me.public_key().to_did_key();
+    let mut other_kit = manifest();
+    other_kit.kit.id = "blake3:another-kit".into();
+    let net = net(vec![("a", Host::new(true, Some(true), 0.0))]);
+    hold_role(&net, "a", &me, &other_kit, "writer", Uuid::new_v4());
+    let candidates = net.candidates(&did);
+    let net = Net(net
+        .0
+        .into_iter()
+        .map(|(n, h)| (n, h.unreachable()))
+        .collect());
+
+    let unassigned = assign(
+        &manifest(),
+        &me,
+        &candidates,
+        TimeDelta::days(1),
+        Utc::now(),
+        &net,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(unassigned.role, "artist");
+    assert_eq!(unassigned.rolled_back, [restored("a", "artist")]);
+    assert_eq!(net.0["a"].role().as_deref(), Some("writer"));
 }
 
 /// Review finding: an agent that committed a role whose acknowledgement

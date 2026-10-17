@@ -244,6 +244,12 @@ impl Specialists for Http {
             .map_err(|e| Failure::Unreachable(format!("unexpected answer: {e}")))
     }
 
+    async fn status(&self, address: &str) -> Result<SpecialistStatus, Failure> {
+        let value = call(address, address, methods::STATUS, json!([])).await?;
+        serde_json::from_value(value)
+            .map_err(|e| Failure::Unreachable(format!("unexpected answer: {e}")))
+    }
+
     async fn revoke(&self, address: &str, revocation: Value) -> Result<(), Failure> {
         call(
             address,

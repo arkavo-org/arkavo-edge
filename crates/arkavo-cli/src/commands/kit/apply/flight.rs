@@ -50,6 +50,10 @@ pub(super) trait Specialists: Sync {
         address: &str,
         revocation: serde_json::Value,
     ) -> impl Future<Output = Result<(), Failure>> + Send;
+    fn status(
+        &self,
+        address: &str,
+    ) -> impl Future<Output = Result<SpecialistStatus, Failure>> + Send;
 }
 
 /// A role handed to an agent.

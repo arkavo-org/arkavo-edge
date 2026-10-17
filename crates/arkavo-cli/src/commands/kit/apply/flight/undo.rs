@@ -75,6 +75,15 @@ pub(super) async fn undo<S: Specialists>(
     else {
         return Undo::Restored;
     };
+    // An agent that never took this flight's role still holds its earlier
+    // one, and the flight-scoped revocation left it alone.
+    if let Ok(after) = net.status(&candidate.address).await
+        && after
+            .delegation
+            .is_some_and(|d| d.flight_id == earlier.flight_id)
+    {
+        return Undo::Restored;
+    }
     let lost = || Undo::EarlierRoleLost {
         role: earlier.role_id.clone(),
         kit_id: earlier.kit_id.clone(),
