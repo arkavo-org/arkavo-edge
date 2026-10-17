@@ -62,7 +62,7 @@ function renderOverview() {
     var html = '<div class="ops-metrics">';
     html += opsMetric('Running tasks', 'circle-play', AppState.observations.tasks ? running : 'Unknown', 'Task snapshot · ' + receivedAge('tasks'));
     html += opsMetric('Needs review', 'clipboard-pen-line', AppState.observations.policy ? pending.length : 'Unknown', 'Policy snapshot · ' + receivedAge('policy'));
-    html += opsMetric('Agent links', 'network', AppState.observations.fleet ? connected + ' / ' + agents.length : 'Unknown', 'Fleet snapshot · ' + receivedAge('fleet'));
+    html += opsMetric('Agent links', 'network', AppState.observations.swarm ? connected + ' / ' + agents.length : 'Unknown', 'Swarm snapshot · ' + receivedAge('swarm'));
     html += opsMetric('Task exceptions', 'octagon-pause', AppState.observations.tasks ? attention.length : 'Unknown', 'Blocked or failed · ' + receivedAge('tasks'));
     html += '</div><div class="ops-grid"><div><section class="ops-section"><div class="ops-section-heading"><h2>Needs attention</h2><button data-navigate="decisions">Review decisions</button></div>';
     if (pending.length) html += '<div class="observation-row"><span>' + uiState('proposed') + '</span><button class="row-action" data-navigate="decisions">' + pending.length + ' policy change' + (pending.length === 1 ? '' : 's') + '</button></div>';
@@ -72,7 +72,7 @@ function renderOverview() {
     html += tasks.length ? taskRows(tasks.slice(0, 8)) : '<div class="ops-empty"><strong>No tasks reported</strong>Create a task when an agent is available.</div>';
     html += '</section></div><aside><section class="ops-section"><div class="ops-section-heading"><h2>Observations ' + uiHelp('freshness') + '</h2></div>';
     html += '<div class="observation-row"><span>Gateway link</span><span>' + uiState(AppState.connection) + '</span></div>';
-    [['fleet', 'Fleet'], ['tasks', 'Tasks'], ['policy', 'Runtime policy']].forEach(function(item) {
+    [['swarm', 'Swarm'], ['tasks', 'Tasks'], ['policy', 'Runtime policy']].forEach(function(item) {
         html += '<div class="observation-row"><span>' + item[1] + '<small>Gateway snapshot</small></span><span class="observation-value">' + receivedAge(item[0]) + '</span></div>';
     });
     html += '<div class="observation-row"><span>Operator grant</span><span class="muted">Not reported</span></div>';

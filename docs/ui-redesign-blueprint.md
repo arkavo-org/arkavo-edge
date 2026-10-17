@@ -18,7 +18,7 @@ This is a design blueprint, not an implementation or a declaration of operationa
 
 Reviewed the specification corpus structure, the relevant UI, orchestration, routing, budget, identity, ingress, policy, data-protection and attestation scenarios, and their principal UI/backend paths. A source inventory found 91 component spec files, 978 scenario-ID entries and 105 `wip: true` markers. These are inventory counts, not test results or coverage measurements. `specs/README.md`, `specs/FUTURE.md`, and the aggregate index contain older counts; use component scenarios and implementation evidence when deciding readiness.
 
-The browser review used the repository's actual HTML/CSS/JavaScript served locally, including a Chrome walkthrough of navigation and the task composer. No live gateway or agent fleet was attached. The visible disconnected state is therefore useful evidence about presentation and interaction, not evidence about live agent execution. No inference, containment, approval or task dispatch was exercised against a running agent.
+The browser review used the repository's actual HTML/CSS/JavaScript served locally, including a Chrome walkthrough of navigation and the task composer. No live gateway or agent swarm was attached. The visible disconnected state is therefore useful evidence about presentation and interaction, not evidence about live agent execution. No inference, containment, approval or task dispatch was exercised against a running agent.
 
 The accompanying design concept was checked in Chrome at desktop and 320 px widths. The lexicon revision was checked at 1024 px and 320 px, including record inspection, connected/link-loss/containment scenarios and keyboard access to information help. Local source links and JavaScript syntax were checked. The concept uses illustrative records and makes no network calls; it is not wired into the production UI. Touch behavior and a full accessibility audit remain implementation validation work.
 
@@ -36,7 +36,7 @@ The browser client lives in `crates/arkavo-agui/static/`, with embedded static a
 
 | Current surface | Existing functionality | Destination in the redesign |
 |---|---|---|
-| Agent Mesh | mDNS discovery, agent purpose/model/endpoint, connection status, per-agent streaming chat | Fleet; contextual conversation in mission detail |
+| Agent Mesh | mDNS discovery, agent purpose/model/endpoint, connection status, per-agent streaming chat | Swarm; contextual conversation in mission detail |
 | Tasks | Free-text submission, task list, status/progress, result, routing and A2A/telemetry detail | Missions |
 | Budget & ROI | Spending, cost metrics, budget alerts, ROI, compute/system metrics | Runtime → Resources; relevant limits beside mission actions |
 | Health | Component health, model availability, uptime, memory, tool availability, timing | Runtime → Health; exceptions on Overview |
@@ -58,7 +58,7 @@ Sources: [browser shell](../crates/arkavo-agui/static/index.html), [event routin
 | Critical | The task composer remains usable while disconnected. `wsSend` silently does nothing if the socket is not open, while `submitTask` clears and closes the composer. | Preserve the draft; require an acknowledged submission; show “not sent” or “outcome unknown.” Never automatically resend uncertain commands. |
 | Critical | `requestStopFlight` removes registry/ARP entries; the inspected path does not cancel remote work, revoke credentials or enforce containment. | Label its actual effect as ending gateway flight tracking. It must not power a “contain” or emergency-stop button. |
 | Critical | Proposal review records the fixed reviewer string `agui-operator`. Browser origin/Host defenses are not individual operator authentication. | Attributable approval needs an authenticated operator and scoped authorization, not an identity field typed in the browser. |
-| Critical | Ingress membership, operator socket, full command confinement and several egress/key-lifecycle defenses are marked incomplete. | Show capability coverage and unknown states. Do not claim the deployed fleet is ready for hostile networks from UI appearance. |
+| Critical | Ingress membership, operator socket, full command confinement and several egress/key-lifecycle defenses are marked incomplete. | Show capability coverage and unknown states. Do not claim the deployed swarm is ready for hostile networks from UI appearance. |
 | High | Ten peer-level technical panels force operators to correlate tasks, policy, costs and findings mentally. | Organize around missions and decisions; reuse the same agent/task/policy identity across all detail views. |
 | High | A task description is presented as submission to an orchestrator, but the gateway selects an agent and delegates; decomposition depends on that agent. | Describe the actual dispatch route. Show an execution plan only when a planner has supplied one. |
 | High | Gateway task tracking is an in-memory map. Persistence promised by the task orchestration subsystem does not establish persistence of this UI's task history. | Define durable mission history and reconciliation explicitly; do not imply refresh/restart recovery that the gateway cannot prove. |
@@ -74,7 +74,7 @@ Evidence: [task client](../crates/arkavo-agui/static/js/panels/tasks.js), [WebSo
 
 Recommended positioning: **“Operate AI agents at the edge, with visible boundaries on what they can do and where data can go.”**
 
-This is a positioning hypothesis grounded in the repository, not a claim of exclusive capability or measured superiority. The initial customer wedge is teams operating small or distributed agent fleets that need local execution, constrained authority, and clear operator intervention. Validate deployment effort, hardware requirements and integration cost with those teams before claiming lower total cost.
+This is a positioning hypothesis grounded in the repository, not a claim of exclusive capability or measured superiority. The initial customer wedge is teams operating small or distributed agent swarms that need local execution, constrained authority, and clear operator intervention. Validate deployment effort, hardware requirements and integration cost with those teams before claiming lower total cost.
 
 ### What is already common in the market
 
@@ -90,12 +90,12 @@ Disconnected edge operations are also an established category. Palantir document
 | Authority tied to an invocation | Permit-bound MCP proxy dispatch verifies issuer, proof of possession, tool/arguments, time and invocation budget. Coverage is the enforced proxy path, not every possible tool/process/network route. | Action receipt shows subject, tool, argument digest, destination when available, permit reference and admission/denial. Show mediated versus uncovered paths. |
 | Policy travels with protected data | TDF wrapping, ABAC/KAS and Iroh sharing exist. Several revocation, key lifecycle and broader data-security scenarios remain WIP. Encryption does not retract plaintext already disclosed. | Follow a protected artifact from source policy through key release and transfer; expose recipient and evidence limitations. |
 | Adaptation with constrained effects | ARP tightening proposals have blast-radius checks, explicit lifecycle states, displaced values and reversal paths. Mesh-wide changes cannot auto-apply; capability expansion has separate gates. | Review exact before/after policy, affected scope, evidence and observation outcome; distinguish tightening from privilege expansion. |
-| Portable role packages and distributed execution | SwarmKit validation, role policy/runtime, role binding and flight visibility exist. A logical flight and a remote execution fleet are distinct objects. | Inspect kit digest, role-to-agent binding, effective policy, launch failures and per-role results. |
+| Portable role packages and distributed execution | SwarmKit validation, role policy/runtime, role binding and flight visibility exist. A logical flight and a remote execution swarm are distinct objects. | Inspect kit digest, role-to-agent binding, effective policy, launch failures and per-role results. |
 | Evidence-led defensive control | Trust-state, Guardian, freshness and containment architecture is documented, with substantial integration still proposed. | A future control surface that shows who authorized an action, which boundary enforced it, and which nodes have acknowledged containment. |
 
 Support: [router](../specs/arkavo-edge/router.spec.yaml), [budget](../specs/arkavo-edge/budget.spec.yaml), [permit dispatch](../specs/arkavo-edge/permit-dispatch.spec.yaml), [TDF](../specs/arkavo-edge/tdf.spec.yaml), [TDF security](../specs/arkavo-edge/tdf-security.spec.yaml), [ARP](../specs/arkavo-edge/arp.spec.yaml), [SwarmKit](../specs/arkavo-edge/swarmkit.spec.yaml), [swarm trust design](swarm-trust-model.md).
 
-Avoid “military-grade,” “fully zero trust,” “all tools sandboxed,” “instant fleet containment,” “autonomous declassification,” “guaranteed air-gap readiness,” or unmeasured savings/latency percentages. The ≤50 ms router and ≤65 MB binary requirements are engineering targets until measured for the shipping build. The UI should highlight concrete evidence rather than promotional badges.
+Avoid “military-grade,” “fully zero trust,” “all tools sandboxed,” “instant swarm containment,” “autonomous declassification,” “guaranteed air-gap readiness,” or unmeasured savings/latency percentages. The ≤50 ms router and ≤65 MB binary requirements are engineering targets until measured for the shipping build. The UI should highlight concrete evidence rather than promotional badges.
 
 ## Users and authority
 
@@ -103,7 +103,7 @@ Avoid “military-grade,” “fully zero trust,” “all tools sandboxed,” �
 |---|---|---|
 | Mission owner | Is the objective progressing within its scope and limits? | Overview, Missions |
 | Security reviewer | Which actions or agents need intervention, and what evidence supports it? | Decisions, Data & Trust, Evidence |
-| Runtime maintainer | Which resource, model, transport or configuration is causing failure? | Fleet, Runtime |
+| Runtime maintainer | Which resource, model, transport or configuration is causing failure? | Swarm, Runtime |
 
 These are workflow responsibilities, not roles already enforced by the gateway. Future grants must distinguish task dispatch, policy approval, containment, recovery and protected-evidence access. A mission owner must not gain recovery or data-release authority merely by owning the mission.
 
@@ -119,7 +119,7 @@ This is the canonical product vocabulary for navigation, labels, notifications, 
 | Task | `list-todo` | One assigned unit of work | Do not alternate with job, mission or operation. |
 | Run | `workflow` | One execution attempt of a task | A retry creates another attempt; it does not rename the task. |
 | Agent | `bot` | An identified worker that accepts work | Use node or host only when discussing the underlying device. |
-| Fleet | `network` | Agents within the selected scope | Discovery alone does not establish membership or authority. |
+| Swarm | `network` | Agents within the selected scope | Discovery alone does not establish membership or authority. |
 | Scope | `scan` | The resources and agents a view or action applies to | Keep visible beside consequential actions. |
 | Policy | `scroll-text` | Rules evaluated at a named enforcement boundary | Policy is not evidence that every path is enforced. |
 | Grant | `key-round` | Authority for a principal to act on a resource | Keep recipient, action and expiry inspectable. A grant is not connectivity. |
@@ -130,7 +130,7 @@ This is the canonical product vocabulary for navigation, labels, notifications, 
 | Artifact | `file` | A file or other addressable output | Use the artifact's short name in rows; protection and provenance are fields. |
 | Boundary | `fence` | A point that enforces a specified rule | Use the concrete name, such as Tool execution or Key release, in the UI. |
 
-Keep subsystem terms such as ARP, KAS, TDF and SwarmFlight in advanced detail and searchable aliases. Default labels are Runtime policy, Key service, Protected artifact and Flight. A Flight is a coordinated set of agent roles, not a synonym for every mission. Expand unfamiliar abbreviations in information help, rather than repeating expansions in every row.
+Keep subsystem terms such as ARP, KAS, TDF and SwarmFlight in advanced detail and searchable aliases. Default labels are Runtime policy, Key service, Protected artifact and Flight. A Swarm is the group of agents. A SwarmKit defines coordinated work; a SwarmFlight is one execution instance of that kit, not a synonym for every mission. These definitions follow the [SwarmKit draft](https://github.com/arkavo-org/specifications/blob/main/swarmkit/swarmkit-spec-draft-01.md). Expand unfamiliar abbreviations in information help, rather than repeating expansions in every row.
 
 Use stable action labels: **Create task, Inspect, Review, Approve change, Reject change, Request containment, Request recovery**. Use **End tracking** for today's flight deregistration. Reserve **Cancel task** for an implemented cancellation contract. Avoid generic Execute, Proceed, Resolve, Stop or Approve all where the effect is ambiguous.
 
@@ -164,7 +164,7 @@ Use one outline family: **Lucide**, with 16 px icons in rows and 18 px in naviga
 |---|---|---|
 | Overview | `layout-dashboard` | Current operations |
 | Missions | `target` | Objectives and their work |
-| Fleet | `network` | Agents in scope |
+| Swarm | `network` | Agents in scope |
 | Decisions | `git-pull-request` | Requests for human review |
 | Data & Trust | `shield` | Policy, identity and protected data; the plain shield names the workspace and makes no security claim |
 | Evidence | `files` | Supporting records |
@@ -230,7 +230,7 @@ Use seven labeled destinations. Advanced subsystem detail becomes a tab within t
 |---|---|---|
 | **Overview** | Mission exceptions, pending decisions, connectivity/evidence gaps, recent consequential events | Open the highest-priority actionable item |
 | **Missions** | Objective, scope, steps, role bindings, results, limits, execution receipts; SwarmFlights as a subview | Create a mission or inspect one |
-| **Fleet** | Agents, capabilities, model availability, reachable peers, last observation, identity and assurance separately | Inspect an agent and its assigned work |
+| **Swarm** | Agents, capabilities, model availability, reachable peers, last observation, identity and assurance separately | Inspect an agent and its assigned work |
 | **Decisions** | Policy proposals, approval requests and recovery requests, separated by kind and authority | Review a concrete change |
 | **Data & Trust** | Effective policy, identity evidence, grants, KAS/key release, protected artifacts and transfers | Explain an allow, deny or inability to decide |
 | **Evidence** | Correlated task, policy, tool and transfer timeline; event gaps and provenance | Reconstruct an outcome or prepare an authorized evidence export |
@@ -242,7 +242,7 @@ Keep the same mission, agent, flight, proposal and incident identifiers in every
 
 The top bar shows the selected scope and separate states for browser→gateway, gateway→agents, and policy/security services where those services actually report state. The page also shows observation age and collection gaps. Internet availability is not a proxy for local mesh health; WebSocket connectivity is not a proxy for authorization.
 
-Use the separate state fields in the UI lexicon. A compact line can read `Gateway · Connected` and `Fleet · 3/4 reporting`; it cannot compress them into “System healthy.” For authorization, pair `Allowed` with the action and scope. Source and verification level must be inspectable. A self-report is labeled as such. Definitions belong behind the adjacent circled i.
+Use the separate state fields in the UI lexicon. A compact line can read `Gateway · Connected` and `Swarm · 3/4 reporting`; it cannot compress them into “System healthy.” For authorization, pair `Allowed` with the action and scope. Source and verification level must be inspectable. A self-report is labeled as such. Definitions belong behind the adjacent circled i.
 
 Classification markings come from authoritative metadata at the relevant scope. Never add a decorative “UNCLASSIFIED” or “SECRET” banner, infer a clearance from a display name, or permit free-text editing of classification as an access grant.
 
@@ -252,11 +252,11 @@ Classification markings come from authoritative metadata at the relevant scope. 
 ┌─────────────────────────────────────────────────────────────────────┐
 │ ARKAVO / Operations     Scope                 Operator / authority   │
 ├─────────────────────────────────────────────────────────────────────┤
-│ Gateway: Connected │ Fleet: 3/4 reporting │ Authority: Unknown  [A] │
+│ Gateway: Connected │ Swarm: 3/4 reporting │ Authority: Unknown  [A] │
 ├──────────────┬──────────────────────────────────┬───────────────────┤
 │ Overview     │ Needs attention: 2            [B]│ Inspector         │
 │ Missions     │ Item / State / Reason / Age      │ Scope / change    │
-│ Fleet        │                          Review  │ Source / age   [C]│
+│ Swarm        │                          Review  │ Source / age   [C]│
 │ Decisions    ├──────────────────────────────────┤                   │
 │ Data & Trust │ Missions                      [D]│ Explanation: ⓘ    │
 │ Evidence     │ Name / State / Next / Age        │ Records: open  [E]│
@@ -330,7 +330,7 @@ An authorized handover export records scope, time interval, unresolved decisions
 
 ## Trust and security presentation
 
-Keep these dimensions separate in Fleet and Data & Trust:
+Keep these dimensions separate in Swarm and Data & Trust:
 
 | Dimension | Example question |
 |---|---|
@@ -396,7 +396,7 @@ Exit condition: disconnected/stale scenarios cannot look current or silently dis
 
 ### Operations workspace: expose existing value
 
-Ship the new shell, Overview, Missions/task detail, Fleet and Decisions using real gateway data. Move existing health, cost, routing, learning and context panels into Runtime. Bring relevant policy/data references into mission detail. Add stable deep links and an accessible inspection pattern.
+Ship the new shell, Overview, Missions/task detail, Swarm and Decisions using real gateway data. Move existing health, cost, routing, learning and context panels into Runtime. Bring relevant policy/data references into mission detail. Add stable deep links and an accessible inspection pattern.
 
 Exit condition: an operator can find a blocked task, explain its route, inspect relevant policy and review an existing ARP proposal without manually matching records across unrelated panels.
 
@@ -434,7 +434,7 @@ These are proposed release gates and usability targets, not results from this re
 | Stale proposal or competing reviewer | Server checks current revision and authority; stale approval fails with visible explanation. |
 | Approval denied or failed | Decision remains visible with reason and authoritative result; no console-only failure. |
 | Flight tracking removed | UI describes registry removal and makes no remote-stop or quarantine claim. |
-| Containment requested on partitioned fleet | Per-boundary acknowledgments and unreachable nodes remain visible; no universal success. |
+| Containment requested on partitioned swarm | Per-boundary acknowledgments and unreachable nodes remain visible; no universal success. |
 | Invalid evidence or compromised worker self-report | Cannot establish eligibility, authorize release or clear quarantine. |
 | Internet lost, local dependencies present | Only policy-permitted local work continues; cloud and authority-dependent operations remain distinct. |
 | Old/duplicate/out-of-order event | Idempotent reduction; newer state is not rolled back; event gaps are disclosed. |
@@ -469,11 +469,13 @@ The first redesign should make the available product substantially easier to ope
 
 The embedded web UI now uses the seven-workspace shell, a shared presentation lexicon, locally bundled Lucide 1.17.0 icons, and information help on hover, focus or click. Escape dismisses help; click pins it. The lexicon is also available as a keyboard-accessible dialog. All assets remain embedded in the Rust gateway; no browser package installation or runtime CDN is required. The icon license is served at `/static/icons/LICENSE`.
 
-Overview derives its counts and attention queue from task, fleet and runtime-policy snapshots. Each displayed age is the browser's receipt age for the named gateway snapshot, not an assertion about the originating agent's clock or enforcement freshness. These snapshots poll every five seconds in the operational workspaces and become stale after fifteen seconds without a response, or immediately when the gateway disconnects. Missing data remains Unknown or Not reported until a response arrives.
+Overview derives its counts and attention queue from task, swarm and runtime-policy snapshots. Each displayed age is the browser's receipt age for the named gateway snapshot, not an assertion about the originating agent's clock or enforcement freshness. These snapshots poll every five seconds in the operational workspaces and become stale after fifteen seconds without a response, or immediately when the gateway disconnects. Missing data remains Unknown or Not reported until a response arrives.
 
-`requestFleetSnapshot` returns the existing `meshStatus` payload using connection state rather than treating discovery as a successful link. It avoids remote key-service probes during routine fleet polling. The existing `requestMeshStatus` path remains available for service refresh when entering Data & Trust. Last-known agent records and chat drafts remain visible after an agent disappears.
+`requestFleetSnapshot` returns the existing `meshStatus` payload using connection state rather than treating discovery as a successful link. It avoids remote key-service probes during routine swarm polling. The existing `requestMeshStatus` path remains available for service refresh when entering Data & Trust. Last-known agent records and chat drafts remain visible after an agent disappears. Closed WebSocket clients are reported as disconnected even when discovery connected them without a background reconnect monitor.
 
-Missions currently contains standalone Tasks. Task lists retain lifecycle output, metrics and session evidence when a later compact task snapshot omits them. Numeric task progress is omitted because the existing gateway can estimate it from polling; the task's reported execution state remains visible. Task details identify energy as estimated.
+LAN discovery remains the default. `arkavo ui --agent IP:PORT` adds an explicit peer for environments where multicast is unavailable. The gateway reads its bounded agent card, rejects redirects and keeps the operator-selected endpoint; card metadata does not establish trust or authorization.
+
+Missions currently contains standalone Tasks. Fresh task snapshots include the full stored output separately from the summary, so a reconnect or new browser can inspect completed work. The browser also retains lifecycle output, metrics and session evidence when an older gateway omits them. Numeric task progress is omitted because the existing gateway can estimate it from polling; the task's reported execution state remains visible. Task details identify energy as estimated.
 
 Task creation sends an optional `requestId`, echoed only in its `taskSubmitted` receipt. This is correlation, not durable idempotency. A draft remains in its browser tab until the matching receipt arrives. Closing the composer keeps it; a lost connection or fifteen-second receipt timeout produces Outcome unknown and prevents automatic replay. Reloading the page or restarting the gateway does not provide durable reconciliation. The browser warns before discarding an outstanding draft on page exit.
 

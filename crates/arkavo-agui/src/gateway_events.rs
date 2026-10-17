@@ -325,6 +325,7 @@ pub async fn handle_request_task_list(
             id: t.id.clone(),
             description: t.description.clone(),
             summary: t.summary.clone(),
+            result: t.result.clone(),
             status: t.status.clone(),
             target_agent: t.target_agent.clone(),
             created_at: t.created_at.clone(),
@@ -350,6 +351,31 @@ pub async fn handle_request_task_list(
 )]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn fresh_browser_snapshot_receives_complete_output_separately_from_summary() {
+        let output = "Observation — 未確認\n".repeat(200);
+        let task = crate::gateway::TrackedTask {
+            id: "triage-1".into(),
+            description: "Assess supplied observations".into(),
+            summary: Some("Triage observations".into()),
+            result: Some(output.clone()),
+            target_agent: Some("triage".into()),
+            status: "completed".into(),
+            progress: Some(1.0),
+            created_at: "2026-10-17T12:00:00Z".into(),
+            completed_at: Some("2026-10-17T12:00:10Z".into()),
+            task_category: None,
+            first_working_at: None,
+            source: "ui".into(),
+        };
+        let store = Arc::new(RwLock::new(HashMap::from([(task.id.clone(), task)])));
+        let (tx, mut rx) = mpsc::channel(1);
+        handle_request_task_list(&store, &tx).await.unwrap();
+        let event = serde_json::to_value(rx.recv().await.unwrap()).unwrap();
+        assert_eq!(event["tasks"][0]["result"], output);
+        assert_eq!(event["tasks"][0]["summary"], "Triage observations");
+    }
 
     #[tokio::test]
     async fn discovery_does_not_imply_a_connected_agent() {

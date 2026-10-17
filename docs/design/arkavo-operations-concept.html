@@ -72,12 +72,12 @@
   <section class="op-app" aria-label="Arkavo Operations proposed interface">
     <header class="op-top"><span class="op-brand">ARKAVO</span><span class="op-product">Operations</span><span class="op-scope">Scope · Defensive validation</span></header>
     <div class="op-layout">
-      <nav class="op-nav" aria-label="Proposed navigation"><span aria-current="page"><i data-lucide="layout-dashboard" aria-hidden="true"></i>Overview</span><span><i data-lucide="target" aria-hidden="true"></i>Missions</span><span><i data-lucide="network" aria-hidden="true"></i>Fleet</span><span><i data-lucide="git-pull-request" aria-hidden="true"></i>Decisions</span><span><i data-lucide="shield" aria-hidden="true"></i>Data &amp; Trust</span><span><i data-lucide="files" aria-hidden="true"></i>Evidence</span><span><i data-lucide="cpu" aria-hidden="true"></i>Runtime</span></nav>
+      <nav class="op-nav" aria-label="Proposed navigation"><span aria-current="page"><i data-lucide="layout-dashboard" aria-hidden="true"></i>Overview</span><span><i data-lucide="target" aria-hidden="true"></i>Missions</span><span><i data-lucide="network" aria-hidden="true"></i>Swarm</span><span><i data-lucide="git-pull-request" aria-hidden="true"></i>Decisions</span><span><i data-lucide="shield" aria-hidden="true"></i>Data &amp; Trust</span><span><i data-lucide="files" aria-hidden="true"></i>Evidence</span><span><i data-lucide="cpu" aria-hidden="true"></i>Runtime</span></nav>
       <main class="op-main">
         <div class="op-heading"><h2>Overview</h2><span class="op-age">Snapshot · 14:32:10 UTC</span></div>
         <div class="op-status" aria-label="Connection and service states">
           <div><span class="op-label">Gateway</span><strong class="op-symbol"><i data-lucide="plug" aria-hidden="true"></i><span>Connected</span></strong><button type="button" class="op-info cursor-interaction" aria-label="About Gateway" data-tooltip="The browser can reach the gateway. This does not establish agent reachability or permission to act."><i data-lucide="info" aria-hidden="true"></i></button></div>
-          <div><span class="op-label">Fleet</span><strong id="op-fleet">3/3 reporting</strong><button type="button" class="op-info cursor-interaction" aria-label="About Fleet" data-tooltip="Agents reporting within 10 s, out of agents in this scope. Reporting does not establish authority."><i data-lucide="info" aria-hidden="true"></i></button></div>
+          <div><span class="op-label">Swarm</span><strong id="op-swarm">3/3 reporting</strong><button type="button" class="op-info cursor-interaction" aria-label="About Swarm" data-tooltip="Agents reporting within 10 s, out of agents in this scope. Reporting does not establish authority."><i data-lucide="info" aria-hidden="true"></i></button></div>
           <div><span class="op-label">Key service</span><strong id="op-key">Unknown</strong><button type="button" class="op-info cursor-interaction" aria-label="About Key service" data-tooltip="Service availability for protected key release. Availability alone does not authorize a release."><i data-lucide="info" aria-hidden="true"></i></button></div>
         </div>
         <div class="op-gap" id="op-gap" hidden><strong id="op-gap-state"></strong><span id="op-gap-reason"></span></div>
@@ -111,9 +111,9 @@
       const state = { scenario:'current', item:null, roomy:false };
       const stateIcons = {Running:'circle-play',Blocked:'octagon-pause',Completed:'circle-check','Needs review':'clipboard-pen-line','Outcome unknown':'circle-help',Unknown:'circle-help',Unconfirmed:'shield-question',Stale:'history',Accepted:'inbox',Disconnected:'unplug'};
       const scenarios = {
-        current:{ fleet:'3/3 reporting', key:'Unknown', containment:'Not reported', gap:null, attention:['release','policy'], missionAge:'2 s', missionReason:'12/16 checks' },
-        degraded:{ fleet:'2/3 reporting', key:'Unavailable', containment:'Not reported', gap:['Collection gap · edge-03','Since 14:28:10 UTC'], attention:['command','release','policy'], missionAge:'4 min', missionReason:'12/16 checks' },
-        incident:{ fleet:'2/3 reporting', key:'Unknown', containment:'Unconfirmed', gap:['Containment · Unconfirmed','Tool execution: 0/1 receipts'], attention:['incident','release','policy'], missionAge:'17 s', missionReason:'12/16 checks' }
+        current:{ swarm:'3/3 reporting', key:'Unknown', containment:'Not reported', gap:null, attention:['release','policy'], missionAge:'2 s', missionReason:'12/16 checks' },
+        degraded:{ swarm:'2/3 reporting', key:'Unavailable', containment:'Not reported', gap:['Collection gap · edge-03','Since 14:28:10 UTC'], attention:['command','release','policy'], missionAge:'4 min', missionReason:'12/16 checks' },
+        incident:{ swarm:'2/3 reporting', key:'Unknown', containment:'Unconfirmed', gap:['Containment · Unconfirmed','Tool execution: 0/1 receipts'], attention:['incident','release','policy'], missionAge:'17 s', missionReason:'12/16 checks' }
       };
       const records = {
         mission:{ id:'M-042', name:'Baseline check', state:'Running', reason:'12/16 checks', age:'2 s', action:'Inspect', facts:[['Scope','edge-03 · baseline config'],['Route','Local'],['Tool policy','Read only'],['Progress','12/16 checks'],['Command','Accepted · C-042'],['Source','Agent report · edge-03']], evidence:'E-208 · agent progress report. C-042 · gateway acceptance receipt. Acceptance does not establish completion.' },
@@ -151,7 +151,7 @@
       }
       function render() {
         const scenario=scenarios[state.scenario]; picker.value=state.scenario; root.dataset.roomy=String(state.roomy);
-        put('fleet',scenario.fleet); ['key','containment'].forEach(key=>root.querySelector('#op-'+key).replaceChildren(symbol(scenario[key])));
+        put('swarm',scenario.swarm); ['key','containment'].forEach(key=>root.querySelector('#op-'+key).replaceChildren(symbol(scenario[key])));
         root.querySelector('#op-gap').hidden=!scenario.gap; if (scenario.gap) { put('gap-state',scenario.gap[0]); put('gap-reason',scenario.gap[1]); }
         put('attention-count',String(scenario.attention.length)); root.querySelector('#op-attention').replaceChildren(...scenario.attention.map(key=>row(key))); root.querySelector('#op-missions').replaceChildren(...['mission','release','complete'].map(key=>row(key,true))); renderDetail(); drawIcons();
       }

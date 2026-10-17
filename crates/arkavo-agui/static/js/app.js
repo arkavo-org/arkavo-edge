@@ -1,7 +1,7 @@
 "use strict";
 
 function routeEvent(event) {
-    var snapshot = { meshStatus: 'fleet', taskList: 'tasks', arpStatusUpdate: 'policy' }[event.type];
+    var snapshot = { meshStatus: 'swarm', taskList: 'tasks', arpStatusUpdate: 'policy' }[event.type];
     if (snapshot) AppState.observations[snapshot] = Date.now();
     // Notify showcase mode of incoming events for intelligent view switching
     if (typeof showcaseOnEvent === 'function') showcaseOnEvent(event);

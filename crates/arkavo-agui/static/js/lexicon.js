@@ -4,7 +4,9 @@
 var UI_TERMS = {
     overview: ['Overview', 'layout-dashboard', 'Current tasks, review requests and gateway observations.'],
     tasks: ['Missions', 'target', 'This gateway tracks standalone tasks. Durable mission records are not yet available.'],
-    agents: ['Fleet', 'network', 'Discovered agents. Discovery does not establish identity or authority.'],
+    agents: ['Swarm', 'network', 'Agents in this gateway scope. Discovery does not establish identity or authority.'],
+    kit: ['SwarmKit', 'file', 'A portable package defining coordinated agent work: roles, skills, tool grants and provisioning.'],
+    flight: ['SwarmFlight', 'workflow', 'One execution instance of a SwarmKit. A standalone task is not a SwarmFlight.'],
     decisions: ['Decisions', 'git-pull-request', 'Runtime policy proposals requiring a human choice.'],
     security: ['Data & Trust', 'shield', 'Inspect protected data, policy and their reported enforcement boundaries.'],
     telemetry: ['Evidence', 'files', 'Session events supporting an observation. Events alone do not prove enforcement.'],

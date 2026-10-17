@@ -7,10 +7,17 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut port = 7700;
     let mut initial_prompt: Option<String> = None;
+    let mut direct_agents = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--agent" => {
+                let endpoint = args.get(i + 1).ok_or("--agent requires IP:PORT")?;
+                arkavo_agui::gateway_direct::parse_endpoint(endpoint)?;
+                direct_agents.push(endpoint.clone());
+                i += 2;
+            }
             "--prompt" | "-p" => {
                 if i + 1 < args.len() {
                     initial_prompt = Some(args[i + 1].clone());
@@ -40,6 +47,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let run_async = async move {
         #[cfg(feature = "cef-ui")]
         {
+            if !direct_agents.is_empty() {
+                return Err("--agent requires the web UI renderer".into());
+            }
             println!("Starting Arkavo UI with native CEF renderer...");
             use_cef_renderer(port, initial_prompt).await
         }
@@ -47,13 +57,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(all(feature = "web-ui", not(feature = "cef-ui")))]
         {
             println!("Starting Arkavo UI with web renderer...");
-            use_web_gateway(port, initial_prompt).await
+            use_web_gateway(port, initial_prompt, direct_agents).await
         }
 
         #[cfg(not(any(feature = "cef-ui", feature = "web-ui")))]
         {
             let _ = port;
             let _ = initial_prompt;
+            let _ = direct_agents;
             Err(
                 "No UI renderer available. Build with --features cef-ui or --features web-ui"
                     .into(),
@@ -997,14 +1008,17 @@ async fn create_client_from_routing(
     Ok(arkavo_llm::LlmClient::new(provider))
 }
 
-#[cfg(feature = "web-ui")]
-#[allow(dead_code)]
+#[cfg(all(feature = "web-ui", not(feature = "cef-ui")))]
 async fn use_web_gateway(
     port: u16,
     initial_prompt: Option<String>,
+    direct_agents: Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Creating web UI gateway...");
     let mut gateway = arkavo_agui::AgUiGateway::new(port);
+    for endpoint in direct_agents {
+        gateway.add_agent_endpoint(&endpoint)?;
+    }
 
     if let Some(prompt) = initial_prompt {
         println!("Starting UI with initial prompt: {prompt}");
@@ -1026,6 +1040,8 @@ fn print_usage() {
     println!();
     println!("OPTIONS:");
     println!("    --port <PORT>              Port to run the UI server on (default: 7700)");
+    println!("    --agent <IP:PORT>          Connect a known agent; repeat for multiple peers");
+    println!("                              LAN discovery remains enabled by default");
     println!("    --prompt, -p <PROMPT>      Initial prompt for UI generation");
     println!("    <PORT>                     Port number (shorthand)");
     println!();

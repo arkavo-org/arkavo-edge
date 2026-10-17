@@ -65,7 +65,7 @@ function environment(...files) {
 
 function ready(env) {
     env.context.AppState.connection = 'connected';
-    env.context.AppState.observations.fleet = Date.now();
+    env.context.AppState.observations.swarm = Date.now();
     env.context.AppState.observations.policy = Date.now();
     env.context.AppState.agents.worker = { id: 'worker', status: 'connected' };
     env.context.ws = new env.context.WebSocket();
@@ -78,6 +78,18 @@ test('all shipped scripts parse without a bundler', () => {
             new vm.Script(readFileSync(join(directory, file), 'utf8'), { filename: file });
         }
     }
+});
+
+test('agent workspace uses Swarm and distinguishes kits from executions', () => {
+    const { context: c } = environment();
+    assert.equal(c.UI_TERMS.agents[0], 'Swarm');
+    assert.equal(c.UI_TERMS.kit[0], 'SwarmKit');
+    assert.equal(c.UI_TERMS.flight[0], 'SwarmFlight');
+    assert.match(c.UI_TERMS.flight[2], /execution instance of a SwarmKit/);
+    const html = readFileSync(join(root, '..', 'index.html'), 'utf8');
+    assert.match(html, /data-nav-term="agents">Swarm</);
+    assert.doesNotMatch(html, /\bFleet\b/);
+    for (const term of Object.values(c.UI_TERMS)) assert.ok(c.UI_ICONS[term[1]], term[0]);
 });
 
 test('untrusted text is escaped in both content and quoted attributes', () => {
@@ -108,13 +120,13 @@ test('observation age handles missing, future and expired observations', () => {
     for (const [elapsed, label] of [[0, 'now'], [1500, '1s'], [120000, '2m'], [3600000, '1h'], [86400000, '1d']]) {
         assert.equal(c.observationAge(new Date(now - elapsed).toISOString(), now), label);
     }
-    assert.equal(c.snapshotState('fleet', now), 'unknown');
+    assert.equal(c.snapshotState('swarm', now), 'unknown');
     c.AppState.connection = 'connected';
-    c.AppState.observations.fleet = now - 15000;
-    assert.equal(c.snapshotState('fleet', now), 'current');
-    assert.equal(c.snapshotState('fleet', now + 1), 'stale');
+    c.AppState.observations.swarm = now - 15000;
+    assert.equal(c.snapshotState('swarm', now), 'current');
+    assert.equal(c.snapshotState('swarm', now + 1), 'stale');
     c.AppState.connection = 'disconnected';
-    assert.equal(c.snapshotState('fleet', now), 'stale');
+    assert.equal(c.snapshotState('swarm', now), 'stale');
 });
 
 test('closing and reopening the composer preserves the draft', () => {
@@ -127,7 +139,7 @@ test('closing and reopening the composer preserves the draft', () => {
     assert.equal(e.element('task-description').value, 'Unsubmitted work');
 });
 
-test('offline, empty fleet and stale fleet cannot silently discard a task', () => {
+test('offline, empty swarm and stale swarm cannot silently discard a task', () => {
     const e = environment('websocket.js', 'task-composer.js');
     ready(e);
     e.context.AppState.connection = 'disconnected';
@@ -140,7 +152,7 @@ test('offline, empty fleet and stale fleet cannot silently discard a task', () =
     assert.equal(e.sent.length, 0);
     assert.match(e.element('task-submission-status').textContent, /no connected agents/);
     e.context.AppState.agents.worker = { status: 'connected' };
-    e.context.AppState.observations.fleet = Date.now() - 16000;
+    e.context.AppState.observations.swarm = Date.now() - 16000;
     e.context.submitTask();
     assert.equal(e.sent.length, 0);
     assert.equal(e.element('task-description').value, 'Inspect the local build');
@@ -201,7 +213,7 @@ test('transport handles malformed frames and send failure without clearing draft
     assert.equal(e.context.wsSend({ type: 'submitTask' }), false);
 });
 
-test('fleet loss retains last observations and chat history', () => {
+test('swarm loss retains last observations and chat history', () => {
     const e = environment('panels/tasks.js', 'panels/agents.js');
     e.context.renderAgents = () => {};
     e.context.handleMeshStatus({ agents: [{ id: 'worker', purpose: 'Review code' }] });
@@ -267,7 +279,7 @@ test('overview distinguishes unreported data from measured zeros and exposes att
     assert.match(e.element('overview-container').innerHTML, /Unknown/);
     assert.match(e.element('overview-container').innerHTML, /Not reported/);
     e.context.AppState.observations.tasks = Date.now();
-    e.context.AppState.observations.fleet = Date.now();
+    e.context.AppState.observations.swarm = Date.now();
     e.context.AppState.observations.policy = Date.now();
     e.context.AppState.connection = 'connected';
     e.context.renderOverview();

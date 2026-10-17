@@ -292,11 +292,24 @@ impl AgentConnection {
     }
 
     pub async fn get_status(&self) -> ConnectionStatus {
-        self.status.read().await.clone()
+        let status = self.status.read().await.clone();
+        // Discovery callers can connect without starting the reconnect monitor.
+        // A retained client handle must not make a closed transport look live.
+        if status == ConnectionStatus::Connected && !self.is_connected().await {
+            ConnectionStatus::Failed {
+                reason: "Connection lost".into(),
+            }
+        } else {
+            status
+        }
     }
 
     pub async fn is_connected(&self) -> bool {
-        self.client.read().await.is_some()
+        self.client
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(WsClient::is_connected)
     }
 
     /// Send a JSON-RPC request to the agent, retrying once after reconnect on connection errors

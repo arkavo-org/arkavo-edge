@@ -86,6 +86,7 @@ pub struct AgUiGateway {
     security_handler: Arc<RwLock<SecurityHandler>>,
     debug_handler: Option<Arc<DebugHandler>>,
     initial_prompt: Option<String>,
+    direct_agents: Vec<SocketAddr>,
 }
 
 impl AgUiGateway {
@@ -103,11 +104,21 @@ impl AgUiGateway {
             security_handler: Arc::new(RwLock::new(SecurityHandler::new())),
             debug_handler: None,
             initial_prompt: None,
+            direct_agents: Vec::new(),
         }
     }
 
     pub fn set_initial_prompt(&mut self, prompt: String) {
         self.initial_prompt = Some(prompt);
+    }
+
+    /// Add a known peer when multicast discovery is unavailable.
+    pub fn add_agent_endpoint(&mut self, endpoint: &str) -> Result<(), String> {
+        let address = crate::gateway_direct::parse_endpoint(endpoint)?;
+        if !self.direct_agents.contains(&address) {
+            self.direct_agents.push(address);
+        }
+        Ok(())
     }
 
     pub async fn with_debug_handler(
@@ -406,6 +417,12 @@ impl AgUiGateway {
             },
             swarm_flights: Arc::new(SwarmFlightRegistry::new()),
         };
+
+        for endpoint in self.direct_agents {
+            crate::gateway_direct::connect(&state, self.telemetry_tx.clone(), endpoint)
+                .await
+                .map_err(|error| format!("Cannot connect to agent {endpoint}: {error}"))?;
+        }
 
         // Auto-launch a SwarmFlight when ARKAVO_SWARMKIT_PATH points at a
         // manifest. Mirrors the ARKAVO_ARP_PATH pattern: errors are logged

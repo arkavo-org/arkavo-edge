@@ -20,11 +20,11 @@ function updateComposerAvailability() {
     var status = document.getElementById('task-submission-status');
     if (!button) return;
     var hasAgents = Object.values(AppState.agents).some(function(agent) { return agent.status === 'connected'; });
-    button.disabled = !!taskSubmission || AppState.connection !== 'connected' || snapshotState('fleet') !== 'current' || !hasAgents;
+    button.disabled = !!taskSubmission || AppState.connection !== 'connected' || snapshotState('swarm') !== 'current' || !hasAgents;
     input.readOnly = !!taskSubmission;
     if (taskSubmission) status.textContent = taskSubmission.unknown ? 'Outcome unknown · receipt not received. Draft retained; check Tasks before resubmitting.' : 'Sending · awaiting gateway acceptance';
     else if (AppState.connection !== 'connected') status.textContent = 'Not sent · gateway disconnected. Draft retained.';
-    else if (snapshotState('fleet') !== 'current') status.textContent = 'Not sent · awaiting a current fleet snapshot';
+    else if (snapshotState('swarm') !== 'current') status.textContent = 'Not sent · awaiting a current swarm snapshot';
     else if (!hasAgents) status.textContent = 'Not sent · no connected agents';
     else status.textContent = 'Draft · kept in this tab until accepted';
 }

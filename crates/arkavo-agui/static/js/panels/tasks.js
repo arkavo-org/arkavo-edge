@@ -24,7 +24,7 @@ function handleTaskList(event) {
         event.tasks.forEach(function(task) {
             var key = safeTaskKey(task.id);
             if (key) {
-                // TaskList omits result and metrics; keep evidence received in lifecycle events.
+                // Older gateways omit output; session metrics and events also survive polling.
                 var merged = Object.assign({}, previous[key] || {}, task);
                 merged._events = previous[key] ? previous[key]._events : [];
                 merged.completed_at = task.completed_at || task.completedAt || merged.completed_at;

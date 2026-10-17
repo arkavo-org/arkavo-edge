@@ -10,8 +10,8 @@ function renderAgentDetail() {
     }
     var agent = AppState.agents[id];
     if (!agent) {
-        updateInspector(container, renderMissingRecord('Agent', id, 'agents', 'fleet'),
-            JSON.stringify([id, !!AppState.observations.fleet]));
+        updateInspector(container, renderMissingRecord('Agent', id, 'agents', 'swarm'),
+            JSON.stringify([id, !!AppState.observations.swarm]));
         return;
     }
     var tasks = sortedTasks().filter(function(task) { return getTaskAgent(task, task.id) === id; });
@@ -23,7 +23,7 @@ function renderAgentDetail() {
     html += '<dl class="inspection-fields">' + inspectionField('Model', escapeHtml(agent.model || 'Not reported')) +
         inspectionField('Endpoint', escapeHtml(agent.endpoint || 'Not reported')) +
         inspectionField('Authorization ' + uiHelp('grant'), 'Not reported') +
-        inspectionField('Snapshot ' + uiHelp('freshness'), receivedAge('fleet')) + '</dl></section>';
+        inspectionField('Snapshot ' + uiHelp('freshness'), receivedAge('swarm')) + '</dl></section>';
     html += '<section class="ops-section"><div class="ops-section-heading"><h2>Assigned tasks</h2><span class="muted">' + receivedAge('tasks') + '</span></div>' +
         (tasks.length ? taskRows(tasks) : '<div class="ops-empty">' + (AppState.observations.tasks ? 'No assigned tasks reported' : 'Tasks not reported') + '</div>') + '</section>';
     html += '<section class="ops-section"><div class="ops-section-heading"><h2>Needs review</h2><span class="muted">' + receivedAge('policy') + '</span></div>';
@@ -33,5 +33,5 @@ function renderAgentDetail() {
     }).join('') : '<div class="ops-empty">' + (policy ? 'No pending policy changes' : 'Policy not reported') + '</div>';
     html += '</section>';
     updateInspector(container, html, JSON.stringify([id, agent, tasks, proposals, !!policy,
-        !!AppState.observations.tasks, !!AppState.observations.fleet, !!AppState.observations.policy]));
+        !!AppState.observations.tasks, !!AppState.observations.swarm, !!AppState.observations.policy]));
 }

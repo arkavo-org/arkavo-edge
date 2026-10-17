@@ -716,6 +716,8 @@ pub struct TaskInfo {
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
     pub status: String,
     #[serde(rename = "targetAgent", skip_serializing_if = "Option::is_none")]
     pub target_agent: Option<String>,

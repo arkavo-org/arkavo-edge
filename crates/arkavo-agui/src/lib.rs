@@ -13,6 +13,7 @@ pub mod gateway_agent;
 pub mod gateway_bind;
 pub mod gateway_config;
 pub mod gateway_context;
+pub mod gateway_direct;
 pub mod gateway_events;
 pub mod gateway_health;
 pub mod gateway_mdns;
