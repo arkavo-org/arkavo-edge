@@ -343,6 +343,7 @@ async fn poll_agent_tasks(
                         .insert(composite_key.clone(), tracked);
 
                     let submitted = AgUiEvent::TaskSubmitted {
+                        request_id: None,
                         task_id: composite_key.clone(),
                         description: Some(objective.to_string()),
                         summary,

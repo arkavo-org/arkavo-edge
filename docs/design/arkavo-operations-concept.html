@@ -1,0 +1,167 @@
+<div id="arkavo-operations-concept">
+  <style>
+    #arkavo-operations-concept { --op-bg:light-dark(#f4f6f8,#10171e); --op-panel:light-dark(#fff,#18212b); --op-ink:light-dark(#182533,#e5ecf2); --op-muted:light-dark(#526170,#a6b4c2); --op-line:light-dark(#d7dfe5,#34434f); --op-accent:light-dark(#076984,#76d2e8); --op-selected:light-dark(#e2f1f6,#203a47); --op-warn:light-dark(#855000,#efbf67); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--op-ink); }
+    #arkavo-operations-concept * { box-sizing:border-box; }
+    #arkavo-operations-concept [hidden] { display:none!important; }
+    #arkavo-operations-concept .op-preview { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:0 90px 12px 0; color:var(--op-muted); font-size:12px; }
+    #arkavo-operations-concept .op-preview label { display:flex; align-items:center; gap:8px; }
+    #arkavo-operations-concept select { font:inherit; color:var(--op-ink); background:var(--op-panel); border:1px solid var(--op-line); border-radius:4px; padding:6px; max-width:100%; }
+    #arkavo-operations-concept .op-app { background:var(--op-bg); border:1px solid var(--op-line); border-radius:8px; }
+    #arkavo-operations-concept .op-top { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:15px 18px; border-bottom:1px solid var(--op-line); background:var(--op-panel); border-radius:8px 8px 0 0; }
+    #arkavo-operations-concept .op-brand { font-size:15px; font-weight:500; letter-spacing:2px; }
+    #arkavo-operations-concept .op-product { padding-left:12px; border-left:1px solid var(--op-line); }
+    #arkavo-operations-concept .op-scope { margin-left:auto; color:var(--op-muted); font-size:12px; }
+    #arkavo-operations-concept .op-layout { display:grid; grid-template-columns:154px minmax(0,1fr); }
+    #arkavo-operations-concept .op-nav { padding:14px 8px; border-right:1px solid var(--op-line); background:var(--op-panel); border-radius:0 0 0 8px; }
+    #arkavo-operations-concept .op-nav span { display:flex; align-items:center; gap:8px; margin:2px 0; padding:9px 10px; border-radius:4px; color:var(--op-muted); }
+    #arkavo-operations-concept .op-nav svg { width:18px; height:18px; flex:0 0 18px; }
+    #arkavo-operations-concept .op-symbol { display:inline-flex; align-items:center; gap:6px; max-width:100%; }
+    #arkavo-operations-concept .op-symbol svg { width:16px; height:16px; flex:0 0 16px; }
+    #arkavo-operations-concept .op-symbol span { min-width:0; }
+    #arkavo-operations-concept .op-nav [aria-current] { color:var(--op-accent); background:var(--op-selected); font-weight:500; }
+    #arkavo-operations-concept .op-main { min-width:0; padding:18px; }
+    #arkavo-operations-concept h2 { margin:0; font-size:22px; line-height:1.3; font-weight:500; }
+    #arkavo-operations-concept h3 { margin:0; font-size:14px; font-weight:500; }
+    #arkavo-operations-concept .op-heading { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+    #arkavo-operations-concept .op-age { margin-left:auto; font-size:12px; color:var(--op-muted); font-variant-numeric:tabular-nums; }
+    #arkavo-operations-concept button { font:inherit; color:var(--op-ink); }
+    #arkavo-operations-concept .op-info { display:inline-flex; align-items:center; justify-content:center; vertical-align:middle; width:24px; height:24px; padding:3px; border:0; border-radius:50%; background:transparent; color:var(--op-muted); }
+    #arkavo-operations-concept .op-info svg { width:16px; height:16px; }
+    #arkavo-operations-concept .op-status { display:flex; flex-wrap:wrap; gap:8px 20px; margin:14px 0 22px; padding-bottom:14px; border-bottom:1px solid var(--op-line); font-size:12px; }
+    #arkavo-operations-concept .op-status > div { display:flex; align-items:center; gap:7px; }
+    #arkavo-operations-concept .op-label { color:var(--op-muted); }
+    #arkavo-operations-concept strong { font-weight:500; }
+    #arkavo-operations-concept .op-section { margin-bottom:20px; }
+    #arkavo-operations-concept .op-section-head { display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin-bottom:8px; }
+    #arkavo-operations-concept .op-count { font-variant-numeric:tabular-nums; color:var(--op-muted); font-size:12px; }
+    #arkavo-operations-concept table { width:100%; border-collapse:collapse; background:var(--op-panel); table-layout:fixed; }
+    #arkavo-operations-concept th { text-align:left; color:var(--op-muted); font-size:12px; font-weight:400; background:var(--op-bg); }
+    #arkavo-operations-concept th, #arkavo-operations-concept td { padding:9px 10px; border-bottom:1px solid var(--op-line); vertical-align:middle; overflow-wrap:anywhere; }
+    #arkavo-operations-concept th:nth-child(1) { width:27%; }
+    #arkavo-operations-concept th:nth-child(2) { width:20%; }
+    #arkavo-operations-concept th:nth-child(3) { width:27%; }
+    #arkavo-operations-concept th:nth-child(4) { width:11%; }
+    #arkavo-operations-concept th:nth-child(5) { width:15%; }
+    #arkavo-operations-concept td { font-size:14px; }
+    #arkavo-operations-concept td small { display:block; color:var(--op-muted); font-size:11px; margin-top:2px; }
+    #arkavo-operations-concept td:nth-child(4) { font-variant-numeric:tabular-nums; }
+    #arkavo-operations-concept td:last-child, #arkavo-operations-concept th:last-child { text-align:right; }
+    #arkavo-operations-concept tr[data-selected="true"] td { background:var(--op-selected); }
+    #arkavo-operations-concept .op-action { border:1px solid var(--op-line); background:var(--op-panel); padding:5px 8px; border-radius:4px; font-size:12px; }
+    #arkavo-operations-concept .op-warn { color:var(--op-warn); }
+    #arkavo-operations-concept .op-gap { display:flex; flex-wrap:wrap; gap:5px 14px; border-left:3px solid var(--op-warn); background:var(--op-panel); padding:10px 12px; margin-bottom:18px; font-size:12px; }
+    #arkavo-operations-concept .op-boundaries { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; border-top:1px solid var(--op-line); padding-top:12px; }
+    #arkavo-operations-concept .op-boundaries dt { display:flex; align-items:center; gap:3px; font-size:12px; color:var(--op-muted); }
+    #arkavo-operations-concept .op-boundaries dd { margin:3px 0 0; font-size:14px; }
+    #arkavo-operations-concept dl { margin:0; }
+    #arkavo-operations-concept .op-detail { background:var(--op-panel); border:1px solid var(--op-line); border-left:3px solid var(--op-accent); border-radius:4px; padding:14px; margin:18px 0 20px; }
+    #arkavo-operations-concept .op-detail .op-action { margin-left:auto; }
+    #arkavo-operations-concept .op-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-top:16px; }
+    #arkavo-operations-concept .op-facts dt { color:var(--op-muted); font-size:12px; }
+    #arkavo-operations-concept .op-facts dd { margin:3px 0 0; font-size:14px; overflow-wrap:anywhere; }
+    #arkavo-operations-concept .op-records { margin-top:14px; border-top:1px solid var(--op-line); padding-top:10px; font-size:12px; }
+    #arkavo-operations-concept summary { font-weight:500; }
+    #arkavo-operations-concept .op-records p { margin:8px 0 0; }
+    #arkavo-operations-concept .op-note { color:var(--op-muted); font-size:11px; margin:12px 0 0; }
+    #arkavo-operations-concept[data-roomy="true"] td { padding-top:15px; padding-bottom:15px; }
+    @media(max-width:760px) { #arkavo-operations-concept .op-layout { display:block; } #arkavo-operations-concept .op-nav { display:flex; flex-wrap:wrap; gap:2px; border:0; border-bottom:1px solid var(--op-line); padding:6px; } #arkavo-operations-concept .op-nav span { font-size:12px; padding:6px 8px; } }
+    @media(max-width:540px) { #arkavo-operations-concept .op-preview { padding:40px 0 12px; } #arkavo-operations-concept .op-scope { margin:0; width:100%; } #arkavo-operations-concept .op-main { padding:14px; } #arkavo-operations-concept .op-age { margin:0; width:100%; } #arkavo-operations-concept table, #arkavo-operations-concept tbody { display:block; } #arkavo-operations-concept thead { display:none; } #arkavo-operations-concept tr { display:block; padding:10px; border-bottom:1px solid var(--op-line); } #arkavo-operations-concept td { display:grid; grid-template-columns:60px minmax(0,1fr); column-gap:9px; padding:3px 0!important; border:0; } #arkavo-operations-concept td::before { content:attr(data-label); color:var(--op-muted); font-size:12px; } #arkavo-operations-concept td small { grid-column:2; } #arkavo-operations-concept td:last-child { display:flex; justify-content:flex-end; margin-top:4px; } #arkavo-operations-concept td:last-child::before { display:none; } #arkavo-operations-concept .op-boundaries, #arkavo-operations-concept .op-facts { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media(pointer:coarse) { #arkavo-operations-concept .op-info, #arkavo-operations-concept .op-action, #arkavo-operations-concept summary { min-height:44px; min-width:44px; } #arkavo-operations-concept select { font-size:16px; min-height:44px; } }
+  </style>
+  <div class="op-preview"><span>Concept · sample records · no commands</span><label for="op-scenario">Scenario <select id="op-scenario"><option value="current">Connected</option><option value="degraded">Link loss</option><option value="incident">Containment</option></select></label></div>
+  <section class="op-app" aria-label="Arkavo Operations proposed interface">
+    <header class="op-top"><span class="op-brand">ARKAVO</span><span class="op-product">Operations</span><span class="op-scope">Scope · Defensive validation</span></header>
+    <div class="op-layout">
+      <nav class="op-nav" aria-label="Proposed navigation"><span aria-current="page"><i data-lucide="layout-dashboard" aria-hidden="true"></i>Overview</span><span><i data-lucide="target" aria-hidden="true"></i>Missions</span><span><i data-lucide="network" aria-hidden="true"></i>Fleet</span><span><i data-lucide="git-pull-request" aria-hidden="true"></i>Decisions</span><span><i data-lucide="shield" aria-hidden="true"></i>Data &amp; Trust</span><span><i data-lucide="files" aria-hidden="true"></i>Evidence</span><span><i data-lucide="cpu" aria-hidden="true"></i>Runtime</span></nav>
+      <main class="op-main">
+        <div class="op-heading"><h2>Overview</h2><span class="op-age">Snapshot · 14:32:10 UTC</span></div>
+        <div class="op-status" aria-label="Connection and service states">
+          <div><span class="op-label">Gateway</span><strong class="op-symbol"><i data-lucide="plug" aria-hidden="true"></i><span>Connected</span></strong><button type="button" class="op-info cursor-interaction" aria-label="About Gateway" data-tooltip="The browser can reach the gateway. This does not establish agent reachability or permission to act."><i data-lucide="info" aria-hidden="true"></i></button></div>
+          <div><span class="op-label">Fleet</span><strong id="op-fleet">3/3 reporting</strong><button type="button" class="op-info cursor-interaction" aria-label="About Fleet" data-tooltip="Agents reporting within 10 s, out of agents in this scope. Reporting does not establish authority."><i data-lucide="info" aria-hidden="true"></i></button></div>
+          <div><span class="op-label">Key service</span><strong id="op-key">Unknown</strong><button type="button" class="op-info cursor-interaction" aria-label="About Key service" data-tooltip="Service availability for protected key release. Availability alone does not authorize a release."><i data-lucide="info" aria-hidden="true"></i></button></div>
+        </div>
+        <div class="op-gap" id="op-gap" hidden><strong id="op-gap-state"></strong><span id="op-gap-reason"></span></div>
+        <section class="op-section" aria-labelledby="op-attention-title">
+          <div class="op-section-head"><h3 id="op-attention-title">Needs attention</h3><span class="op-count" id="op-attention-count">2</span><button type="button" class="op-info cursor-interaction" aria-label="About Needs attention" data-tooltip="Blocked work and requests needing a decision. Review opens the exact scope and effect; it does not approve a change."><i data-lucide="info" aria-hidden="true"></i></button></div>
+          <table aria-label="Items needing attention"><thead><tr><th scope="col">Item</th><th scope="col">State</th><th scope="col">Reason</th><th scope="col">Age</th><th scope="col">Action</th></tr></thead><tbody id="op-attention"></tbody></table>
+        </section>
+        <section class="op-section" aria-labelledby="op-missions-title">
+          <div class="op-section-head"><h3 id="op-missions-title">Missions</h3><span class="op-count">3</span><button type="button" class="op-info cursor-interaction" aria-label="About Missions" data-tooltip="A mission groups tasks under an objective, scope and success criteria. A task is one unit of work; a run is one execution attempt."><i data-lucide="info" aria-hidden="true"></i></button><span class="op-age">Age at snapshot<button type="button" class="op-info cursor-interaction" aria-label="About Age" data-tooltip="Time since the source observation at this snapshot. Stale means its freshness threshold was exceeded; the last reported state remains visible."><i data-lucide="info" aria-hidden="true"></i></button></span></div>
+          <table aria-label="Mission status"><thead><tr><th scope="col">Mission</th><th scope="col">State</th><th scope="col">Progress / blocker</th><th scope="col">Age</th><th scope="col">Action</th></tr></thead><tbody id="op-missions"></tbody></table>
+        </section>
+        <dl class="op-boundaries" aria-label="Operating boundaries for this scope">
+          <div><dt>Model route<button type="button" class="op-info cursor-interaction" aria-label="About Model route" data-tooltip="Where inference runs. Local inference does not establish permission to access or release data."><i data-lucide="info" aria-hidden="true"></i></button></dt><dd>Local</dd></div>
+          <div><dt>Cloud inference<button type="button" class="op-info cursor-interaction" aria-label="About Cloud inference" data-tooltip="Authorization for cloud inference in this scope. Denied is a policy result, not a connectivity failure."><i data-lucide="info" aria-hidden="true"></i></button></dt><dd class="op-symbol"><i data-lucide="ban" aria-hidden="true"></i><span>Denied</span></dd></div>
+          <div><dt>Data release<button type="button" class="op-info cursor-interaction" aria-label="About Data release" data-tooltip="Authorization for the selected recipient and destination. Unknown means no current decision establishes permission."><i data-lucide="info" aria-hidden="true"></i></button></dt><dd class="op-symbol op-warn"><i data-lucide="circle-help" aria-hidden="true"></i><span>Unknown</span></dd></div>
+          <div><dt>Containment<button type="button" class="op-info cursor-interaction" aria-label="About Containment" data-tooltip="Enforcement at the targeted boundaries. Requested is intent; Enforced requires a receipt. Unconfirmed means the effect is not established."><i data-lucide="info" aria-hidden="true"></i></button></dt><dd id="op-containment">Not reported</dd></div>
+        </dl>
+        <section class="op-detail" id="op-detail" aria-label="Selected record" hidden>
+          <div class="op-heading"><h3 id="op-detail-title"></h3><button class="op-action cursor-interaction" id="op-close" type="button">Close</button></div>
+          <div id="op-detail-content" aria-live="polite" aria-atomic="true"><dl class="op-facts" id="op-facts"></dl></div>
+          <details class="op-records"><summary class="cursor-interaction">Evidence</summary><p id="op-evidence"></p></details>
+        </section>
+        <p class="op-note">Proposed contracts · illustrative snapshot</p>
+      </main>
+    </div>
+  </section>
+  <script>
+    (() => {
+      const root = document.getElementById('arkavo-operations-concept');
+      const picker = root.querySelector('#op-scenario');
+      const state = { scenario:'current', item:null, roomy:false };
+      const stateIcons = {Running:'circle-play',Blocked:'octagon-pause',Completed:'circle-check','Needs review':'clipboard-pen-line','Outcome unknown':'circle-help',Unknown:'circle-help',Unconfirmed:'shield-question',Stale:'history',Accepted:'inbox',Disconnected:'unplug'};
+      const scenarios = {
+        current:{ fleet:'3/3 reporting', key:'Unknown', containment:'Not reported', gap:null, attention:['release','policy'], missionAge:'2 s', missionReason:'12/16 checks' },
+        degraded:{ fleet:'2/3 reporting', key:'Unavailable', containment:'Not reported', gap:['Collection gap · edge-03','Since 14:28:10 UTC'], attention:['command','release','policy'], missionAge:'4 min', missionReason:'12/16 checks' },
+        incident:{ fleet:'2/3 reporting', key:'Unknown', containment:'Unconfirmed', gap:['Containment · Unconfirmed','Tool execution: 0/1 receipts'], attention:['incident','release','policy'], missionAge:'17 s', missionReason:'12/16 checks' }
+      };
+      const records = {
+        mission:{ id:'M-042', name:'Baseline check', state:'Running', reason:'12/16 checks', age:'2 s', action:'Inspect', facts:[['Scope','edge-03 · baseline config'],['Route','Local'],['Tool policy','Read only'],['Progress','12/16 checks'],['Command','Accepted · C-042'],['Source','Agent report · edge-03']], evidence:'E-208 · agent progress report. C-042 · gateway acceptance receipt. Acceptance does not establish completion.' },
+        release:{ id:'M-043', name:'Findings export', state:'Blocked', reason:'Release grant missing', age:'4 s', action:'Inspect', facts:[['Scope','Findings package · M-043'],['Recipient','Review team'],['Destination','Evidence store'],['Authorization','Unknown'],['Blocker','Release grant missing'],['Next','Review recipient policy']], evidence:'E-210 · release preflight. No current grant reported for this recipient and destination.' },
+        complete:{ id:'M-044', name:'Tool audit', state:'Completed', reason:'12/12 checks', age:'8 s', action:'Inspect', facts:[['Scope','edge-01 · tool inventory'],['Result','12/12 checks'],['Artifact','Tool inventory'],['Run','R-044-1'],['Source','Agent result · edge-01'],['Receipt','Task completion · C-044']], evidence:'E-206 · inventory result and task completion receipt. Completion applies to the declared audit checks.' },
+        policy:{ id:'P-017', name:'Tool permission', state:'Needs review', reason:'Remove write access', age:'18 s', action:'Review', facts:[['Scope','edge-02 · config tool'],['Before','Read + write'],['After','Read only'],['Policy','Version 8 → 9'],['Effect','Config writes denied'],['Application','Not applied']], evidence:'P-017 · policy diff. E-204 · affected tool inventory. Reviewer authority and current policy revision must be checked before approval.' },
+        command:{ id:'C-045', name:'Cancel baseline', state:'Outcome unknown', reason:'Reply missing', age:'4 min', action:'Inspect', facts:[['Scope','M-042 · edge-03'],['Command','Cancel · outcome unknown'],['Link','Disconnected'],['Replay','Disabled'],['Next','Query command receipt'],['Task','Running · last reported']], evidence:'C-045 · cancellation acknowledgment missing after link loss. C-042 confirms the original task admission only. Reconciliation requires the proposed durable command contract; no resend is available here.' },
+        incident:{ id:'I-018', name:'Tool integrity', state:'Unconfirmed', reason:'Containment receipt missing', age:'9 s', action:'Review', facts:[['Scope','edge-03 · tool execution'],['Request','Containment · C-051'],['Enforcement','Unconfirmed'],['Receipts','0/1 boundaries'],['Remote work','Stop unconfirmed'],['Next','Inspect boundary receipt']], evidence:'I-018 · integrity finding. C-051 · containment request. No enforcement receipt received; ending flight tracking cannot establish containment.' }
+      };
+      function put(id,value) { root.querySelector('#op-'+id).textContent=value; }
+      function symbol(value) { const result=document.createElement('span'); result.className='op-symbol'; if (stateIcons[value]) { const icon=document.createElement('i'); icon.dataset.lucide=stateIcons[value]; icon.setAttribute('aria-hidden','true'); result.append(icon); } const label=document.createElement('span'); label.textContent=value; result.append(label); return result; }
+      function drawIcons() { if (globalThis.lucide) lucide.createIcons({attrs:{width:16,height:16}}); }
+      function cell(text,label) { const node=document.createElement('td'); node.textContent=text; node.dataset.label=label; return node; }
+      function row(key,missionRow=false) {
+        const record=records[key]; const scenario=scenarios[state.scenario]; const tr=document.createElement('tr'); tr.dataset.item=key; tr.dataset.selected=String(state.item===key);
+        const name=cell(record.name,missionRow?'Mission':'Item'); const id=document.createElement('small'); id.textContent=record.id; name.append(id);
+        const status=cell('','State'); status.append(symbol(record.state)); if (['Blocked','Outcome unknown','Unconfirmed'].includes(record.state)) status.classList.add('op-warn');
+        const reason=cell(key==='mission'?scenario.missionReason:record.reason,missionRow?(key==='release'?'Blocker':'Progress'):'Reason');
+        const age=cell(key==='mission'?scenario.missionAge:record.age,'Age');
+        if (key==='mission' && state.scenario!=='current') { const stale=document.createElement('small'); stale.append(symbol('Stale')); age.append(stale); }
+        const action=document.createElement('td'); const button=document.createElement('button'); button.type='button'; button.className='op-action cursor-interaction'; button.textContent=record.action; button.setAttribute('aria-label',record.action+' '+record.name); button.setAttribute('aria-controls','op-detail'); button.setAttribute('aria-expanded',String(state.item===key));
+        button.addEventListener('click',()=>{ state.item=key; root.querySelector('details').open=false; const panel=root.querySelector('#op-detail'); tr.closest('.op-section').after(panel); renderDetail(); markSelection(); root.querySelector('#op-close').focus(); save(); }); action.append(button); tr.append(name,status,reason,age,action); return tr;
+      }
+      function markSelection() { root.querySelectorAll('tr[data-item]').forEach(tr=>{ const selected=tr.dataset.item===state.item; tr.dataset.selected=String(selected); tr.querySelector('button').setAttribute('aria-expanded',String(selected)); }); }
+      function renderDetail() {
+        const panel=root.querySelector('#op-detail'); panel.hidden=!state.item; if (!state.item) return;
+        const record=records[state.item]; put('detail-title',record.id+' · '+record.name);
+        const facts=record.facts.map(pair=>[...pair]);
+        if (state.item==='mission' && state.scenario==='degraded') { facts[4]=['Cancellation','Outcome unknown · C-045']; facts[5]=['Observation','Stale · 4 min']; }
+        if (state.item==='mission' && state.scenario==='incident') { facts[4]=['Containment','Unconfirmed · C-051']; facts[5]=['Observation','Stale · 17 s']; }
+        const target=root.querySelector('#op-facts'); target.replaceChildren();
+        facts.forEach(([label,value])=>{ const pair=document.createElement('div'); const term=document.createElement('dt'); const text=document.createElement('dd'); term.textContent=label; const parts=value.split(' · '); if (stateIcons[parts[0]]) { text.append(symbol(parts[0])); if (parts.length>1) text.append(document.createTextNode(' · '+parts.slice(1).join(' · '))); } else text.textContent=value; pair.append(term,text); target.append(pair); });
+        put('evidence',state.item==='mission' && state.scenario==='degraded'?records.command.evidence:state.item==='mission' && state.scenario==='incident'?records.incident.evidence:record.evidence);
+        drawIcons();
+      }
+      function render() {
+        const scenario=scenarios[state.scenario]; picker.value=state.scenario; root.dataset.roomy=String(state.roomy);
+        put('fleet',scenario.fleet); ['key','containment'].forEach(key=>root.querySelector('#op-'+key).replaceChildren(symbol(scenario[key])));
+        root.querySelector('#op-gap').hidden=!scenario.gap; if (scenario.gap) { put('gap-state',scenario.gap[0]); put('gap-reason',scenario.gap[1]); }
+        put('attention-count',String(scenario.attention.length)); root.querySelector('#op-attention').replaceChildren(...scenario.attention.map(key=>row(key))); root.querySelector('#op-missions').replaceChildren(...['mission','release','complete'].map(key=>row(key,true))); renderDetail(); drawIcons();
+      }
+      function save() { if (window.openai?.setWidgetState) window.openai.setWidgetState({ modelContent:{scenario:state.scenario,item:state.item},privateContent:{roomy:state.roomy} }).catch(()=>{}); }
+      function restore(saved) { const previous=JSON.stringify(state); const value=saved?.modelContent; if (value && Object.hasOwn(scenarios,value.scenario)) state.scenario=value.scenario; if (value && (value.item===null || Object.hasOwn(records,value.item))) state.item=value.item; if (typeof saved?.privateContent?.roomy==='boolean') state.roomy=saved.privateContent.roomy; if (previous!==JSON.stringify(state)) render(); }
+      picker.addEventListener('change',()=>{ state.scenario=picker.value; state.item=null; root.querySelector('details').open=false; render(); save(); });
+      root.querySelector('#op-close').addEventListener('click',()=>{ const selected=state.item; state.item=null; renderDetail(); markSelection(); root.querySelector('tr[data-item="'+selected+'"] button')?.focus(); save(); });
+      render(); restore(window.openai?.widgetState);
+      window.addEventListener('openai:set_globals',event=>{ if (event.detail?.globals?.widgetState) restore(event.detail.globals.widgetState); });
+      if (globalThis.Tweak) { const tweak=new Tweak({container:root.querySelector('.op-app'),onChange:()=>{render();save();}}); tweak.addToggle(state,'roomy',{label:'More row spacing'}); }
+    })();
+  </script>
+</div>

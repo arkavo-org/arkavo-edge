@@ -1,10 +1,13 @@
 "use strict";
 
 var AppState = {
-    agents: {},
-    tasks: {},
+    agents: Object.create(null),
+    tasks: Object.create(null),
+    connection: 'reconnecting',
+    observations: Object.create(null),
     telemetry: [],
     eventCount: 0,
+    evictedEvents: 0,
     taskCount: 0,
     totalCost: 0,
     budgetStatus: null,
@@ -17,7 +20,7 @@ var AppState = {
     policyLog: [],
     dataPlaneStatus: null,
     dataPlaneTransfers: [],
-    activeView: 'agents',
+    activeView: 'overview',
     learningAgents: {},
     routingHistory: [],
     routingAnimations: [],
@@ -26,6 +29,8 @@ var AppState = {
     lessons: [],
     lessonCount: 0,
     selectedTaskId: null,
+    selectedAgentId: null,
+    route: null,
     teachingEvents: [],
     agentSystemMetrics: {},
     optimalConfigs: [],
@@ -50,9 +55,9 @@ var MAX_ROUTING_HISTORY = 50;
 
 function escapeHtml(text) {
     if (text == null) return '';
-    var div = document.createElement('div');
-    div.textContent = String(text);
-    return div.innerHTML;
+    return String(text).replace(/[&<>"']/g, function(character) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character];
+    });
 }
 
 function formatTime(ts) {

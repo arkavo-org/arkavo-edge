@@ -301,6 +301,8 @@ pub enum AgUiEvent {
 
     // Mesh dashboard events
     RequestMeshStatus,
+    /// Lightweight connection snapshot without remote key-service probes.
+    RequestFleetSnapshot,
     MeshStatus {
         agents: Vec<MeshAgentInfo>,
         timestamp: String,
@@ -615,10 +617,14 @@ pub enum AgUiEvent {
     },
     SubmitTask {
         description: String,
+        #[serde(rename = "requestId", default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
         #[serde(rename = "targetAgent", skip_serializing_if = "Option::is_none")]
         target_agent: Option<String>,
     },
     TaskSubmitted {
+        #[serde(rename = "requestId", default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
         #[serde(rename = "taskId")]
         task_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]

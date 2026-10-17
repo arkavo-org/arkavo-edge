@@ -10,6 +10,7 @@ use tokio::sync::{RwLock, mpsc};
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_submit_task(
     description: String,
+    request_id: Option<String>,
     target_agent: Option<String>,
     agents: &Arc<RwLock<Vec<serde_json::Value>>>,
     agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
@@ -21,8 +22,6 @@ pub async fn handle_submit_task(
     lesson_store: &Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("AG-UI: Received SubmitTask: {}", description);
-
     let task_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -119,6 +118,7 @@ pub async fn handle_submit_task(
 
     // Notify UI of submission
     tx.send(AgUiEvent::TaskSubmitted {
+        request_id,
         task_id: task_id.clone(),
         description: Some(description.clone()),
         summary: None,

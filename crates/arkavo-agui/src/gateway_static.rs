@@ -12,6 +12,27 @@ pub async fn static_file_handler(AxumPath(path): AxumPath<String>) -> Response {
         "styles/base.css" => serve_css(include_str!("../static/styles/base.css")),
         "styles/panels.css" => serve_css(include_str!("../static/styles/panels.css")),
         "styles/dashboard.css" => serve_css(include_str!("../static/styles/dashboard.css")),
+        "styles/operations.css" => serve_css(include_str!("../static/styles/operations.css")),
+        "js/icons.js" => serve_js(include_str!("../static/js/icons.js")),
+        "js/lexicon.js" => serve_js(include_str!("../static/js/lexicon.js")),
+        "js/help.js" => serve_js(include_str!("../static/js/help.js")),
+        "js/inspection.js" => serve_js(include_str!("../static/js/inspection.js")),
+        "js/routes.js" => serve_js(include_str!("../static/js/routes.js")),
+        "js/panels/agent-detail.js" => {
+            serve_js(include_str!("../static/js/panels/agent-detail.js"))
+        }
+        "js/navigation.js" => serve_js(include_str!("../static/js/navigation.js")),
+        "js/task-composer.js" => serve_js(include_str!("../static/js/task-composer.js")),
+        "js/panels/operations.js" => serve_js(include_str!("../static/js/panels/operations.js")),
+        "js/panels/evidence.js" => serve_js(include_str!("../static/js/panels/evidence.js")),
+        "icons/LICENSE" => Response::builder()
+            .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(Body::from(include_str!("../static/icons/LICENSE")))
+            .expect("valid response"),
+        "icons/arkavo.svg" => Response::builder()
+            .header(header::CONTENT_TYPE, "image/svg+xml")
+            .body(Body::from(include_str!("../static/icons/arkavo.svg")))
+            .expect("valid response"),
         "js/state.js" => serve_js(include_str!("../static/js/state.js")),
         "js/websocket.js" => serve_js(include_str!("../static/js/websocket.js")),
         "js/panels/agents.js" => serve_js(include_str!("../static/js/panels/agents.js")),
@@ -59,4 +80,45 @@ fn serve_css(content: &'static str) -> Response {
         .body(Body::from(content))
         .expect("valid response")
         .into_response()
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "Tokio's test macro starts a runtime outside async execution"
+)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn every_shell_asset_is_embedded_and_served_with_its_content_type() {
+        let html = index_handler().await.0;
+        for suffix in html.split("/static/").skip(1) {
+            let path = suffix.split('"').next().unwrap();
+            let response = static_file_handler(AxumPath(path.to_owned())).await;
+            assert_eq!(response.status(), 200, "missing shell asset: {path}");
+            let expected = if path.ends_with(".js") {
+                "application/javascript"
+            } else if path.ends_with(".svg") {
+                "image/svg+xml"
+            } else {
+                "text/css"
+            };
+            assert_eq!(response.headers()[header::CONTENT_TYPE], expected);
+        }
+        let license = static_file_handler(AxumPath("icons/LICENSE".into())).await;
+        assert_eq!(license.status(), 200);
+        assert_eq!(
+            license.headers()[header::CONTENT_TYPE],
+            "text/plain; charset=utf-8"
+        );
+    }
+
+    #[tokio::test]
+    async fn static_asset_allowlist_rejects_path_traversal() {
+        for path in ["../Cargo.toml", "js/../../../src/gateway.rs", "missing.js"] {
+            let response = static_file_handler(AxumPath(path.into())).await;
+            assert_eq!(response.status(), 404);
+        }
+    }
 }

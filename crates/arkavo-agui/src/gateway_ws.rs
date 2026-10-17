@@ -300,6 +300,9 @@ async fn dispatch_event(
         AgUiEvent::RequestStatus => {
             gateway_events::handle_request_status(connections, tx).await?;
         }
+        AgUiEvent::RequestFleetSnapshot => {
+            gateway_events::handle_request_fleet_snapshot(agents, agent_connections, tx).await?;
+        }
         AgUiEvent::RequestMeshStatus => {
             gateway_events::handle_request_mesh_status(
                 agents,
@@ -317,10 +320,12 @@ async fn dispatch_event(
         }
         AgUiEvent::SubmitTask {
             description,
+            request_id,
             target_agent,
         } => {
             gateway_task_dispatch::handle_submit_task(
                 description,
+                request_id,
                 target_agent,
                 agents,
                 agent_connections,

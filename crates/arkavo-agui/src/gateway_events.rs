@@ -137,14 +137,14 @@ async fn send_status_update(
     Ok(())
 }
 
-pub async fn handle_request_mesh_status(
+/// Fleet polling must not wait for remote key-service requests.
+pub async fn handle_request_fleet_snapshot(
     agents: &Arc<RwLock<Vec<serde_json::Value>>>,
     agent_connections: &Arc<RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>>,
-    security_handler: &Arc<RwLock<crate::security_handler::SecurityHandler>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let agents_list = agents.read().await;
-    let mesh_agents: Vec<MeshAgentInfo> = agents_list
+    let mut mesh_agents: Vec<MeshAgentInfo> = agents_list
         .iter()
         .map(|a| MeshAgentInfo {
             id: a
@@ -167,16 +167,39 @@ pub async fn handle_request_mesh_status(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
-            status: "connected".to_string(),
+            status: "disconnected".to_string(),
         })
         .collect();
     drop(agents_list);
+    let connections = agent_connections.read().await.clone();
+    for agent in &mut mesh_agents {
+        if let Some(connection) = connections.get(&agent.id) {
+            agent.status = match connection.get_status().await {
+                crate::agent_connection::ConnectionStatus::Connected => "connected",
+                crate::agent_connection::ConnectionStatus::Connecting
+                | crate::agent_connection::ConnectionStatus::Reconnecting { .. } => "reconnecting",
+                crate::agent_connection::ConnectionStatus::Failed { .. } => "disconnected",
+            }
+            .to_string();
+        }
+    }
 
     let mesh_status = AgUiEvent::MeshStatus {
         agents: mesh_agents,
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
     tx.send(mesh_status).await?;
+
+    Ok(())
+}
+
+pub async fn handle_request_mesh_status(
+    agents: &Arc<RwLock<Vec<serde_json::Value>>>,
+    agent_connections: &Arc<RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>>,
+    security_handler: &Arc<RwLock<crate::security_handler::SecurityHandler>>,
+    tx: &mpsc::Sender<AgUiEvent>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    handle_request_fleet_snapshot(agents, agent_connections, tx).await?;
 
     // Metrics (RSS, CPU, compute budget, Iroh) are now push-based via
     // system.metrics.subscribe — no polling needed. Only KAS status is still polled
@@ -318,4 +341,40 @@ pub async fn handle_request_task_list(
     .await?;
     println!("AG-UI: Sent TaskList");
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "Tokio test harness runs outside an async runtime"
+)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn discovery_does_not_imply_a_connected_agent() {
+        let agents = Arc::new(RwLock::new(vec![
+            serde_json::json!({"id": "discovered"}),
+            serde_json::json!({"id": "connecting"}),
+        ]));
+        let (telemetry_tx, _telemetry_rx) = mpsc::channel(8);
+        let connection = crate::agent_connection::AgentConnection::new(
+            "connecting".into(),
+            "ws://127.0.0.1:1".into(),
+            telemetry_tx,
+        );
+        let connections = Arc::new(RwLock::new(HashMap::from([(
+            "connecting".into(),
+            Arc::new(connection),
+        )])));
+        let (tx, mut rx) = mpsc::channel(8);
+        handle_request_fleet_snapshot(&agents, &connections, &tx)
+            .await
+            .unwrap();
+        let AgUiEvent::MeshStatus { agents, .. } = rx.recv().await.unwrap() else {
+            panic!("expected fleet snapshot");
+        };
+        assert_eq!(agents[0].status, "disconnected");
+        assert_eq!(agents[1].status, "reconnecting");
+    }
 }
