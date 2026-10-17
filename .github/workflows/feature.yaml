@@ -238,6 +238,16 @@ jobs:
           shared-key: "v1-${{ runner.os }}"
           prefix-key: "test-lint-${{ matrix.group }}"
 
+      - name: Setup Node for UI regression tests
+        if: matrix.group == 'ui'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run Operations UI regression tests
+        if: matrix.group == 'ui'
+        run: node --test crates/arkavo-agui/tests/ui_operations.test.cjs
+
       # Step 1: Run tests first (produces full codegen artifacts)
       - name: Run tests with mold linker
         env:
