@@ -1,105 +1,25 @@
 //! What a requester gets back from `message/send` when no agent loop is
 //! running and the handler executes the task itself.
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use arkavo_crypto::AgentKeypair;
-use arkavo_gossip::{GossipConfig, GossipMessage};
+use arkavo_gossip::{GossipConfig, GossipMessage, TaskCompletionNotice};
 use arkavo_hrm::{Conductor, store::InMemoryTaskStore};
-use arkavo_llm::{Message as Prompt, ParsedToolCall, Provider, ProviderResponse, StreamResponse};
 use arkavo_protocol::mcp_registry::McpRegistry;
 use arkavo_protocol::metrics::MetricsCollector;
 use arkavo_protocol::rate_limit::{RateLimitConfig, RateLimiter};
 use arkavo_protocol::types::{Message, MessagePart, MessageSendRequest};
-use arkavo_router::{ModelChoice, ProviderFactory};
+use arkavo_router::ModelChoice;
 use arkavo_tasks::task_executor::{TaskExecutor, TaskExecutorConfig};
 use arkavo_tasks::task_store::{SqliteTaskStore, TaskStore};
 
 use super::handle_message_send;
 use crate::server::LearningBus;
 use crate::server::config_helpers::AgentMetadata;
+use crate::server::scripted_model::{Script, calling, scripted_router, text};
 use crate::server::tool_memory::ToolMemory;
-
-/// Replies handed out in order, counting the dispatches that asked for them.
-#[derive(Default)]
-struct Script {
-    replies: Mutex<VecDeque<ProviderResponse>>,
-    dispatches: Mutex<usize>,
-}
-
-struct ScriptedProvider(Arc<Script>);
-
-#[async_trait::async_trait]
-impl Provider for ScriptedProvider {
-    async fn complete_with_options(
-        &self,
-        messages: Vec<Prompt>,
-        max_tokens: Option<usize>,
-    ) -> arkavo_llm::Result<String> {
-        self.complete_with_tools(messages, None, max_tokens)
-            .await
-            .map(|reply| reply.content)
-    }
-
-    async fn stream(
-        &self,
-        _messages: Vec<Prompt>,
-    ) -> arkavo_llm::Result<
-        Box<dyn futures::Stream<Item = arkavo_llm::Result<StreamResponse>> + Send + Unpin>,
-    > {
-        Ok(Box::new(futures::stream::empty()))
-    }
-
-    fn name(&self) -> &'static str {
-        "scripted"
-    }
-
-    async fn complete_with_tools(
-        &self,
-        _messages: Vec<Prompt>,
-        _tools: Option<serde_json::Value>,
-        _max_tokens: Option<usize>,
-    ) -> arkavo_llm::Result<ProviderResponse> {
-        *self.0.dispatches.lock().expect("dispatch count") += 1;
-        Ok(self
-            .0
-            .replies
-            .lock()
-            .expect("reply queue")
-            .pop_front()
-            .unwrap_or_default())
-    }
-}
-
-struct ScriptedFactory(Arc<Script>);
-
-impl ProviderFactory for ScriptedFactory {
-    fn build(&self, _model: &ModelChoice) -> arkavo_router::Result<Box<dyn Provider>> {
-        Ok(Box::new(ScriptedProvider(self.0.clone())))
-    }
-}
-
-async fn scripted_router(script: &Arc<Script>) -> Arc<arkavo_router::Router> {
-    let availability = arkavo_router::ProviderAvailability {
-        xai: true,
-        ..Default::default()
-    };
-    let mut router = arkavo_router::Router::new_offline().await.expect("router");
-    router.set_offline_mode(false);
-    Arc::new(
-        router
-            .with_cloud_policy(arkavo_budget::CloudPolicy::AskBeforeCloud)
-            .with_connectivity(arkavo_router::ConnectivityChecker::assume(true))
-            .with_selector(arkavo_router::ModelSelector::with_availability(
-                availability,
-                false,
-            ))
-            .await
-            .with_provider_factory(Arc::new(ScriptedFactory(script.clone()))),
-    )
-}
 
 /// Regression: the planner answered a text reply with "You MUST use a tool
 /// now", so the requester was handed the output of `list_agents` instead of
@@ -108,24 +28,43 @@ async fn scripted_router(script: &Arc<Script>) -> Arc<arkavo_router::Router> {
 #[tokio::test]
 async fn a_text_answer_is_the_result_of_the_task() {
     let answer = "Organic search drives 62% of signups; paid social converts worst.";
-    let script = Arc::new(Script {
-        replies: Mutex::new(VecDeque::from([
-            ProviderResponse {
-                content: answer.to_string(),
-                ..Default::default()
-            },
-            ProviderResponse {
-                tool_calls: vec![ParsedToolCall {
-                    tool_name: "list_agents".to_string(),
-                    arguments: serde_json::json!({}),
-                    call_id: None,
-                }],
-                ..Default::default()
-            },
-        ])),
-        dispatches: Mutex::new(0),
-    });
-    let router = scripted_router(&script).await;
+    let script = Script::of([text(answer), calling("list_agents")]);
+
+    let notice = answer_to(&script, "Which channel should we cut?").await;
+
+    assert!(notice.succeeded, "{}", notice.content);
+    assert_eq!(notice.content, answer);
+    assert_eq!(*script.dispatches.lock().expect("dispatch count"), 1);
+}
+
+/// Regression (SRV-014): a writer asked for a sprite called generate_image,
+/// then list_agents, and the planner's rounds ran out, so the requester got
+/// the truncated JSON of those tool results instead of a reply. A round
+/// offered no tools now turns the results into the model's own answer.
+#[arkavo_test_macros::spec("SRV-014")]
+#[tokio::test]
+async fn rounds_that_end_on_tool_calls_are_answered_from_the_results() {
+    let answer = "Two agents are on the mesh: the analyst and the artist.";
+    let script = Script::of([calling("list_agents"), calling("list_agents"), text(answer)]);
+
+    let notice = answer_to(&script, "Who else is on the mesh?").await;
+
+    assert!(notice.succeeded, "{}", notice.content);
+    assert_eq!(notice.content, answer);
+    assert_eq!(
+        *script.offered_tools.lock().expect("tool offers"),
+        [true, true, false],
+        "the answer round offers no tools"
+    );
+}
+
+/// The answer the requester of `question` gets from an analyst whose model
+/// follows `script`. It is read from the completion notice the handler
+/// gossips to the commander: that carries exactly what the task was
+/// completed with, and unlike the task row it is not rewritten by the
+/// conductor's detached progress updates.
+async fn answer_to(script: &Arc<Script>, question: &str) -> TaskCompletionNotice {
+    let router = scripted_router(script).await;
     let store: Arc<dyn TaskStore> = Arc::new(
         SqliteTaskStore::new_in_memory()
             .await
@@ -140,10 +79,6 @@ async fn a_text_answer_is_the_result_of_the_task() {
         purpose: "You are the analyst. Answer what you are asked.".to_string(),
         ..Default::default()
     };
-    // The result is read from the completion notice the handler gossips to
-    // the commander. It carries exactly what the task was completed with, and
-    // unlike the task row it is not rewritten by the conductor's detached
-    // progress updates.
     let commander = AgentKeypair::generate();
     let bus = Arc::new(LearningBus::new(
         "analyst".to_string(),
@@ -178,7 +113,7 @@ async fn a_text_answer_is_the_result_of_the_task() {
         MessageSendRequest {
             message: Message {
                 parts: vec![MessagePart::Text {
-                    content: "Which channel should we cut?".to_string(),
+                    content: question.to_string(),
                 }],
                 metadata: None,
             },
@@ -188,7 +123,7 @@ async fn a_text_answer_is_the_result_of_the_task() {
     .await
     .expect("message accepted");
 
-    let notice = tokio::time::timeout(Duration::from_secs(30), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let (_peer, message) = gossiped.recv().await.expect("gossip channel open");
             if let GossipMessage::TaskCompleted(notice) = message {
@@ -197,9 +132,5 @@ async fn a_text_answer_is_the_result_of_the_task() {
         }
     })
     .await
-    .expect("the task finished");
-
-    assert!(notice.succeeded, "{}", notice.content);
-    assert_eq!(notice.content, answer);
-    assert_eq!(*script.dispatches.lock().expect("dispatch count"), 1);
+    .expect("the task finished")
 }

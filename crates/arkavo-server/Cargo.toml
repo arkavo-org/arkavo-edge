@@ -164,7 +164,7 @@ claude-agent = ["dep:arkavo-mcp-claude"]
 taint = ["arkavo-protocol/taint", "arkavo-arp-runtime/taint"]
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
