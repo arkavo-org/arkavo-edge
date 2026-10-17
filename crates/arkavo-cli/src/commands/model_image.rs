@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use arkavo_image_gen::catalog::{self, ALIASES, Entry, entries};
 use arkavo_image_gen::host::Platform;
 use arkavo_image_gen::plan::BASE_PIXELS;
-use arkavo_image_gen::{Generator, Host, Progress, Store, offers};
+use arkavo_image_gen::{Generator, Host, Producer, Progress, Store, offers};
 
 const GIB: f64 = (1u64 << 30) as f64;
 
@@ -106,7 +106,7 @@ pub async fn download(name: &str) -> anyhow::Result<()> {
             resolved.entry.id
         )
     };
-    let generator = Generator::for_this_host(resident, None).ok_or_else(refusal)?;
+    let generator = Generator::for_this_host(resident, Producer::default()).ok_or_else(refusal)?;
     generator.offer(resolved.entry.id).ok_or_else(refusal)?;
     prefetch(&generator, name).await
 }

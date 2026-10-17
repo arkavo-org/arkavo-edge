@@ -20,7 +20,7 @@ use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 use crate::catalog::{PinnedFile, RuntimePin, SetLabel, WeightSet, resolve};
 use crate::generator::Generator;
 use crate::host::{Host, Platform};
-use crate::output::{AssetEntry, Generated, Manifest};
+use crate::output::{AssetEntry, Generated, Manifest, Producer};
 use crate::plan::Offer;
 use crate::run::Sandbox;
 use crate::store::Store;
@@ -300,7 +300,10 @@ pub async fn fake_generator(fetches: u64, delay: Duration) -> FakeGenerator {
         Sandbox::Off,
     )
     .unwrap()
-    .with_producer(Some("did:key:z6Mtest".into()));
+    .with_producer(Producer {
+        did: Some("did:key:z6Mtest".into()),
+        agent_id: Some("test-host".into()),
+    });
     FakeGenerator {
         server,
         generator: std::sync::Arc::new(generator),
