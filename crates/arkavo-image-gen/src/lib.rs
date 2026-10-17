@@ -38,7 +38,7 @@ pub use generator::Generator;
 pub use host::{Host, Platform};
 pub use hosting::HostGenerator;
 pub use job::{AssetJob, AssetSink, Outbox};
-pub use output::{AssetEntry, Generated, Manifest, assets_dir};
+pub use output::{AssetEntry, Generated, Manifest, Producer, assets_dir};
 pub use plan::{Offer, offers};
 pub use progress::Progress;
 pub use request::{ImageRequest, Job};

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use arkavo_image_gen::tool::{Delegate, JOB_DEADLINE};
 use arkavo_image_gen::{
-    AssetJob, AssetSink, Descriptor, Generated, Generator, HostGenerator, ImageGenError,
+    AssetJob, AssetSink, Descriptor, Generated, Generator, HostGenerator, ImageGenError, Producer,
 };
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_protocol::types::{MessagePart, TaskProgress};
@@ -72,9 +72,12 @@ impl AssetService {
         hosting: Hosting,
     ) -> Option<Arc<Self>> {
         let node = node?;
-        let did = identity.did.clone();
+        let producer = Producer {
+            did: identity.did.clone(),
+            agent_id: Some(identity.agent_id.clone()),
+        };
         let generator = tokio::task::spawn_blocking(move || {
-            Generator::for_this_host(resident_chat_bytes, did).map(Arc::new)
+            Generator::for_this_host(resident_chat_bytes, producer).map(Arc::new)
         })
         .await
         .ok()

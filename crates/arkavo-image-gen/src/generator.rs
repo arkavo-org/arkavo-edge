@@ -16,7 +16,7 @@ use crate::error::{ImageGenError, Result};
 use crate::fetch::Fetcher;
 use crate::host::Host;
 use crate::lock::{self, HostLock};
-use crate::output::{Generated, assets_dir, collect};
+use crate::output::{Generated, Producer, assets_dir, collect};
 use crate::plan::{BASE_PIXELS, Offer, offers};
 use crate::progress::{Event, Progress};
 use crate::request::{ImageRequest, Job};
@@ -36,7 +36,7 @@ pub struct Generator {
     runtime_pin: &'static RuntimePin,
     sandbox: Sandbox,
     offers: Vec<Offer>,
-    producer: Option<String>,
+    producer: Producer,
     runtime: OnceCell<Runtime>,
     fetch_lock: Arc<tokio::sync::Mutex<()>>,
     fetches: Mutex<HashMap<usize, InFlight>>,
@@ -48,7 +48,7 @@ pub struct Generator {
 impl Generator {
     /// The generator for this machine, or `None` when it does not qualify
     /// (IMG-001). Prunes runtimes no pin of this release names (IMG-020).
-    pub fn for_this_host(resident_chat_bytes: u64, producer: Option<String>) -> Option<Self> {
+    pub fn for_this_host(resident_chat_bytes: u64, producer: Producer) -> Option<Self> {
         let host = Host::detect();
         if !host.qualifies() {
             return None;
@@ -81,7 +81,7 @@ impl Generator {
             runtime_pin,
             sandbox,
             offers,
-            producer: None,
+            producer: Producer::default(),
             runtime: OnceCell::new(),
             fetch_lock: Arc::new(tokio::sync::Mutex::new(())),
             fetches: Mutex::new(HashMap::new()),
@@ -93,7 +93,7 @@ impl Generator {
 
     /// Name the agent that produces assets, for their manifests.
     #[must_use]
-    pub fn with_producer(mut self, producer: Option<String>) -> Self {
+    pub fn with_producer(mut self, producer: Producer) -> Self {
         self.producer = producer;
         self
     }
@@ -267,7 +267,8 @@ impl Generator {
             self.record_speed(job, seconds);
         }
         let mut manifest = collect(dir, job, set, &output.seeds).await?;
-        manifest.producer.clone_from(&self.producer);
+        manifest.producer.clone_from(&self.producer.did);
+        manifest.producer_agent.clone_from(&self.producer.agent_id);
         Ok(Generated::owning(dir.to_path_buf(), manifest))
     }
 
