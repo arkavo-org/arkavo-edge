@@ -39,6 +39,13 @@ pub struct ModelUsed {
     pub alias: Option<String>,
 }
 
+/// The agent that generates, as its manifests name it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Producer {
+    pub did: Option<String>,
+    pub agent_id: Option<String>,
+}
+
 /// What generated a set of assets and under which terms.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -49,6 +56,9 @@ pub struct Manifest {
     /// The did:key of the agent that generated the assets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub producer: Option<String>,
+    /// The agent id requesters know the producer by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub producer_agent: Option<String>,
     pub prompt: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guidance: Option<f32>,
@@ -61,10 +71,17 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// One line naming the model and its license, shown with every delivery.
+    /// One line naming the agent that generated the assets, the model and
+    /// its license, shown with every delivery. It is read wherever the files
+    /// land, so it names the producer rather than calling it local.
     pub fn license_line(&self) -> String {
+        let by = self
+            .producer_agent
+            .as_deref()
+            .map(|agent| format!(" by {agent}"))
+            .unwrap_or_default();
         format!(
-            "Generated locally with {} ({}); license: {} <{}>",
+            "Generated{by} with {} ({}); license: {} <{}>",
             self.model.id, self.runtime, self.license, self.license_url
         )
     }
@@ -159,6 +176,7 @@ pub async fn collect(dir: &Path, job: &Job, set: &WeightSet, seeds: &[u32]) -> R
         license_url: job.entry.license_url.to_string(),
         runtime: format!("stable-diffusion.cpp {}", RUNTIME.tag),
         producer: None,
+        producer_agent: None,
         prompt: job.prompt.clone(),
         guidance: job.guided().then_some(job.guidance),
         negative_prompt: job.negative_prompt.clone(),

@@ -49,6 +49,7 @@ async fn first_request_fetches_then_generates() {
     assert_eq!(m.assets[1].seed, 6);
     assert!(m.assets.iter().all(|a| a.has_alpha));
     assert_eq!(m.producer.as_deref(), Some("did:key:z6Mtest"));
+    assert_eq!(m.producer_agent.as_deref(), Some("test-host"));
     assert!(generated.path_of(&m.assets[0]).exists());
     assert!(!generated.dir.join(".prompt").exists());
 
@@ -239,6 +240,6 @@ async fn prefetch_readies_an_entry() {
 #[test]
 fn non_qualifying_hosts_get_no_generator() {
     if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        assert!(Generator::for_this_host(0, None).is_none());
+        assert!(Generator::for_this_host(0, Producer::default()).is_none());
     }
 }
