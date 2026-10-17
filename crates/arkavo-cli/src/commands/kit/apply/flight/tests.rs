@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use super::*;
-use arkavo_swarmkit_delegation::{CapabilityReport, Policy, RefusalReason, Specialist, StateStore};
+use arkavo_swarmkit_delegation::{
+    CapabilityReport, Policy, RefusalReason, RevokeError, Specialist, StateStore,
+};
 use arkavo_test_macros::spec;
 
 const KIT: &str = r#"
@@ -54,6 +56,8 @@ struct Host {
     specialist: Mutex<Specialist>,
     generates: Option<bool>,
     load: f64,
+    /// Commits a role, then loses the acknowledgement, as a timeout does.
+    drops_acks: bool,
     _dir: tempfile::TempDir,
 }
 
@@ -72,8 +76,20 @@ impl Host {
             specialist: Mutex::new(specialist),
             generates,
             load,
+            drops_acks: false,
             _dir: dir,
         }
+    }
+
+    fn dropping_acks(self) -> Self {
+        Self {
+            drops_acks: true,
+            ..self
+        }
+    }
+
+    fn key(&self) -> String {
+        self.specialist.lock().unwrap().key().to_string()
     }
 
     fn status(&self) -> SpecialistStatus {
@@ -137,7 +153,12 @@ impl Net {
                 "this host cannot generate images",
             )));
         }
-        Ok(specialist.commit(admitted, Utc::now()).unwrap())
+        let ready = specialist.commit(admitted, Utc::now()).unwrap();
+        drop(specialist);
+        if host.drops_acks {
+            return Err(Failure::Unreachable("timed out".into()));
+        }
+        Ok(ready)
     }
 
     fn give_back(&self, address: &str, revocation: serde_json::Value) -> Result<(), Failure> {
@@ -145,7 +166,10 @@ impl Net {
         specialist
             .revoke(revocation, Utc::now())
             .map(drop)
-            .map_err(|e| Failure::Unreachable(e.to_string()))
+            .map_err(|e| match e {
+                RevokeError::Refused(refusal) => Failure::Refused(refusal),
+                RevokeError::Store(e) => Failure::Unreachable(e.to_string()),
+            })
     }
 }
 
@@ -180,7 +204,7 @@ async fn the_artist_goes_to_the_ready_generator_and_every_agent_binds_to_me() {
         ("macbook", Host::new(true, Some(false), 0.0)),
         ("m6", Host::new(true, Some(true), 0.5)),
     ]);
-    let (flight, assignments) = assign(
+    let applied = assign(
         &manifest(),
         &me,
         &net.candidates(&did),
@@ -190,6 +214,8 @@ async fn the_artist_goes_to_the_ready_generator_and_every_agent_binds_to_me() {
     )
     .await
     .unwrap();
+    let (flight, assignments) = (applied.flight, applied.assignments);
+    assert_eq!(applied.cleaned_up, []);
 
     let by_role: HashMap<_, _> = assignments
         .iter()
@@ -253,8 +279,156 @@ async fn a_refusal_moves_the_role_and_a_role_nobody_takes_undoes_the_rest() {
     .unwrap_err();
     assert_eq!(unassigned.role, "writer", "one agent, two roles");
     assert_eq!(unassigned.offers.len(), 0);
-    assert_eq!(unassigned.rolled_back, [("artist".to_string(), None)]);
+    assert_eq!(unassigned.rolled_back, [restored("a", "artist")]);
     assert_eq!(net2.0["a"].role(), None, "the artist role was taken back");
+    assert!(
+        net2.0["a"].status().binding.is_none(),
+        "an agent unbound before the apply is unbound after it"
+    );
+}
+
+fn restored(agent: &str, role: &str) -> RolledBack {
+    RolledBack {
+        agent: agent.into(),
+        role: role.into(),
+        undo: Undo::Restored,
+    }
+}
+
+/// Bind `host` to `me` with `role_id` of `manifest` under `flight`, issued
+/// ten minutes ago, as an earlier apply would have.
+fn hold_role(
+    net: &Net,
+    name: &str,
+    me: &AgentKeypair,
+    manifest: &Manifest,
+    role_id: &str,
+    flight: Uuid,
+) {
+    let role = manifest.roles.iter().find(|r| r.id == role_id).unwrap();
+    let signed = Delegation::for_role(
+        manifest,
+        role,
+        me.public_key().to_did_key(),
+        net.0[name].key(),
+        flight,
+        Utc::now() - TimeDelta::minutes(10),
+        TimeDelta::days(1),
+    )
+    .unwrap()
+    .sign(me)
+    .unwrap();
+    net.take_role(name, signed.wire().clone()).unwrap();
+}
+
+/// Review finding: a failed re-apply took down a role an agent held from
+/// an earlier apply. Undoing gives it back when it came from the same kit,
+/// and says it is gone when it came from another.
+#[spec("SKD-012")]
+#[tokio::test]
+async fn a_failed_reapply_gives_back_the_earlier_role() {
+    let me = AgentKeypair::generate();
+    let did = me.public_key().to_did_key();
+    let net = net(vec![("a", Host::new(true, Some(true), 0.0))]);
+    let earlier = Uuid::new_v4();
+    hold_role(&net, "a", &me, &manifest(), "writer", earlier);
+
+    let unassigned = assign(
+        &manifest(),
+        &me,
+        &net.candidates(&did),
+        TimeDelta::days(1),
+        Utc::now(),
+        &net,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(unassigned.role, "writer", "the artist took the only agent");
+    assert_eq!(unassigned.rolled_back, [restored("a", "artist")]);
+    assert_eq!(net.0["a"].role().as_deref(), Some("writer"));
+    let status = net.0["a"].status();
+    assert_eq!(status.delegation.unwrap().flight_id, earlier);
+    assert_eq!(status.binding.unwrap().orchestrator, did);
+
+    let mut other_kit = manifest();
+    other_kit.kit.id = "blake3:another-kit".into();
+    let net = self::net(vec![("a", Host::new(true, Some(true), 0.0))]);
+    hold_role(&net, "a", &me, &other_kit, "writer", Uuid::new_v4());
+    let unassigned = assign(
+        &manifest(),
+        &me,
+        &net.candidates(&did),
+        TimeDelta::days(1),
+        Utc::now(),
+        &net,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        unassigned.rolled_back[0].undo,
+        Undo::EarlierRoleLost {
+            role: "writer".into(),
+            kit_id: "blake3:another-kit".into()
+        }
+    );
+    assert_eq!(net.0["a"].role(), None);
+}
+
+/// Review finding: an agent that committed a role whose acknowledgement
+/// was lost kept it. Undoing reaches it too, whether the apply fails or
+/// the role went to another agent.
+#[spec("SKD-012")]
+#[tokio::test]
+async fn an_unconfirmed_offer_is_taken_back() {
+    let me = AgentKeypair::generate();
+    let did = me.public_key().to_did_key();
+    let net = net(vec![
+        ("x", Host::new(true, Some(true), 0.0).dropping_acks()),
+        ("y", Host::new(true, None, 0.0)),
+    ]);
+    let unassigned = assign(
+        &manifest(),
+        &me,
+        &net.candidates(&did),
+        TimeDelta::days(1),
+        Utc::now(),
+        &net,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(unassigned.role, "artist");
+    assert_eq!(unassigned.rolled_back, [restored("x", "artist")]);
+    assert_eq!(net.0["x"].role(), None);
+    assert!(net.0["x"].status().binding.is_none());
+
+    let net = self::net(vec![
+        ("x", Host::new(true, Some(true), 0.0).dropping_acks()),
+        ("y", Host::new(true, None, 0.0)),
+        ("z", Host::new(true, Some(false), 0.0)),
+    ]);
+    let applied = assign(
+        &manifest(),
+        &me,
+        &net.candidates(&did),
+        TimeDelta::days(1),
+        Utc::now(),
+        &net,
+    )
+    .await
+    .unwrap();
+    let by_role: HashMap<_, _> = applied
+        .assignments
+        .iter()
+        .map(|a| (a.role.as_str(), a.agent.as_str()))
+        .collect();
+    assert_eq!((by_role["artist"], by_role["writer"]), ("z", "y"));
+    assert_eq!(applied.cleaned_up, [restored("x", "artist")]);
+    assert_eq!(
+        net.0["x"].role(),
+        None,
+        "x took the writer role silently, then gave it back"
+    );
+    assert!(net.0["x"].status().binding.is_none());
 }
 
 #[spec("SKD-012")]

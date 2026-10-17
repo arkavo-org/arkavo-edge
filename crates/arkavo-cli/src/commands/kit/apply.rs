@@ -22,7 +22,9 @@ use super::{reject_unknown_options, usage_error, validate_kit_at};
 
 mod flight;
 
-use flight::{Assignment, Candidate, Failure, Specialists, Unassigned, assign, eligibility};
+use flight::{
+    Applied, Candidate, Failure, RolledBack, Specialists, Unassigned, Undo, assign, eligibility,
+};
 
 const HELP: &str = "arkavo kit apply --help";
 
@@ -73,8 +75,8 @@ pub(super) fn cmd_apply(
         )
     })?;
     match outcome {
-        Ok((flight, assignments)) => {
-            print_assignments(out, &manifest.kit.name, flight, &assignments)?;
+        Ok(applied) => {
+            print_applied(out, &manifest.kit.name, &applied)?;
             Ok(())
         }
         Err(unassigned) => Err(describe(&unassigned).into()),
@@ -178,24 +180,40 @@ fn describe_candidate(status: &SpecialistStatus) -> String {
     line
 }
 
-fn print_assignments(
-    out: &mut dyn Write,
-    kit: &str,
-    flight: uuid::Uuid,
-    assignments: &[Assignment],
-) -> std::io::Result<()> {
-    writeln!(out, "Applied {kit} as flight {flight}:")?;
-    for a in assignments {
+fn print_applied(out: &mut dyn Write, kit: &str, applied: &Applied) -> std::io::Result<()> {
+    writeln!(out, "Applied {kit} as flight {}:", applied.flight)?;
+    for a in &applied.assignments {
         writeln!(
             out,
             "  {} -> {} ({}), until {}",
             a.role, a.agent, a.specialist, a.expires
         )?;
     }
+    for line in applied.cleaned_up.iter().map(describe_undo) {
+        writeln!(out, "{line}")?;
+    }
     writeln!(
         out,
         "Agents keep their roles across restarts until then. Run apply again to reassign them."
     )
+}
+
+/// What putting one agent back did, as a line of output.
+fn describe_undo(rolled_back: &RolledBack) -> String {
+    let RolledBack { agent, role, undo } = rolled_back;
+    match undo {
+        Undo::Restored => format!("  {agent}: put back as it was (offered {role})"),
+        Undo::EarlierRoleLost {
+            role: earlier,
+            kit_id,
+        } => format!(
+            "  {agent}: took role {role} back, but its earlier role {earlier} came from kit \
+             {kit_id}, which this apply cannot give back; apply that kit again"
+        ),
+        Undo::Failed(failure) => {
+            format!("  {agent}: may still hold role {role}; could not take it back: {failure}")
+        }
+    }
 }
 
 fn describe(unassigned: &Unassigned) -> String {
@@ -206,12 +224,7 @@ fn describe(unassigned: &Unassigned) -> String {
     for (agent, failure) in &unassigned.offers {
         lines.push(format!("  {agent}: {failure}"));
     }
-    for (role, failure) in &unassigned.rolled_back {
-        lines.push(match failure {
-            None => format!("  took role {role} back"),
-            Some(failure) => format!("  could not take role {role} back: {failure}"),
-        });
-    }
+    lines.extend(unassigned.rolled_back.iter().map(describe_undo));
     lines.join("\n")
 }
 

@@ -5,11 +5,13 @@ use std::collections::HashSet;
 
 use arkavo_crypto::AgentKeypair;
 use arkavo_swarmkit::{Manifest, RoleSpec};
-use arkavo_swarmkit_delegation::{
-    BindingMode, Delegation, Ready, Refusal, Revocation, SpecialistStatus,
-};
+use arkavo_swarmkit_delegation::{BindingMode, Delegation, Ready, Refusal, SpecialistStatus};
 use chrono::{DateTime, TimeDelta, Utc};
 use uuid::Uuid;
+
+mod undo;
+
+pub(super) use undo::{RolledBack, Undo};
 
 /// An agent that answered `swarmkit/status`.
 #[derive(Debug, Clone)]
@@ -59,14 +61,22 @@ pub(super) struct Assignment {
     pub(super) expires: DateTime<Utc>,
 }
 
-/// A role no agent took, with what each one it was offered to said.
+/// Every role handed out, and the agents that may have taken a role this
+/// apply could not confirm, put back as they were.
+#[derive(Debug)]
+pub(super) struct Applied {
+    pub(super) flight: Uuid,
+    pub(super) assignments: Vec<Assignment>,
+    pub(super) cleaned_up: Vec<RolledBack>,
+}
+
+/// A role no agent took, with what each one it was offered to said, and
+/// every agent this apply touched put back as it was.
 #[derive(Debug)]
 pub(super) struct Unassigned {
     pub(super) role: String,
     pub(super) offers: Vec<(String, Failure)>,
-    /// Roles this apply had handed out and took back; those it could not
-    /// are named with the reason.
-    pub(super) rolled_back: Vec<(String, Option<Failure>)>,
+    pub(super) rolled_back: Vec<RolledBack>,
 }
 
 /// Whether the orchestrator `me` may offer a role to `status`'s agent, or
@@ -113,7 +123,7 @@ pub(super) fn ranked<'a>(
 }
 
 /// Hand each role of `manifest` to one candidate, all or none: a role no
-/// candidate takes revokes those already handed out.
+/// candidate takes puts every agent this apply touched back as it was.
 pub(super) async fn assign<S: Specialists>(
     manifest: &Manifest,
     keypair: &AgentKeypair,
@@ -121,11 +131,13 @@ pub(super) async fn assign<S: Specialists>(
     lifetime: TimeDelta,
     now: DateTime<Utc>,
     net: &S,
-) -> Result<(Uuid, Vec<Assignment>), Unassigned> {
+) -> Result<Applied, Unassigned> {
     let me = keypair.public_key().to_did_key();
     let flight = Uuid::new_v4();
     let mut taken = HashSet::new();
     let mut assigned: Vec<(Assignment, &Candidate)> = Vec::new();
+    // Offers whose outcome is unknown: the agent may have taken the role.
+    let mut unconfirmed: Vec<(String, &Candidate)> = Vec::new();
     for role in role_order(&manifest.roles) {
         let mut offers = Vec::new();
         for candidate in ranked(&role.required_capabilities(), candidates, &taken) {
@@ -166,15 +178,27 @@ pub(super) async fn assign<S: Specialists>(
                     assigned.push((assignment, candidate));
                     break;
                 }
-                Ok(_) => offers.push((
-                    candidate.name.clone(),
-                    Failure::Unreachable("acknowledged a different envelope".into()),
-                )),
-                Err(failure) => offers.push((candidate.name.clone(), failure)),
+                Ok(_) => {
+                    unconfirmed.push((role.id.clone(), candidate));
+                    offers.push((
+                        candidate.name.clone(),
+                        Failure::Unreachable("acknowledged a different envelope".into()),
+                    ));
+                }
+                Err(failure) => {
+                    if !matches!(failure, Failure::Refused(_)) {
+                        unconfirmed.push((role.id.clone(), candidate));
+                    }
+                    offers.push((candidate.name.clone(), failure));
+                }
             }
         }
         if !assigned.iter().any(|(a, _)| a.role == role.id) {
-            let rolled_back = roll_back(&assigned, &me, keypair, flight, net).await;
+            let touched = assigned
+                .iter()
+                .map(|(a, c)| (a.role.clone(), *c))
+                .chain(unconfirmed);
+            let rolled_back = undo_all(manifest, touched, keypair, flight, now, net).await;
             return Err(Unassigned {
                 role: role.id.clone(),
                 offers,
@@ -182,33 +206,40 @@ pub(super) async fn assign<S: Specialists>(
             });
         }
     }
-    Ok((flight, assigned.into_iter().map(|(a, _)| a).collect()))
+    // An agent whose offer went unconfirmed and that then took no role may
+    // still hold one nobody counts on.
+    let stray = unconfirmed
+        .into_iter()
+        .filter(|(_, c)| !taken.contains(&c.status.specialist));
+    let cleaned_up = undo_all(manifest, stray, keypair, flight, now, net).await;
+    Ok(Applied {
+        flight,
+        assignments: assigned.into_iter().map(|(a, _)| a).collect(),
+        cleaned_up,
+    })
 }
 
-async fn roll_back<S: Specialists>(
-    assigned: &[(Assignment, &Candidate)],
-    me: &str,
+/// Undo each agent once, naming the role it was offered.
+async fn undo_all<'a, S: Specialists>(
+    manifest: &Manifest,
+    touched: impl Iterator<Item = (String, &'a Candidate)>,
     keypair: &AgentKeypair,
     flight: Uuid,
+    now: DateTime<Utc>,
     net: &S,
-) -> Vec<(String, Option<Failure>)> {
+) -> Vec<RolledBack> {
+    let mut seen = HashSet::new();
     let mut rolled_back = Vec::new();
-    for (assignment, candidate) in assigned {
-        let revocation = Revocation::new(
-            me.to_string(),
-            assignment.specialist.clone(),
-            Some(flight),
-            false,
-            Utc::now(),
-        );
-        let outcome = match revocation.sign(keypair) {
-            Ok(signed) => net
-                .revoke(&candidate.address, signed.wire().clone())
-                .await
-                .err(),
-            Err(e) => Some(Failure::Unreachable(e.to_string())),
-        };
-        rolled_back.push((assignment.role.clone(), outcome));
+    for (role, candidate) in touched {
+        if !seen.insert(candidate.status.specialist.clone()) {
+            continue;
+        }
+        let undo = undo::undo(manifest, candidate, keypair, flight, now, net).await;
+        rolled_back.push(RolledBack {
+            agent: candidate.name.clone(),
+            role,
+            undo,
+        });
     }
     rolled_back
 }

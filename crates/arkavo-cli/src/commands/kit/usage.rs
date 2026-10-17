@@ -68,8 +68,10 @@ The kit is validated first and must have its kit.id set. Agents are found
 over mDNS, and each role goes to one agent that can take it: roles that need
 a host capability, such as image_generation, go first, to a host that has
 it ready if one does. A role an agent refuses is offered to the next one.
-If a role finds no agent, the roles already given out are taken back and
-nothing changes.
+If a role finds no agent, every agent the apply touched is put back as it
+was: its role from this apply is revoked, a binding it did not have is
+released, and a role it held from an earlier apply of the same kit is given
+back. A role from another kit cannot be given back, and the output says so.
 
 The orchestrator is this host's agent identity key, printed first. An agent
 started without a kit binds to the first orchestrator that gives it a role

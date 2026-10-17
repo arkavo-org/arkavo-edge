@@ -210,7 +210,9 @@ scenarios:
       - "An agent is a candidate when it answers swarmkit/status, is bound to this orchestrator or binds on first use, and is the first found with its key"
       - "Roles that need host capabilities are offered first, to candidates that report every capability, ready before not, then the least loaded, then by name"
       - "Each role goes to one agent in a signed envelope for --days (default 7, 1 to 30); an acknowledgement for a different envelope does not count"
-      - "A refused offer moves the role to the next candidate; a role no candidate takes revokes every role this apply handed out, and the command fails naming the role and each refusal"
+      - "A refused offer moves the role to the next candidate; a role no candidate takes fails the command, naming the role and each refusal, after every agent the apply touched is put back as it was"
+      - "Putting an agent back revokes this flight's role, releases a binding the agent did not have before the apply, and gives back a role it held from an earlier flight of the same kit; an earlier role from another kit is reported as lost"
+      - "An offer whose outcome is unknown (a timeout, a dropped connection, or an acknowledgement of another envelope) counts as touching the agent: it is put back whether the apply fails or the role went to another agent"
       - "A kit without kit.id, or with a pipeline topology, is refused before any agent is contacted"
     refs:
       - crates/arkavo-cli/src/commands/kit/apply.rs
