@@ -122,6 +122,24 @@ runtime:
 
 `--bind <address>` overrides the host the kit names, and says so on stderr. Without a port in the address it keeps the port that `-p` or `runtime.listen` selects; `--bind 127.0.0.1:8343` names both. `--trust` shows the agent's authorization QR code and does not change where it listens.
 
+### Give roles to agents already running
+
+`arkavo kit apply <kit>` hands a kit's roles to agents that are already running on the network, instead of starting each role by hand. It implements SwarmKit draft-02 §7 (arkavo-org/specifications#8); behavior is in `specs/arkavo-edge/swarmkit-delegation.spec.yaml`.
+
+```bash
+arkavo agent                                  # on each machine, without a kit
+arkavo kit apply image-swarm.swarmkit.yaml    # on the machine that orchestrates
+```
+
+- **Who orchestrates.** The orchestrator is the identity key of the host that runs `kit apply`, printed on its first line. Each role travels in an envelope signed with that key, addressed to one agent's own key, valid for `--days` (7 by default, at most 30, never past `kit.expires`).
+- **Who takes roles.** An agent started without a kit binds to the first orchestrator that gives it a role, and refuses every other orchestrator afterwards. Run agents only on networks you trust, or start each with `arkavo agent --orchestrator <did:key>` to name its orchestrator first. `arkavo agent release` forgets the orchestrator and the role. An agent started with a kit runs its kit's role and takes no other.
+- **Which agent gets which role.** Agents are found over mDNS. Roles that need a host capability go first: a role with `host_requirements: [image_generation]`, or one that grants `image_generation` as a tool, goes to a Mac that can generate, one with its weights downloaded if possible. An agent that refuses a role, for example because it has no model for the role's family and size, is skipped and the role offered to the next. If any role finds no agent, the roles already given out are taken back and the command fails, naming the role and what each agent said.
+- **What a role changes.** The agent's purpose (the objective and the role's skill instructions), its model, its tools (the role's grants, enforced) and whether it serves image generation. Agents keep their roles across restarts until they expire.
+- **Limits.**
+  - Every agent process on one host shares that host's key, so a host takes one role this way. Several roles on one Mac still start with `arkavo agent -c <kit> -n <role>`.
+  - A `pipeline` kit's roles find each other by role id, which enlisted agents do not have, so `kit apply` refuses one.
+  - Envelopes are signed, not encrypted, and carry no credentials: a grant with `auth: delegated` is refused.
+
 ### Run a pipeline
 
 A kit with `coordination.topology: pipeline` runs its roles in order. The order comes from `handoffs`: each role hands off to at most one role and receives from at most one. The role that no role hands off to is the entry role.
@@ -350,8 +368,9 @@ This isn't a label system. Domain-specific role types travel through the manifes
 | `ARKAVO_SWARMKIT_PATH` auto-launch | wired under `arkavo ui` (SK-022, SK-061..062) |
 | AG-UI panel: live SwarmFlight roles | wired (SK-020..033) |
 | Operator stop control (`requestStopFlight`) | wired (SK-040) |
-| A2A JSON-RPC delegation envelope (§7.2) | aspirational |
-| Specialist process spawning + inference | aspirational; start each role with `arkavo agent -c <kit> -n <role-id>` |
+| A2A JSON-RPC delegation envelope (§7.2) | wired as draft-02 §7.2: signed, addressed to one agent, with orchestrator binding (SKD-001..011) |
+| Roles given to running agents | wired: `arkavo kit apply <kit>` for kits of other topologies than `pipeline` (SKD-012) |
+| Specialist process spawning + inference | aspirational; start each role with `arkavo agent -c <kit> -n <role-id>`, or give roles to running agents with `arkavo kit apply` |
 | `handoffs` and `context_scope.can_read` in a `pipeline` kit | wired on the `arkavo agent -c` path: a message to the entry role runs the roles in order |
 | Critic verdict, `completion.max_retries`, `completion.on_failure: abort`, `max_wallclock_seconds` in a `pipeline` kit | wired on the `arkavo agent -c` path |
 | `handoffs` in kits of other topologies, rubric scoring, `completion.rules`, `on_failure` other than `abort`, `context_scope.can_write`, `inputs`, `deliverables` | parsed and validated; not executed |

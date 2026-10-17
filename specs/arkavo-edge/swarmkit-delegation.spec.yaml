@@ -197,3 +197,23 @@ scenarios:
       - crates/arkavo-image-gen/src/hosting.rs
       - crates/arkavo-image-gen/src/tool.rs
     changed: "2026-10-16"
+
+  - id: SKD-012
+    name: arkavo kit apply gives a kit's roles to running agents, all or none
+    criticality: high
+    given:
+      - A validated kit with its kit.id set and a topology other than pipeline
+      - Agents on the network found over mDNS
+    when: The operator runs `arkavo kit apply <kit> [--days <n>]`
+    then:
+      - "The orchestrator is this host's agent identity key, printed first; each agent found is listed with whether it can take a role from it and why not"
+      - "An agent is a candidate when it answers swarmkit/status, is bound to this orchestrator or binds on first use, and is the first found with its key"
+      - "Roles that need host capabilities are offered first, to candidates that report every capability, ready before not, then the least loaded, then by name"
+      - "Each role goes to one agent in a signed envelope for --days (default 7, 1 to 30); an acknowledgement for a different envelope does not count"
+      - "A refused offer moves the role to the next candidate; a role no candidate takes revokes every role this apply handed out, and the command fails naming the role and each refusal"
+      - "A kit without kit.id, or with a pipeline topology, is refused before any agent is contacted"
+    refs:
+      - crates/arkavo-cli/src/commands/kit/apply.rs
+      - crates/arkavo-cli/src/commands/kit/apply/flight.rs
+      - crates/arkavo-cli/src/commands/kit/usage.rs
+    changed: "2026-10-16"
