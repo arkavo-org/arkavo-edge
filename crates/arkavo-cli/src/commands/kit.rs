@@ -16,6 +16,7 @@ use arkavo_swarmkit::{discover::ARKAVO_DIR, validate};
 mod agents_md;
 mod agents_md_markdown;
 mod agents_md_yaml;
+mod apply;
 mod frontmatter;
 mod kit_build;
 mod manifest_template;
@@ -28,7 +29,13 @@ pub use validate_cmd::{KitValidateReport, validate_kit, validate_kit_at};
 
 /// Words that are subcommands or help requests. `kit init help` would
 /// otherwise write a kit called "help" when the user was asking for help.
-const RESERVED_NAMES: &[&str] = &["help", "init", "validate", "migrate-from-agents-md"];
+const RESERVED_NAMES: &[&str] = &[
+    "help",
+    "init",
+    "validate",
+    "apply",
+    "migrate-from-agents-md",
+];
 
 /// A failure is reported only through the returned error: the caller prints
 /// it, so printing it here as well would show the user one mistake twice.
@@ -55,6 +62,7 @@ fn run(
         }
         "init" => (usage::INIT, cmd_init),
         "validate" => (usage::VALIDATE, cmd_validate),
+        "apply" => (usage::APPLY, apply::cmd_apply),
         "migrate-from-agents-md" => (usage::MIGRATE, cmd_migrate),
         other => {
             return Err(usage_error(

@@ -11,7 +11,7 @@ use tokio::time::Instant;
 
 use crate::catalog::{self, ALIASES, entries};
 use crate::error::{ImageGenError, Result};
-use crate::generator::Generator;
+use crate::hosting::HostGenerator;
 use crate::job::{AssetJob, AssetSink};
 use crate::output::Generated;
 use crate::progress::Progress;
@@ -35,7 +35,7 @@ pub trait Delegate: Send + Sync {
 }
 
 pub struct GenerateImageTool {
-    local: Option<Arc<Generator>>,
+    local: Arc<HostGenerator>,
     delegate: Option<Arc<dyn Delegate>>,
     sink: Arc<dyn AssetSink>,
     schema: ToolSchema,
@@ -43,7 +43,7 @@ pub struct GenerateImageTool {
 
 impl GenerateImageTool {
     pub fn new(
-        local: Option<Arc<Generator>>,
+        local: Arc<HostGenerator>,
         delegate: Option<Arc<dyn Delegate>>,
         sink: Arc<dyn AssetSink>,
     ) -> Self {
@@ -56,11 +56,11 @@ impl GenerateImageTool {
     }
 }
 
-/// Register generate_image with the generator this host runs, if any, and
-/// the members it can delegate to.
+/// Register generate_image with this host's generator, used while it
+/// serves, and the members it can delegate to.
 pub fn register_tools(
     registry: &mut ToolRegistry,
-    local: Option<Arc<Generator>>,
+    local: Arc<HostGenerator>,
     delegate: Option<Arc<dyn Delegate>>,
     sink: Arc<dyn AssetSink>,
 ) {
@@ -122,7 +122,7 @@ impl GenerateImageTool {
                 tx.send_replace(Some(p));
             };
             let job = request.validate()?;
-            let here = local.filter(|g| g.offer(job.entry.id).is_some());
+            let here = local.serving().filter(|g| g.offer(job.entry.id).is_some());
             if let Some(generator) = here {
                 match generator.generate(&request, deadline, &report).await {
                     Err(e) if e.try_elsewhere() && delegate.is_some() => {}

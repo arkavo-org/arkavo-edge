@@ -60,7 +60,7 @@ pub(crate) async fn accept_request(
             }
         }
     }
-    let service = assets.filter(|s| s.generator.is_some());
+    let service = assets.filter(|s| s.host.serving().is_some());
     if let Some(service) = service {
         service.admit(&request).map_err(|e| refusal(REFUSED, &e))?;
     }
@@ -126,7 +126,7 @@ fn refusal(code: i32, error: &ImageGenError) -> ErrorObjectOwned {
 impl AssetService {
     /// Whether this host takes every item of `request` now.
     fn admit(&self, request: &AssetRequest) -> Result<(), ImageGenError> {
-        let generator = self.generator.as_ref().ok_or_else(unavailable)?;
+        let generator = self.host.serving().ok_or_else(unavailable)?;
         request
             .items
             .iter()
@@ -183,7 +183,7 @@ impl AssetService {
         executor: &TaskExecutor,
         task_id: &uuid::Uuid,
     ) -> Result<Vec<MessagePart>, DeliveryError> {
-        let generator = self.generator.clone().ok_or_else(unavailable)?;
+        let generator = self.host.serving().ok_or_else(unavailable)?;
         let until = Instant::now() + Duration::from_secs(request.deadline_secs).min(JOB_DEADLINE);
         let mut summary = Vec::new();
         let mut manifests = Vec::new();

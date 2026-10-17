@@ -1,11 +1,50 @@
+use std::time::Duration;
+
 use arkavo_protocol::agent_registry::AgentInfo;
 
-/// Discover agents on the mesh network using mDNS
-#[cfg(feature = "mdns")]
+/// How long discovery listens for agents' announcements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Listen {
+    /// The longest it listens.
+    pub window: Duration,
+    /// Stop this long after the last agent was heard, once one was; `None`
+    /// listens for the whole window.
+    pub quiet: Option<Duration>,
+}
+
+impl Listen {
+    /// Enough to reach an agent by name: stop once announcements settle.
+    pub const FIRST: Self = Self {
+        window: Duration::from_secs(5),
+        quiet: Some(Duration::from_millis(500)),
+    };
+
+    /// Every agent on the network, for `arkavo kit apply`. This host's own
+    /// agent answers at once, so settling after it misses slower hosts.
+    pub const ALL: Self = Self {
+        window: Duration::from_secs(5),
+        quiet: None,
+    };
+
+    fn done(&self, elapsed: Duration, since_last: Duration, found: usize) -> bool {
+        elapsed >= self.window || (found > 0 && self.quiet.is_some_and(|q| since_last > q))
+    }
+}
+
+/// Discover agents on the mesh network using mDNS, stopping once
+/// announcements settle.
 pub fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> {
+    discover_mesh_agents_with(Listen::FIRST)
+}
+
+/// Discover agents on the mesh network using mDNS, listening as `listen`
+/// says. Each agent is listed once.
+#[cfg(feature = "mdns")]
+pub fn discover_mesh_agents_with(
+    listen: Listen,
+) -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> {
     use mdns_sd::{ServiceDaemon, ServiceEvent};
     use std::collections::HashMap;
-    use std::time::Duration;
     use tracing::info;
 
     info!("Discovering mesh agents via mDNS...");
@@ -13,20 +52,19 @@ pub fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Erro
     let mdns = ServiceDaemon::new()?;
     let receiver = mdns.browse("_a2a._tcp.local.")?;
 
-    let mut agents = Vec::new();
-    let timeout = Duration::from_secs(5);
+    let mut agents: Vec<AgentInfo> = Vec::new();
     let start = std::time::Instant::now();
     let mut last_discovery = std::time::Instant::now();
 
-    while start.elapsed() < timeout {
-        // Exit early once we've seen agents and had a quiet period
-        if !agents.is_empty() && last_discovery.elapsed() > Duration::from_millis(500) {
-            break;
-        }
+    while !listen.done(start.elapsed(), last_discovery.elapsed(), agents.len()) {
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(event) => {
                 if let ServiceEvent::ServiceResolved(info) = event {
                     last_discovery = std::time::Instant::now();
+                    // An agent resolves again on each interface it announces on.
+                    if agents.iter().any(|a| a.name == info.get_fullname()) {
+                        continue;
+                    }
                     let agent_id = info
                         .get_property_val_str("agent_id")
                         .unwrap_or("unknown")
@@ -101,7 +139,9 @@ pub fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Erro
 }
 
 #[cfg(not(feature = "mdns"))]
-pub fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> {
+pub fn discover_mesh_agents_with(
+    _listen: Listen,
+) -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> {
     tracing::warn!("mDNS feature not compiled in - cannot discover agents");
     Ok(Vec::new())
 }
@@ -242,6 +282,22 @@ mod tests {
         ];
         assert_eq!(answer_text(&parts), "first\nsecond");
         assert_eq!(answer_text(&[]), "");
+    }
+
+    /// SKD-012 regression: `kit apply` listed this Mac's own agent and
+    /// stopped before a MacBook's announcement arrived.
+    #[arkavo_test_macros::spec("SKD-012")]
+    #[test]
+    fn finding_every_agent_listens_for_the_whole_window() {
+        let ms = Duration::from_millis;
+        assert!(!Listen::FIRST.done(ms(100), ms(10), 0));
+        assert!(
+            Listen::FIRST.done(ms(700), ms(600), 1),
+            "settled after the first agent"
+        );
+        assert!(!Listen::ALL.done(ms(700), ms(600), 1));
+        assert!(!Listen::ALL.done(ms(4_900), ms(4_000), 1));
+        assert!(Listen::ALL.done(ms(5_000), ms(0), 3));
     }
 
     #[test]

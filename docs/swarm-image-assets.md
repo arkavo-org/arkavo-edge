@@ -78,12 +78,27 @@ Start each role as its own process, from its own directory (`arkavo agent -c <ki
 
 Editing a kit changes its content hash: `arkavo kit validate <path>` names the `kit.id` the edited file needs.
 
+## Roles across machines
+
+Across machines, the roles can be handed out instead of started by hand. Run `arkavo agent` without a kit on each machine, then `arkavo kit apply <kit>` on one of them (docs/SWARMKIT.md, "Give roles to agents already running"). A role that needs generation lists it:
+
+```yaml
+- id: artist
+  mcp_tools:
+  - server: arkavo
+    auth: none
+    tools: [generate_image]
+  host_requirements: [image_generation]
+```
+
+The artist goes to a Mac that can generate, preferring one with its weights downloaded. A capable Mac given another role stops serving generation and asks the artist, and goes back to serving when its role ends.
+
 Delivery uses the agent's existing Iroh data-plane node, the one released `arkavo` binaries already start (the `iroh` feature). The data plane carries plain references (name, ticket, content hash, size, media type) and knows nothing about images; the asset layer pairs those references with the manifest. An agent built without the node neither generates nor asks members, since nothing could be delivered.
 
 ## What is not done yet
 
 - Assets are not sealed to their requester. Sealing (ASSET-004) needs a TDF path that decrypts (TDF-002). Until then a ticket is a bearer reference for one hour, and tickets are written only into the task result for the party that asked.
-- Two machines have not run the swarm together; three roles on one M6 have (above). On one host every agent signs with the device's did:key, so a manifest's `producer` names the host, not the role.
+- On one host every agent signs with the device's did:key, so a manifest's `producer` names the host, not the role.
 - Models that see tool names and descriptions only (Gemma 4 E2B and other small models) cannot pass `width` or `height`, so they get each entry's default size.
 
 ## Measured on Apple Silicon

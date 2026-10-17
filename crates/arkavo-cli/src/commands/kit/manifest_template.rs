@@ -135,6 +135,7 @@ fn primary_role() -> RoleSpec {
         },
         skills: vec![identity_skill(DEFAULT_IDENTITY_INSTRUCTIONS)],
         mcp_tools: vec![],
+        host_requirements: Vec::new(),
         tdf_attribute_release_policy: None,
         handoffs: vec![],
         context_scope: None,

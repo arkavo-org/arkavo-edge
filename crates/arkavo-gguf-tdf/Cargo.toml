@@ -10,8 +10,8 @@ keywords = ["gguf", "opentdf", "tdf", "llama", "encryption"]
 categories = ["cryptography"]
 
 [dependencies]
-opentdf = { version = "0.16.0", default-features = false, features = ["rustls-tls"] }
-zip = { version = "2.2", default-features = false }
+opentdf = { version = "0.16.1", default-features = false, features = ["rustls-tls"] }
+zip = { version = "9.0.4", default-features = false }
 rand = { workspace = true }
 zeroize = { version = "1.8", features = ["derive"] }
 subtle = "2.6"
@@ -27,7 +27,7 @@ arkavo-test-macros = { path = "../arkavo-test-macros" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 reqwest = { workspace = true }
-zip = { version = "2.2", default-features = false }
+zip = { version = "9.0.4", default-features = false }
 
 [features]
 default = []

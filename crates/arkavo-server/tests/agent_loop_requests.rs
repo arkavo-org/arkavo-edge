@@ -189,3 +189,28 @@ async fn a_cycle_that_generates_images_answers_with_them() {
     );
     node.stop().await.expect("data plane stops");
 }
+
+/// SKD-011: a role assigned while the loop runs is the system prompt from
+/// the next cycle on, and the agent's own purpose returns when it ends.
+#[arkavo_test_macros::spec("SKD-011")]
+#[tokio::test]
+async fn an_assigned_role_becomes_the_system_prompt() {
+    let script = Script::new(vec![text("One."), text("Two.")]);
+    let agent = RunningAgent::start(AgentMode::Specialist, false, script).await;
+
+    agent.metadata().write().await.purpose =
+        "You are the writer. Ask the artist for images.".into();
+    agent.ask("Introduce yourself.").await;
+    agent.metadata().write().await.purpose = String::new();
+    agent.ask("Introduce yourself again.").await;
+    let script = agent.stop().await;
+
+    assert!(
+        script.prompt(0).contains("You are the writer."),
+        "{}",
+        script.prompt(0)
+    );
+    let after = script.prompt(1);
+    assert!(after.contains("You are the analyst."), "{after}");
+    assert!(!after.contains("You are the writer."), "{after}");
+}

@@ -159,7 +159,17 @@ pub async fn run_agent_loop(
     let min_context = config.router.min_feasible_context_size();
     let mut conversation =
         crate::server::conversation_window::ConversationWindow::new(min_context, estimator);
-    conversation.set_system_message(arkavo_llm::Message::system(&config.purpose));
+    // A role an orchestrator assigns changes the agent's purpose while the
+    // loop runs (SKD-011), so each cycle looks for a change to it. A role
+    // that ends puts the agent's own purpose back.
+    // A role resumed at startup is already in place when the loop starts.
+    let mut assigned_purpose = config.agent_metadata.read().await.purpose.clone();
+    let mut purpose = if assigned_purpose.is_empty() {
+        config.purpose.clone()
+    } else {
+        assigned_purpose.clone()
+    };
+    conversation.set_system_message(arkavo_llm::Message::system(&purpose));
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     // Whether anything queued for the next cycle is a task someone delegated,
     // as opposed to a commander's state broadcast. Every tick empties the
@@ -171,12 +181,12 @@ pub async fn run_agent_loop(
     // Every cycle's generate_image calls land here; the cycle's reply takes
     // them, so a reply never carries another cycle's images (ASSET-008).
     let outbox = Arc::new(arkavo_image_gen::Outbox::default());
-    let full_registry = build_full_registry(&config, &outbox).await;
+    let full_registry = Arc::new(build_full_registry(&config, &outbox).await);
     info!(
         "Agent loop: cached {} tools for reuse across cycles",
         full_registry.list_tools().len()
     );
-    let mut active_registry = Arc::new(full_registry);
+    let mut active_registry = full_registry.clone();
     let mut active_grant_hash: u64 = 0; // 0 = unfiltered
 
     // Adaptive tick interval
@@ -217,7 +227,18 @@ pub async fn run_agent_loop(
                 // under, and cannot be served at all once the compute budget is
                 // gone. Both are terminal for anything already queued: leaving
                 // it queued is what makes a requester wait on silence.
-                if config.purpose.is_empty() {
+                let assigned = config.agent_metadata.read().await.purpose.clone();
+                if assigned != assigned_purpose {
+                    purpose = if assigned.is_empty() {
+                        config.purpose.clone()
+                    } else {
+                        assigned.clone()
+                    };
+                    assigned_purpose = assigned;
+                    conversation.set_system_message(arkavo_llm::Message::system(&purpose));
+                    info!("Purpose changed with this agent's role; system prompt updated");
+                }
+                if purpose.is_empty() {
                     reject_pending(
                         &mut pending_messages,
                         CycleId(cycle),
@@ -268,6 +289,11 @@ pub async fn run_agent_loop(
                         tools = active_registry.list_tools().len(),
                         "Specialized: registry filtered to granted tool set"
                     );
+                } else if !specialized && active_grant_hash != 0 {
+                    // The role ended: the agent has every tool again.
+                    active_registry = full_registry.clone();
+                    active_grant_hash = 0;
+                    info!("Role ended: registry restored to every tool");
                 }
 
                 // 2. Drain gossip completions into specialist_context
@@ -459,7 +485,7 @@ pub async fn run_agent_loop(
                     None,
                     config.learning_bus.as_ref(),
                     Some(&config.agent_memory),
-                    Some(config.purpose.as_str()), // in messages too, but needed for classification_content hint
+                    Some(purpose.as_str()), // in messages too, but needed for classification_content hint
                     Some(&config.mesh_state),
                     config.model_hint.as_ref(),
                     None,
@@ -605,9 +631,8 @@ pub async fn run_agent_loop(
                             mem.clear();
                             drop(mem);
                             conversation.clear_history();
-                            conversation.set_system_message(arkavo_llm::Message::system(
-                                &config.purpose,
-                            ));
+                            conversation
+                                .set_system_message(arkavo_llm::Message::system(&purpose));
                             consecutive_no_action_cycles = 0;
                             consecutive_duplicate_prompts = 0;
 

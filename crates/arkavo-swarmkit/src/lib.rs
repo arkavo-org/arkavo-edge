@@ -45,14 +45,15 @@ pub use pricing::ModelPricingEntry;
 #[allow(deprecated)]
 pub use role::ArpRule;
 pub use role::{
-    AgentProvisioning, AuthMode, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant,
-    Model, Observability, Plane, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy,
-    TdfReleaseRule, ToolUse,
+    AgentProvisioning, AuthMode, Budget, ContextScope, Failure, Handoff, IMAGE_GENERATION,
+    Inference, McpToolGrant, Model, Observability, Plane, RoleSpec, Skill, SkillSource,
+    TdfAttributeReleasePolicy, TdfReleaseRule, ToolUse,
 };
 pub use runtime_config::{
     AgentRuntimeConfig, CloudPolicyKind, KitRuntimeConfig, PreflightAction, PreflightPolicySpec,
     RoleRuntimeView, RuntimeKas, RuntimeMcpServer, RuntimeMode, RuntimePreflight,
-    RuntimeValidationError, TrustedRoot, agent_runtime_config_from_manifest, validate_runtime,
+    RuntimeValidationError, TrustedRoot, agent_runtime_config_from_manifest, skill_instructions,
+    validate_runtime,
 };
 pub use skill_content::{SkillContent, SkillResource};
 pub use unenforced::{UnenforcedControl, unenforced_on_agent_path};

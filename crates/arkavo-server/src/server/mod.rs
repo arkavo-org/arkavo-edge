@@ -49,6 +49,7 @@ mod routine_tools;
 mod startup;
 #[cfg(feature = "swarm-apply")]
 mod swarm_apply_tool;
+pub mod swarmkit;
 mod synthesis;
 #[cfg(test)]
 mod test_support;
@@ -304,6 +305,25 @@ pub trait A2aRpc {
     #[method(name = "agent.capabilities.get")]
     async fn agent_capabilities_get(&self) -> RpcResult<AgentCapabilitiesGetResponse>;
 
+    /// This agent's orchestrator binding, role and host capabilities
+    /// (SwarmKit draft-02 §7.3.4)
+    #[method(name = "swarmkit/status")]
+    async fn swarmkit_status(&self) -> RpcResult<arkavo_swarmkit_delegation::SpecialistStatus>;
+
+    /// Take a kit role from the bound orchestrator (SwarmKit draft-02 §7.3)
+    #[method(name = "swarmkit/delegate", param_kind = map)]
+    async fn swarmkit_delegate(
+        &self,
+        envelope: serde_json::Value,
+    ) -> RpcResult<arkavo_swarmkit_delegation::Ready>;
+
+    /// Give a role back, or release the binding (SwarmKit draft-02 §7.4)
+    #[method(name = "swarmkit/revoke", param_kind = map)]
+    async fn swarmkit_revoke(
+        &self,
+        revocation: serde_json::Value,
+    ) -> RpcResult<arkavo_swarmkit_delegation::Revoked>;
+
     /// Specialize agent with TDF-encrypted configuration
     #[method(name = "agent.specialize")]
     async fn agent_specialize(
@@ -450,6 +470,28 @@ pub struct A2aRpcImpl {
     pub(crate) iroh_node: Option<Arc<arkavo_tdf_iroh::IrohNode>>,
     /// Image generation and delivery, when the agent has a data plane
     pub(crate) assets: Option<Arc<AssetService>>,
+    /// Roles an orchestrator assigns, for an agent set up to take them
+    pub(crate) swarmkit: Option<Arc<swarmkit::SpecialistService>>,
+}
+
+impl A2aRpcImpl {
+    /// The specialist service, or an error for an agent not set up to take
+    /// roles, or whose binding could not be read.
+    fn specialist(&self) -> RpcResult<&Arc<swarmkit::SpecialistService>> {
+        self.swarmkit.as_ref().ok_or_else(|| {
+            ErrorObjectOwned::owned(
+                -32601,
+                "this agent takes no role from an orchestrator",
+                None::<()>,
+            )
+        })
+    }
+
+    fn limit_rate(&self) -> RpcResult<()> {
+        self.rate_limiter.check_rate_limit().inspect_err(|_| {
+            self.metrics.record_rate_limit_blocked(None);
+        })
+    }
 }
 
 #[async_trait]
@@ -1067,6 +1109,26 @@ impl A2aRpcServer for A2aRpcImpl {
             self.assets.as_deref(),
         )
         .await
+    }
+
+    async fn swarmkit_status(&self) -> RpcResult<arkavo_swarmkit_delegation::SpecialistStatus> {
+        Ok(self.specialist()?.status().await)
+    }
+
+    async fn swarmkit_delegate(
+        &self,
+        envelope: serde_json::Value,
+    ) -> RpcResult<arkavo_swarmkit_delegation::Ready> {
+        self.limit_rate()?;
+        self.specialist()?.delegate(envelope).await
+    }
+
+    async fn swarmkit_revoke(
+        &self,
+        revocation: serde_json::Value,
+    ) -> RpcResult<arkavo_swarmkit_delegation::Revoked> {
+        self.limit_rate()?;
+        self.specialist()?.revoke(revocation).await
     }
 
     async fn agent_specialize(

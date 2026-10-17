@@ -141,7 +141,10 @@ fn extract(archive: &Path, staging: &Path, members: &[&str]) -> Result<()> {
         let mut entry = zip
             .by_index(index)
             .map_err(|e| fail(format!("unreadable entry {index}: {e}")))?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|e| fail(format!("entry {index} has an unreadable name: {e}")))?
+            .into_owned();
         if name.contains(['/', '\\']) || name == ".." || name.is_empty() {
             return Err(fail(format!("archive entry {name:?} names a path")));
         }

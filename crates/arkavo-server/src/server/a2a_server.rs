@@ -92,6 +92,8 @@ pub struct A2aServer {
     iroh_node: Arc<tokio::sync::RwLock<Option<Arc<arkavo_tdf_iroh::IrohNode>>>>,
     /// Image generation and delivery, set up once the data plane is up
     assets: Arc<tokio::sync::RwLock<Option<Arc<super::assets::AssetService>>>>,
+    /// How this agent takes roles from an orchestrator, taken at start
+    specialist_config: std::sync::Mutex<Option<super::swarmkit::SpecialistConfig>>,
 }
 
 impl A2aServer {
@@ -148,6 +150,7 @@ impl A2aServer {
             #[cfg(feature = "iroh")]
             iroh_node: Arc::new(tokio::sync::RwLock::new(None)),
             assets: Arc::new(tokio::sync::RwLock::new(None)),
+            specialist_config: std::sync::Mutex::new(None),
         }
     }
 
@@ -297,6 +300,16 @@ impl A2aServer {
         self.agent_metadata.write().await.role_id = role_id;
     }
 
+    /// Let an orchestrator assign this agent roles (SwarmKit draft-02 §7).
+    /// Takes effect when the server starts, after the asset service, since
+    /// a role decides whether the agent serves image generation.
+    pub fn set_specialist(&self, config: super::swarmkit::SpecialistConfig) {
+        *self
+            .specialist_config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config);
+    }
+
     /// Whether this agent may host image generation, from its kit role's
     /// grants (ASSET-010). Takes effect when the server starts.
     pub async fn set_image_generation_hosting(&self, hosting: super::assets::Hosting) {
@@ -440,6 +453,29 @@ impl A2aServer {
             hosting,
         )
         .await
+    }
+
+    /// The service that takes roles from an orchestrator, when the CLI set
+    /// one up. A binding that cannot be read leaves the agent taking none,
+    /// rather than open to whoever assigns one first.
+    async fn start_specialist(
+        &self,
+        assets: Option<Arc<super::assets::AssetService>>,
+    ) -> Option<Arc<super::swarmkit::SpecialistService>> {
+        let config = self
+            .specialist_config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()?;
+        match super::swarmkit::SpecialistService::open(config, self.agent_metadata.clone(), assets)
+            .await
+        {
+            Ok(service) => Some(service),
+            Err(e) => {
+                warn!("this agent takes no role from an orchestrator: {e}");
+                None
+            }
+        }
     }
 
     async fn resolve_model_hint(&self) -> Option<arkavo_router::ModelChoice> {
@@ -1258,6 +1294,7 @@ impl A2aServer {
         let node = None;
         let assets = self.start_assets(node, router.as_ref()).await;
         self.assets.write().await.clone_from(&assets);
+        let swarmkit = self.start_specialist(assets.clone()).await;
 
         let trust_init = super::trust_init::init_trust_service().await;
         let trust_service = trust_init.as_ref().map(|t| t.service.clone());
@@ -1346,6 +1383,7 @@ impl A2aServer {
             #[cfg(feature = "iroh")]
             iroh_node: self.iroh_node.read().await.clone(),
             assets,
+            swarmkit,
         };
 
         if let Err(e) = self.start_file_watcher().await {

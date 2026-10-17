@@ -30,7 +30,7 @@ tracing = { workspace = true }
 # The runtime ships as a deflated zip. zip's deflate feature also builds the
 # zopfli compressor, which inflating never needs, so the decoder is enabled
 # alone and flate2 is given its pure-Rust backend here.
-zip = { version = "2.4", default-features = false, features = ["deflate-flate2", "flate2"] }
+zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # Each process's outputs live in a temporary directory of their own.
 tempfile = { workspace = true }

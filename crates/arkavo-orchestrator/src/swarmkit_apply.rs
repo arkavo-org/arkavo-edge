@@ -587,6 +587,7 @@ mod env_token_vault_tests {
                 tools: vec!["some_tool".to_string()],
                 auth: AuthMode::Delegated,
             }],
+            host_requirements: Vec::new(),
             tdf_attribute_release_policy: None,
             handoffs: vec![],
             context_scope: None,

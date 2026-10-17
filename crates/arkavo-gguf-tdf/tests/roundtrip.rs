@@ -163,7 +163,11 @@ fn rewrite_manifest(archive: &Path, dest: &Path, edit: impl FnOnce(&mut serde_js
     let mut zip = zip::ZipArchive::new(File::open(archive).unwrap()).unwrap();
     for i in 0..zip.len() {
         let e = zip.by_index(i).unwrap();
-        names.push((e.name().to_string(), e.data_start(), e.size()));
+        names.push((
+            e.name().unwrap().into_owned(),
+            e.data_start().unwrap(),
+            e.size(),
+        ));
     }
 
     let mut builder = TdfMultiEntryBuilder::new(dest).unwrap();
@@ -412,7 +416,11 @@ fn t11_falls_back_to_the_historical_manifest_name() {
     let entries: Vec<(String, u64, u64)> = (0..zip.len())
         .map(|i| {
             let e = zip.by_index(i).unwrap();
-            (e.name().to_string(), e.data_start(), e.size())
+            (
+                e.name().unwrap().into_owned(),
+                e.data_start().unwrap(),
+                e.size(),
+            )
         })
         .collect();
 
@@ -468,7 +476,11 @@ fn t17_equal_size_member_swap_is_caught_by_the_root_signature() {
     let entries: Vec<(String, u64, u64)> = (0..zip.len())
         .map(|i| {
             let e = zip.by_index(i).unwrap();
-            (e.name().to_string(), e.data_start(), e.size())
+            (
+                e.name().unwrap().into_owned(),
+                e.data_start().unwrap(),
+                e.size(),
+            )
         })
         .collect();
 
@@ -537,7 +549,11 @@ fn t13_reads_an_archive_with_zip64_extra_fields() {
         (0..zip.len())
             .map(|i| {
                 let e = zip.by_index(i).unwrap();
-                (e.name().to_string(), e.data_start(), e.size())
+                (
+                    e.name().unwrap().into_owned(),
+                    e.data_start().unwrap(),
+                    e.size(),
+                )
             })
             .collect()
     };

@@ -255,7 +255,7 @@ fn manifest_is_the_last_member_so_the_root_signature_covers_every_tag() {
     let mut file = File::open(&dest).unwrap();
     let mut zip = zip::ZipArchive::new(&mut file).unwrap();
     let names: Vec<String> = (0..zip.len())
-        .map(|i| zip.by_index(i).unwrap().name().to_string())
+        .map(|i| zip.by_index(i).unwrap().name().unwrap().into_owned())
         .collect();
     assert_eq!(names.last().unwrap(), "0.manifest.json");
     assert_eq!(names.first().unwrap(), "header");
