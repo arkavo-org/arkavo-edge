@@ -214,3 +214,26 @@ scenarios:
     refs:
       - crates/arkavo-server/src/server/agent_loop.rs
     changed: "2026-10-12"
+
+  - id: SRV-014
+    name: A requester's answer is the model's own text even when its rounds end on tool calls
+    criticality: high
+    given:
+      - A cycle a requester is waiting on, in the agent loop or a direct execution of message/send
+      - The planner's rounds end on tool calls whose results came back, or on a round that said nothing after them
+    when: The cycle's answer is written to the requester's task
+    then:
+      - "The planner waits up to 5 minutes for a batch's results, not its inference timeout, so a tool that bounds its own wait (generate_image answers after up to 90 s) reaches the model"
+      - "A call the role's grants deny is reported to the model as denied, as the sequential loop reports it, so every batch has results to wait for"
+      - "One more round runs on the same model with the results in context, offered no tools and told to answer from them"
+      - "Its text is the requester's answer, ahead of any assets the cycle produced (ASSET-008)"
+    edge_cases:
+      - condition: That round fails, times out, answers with a tool call or says nothing
+        expected: "The requester gets the record of the cycle's tool results, as before"
+      - condition: A cycle nobody is waiting on, a round that already answered in text, a refused or failed round, or a spent compute budget
+        expected: "No extra round runs"
+    refs:
+      - crates/arkavo-server/src/server/conductor_parallel.rs
+      - crates/arkavo-server/src/server/conductor_parallel/answering.rs
+      - crates/arkavo-server/src/server/conductor_tool_loop.rs
+    changed: "2026-10-17"

@@ -77,6 +77,14 @@ pub(super) fn tool_call_permitted(
     granted.is_none_or(|g| g.contains(name))
 }
 
+/// What the model is told about a call `tool_call_permitted` refused.
+pub(super) fn denial(name: &str) -> String {
+    format!(
+        "Tool {name} (Denied): not permitted for this role — \
+         it is not in the agent's granted tool set."
+    )
+}
+
 /// Run the agentic tool loop: LLM calls tools → results fed back → LLM continues.
 /// Allows multi-step workflows like observe → delegate → monitor → execute.
 #[allow(clippy::too_many_arguments)]
@@ -690,11 +698,7 @@ async fn execute_tool_calls(
                 tool = %tool_call.tool_name,
                 "Tool call denied: not in this agent's granted set (least-privilege)"
             );
-            tool_result_parts.push(format!(
-                "Tool {} (Denied): not permitted for this role — \
-                 it is not in the agent's granted tool set.",
-                tool_call.tool_name
-            ));
+            tool_result_parts.push(denial(&tool_call.tool_name));
             *total_step_idx += 1;
             continue;
         }

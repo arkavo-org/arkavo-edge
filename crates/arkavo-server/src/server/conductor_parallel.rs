@@ -6,7 +6,7 @@
 //! - Judge (small model): distills results, scores quality, synthesizes feedback
 
 use super::conductor_tool_loop::{
-    ToolCallObservation, ToolLoopResult, distill_with_small_model, tool_call_permitted,
+    ToolCallObservation, ToolLoopResult, denial, distill_with_small_model, tool_call_permitted,
 };
 use super::learning_bus::{LearningBus, LearningEvent};
 use super::tool_memory::ToolMemory;
@@ -19,6 +19,19 @@ use tracing::{debug, info, warn};
 
 mod answering;
 pub(super) use answering::for_requester;
+#[cfg(test)]
+// `#[tokio::test]` expands to `Runtime::block_on`, which the crate's lint set
+// disallows in library code.
+#[allow(clippy::disallowed_methods)]
+mod planner_tests;
+
+/// How long the planner waits for a batch's results. Tools bound their own
+/// waits, generate_image's at 90 s, and the loop waits for the executor
+/// before it returns whatever the planner does: giving up sooner saves no
+/// time and only keeps the results from the model, which then cannot answer.
+/// Every call is reported, a denied one too, so this only ends a batch with
+/// a tool that hangs.
+const TOOL_RESULTS_WAIT: std::time::Duration = std::time::Duration::from_mins(5);
 
 /// Batch of tool calls from the planner
 struct PlannedActions {
@@ -205,6 +218,14 @@ async fn planner_track(
 
     let model_ctx = super::rlm_bridge::model_context_size(model_hint.map(|h| h.name()), false);
     let mut prev_degenerate = false;
+    let timeout_secs = match model_hint {
+        Some(h) if h.size_bytes() >= 15_000_000_000 => 240u64,
+        Some(h) if h.size_bytes() >= 5_000_000_000 => 180,
+        _ => 90,
+    };
+    // The last batch's results are in `messages` and the model has not
+    // spoken since: a requester is still owed its answer.
+    let mut results_unanswered = false;
 
     for plan_round in 0..2 {
         // Consume any judge feedback from previous round as proper tool result messages
@@ -300,12 +321,6 @@ async fn planner_track(
                 .max(result.context_utilization_pct);
         }
 
-        let timeout_secs = match model_hint {
-            Some(h) if h.size_bytes() >= 15_000_000_000 => 240u64,
-            Some(h) if h.size_bytes() >= 5_000_000_000 => 180,
-            _ => 90,
-        };
-
         info!(
             plan_round,
             context_tokens,
@@ -381,6 +396,7 @@ async fn planner_track(
         if response.tool_calls.is_empty() {
             if answering::text_is_final(&response.content) {
                 info!("Planner round {plan_round}: text answer for the requester, done");
+                results_unanswered = false;
                 break;
             }
             if plan_round == 0 {
@@ -411,6 +427,7 @@ async fn planner_track(
 
         let native_tool_role = response.tool_results_use_tool_role();
         messages.push(response.as_assistant_message());
+        results_unanswered = false;
 
         if plan_tx
             .send(PlannedActions {
@@ -428,12 +445,7 @@ async fn planner_track(
         // ahead and generates the next inference without seeing whether the
         // previous tool calls succeeded — causing repeated registerAgent calls
         // and lost context.
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            feedback_rx.recv(),
-        )
-        .await
-        {
+        match tokio::time::timeout(TOOL_RESULTS_WAIT, feedback_rx.recv()).await {
             Ok(Some(feedback)) => {
                 // Push tool results with proper role so Jinja templates
                 // (especially Gemma 4) render <|tool_response> tokens.
@@ -450,6 +462,7 @@ async fn planner_track(
                         "Previous actions had negative results. Adjust strategy.".to_string(),
                     ));
                 }
+                results_unanswered = true;
             }
             Ok(None) => {
                 warn!("Planner: judge channel closed before feedback");
@@ -466,6 +479,26 @@ async fn planner_track(
 
     // Drop sender to signal executor to stop
     drop(plan_tx);
+
+    let budget_left = match compute_budget {
+        Some(budget) => budget.read().await.snapshot().has_remaining,
+        None => true,
+    };
+    if results_unanswered
+        && result.failure.is_none()
+        && budget_left
+        && let Some(answer) = answering::after_tools(
+            router,
+            task_content,
+            messages,
+            model_hint,
+            std::time::Duration::from_secs(timeout_secs),
+        )
+        .await
+    {
+        info!("Planner: answered the requester from the tool results");
+        result.final_text = answer;
+    }
     result
 }
 
@@ -514,22 +547,27 @@ async fn executor_track(
 
     while let Some(planned) = plan_rx.recv().await {
         // Filter calls to only those permitted by the grant set before
-        // executing — deny at the boundary, never fabricate.
-        let raw_calls = dedup_tool_calls(planned.tool_calls);
-        let tool_calls: Vec<_> = raw_calls
+        // executing — deny at the boundary, never fabricate. A denied call is
+        // reported like a failed one, so the model learns it may not use the
+        // tool and the planner is not left waiting on a batch with no result.
+        let (tool_calls, denied): (Vec<_>, Vec<_>) = dedup_tool_calls(planned.tool_calls)
             .into_iter()
-            .filter(|tc| {
-                if tool_call_permitted(&tc.tool_name, granted_tools) {
-                    true
-                } else {
-                    warn!(
-                        tool = %tc.tool_name,
-                        "Parallel executor: tool call denied (least-privilege)"
-                    );
-                    false
-                }
-            })
-            .collect();
+            .partition(|tc| tool_call_permitted(&tc.tool_name, granted_tools));
+        for (idx, tc) in denied.into_iter().enumerate() {
+            warn!(
+                tool = %tc.tool_name,
+                "Parallel executor: tool call denied (least-privilege)"
+            );
+            let _ = result_tx
+                .send(ExecutionResult {
+                    result: denial(&tc.tool_name),
+                    call_id: tc.call_id.unwrap_or_else(|| format!("denied_{idx}")),
+                    tool_name: tc.tool_name,
+                    success: false,
+                    reward: None,
+                })
+                .await;
+        }
         info!(
             tool_count = tool_calls.len(),
             "Executor: received action batch"
