@@ -76,6 +76,16 @@ impl ToolParser {
         collapse.replace_all(result.trim(), "\n\n").to_string()
     }
 
+    /// Remove the tool-call markup our fallback parsers read, XML
+    /// `<tool_call>` blocks as well as fences, once their calls are parsed.
+    pub fn strip_tool_call_blocks(text: &str) -> String {
+        let without_xml = match Regex::new(r"<tool_call>[\s\S]*?</tool_call>") {
+            Ok(re) => re.replace_all(text, "").into_owned(),
+            Err(_) => text.to_string(),
+        };
+        Self::strip_fence_blocks(&without_xml)
+    }
+
     /// Strip GLM-4 thinking blocks from model output
     ///
     /// GLM-4.7-Flash outputs `<|thought|>...<|/thought|>` blocks before tool calls.
@@ -815,6 +825,23 @@ I'll get that now."#;
         let text = "Let me check.\n\n```get_weather\nlocation: NYC\n```\n\nHere you go.";
         let stripped = ToolParser::strip_fence_blocks(text);
         assert_eq!(stripped, "Let me check.\n\nHere you go.");
+    }
+
+    /// Regression: an XML call the template's parser rejected (optional
+    /// parameters before the required one) was parsed by the fallback but
+    /// left in the reply's text.
+    #[test]
+    fn strip_tool_call_blocks_removes_xml_calls() {
+        let text = "Reading the next page.\n<tool_call>\n<function=read_file>\n<parameter=limit>\n100\n</parameter>\n<parameter=path>\napp.log\n</parameter>\n</function>\n</tool_call>";
+        assert_eq!(
+            ToolParser::strip_tool_call_blocks(text),
+            "Reading the next page."
+        );
+        let fenced = "Let me check.\n\n```get_weather\nlocation: NYC\n```\n\nHere you go.";
+        assert_eq!(
+            ToolParser::strip_tool_call_blocks(fenced),
+            "Let me check.\n\nHere you go."
+        );
     }
 
     #[test]

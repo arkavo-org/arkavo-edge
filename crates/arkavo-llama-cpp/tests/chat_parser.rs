@@ -6,7 +6,9 @@
 //!
 //! Run with: cargo test -p arkavo-llama-cpp --test chat_parser -- --ignored
 
-use arkavo_llama_cpp::{ffi, parse_tool_calls, ChatInputs, ChatTool, LlamaModel, ToolChoice};
+use arkavo_llama_cpp::{
+    ffi, parse_tool_calls, ChatInputs, ChatParser, ChatTool, LlamaModel, ToolChoice,
+};
 use std::ffi::CString;
 
 fn cached(repo_dir: &str, file: &str) -> Option<String> {
@@ -21,9 +23,8 @@ fn cached(repo_dir: &str, file: &str) -> Option<String> {
     .map(|p| p.to_string_lossy().to_string())
 }
 
-/// Renders a one-tool weather conversation and parses `output` with the
-/// parser that rendering produced.
-fn parse_with_template(model_path: &str, output: &str) -> (String, String) {
+/// The parser from rendering a one-tool weather conversation.
+fn parser_for(model_path: &str, enable_thinking: bool) -> ChatParser {
     let model = LlamaModel::from_file(model_path).expect("load model");
     let templates = model.chat_templates().expect("chat templates");
     let role = CString::new("user").unwrap();
@@ -40,7 +41,7 @@ fn parse_with_template(model_path: &str, output: &str) -> (String, String) {
                 .to_string(),
         }],
         tool_choice: ToolChoice::Auto,
-        enable_thinking: false,
+        enable_thinking,
         add_generation_prompt: true,
         parallel_tool_calls: false,
     };
@@ -52,7 +53,12 @@ fn parse_with_template(model_path: &str, output: &str) -> (String, String) {
     // Dropping the template set and model first proves the handle owns its parser.
     drop(templates);
     drop(model);
+    parser
+}
 
+/// Parses `output` as the one tool call it must contain.
+fn parse_with_template(model_path: &str, output: &str) -> (String, String) {
+    let parser = parser_for(model_path, false);
     let (_, _, calls) = parse_tool_calls(output, &parser);
     assert_eq!(
         calls.len(),
@@ -97,4 +103,27 @@ fn a_gemma4_tool_call_parses_without_the_generation_prompt() {
     let (name, arguments) = parse_with_template(&path, output);
     assert_eq!(name, "get_weather");
     assert_eq!(compact(&arguments), r#"{"location":"Paris"}"#);
+}
+
+/// Regression: templates were applied with reasoning_format NONE, so a
+/// thinking model's reasoning came back inline in the answer.
+#[test]
+#[ignore = "requires unsloth/Qwen3.5-0.8B-GGUF in the HuggingFace cache"]
+fn reasoning_is_split_from_the_answer() {
+    let Some(path) = cached(
+        "models--unsloth--Qwen3.5-0.8B-GGUF",
+        "Qwen3.5-0.8B-Q4_K_M.gguf",
+    ) else {
+        eprintln!("skipping: Qwen3.5-0.8B GGUF not cached");
+        return;
+    };
+    let parser = parser_for(&path, true);
+    let (content, reasoning, calls) =
+        parse_tool_calls("Paris is in France.\n</think>\n\nIt is in France.", &parser);
+    assert!(calls.is_empty(), "{calls:?}");
+    assert_eq!(content.trim(), "It is in France.");
+    assert_eq!(
+        reasoning.as_deref().map(str::trim),
+        Some("Paris is in France.")
+    );
 }

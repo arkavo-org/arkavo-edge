@@ -87,6 +87,9 @@ arkavo_chat_result arkavo_chat_templates_apply(
         inputs.add_generation_prompt = (add_generation_prompt != 0);
         inputs.use_jinja = true;
         inputs.enable_thinking = (enable_thinking != 0);
+        // Have the output parser split reasoning from the answer, as
+        // llama-server does by default; NONE leaves it inline in content.
+        inputs.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
         inputs.parallel_tool_calls = (parallel_tool_calls != 0);
 
         for (int i = 0; i < num_messages; i++) {
@@ -243,6 +246,9 @@ arkavo_chat_parse_result arkavo_chat_parse(
         }
     } catch (const std::exception &e) {
         fprintf(stderr, "arkavo_chat_parse: %s\n", e.what());
+        if (getenv("ARKAVO_DEBUG_PEG")) {
+            fprintf(stderr, "[PEG-INPUT] %s\n[PEG-INPUT-END]\n", output_text);
+        }
     } catch (...) {
         fprintf(stderr, "arkavo_chat_parse: unknown exception\n");
     }
