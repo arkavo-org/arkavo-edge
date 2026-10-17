@@ -8,12 +8,13 @@ use arkavo_llm::{Message as Prompt, ParsedToolCall, Provider, ProviderResponse, 
 use arkavo_router::{ModelChoice, ProviderFactory};
 
 /// Replies handed out in order, counting the dispatches that asked for them
-/// and noting whether each was offered tools.
+/// and noting whether each was offered tools and what it was shown.
 #[derive(Default)]
 pub(crate) struct Script {
     replies: Mutex<VecDeque<ProviderResponse>>,
     pub(crate) dispatches: Mutex<usize>,
     pub(crate) offered_tools: Mutex<Vec<bool>>,
+    pub(crate) prompts: Mutex<Vec<String>>,
 }
 
 impl Script {
@@ -33,12 +34,20 @@ pub(crate) fn text(content: &str) -> ProviderResponse {
 }
 
 pub(crate) fn calling(tool_name: &str) -> ProviderResponse {
+    calling_all(&[tool_name])
+}
+
+/// One round that calls every tool in `tool_names`, in that order.
+pub(crate) fn calling_all(tool_names: &[&str]) -> ProviderResponse {
     ProviderResponse {
-        tool_calls: vec![ParsedToolCall {
-            tool_name: tool_name.to_string(),
-            arguments: serde_json::json!({}),
-            call_id: None,
-        }],
+        tool_calls: tool_names
+            .iter()
+            .map(|tool_name| ParsedToolCall {
+                tool_name: (*tool_name).to_string(),
+                arguments: serde_json::json!({}),
+                call_id: None,
+            })
+            .collect(),
         ..Default::default()
     }
 }
@@ -72,11 +81,17 @@ impl Provider for ScriptedProvider {
 
     async fn complete_with_tools(
         &self,
-        _messages: Vec<Prompt>,
+        messages: Vec<Prompt>,
         tools: Option<serde_json::Value>,
         _max_tokens: Option<usize>,
     ) -> arkavo_llm::Result<ProviderResponse> {
         *self.0.dispatches.lock().expect("dispatch count") += 1;
+        let shown: Vec<_> = messages.into_iter().map(|m| m.content).collect();
+        self.0
+            .prompts
+            .lock()
+            .expect("prompts")
+            .push(shown.join("\n"));
         self.0
             .offered_tools
             .lock()

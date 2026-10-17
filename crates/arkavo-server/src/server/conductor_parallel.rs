@@ -228,21 +228,7 @@ async fn planner_track(
     let mut results_unanswered = false;
 
     for plan_round in 0..2 {
-        // Consume any judge feedback from previous round as proper tool result messages
-        while let Ok(feedback) = feedback_rx.try_recv() {
-            for tr in &feedback.tool_results {
-                messages.push(arkavo_llm::Message::tool_result(
-                    &tr.content,
-                    &tr.call_id,
-                    &tr.tool_name,
-                ));
-            }
-            if feedback.should_replan {
-                messages.push(arkavo_llm::Message::user(
-                    "Previous actions had negative results. Adjust strategy.".to_string(),
-                ));
-            }
-        }
+        drain_feedback(&mut feedback_rx, &mut messages);
 
         // Check compute budget
         if let Some(budget) = compute_budget {
@@ -368,7 +354,7 @@ async fn planner_track(
         let response =
             tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), inference_fut).await;
 
-        let response = match response {
+        let mut response = match response {
             Ok(Ok(resp)) => resp,
             Ok(Err(e)) => {
                 warn!("Planner round {plan_round} failed: {e}");
@@ -426,6 +412,10 @@ async fn planner_track(
         info!("Planner round {plan_round}: produced {call_count} tool calls");
 
         let native_tool_role = response.tool_results_use_tool_role();
+        // The planner waits for one result per call, so a call the model
+        // repeated has to be dropped here, before it is counted.
+        response.tool_calls = dedup_tool_calls(std::mem::take(&mut response.tool_calls));
+        let batch_len = response.tool_calls.len();
         messages.push(response.as_assistant_message());
         results_unanswered = false;
 
@@ -445,33 +435,26 @@ async fn planner_track(
         // ahead and generates the next inference without seeing whether the
         // previous tool calls succeeded — causing repeated registerAgent calls
         // and lost context.
-        match tokio::time::timeout(TOOL_RESULTS_WAIT, feedback_rx.recv()).await {
-            Ok(Some(feedback)) => {
-                // Push tool results with proper role so Jinja templates
-                // (especially Gemma 4) render <|tool_response> tokens.
-                for tr in &feedback.tool_results {
-                    messages.push(arkavo_llm::tool_feedback_message(
-                        &tr.content,
-                        &tr.call_id,
-                        &tr.tool_name,
-                        native_tool_role,
-                    ));
-                }
-                if feedback.should_replan {
-                    messages.push(arkavo_llm::Message::user(
-                        "Previous actions had negative results. Adjust strategy.".to_string(),
-                    ));
-                }
-                results_unanswered = true;
-            }
-            Ok(None) => {
-                warn!("Planner: judge channel closed before feedback");
-                break;
-            }
-            Err(_) => {
-                warn!("Planner: timed out waiting for executor feedback");
-                break;
-            }
+        let (feedback, cut_short) = batch_feedback(&mut feedback_rx, batch_len).await;
+        // Push tool results with proper role so Jinja templates
+        // (especially Gemma 4) render <|tool_response> tokens.
+        for tr in &feedback.tool_results {
+            messages.push(arkavo_llm::tool_feedback_message(
+                &tr.content,
+                &tr.call_id,
+                &tr.tool_name,
+                native_tool_role,
+            ));
+        }
+        if feedback.should_replan {
+            messages.push(arkavo_llm::Message::user(
+                "Previous actions had negative results. Adjust strategy.".to_string(),
+            ));
+        }
+        results_unanswered = !feedback.tool_results.is_empty();
+        if let Some(why) = cut_short {
+            warn!("Planner: {why}");
+            break;
         }
 
         prev_degenerate = batch_degenerate;
@@ -479,6 +462,7 @@ async fn planner_track(
 
     // Drop sender to signal executor to stop
     drop(plan_tx);
+    drain_feedback(&mut feedback_rx, &mut messages);
 
     let budget_left = match compute_budget {
         Some(budget) => budget.read().await.snapshot().has_remaining,
@@ -500,6 +484,60 @@ async fn planner_track(
         result.final_text = answer;
     }
     result
+}
+
+/// What came back for a batch of `calls` tool calls, in the order the judge
+/// sent it, and why the batch ended short of one result per call when it
+/// did. The judge reports each call on its own, as it finishes: a planner
+/// that went on after the first report left a slower call's result unread,
+/// and a denied call is reported at once while generate_image takes minutes.
+async fn batch_feedback(
+    feedback_rx: &mut mpsc::Receiver<JudgeFeedback>,
+    calls: usize,
+) -> (JudgeFeedback, Option<&'static str>) {
+    let mut batch = JudgeFeedback {
+        tool_results: Vec::with_capacity(calls),
+        should_replan: false,
+    };
+    let collect = async {
+        while batch.tool_results.len() < calls {
+            let feedback = feedback_rx
+                .recv()
+                .await
+                .ok_or("judge channel closed before feedback")?;
+            batch.tool_results.extend(feedback.tool_results);
+            batch.should_replan |= feedback.should_replan;
+        }
+        Ok(())
+    };
+    let cut_short = match tokio::time::timeout(TOOL_RESULTS_WAIT, collect).await {
+        Ok(Ok(())) => None,
+        Ok(Err(why)) => Some(why),
+        Err(_) => Some("timed out waiting for executor feedback"),
+    };
+    (batch, cut_short)
+}
+
+/// Take whatever judge feedback is already waiting, which is a result that
+/// came in after its batch was cut short.
+fn drain_feedback(
+    feedback_rx: &mut mpsc::Receiver<JudgeFeedback>,
+    messages: &mut Vec<arkavo_llm::Message>,
+) {
+    while let Ok(feedback) = feedback_rx.try_recv() {
+        for tr in &feedback.tool_results {
+            messages.push(arkavo_llm::Message::tool_result(
+                &tr.content,
+                &tr.call_id,
+                &tr.tool_name,
+            ));
+        }
+        if feedback.should_replan {
+            messages.push(arkavo_llm::Message::user(
+                "Previous actions had negative results. Adjust strategy.".to_string(),
+            ));
+        }
+    }
 }
 
 /// Collapse identical tool calls (same name + same args) in a batch.
@@ -550,7 +588,8 @@ async fn executor_track(
         // executing — deny at the boundary, never fabricate. A denied call is
         // reported like a failed one, so the model learns it may not use the
         // tool and the planner is not left waiting on a batch with no result.
-        let (tool_calls, denied): (Vec<_>, Vec<_>) = dedup_tool_calls(planned.tool_calls)
+        let (tool_calls, denied): (Vec<_>, Vec<_>) = planned
+            .tool_calls
             .into_iter()
             .partition(|tc| tool_call_permitted(&tc.tool_name, granted_tools));
         for (idx, tc) in denied.into_iter().enumerate() {

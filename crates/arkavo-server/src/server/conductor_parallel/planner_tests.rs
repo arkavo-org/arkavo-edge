@@ -6,32 +6,30 @@ use arkavo_llm::ParsedToolCall;
 use arkavo_router::ModelChoice;
 
 use super::*;
-use crate::server::scripted_model::{Script, calling, scripted_router, text};
+use crate::server::scripted_model::{Script, calling, calling_all, scripted_router, text};
 
-/// Run the planner on `script` with an executor that answers each batch
-/// after `tool_time`, as a slow tool would.
+/// Run the planner on `script` with an executor whose calls each finish
+/// `tool_time` after the one before, reported one at a time as the judge
+/// reports them.
 async fn plan_with_slow_tools(script: &Arc<Script>, tool_time: Duration) -> PlanResult {
     let router = scripted_router(script).await;
     let (plan_tx, mut plan_rx) = mpsc::channel::<PlannedActions>(4);
     let (feedback_tx, feedback_rx) = mpsc::channel(4);
     let executor = tokio::spawn(async move {
         while let Some(planned) = plan_rx.recv().await {
-            tokio::time::sleep(tool_time).await;
-            let tool_results = planned
-                .tool_calls
-                .into_iter()
-                .map(|call| CondensedToolResult {
-                    content: format!("{} finished", call.tool_name),
-                    call_id: call.call_id.unwrap_or_default(),
-                    tool_name: call.tool_name,
-                })
-                .collect();
-            let feedback = JudgeFeedback {
-                tool_results,
-                should_replan: false,
-            };
-            if feedback_tx.send(feedback).await.is_err() {
-                break;
+            for call in planned.tool_calls {
+                tokio::time::sleep(tool_time).await;
+                let feedback = JudgeFeedback {
+                    tool_results: vec![CondensedToolResult {
+                        content: format!("{} finished", call.tool_name),
+                        call_id: call.call_id.unwrap_or_default(),
+                        tool_name: call.tool_name,
+                    }],
+                    should_replan: false,
+                };
+                if feedback_tx.send(feedback).await.is_err() {
+                    return;
+                }
             }
         }
     });
@@ -66,6 +64,47 @@ async fn a_tool_slower_than_an_inference_round_still_reaches_the_model() {
     assert_eq!(result.failure, None);
     assert_eq!(result.final_text, answer);
     assert_eq!(*script.dispatches.lock().expect("dispatch count"), 2);
+}
+
+/// Regression (SRV-014): the judge reports each call of a batch on its
+/// own, and the planner went on after the first report. A denied call is
+/// reported at once while generate_image takes minutes, so its result
+/// reached nobody and the model answered without it.
+#[arkavo_test_macros::spec("SRV-014")]
+#[tokio::test(start_paused = true)]
+async fn the_next_round_waits_for_every_call_in_the_batch() {
+    let script = Script::of([
+        calling_all(&["shell_exec", "generate_image"]),
+        text("Your gold coin sprite is on its way."),
+    ]);
+
+    for_requester(plan_with_slow_tools(&script, Duration::from_secs(120))).await;
+
+    let prompts = script.prompts.lock().expect("prompts");
+    assert!(prompts[1].contains("shell_exec finished"), "{}", prompts[1]);
+    assert!(
+        prompts[1].contains("generate_image finished"),
+        "{}",
+        prompts[1]
+    );
+}
+
+/// Regression (SRV-014): the planner now waits for one result per call, so
+/// a call the model repeated in its batch is run and counted once, or the
+/// planner would wait for a result that never comes.
+#[arkavo_test_macros::spec("SRV-014")]
+#[tokio::test(start_paused = true)]
+async fn a_repeated_call_is_run_once() {
+    let script = Script::of([
+        calling_all(&["list_agents", "list_agents"]),
+        text("Two agents are on the mesh."),
+    ]);
+
+    let result = for_requester(plan_with_slow_tools(&script, Duration::ZERO)).await;
+
+    assert_eq!(result.failure, None);
+    let prompts = script.prompts.lock().expect("prompts");
+    assert_eq!(prompts[1].matches("list_agents finished").count(), 1);
 }
 
 /// SRV-014: an autonomous cycle is not owed an answer, so its rounds end on
