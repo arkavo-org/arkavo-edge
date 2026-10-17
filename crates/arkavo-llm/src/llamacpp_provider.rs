@@ -85,6 +85,14 @@ fn is_small_model(name: &str) -> bool {
         || lower.contains("500m")
 }
 
+/// DRY penalizes repeating any run of tokens seen recently, which code does
+/// legitimately (`for x in xs` ... `len(xs)`): models dropped characters from
+/// identifiers they had already written. GLM-4.7 needs it to stop looping.
+#[cfg(feature = "llama-cpp")]
+fn uses_dry_sampling(format: ModelFormat) -> bool {
+    matches!(format, ModelFormat::GLM4)
+}
+
 #[cfg(feature = "llama-cpp")]
 pub struct LlamaCppProvider {
     /// Model reference - either owned directly or accessed via registry
@@ -573,8 +581,7 @@ impl LlamaCppProvider {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Enable dry sampling for repetition prevention (all models can loop)
-        let use_dry_sampling = true;
+        let use_dry_sampling = uses_dry_sampling(format);
 
         // Store template parse info for complete_with_tools to use later
         if let Some(parser) = template_chat_parser
@@ -674,9 +681,8 @@ impl LlamaCppProvider {
             .clone()
             .ok_or_else(|| Error::Config("Vision context not initialized".to_string()))?;
 
-        // Detect if GLM for dry sampling
         let format = detect_model_format(&self.name);
-        let use_dry_sampling = matches!(format, ModelFormat::GLM4);
+        let use_dry_sampling = uses_dry_sampling(format);
 
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
@@ -1354,7 +1360,23 @@ impl Provider for LlamaCppProvider {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "llama-cpp")]
-    use super::is_small_model;
+    use super::{is_small_model, uses_dry_sampling};
+
+    /// Regression: DRY ran for every model and corrupted code it wrote.
+    #[test]
+    #[cfg(feature = "llama-cpp")]
+    fn only_glm_samples_with_dry() {
+        use arkavo_llama_cpp::ModelFormat;
+        assert!(uses_dry_sampling(ModelFormat::GLM4));
+        for format in [
+            ModelFormat::Gemma3,
+            ModelFormat::Gemma4,
+            ModelFormat::MistralV3,
+            ModelFormat::Qwen3,
+        ] {
+            assert!(!uses_dry_sampling(format), "{format:?}");
+        }
+    }
 
     #[test]
     #[cfg(feature = "llama-cpp")]
