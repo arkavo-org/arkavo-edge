@@ -648,7 +648,7 @@ components:
     module: arkavo_swarmkit_delegation
     description: Signed SwarmKit delegation envelopes, the specialist's orchestrator binding, and roles assigned to running agents (SwarmKit draft-02 §7)
     criticality: critical
-    scenario_count: 9
+    scenario_count: 11
     invariants:
       - A role is applied only from an envelope whose signature verifies over the JSON received
       - A bound specialist takes roles and revocations from its bound orchestrator only

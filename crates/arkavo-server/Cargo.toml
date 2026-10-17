@@ -92,6 +92,7 @@ arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["advisor-persistence", "persistence"] }
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
+arkavo-swarmkit-delegation = { path = "../arkavo-swarmkit-delegation" }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-crypto = { path = "../arkavo-crypto" }

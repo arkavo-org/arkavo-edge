@@ -157,3 +157,43 @@ scenarios:
     refs:
       - crates/arkavo-swarmkit-delegation/src/envelope.rs
     changed: "2026-10-16"
+
+  - id: SKD-010
+    name: An agent answers swarmkit/status and takes roles over swarmkit/delegate
+    criticality: high
+    given:
+      - An agent with its own did:key (the agent identity key, not the device key)
+    when: An orchestrator calls swarmkit/status, swarmkit/delegate or swarmkit/revoke
+    then:
+      - "swarmkit/status reports the agent's key, its binding, binds_by, the role it holds, and image_generation with whether a model is ready when the host can generate, whatever role it holds"
+      - "swarmkit/delegate and swarmkit/revoke take named params (envelope, revocation); a refusal is JSON-RPC error -32040 whose data carries the reason"
+      - "An agent started without a kit binds on first use, or to the orchestrator `arkavo agent --orchestrator <did:key>` names; the binding and role are kept beside the agent identity key"
+      - "An agent started with a kit role takes no other: its status shows no binding or role and binds_by is empty, and a delegation is refused as binding_required, though other agents on the host share its key's state"
+      - "`--orchestrator` with a kit is refused before the agent starts; `arkavo agent release` forgets the binding and the role, and removes an unreadable binding"
+      - "A binding that cannot be read leaves the agent taking no roles at all, never binding on first use"
+    refs:
+      - crates/arkavo-server/src/server/swarmkit.rs
+      - crates/arkavo-server/src/server/mod.rs
+      - crates/arkavo-server/src/server/a2a_server.rs
+      - crates/arkavo-cli/src/commands/agent/enlist.rs
+      - crates/arkavo-device-identity/src/keypair.rs
+    changed: "2026-10-16"
+
+  - id: SKD-011
+    name: A role changes what the running agent does, and its end restores it
+    criticality: high
+    given:
+      - An agent started without a kit that accepts a delegation
+    when: The role is applied, revoked, expires, or the agent restarts
+    then:
+      - "The host must provide each of host_requirements (image_generation needs a host that can generate), the role's model must resolve to one this host runs, and initial_inputs must be empty; otherwise host_unsuitable, and nothing is bound or changed"
+      - "The agent's purpose becomes the objective and the role's skill instructions (or its description), its model the role's, its description the role's, and its tools the role's grants; the agent loop picks up the new purpose and tool set on its next cycle"
+      - "It serves image generation exactly while its role lists image_generation, so a qualifying Mac given a role without it asks the member that has it (ASSET-010)"
+      - "A revocation or expiry restores the purpose, model, description, every tool and the generation the agent started with; a restarted agent takes its role up again"
+    refs:
+      - crates/arkavo-server/src/server/swarmkit.rs
+      - crates/arkavo-server/src/server/agent_loop.rs
+      - crates/arkavo-server/src/server/assets.rs
+      - crates/arkavo-image-gen/src/hosting.rs
+      - crates/arkavo-image-gen/src/tool.rs
+    changed: "2026-10-16"

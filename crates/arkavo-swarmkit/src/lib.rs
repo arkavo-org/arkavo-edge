@@ -52,7 +52,8 @@ pub use role::{
 pub use runtime_config::{
     AgentRuntimeConfig, CloudPolicyKind, KitRuntimeConfig, PreflightAction, PreflightPolicySpec,
     RoleRuntimeView, RuntimeKas, RuntimeMcpServer, RuntimeMode, RuntimePreflight,
-    RuntimeValidationError, TrustedRoot, agent_runtime_config_from_manifest, validate_runtime,
+    RuntimeValidationError, TrustedRoot, agent_runtime_config_from_manifest, skill_instructions,
+    validate_runtime,
 };
 pub use skill_content::{SkillContent, SkillResource};
 pub use unenforced::{UnenforcedControl, unenforced_on_agent_path};

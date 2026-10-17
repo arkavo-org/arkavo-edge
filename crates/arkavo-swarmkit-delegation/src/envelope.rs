@@ -184,6 +184,23 @@ impl Delegation {
         })
     }
 
+    /// What the role tells its agent: the objective and the role's skill
+    /// instructions, as an agent started from the kit reads them, or the
+    /// role's description when it has no instructions.
+    pub fn purpose(&self) -> String {
+        let instructions = arkavo_swarmkit::skill_instructions(&self.skills);
+        let role = if instructions.is_empty() {
+            self.context.role_description.clone().unwrap_or_default()
+        } else {
+            instructions
+        };
+        [self.context.objective.clone().unwrap_or_default(), role]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
     /// The tool names the grants allow, sorted, without duplicates.
     pub fn granted_tools(&self) -> Vec<String> {
         let mut tools: Vec<String> = self

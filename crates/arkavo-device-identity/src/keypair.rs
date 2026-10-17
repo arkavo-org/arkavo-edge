@@ -106,7 +106,6 @@ mod platform {
         Ok(())
     }
 
-    #[cfg(test)]
     pub fn slot_path(filename: &str) -> Result<PathBuf> {
         keypair_path(filename)
     }
@@ -202,7 +201,6 @@ mod platform {
         Ok(())
     }
 
-    #[cfg(test)]
     pub fn slot_path(filename: &str) -> Result<PathBuf> {
         keypair_path(filename)
     }
@@ -298,7 +296,6 @@ mod platform {
         Ok(())
     }
 
-    #[cfg(test)]
     pub fn slot_path(filename: &str) -> Result<PathBuf> {
         keypair_path(filename)
     }
@@ -363,6 +360,16 @@ pub fn store_keypair(keypair_bytes: &[u8]) -> Result<()> {
 
 pub fn delete_keypair() -> Result<()> {
     platform::delete()
+}
+
+/// The directory the agent identity key lives in. State that belongs to
+/// that identity, such as its SwarmKit orchestrator binding, lives beside it,
+/// under the same test override.
+pub fn identity_dir() -> Result<std::path::PathBuf> {
+    let key = platform::slot_path(AGENT_KEYPAIR_FILENAME)?;
+    Ok(key
+        .parent()
+        .map_or(key.clone(), std::path::Path::to_path_buf))
 }
 
 /// Retrieve the agent's own identity keypair. This is stored in a slot

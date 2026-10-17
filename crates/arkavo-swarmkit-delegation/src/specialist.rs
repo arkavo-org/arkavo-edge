@@ -316,6 +316,12 @@ impl Specialist {
         ))
     }
 
+    /// Drop the active delegation because this host can no longer take
+    /// it, such as after a restart on a host that lost a capability.
+    pub fn abandon(&mut self) -> Result<(), StoreError> {
+        self.drop_active()
+    }
+
     /// Drop the active delegation if it has expired; whether it did.
     pub fn expire(&mut self, now: DateTime<Utc>) -> Result<bool, StoreError> {
         if self.active().is_some_and(|d| d.expires <= now) {

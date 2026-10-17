@@ -13,6 +13,7 @@ pub mod error;
 pub mod fetch;
 pub mod generator;
 pub mod host;
+pub mod hosting;
 pub mod job;
 mod lock;
 pub mod output;
@@ -35,6 +36,7 @@ pub use descriptor::{
 pub use error::{ImageGenError, Result};
 pub use generator::Generator;
 pub use host::{Host, Platform};
+pub use hosting::HostGenerator;
 pub use job::{AssetJob, AssetSink, Outbox};
 pub use output::{AssetEntry, Generated, Manifest, assets_dir};
 pub use plan::{Offer, offers};

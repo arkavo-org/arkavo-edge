@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::Manifest;
-use crate::role::RoleSpec;
+use crate::role::{RoleSpec, Skill};
 use crate::skill_content::SkillContent;
 
 /// How the agent process behaves when this kit is the primary config.
@@ -243,8 +243,14 @@ fn role_runtime_view(r: &RoleSpec) -> RoleRuntimeView {
 }
 
 fn collect_skill_instructions(role: &RoleSpec) -> String {
+    skill_instructions(&role.skills)
+}
+
+/// The instructions of `skills`, in order, separated by blank lines: what a
+/// role tells its agent to do.
+pub fn skill_instructions(skills: &[Skill]) -> String {
     let mut parts = Vec::new();
-    for skill in &role.skills {
+    for skill in skills {
         let Some(payload) = &skill.payload else {
             continue;
         };

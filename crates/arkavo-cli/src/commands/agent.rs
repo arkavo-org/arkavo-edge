@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod advertise;
+mod enlist;
 mod gpu_residency;
 pub mod listen;
 
@@ -16,6 +17,7 @@ pub mod listen;
 enum Invocation {
     Help,
     Init { name: Option<String> },
+    Release,
     Run(RunOptions),
 }
 
@@ -31,6 +33,8 @@ struct RunOptions {
     bind: Option<listen::BindAddress>,
     port: Option<u16>,
     name: Option<String>,
+    /// The orchestrator an agent without a kit takes roles from.
+    orchestrator: Option<String>,
 }
 
 /// Read the command line. Nothing is resolved or started here, so a
@@ -80,6 +84,13 @@ fn parse_args(args: &[String]) -> Result<Invocation, Box<dyn std::error::Error>>
                     return Err("--bind requires an address, for example --bind 127.0.0.1".into());
                 }
             },
+            "--orchestrator" => match args.get(i + 1).filter(|value| !value.starts_with('-')) {
+                Some(value) => {
+                    options.orchestrator = Some(enlist::parse_orchestrator(value)?);
+                    i += 1;
+                }
+                None => return Err("--orchestrator requires a did:key".into()),
+            },
             "-v" | "--verbose" => options.verbose = true,
             "--trust" => options.trust = true,
             "-h" | "--help" | "help" => return Ok(Invocation::Help),
@@ -91,6 +102,7 @@ fn parse_args(args: &[String]) -> Result<Invocation, Box<dyn std::error::Error>>
                 }
             }
             "run" => subcommand = Some("run"),
+            "release" => subcommand = Some("release"),
             // An unrecognized option must surface an error rather than silently booting
             // the agent — e.g. a typo like `arkavo --trsut` (also reachable via the bare
             // `arkavo <flag>` top-level route, which dispatches here).
@@ -113,6 +125,7 @@ fn parse_args(args: &[String]) -> Result<Invocation, Box<dyn std::error::Error>>
 
     Ok(match subcommand {
         Some("init") => Invocation::Init { name: init_name },
+        Some("release") => Invocation::Release,
         _ => Invocation::Run(options),
     })
 }
@@ -135,6 +148,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Usage: arkavo agent init <agent-name>");
             Err("Missing agent name".into())
         }
+        Invocation::Release => enlist::release(),
         Invocation::Run(options) => run_agent_with_options(&options),
     }
 }
@@ -148,10 +162,12 @@ const USAGE: &str = r#"Arkavo Agent - Configure and run AI agents
 USAGE:
     arkavo agent [OPTIONS]
     arkavo agent init <name>
+    arkavo agent release
 
 SUBCOMMANDS:
     init <name>         [DEPRECATED] alias for 'arkavo kit init <name>'; writes .arkavo/<name>.swarmkit.yaml
     run                 Run an agent (alias for default behavior)
+    release             Forget the orchestrator this agent takes roles from, and its role
     help                Print this help message
 
 OPTIONS:
@@ -164,6 +180,17 @@ OPTIONS:
     -n, --name <NAME>   Select a role by id from a multi-role kit (default: the first role)
     -v, --verbose       Show startup messages and status
     --trust             Show the agent authorization QR code (DID:key) on startup
+    --orchestrator <DID>
+                        Take kit roles only from this orchestrator's did:key
+                        (the one `arkavo kit apply` prints); remembered
+
+ROLES:
+    An agent started without a kit takes a kit role from an orchestrator
+    (`arkavo kit apply`). It binds to the first orchestrator that assigns it
+    one, and refuses every other afterwards: run agents on networks you
+    trust, or name the orchestrator with --orchestrator. The binding and the
+    role survive restarts; `arkavo agent release` forgets both. An agent
+    started with a kit runs its kit's role and takes no other.
 
 NETWORK:
     By default the agent announces itself over mDNS and listens on every
@@ -267,6 +294,7 @@ fn run_agent_with_options(options: &RunOptions) -> Result<(), Box<dyn std::error
     let cli_config_path = options.config_path.as_deref().map(Path::new);
     let verbose = options.verbose;
     let trust = options.trust;
+    let orchestrator = options.orchestrator.as_deref();
 
     // Resolve config from a SwarmKit kit: -c/--config > discovery > the
     // zero-config default. AGENTS.md is never read on this path (S6).
@@ -277,6 +305,14 @@ fn run_agent_with_options(options: &RunOptions) -> Result<(), Box<dyn std::error
         options.bind,
         &cwd,
     )?;
+    // Before anything starts: a kit agent runs its kit's role and takes no
+    // orchestrator's.
+    if agent_config.role_id.is_some() && orchestrator.is_some() {
+        return Err(
+            "--orchestrator is for an agent started without a kit; this one runs its kit's role"
+                .into(),
+        );
+    }
 
     // Shown in a quiet run too: the kit asked for an address and the agent
     // is not on it.
@@ -302,12 +338,14 @@ fn run_agent_with_options(options: &RunOptions) -> Result<(), Box<dyn std::error
     // A failed start is final. Retrying with a different configuration would
     // put the agent on an address and persona the operator never asked for.
     match tokio::runtime::Handle::try_current() {
-        Ok(handle) => {
-            handle.block_on(async { agent::start_agent_server(&agent_config, trust).await })
-        }
+        Ok(handle) => handle.block_on(async {
+            agent::start_agent_server(&agent_config, trust, orchestrator).await
+        }),
         Err(_) => {
             let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async { agent::start_agent_server(&agent_config, trust).await })
+            runtime.block_on(async {
+                agent::start_agent_server(&agent_config, trust, orchestrator).await
+            })
         }
     }
 }
@@ -393,6 +431,7 @@ fn has_required_args(schema: &serde_json::Value) -> bool {
 pub async fn start_agent_server(
     config: &AgentConfig,
     trust: bool,
+    orchestrator: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::mcp_spawner::McpProcessManager;
     use arkavo_crypto::AgentKeypair;
@@ -518,6 +557,10 @@ pub async fn start_agent_server(
     server
         .set_image_generation_hosting(config.image_generation)
         .await;
+    server.set_specialist(enlist::specialist_config(
+        config.role_id.as_deref(),
+        orchestrator,
+    )?);
     server
         .set_agent_description(config.description.clone())
         .await;
@@ -1595,6 +1638,32 @@ mod tests {
         );
     }
 
+    #[arkavo_test_macros::spec("SKD-007")]
+    #[test]
+    fn orchestrator_takes_a_did_key_and_release_is_a_subcommand() {
+        let did = arkavo_crypto::AgentKeypair::generate()
+            .public_key()
+            .to_did_key();
+        assert_eq!(
+            run_options(&["--orchestrator", &did, "-v"]),
+            RunOptions {
+                orchestrator: Some(did),
+                verbose: true,
+                ..RunOptions::default()
+            }
+        );
+        for bad in [
+            &["--orchestrator", "did:web:example.com"][..],
+            &["--orchestrator", "-v"],
+        ] {
+            assert!(parse_args(&args(bad)).is_err(), "{bad:?}");
+        }
+        assert_eq!(
+            parse_args(&args(&["release"])).unwrap(),
+            Invocation::Release
+        );
+    }
+
     #[test]
     fn bind_is_read_with_and_without_a_port() {
         for (value, bind) in [
@@ -1912,7 +1981,7 @@ provenance:
             ..AgentConfig::default()
         };
 
-        let err = start_agent_server(&config, false)
+        let err = start_agent_server(&config, false, None)
             .await
             .expect_err("an unparseable listen address must not start a server")
             .to_string();

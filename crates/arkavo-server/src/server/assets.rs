@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arkavo_image_gen::tool::{Delegate, JOB_DEADLINE};
-use arkavo_image_gen::{AssetJob, AssetSink, Descriptor, Generated, Generator, ImageGenError};
+use arkavo_image_gen::{
+    AssetJob, AssetSink, Descriptor, Generated, Generator, HostGenerator, ImageGenError,
+};
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_protocol::types::{MessagePart, TaskProgress};
 use arkavo_tasks::task_executor::TaskExecutor;
@@ -39,7 +41,7 @@ pub struct Identity {
 /// Generation for this agent, here or on members, and delivery of what it
 /// produces.
 pub struct AssetService {
-    generator: Option<Arc<Generator>>,
+    host: Arc<HostGenerator>,
     delegate: Option<Arc<dyn Delegate>>,
     transport: IrohTransport,
 }
@@ -58,8 +60,10 @@ pub enum Hosting {
 impl AssetService {
     /// The service for an agent with a data plane: it generates here when
     /// the host qualifies (IMG-001) and `hosting` allows it, and asks
-    /// members otherwise. Without a data plane nothing could be delivered,
-    /// so there is no service.
+    /// members otherwise. A qualifying host keeps its generator when
+    /// `hosting` withholds it, so a role assigned later can turn it on
+    /// (SKD-011). Without a data plane nothing could be delivered, so there
+    /// is no service.
     pub async fn for_agent(
         node: Option<Arc<IrohNode>>,
         mesh: Option<Arc<arkavo_mcp_mesh::MeshToolsState>>,
@@ -69,24 +73,22 @@ impl AssetService {
     ) -> Option<Arc<Self>> {
         let node = node?;
         let did = identity.did.clone();
-        let generator = match hosting {
-            Hosting::WhereQualified => tokio::task::spawn_blocking(move || {
-                Generator::for_this_host(resident_chat_bytes, did).map(Arc::new)
-            })
-            .await
-            .ok()
-            .flatten(),
-            Hosting::Withheld => None,
-        };
-        match (&generator, hosting) {
-            (Some(g), _) => info!(
+        let generator = tokio::task::spawn_blocking(move || {
+            Generator::for_this_host(resident_chat_bytes, did).map(Arc::new)
+        })
+        .await
+        .ok()
+        .flatten();
+        let serving = hosting == Hosting::WhereQualified;
+        match (&generator, serving) {
+            (Some(g), true) => info!(
                 models = g.offers().len(),
                 "image generation offered on this host"
             ),
-            (None, Hosting::Withheld) => info!(
+            (Some(_), false) => info!(
                 "this role's tool grants leave out image_generation; members are asked instead"
             ),
-            (None, Hosting::WhereQualified) => {
+            (None, _) => {
                 info!("this host does not generate images; members are asked instead");
             }
         }
@@ -98,16 +100,19 @@ impl AssetService {
                 transport.clone(),
             )) as Arc<dyn Delegate>
         });
-        Some(Arc::new(Self::new(generator, delegate, transport)))
+        let service = Self::new(generator, delegate, transport);
+        service.set_serving(serving);
+        Some(Arc::new(service))
     }
 
+    /// A service that generates with `generator`, when there is one.
     pub fn new(
         generator: Option<Arc<Generator>>,
         delegate: Option<Arc<dyn Delegate>>,
         transport: IrohTransport,
     ) -> Self {
         Self {
-            generator,
+            host: Arc::new(HostGenerator::new(generator, true)),
             delegate,
             transport,
         }
@@ -116,16 +121,31 @@ impl AssetService {
     /// What members are told about this host's generation (ASSET-001);
     /// `None` when it does not generate.
     pub fn descriptor(&self) -> Option<Descriptor> {
-        self.generator.as_ref().map(|g| g.descriptor())
+        self.host.serving().map(|g| g.descriptor())
+    }
+
+    /// Turn local generation on or off for the role the agent now holds
+    /// (SKD-011). It takes effect on the next request.
+    pub fn set_serving(&self, serving: bool) {
+        self.host.set_serving(serving);
+    }
+
+    /// Whether this host can generate whatever its role, and whether a
+    /// model is ready to run without a download: what an orchestrator
+    /// matches a role's host requirements against (draft-02 §7.3.4).
+    pub fn generation_capability(&self) -> Option<bool> {
+        self.host
+            .qualified()
+            .map(|g| g.descriptor().models.iter().any(|m| m.ready))
     }
 
     /// Offer generate_image to a model whose answer is delivered with what
     /// `sink` collects (IMG-014).
     pub fn register_tools(&self, registry: &mut ToolRegistry, sink: Arc<dyn AssetSink>) {
-        if self.generator.is_some() || self.delegate.is_some() {
+        if self.host.qualified().is_some() || self.delegate.is_some() {
             arkavo_image_gen::register_tools(
                 registry,
-                self.generator.clone(),
+                self.host.clone(),
                 self.delegate.clone(),
                 sink,
             );

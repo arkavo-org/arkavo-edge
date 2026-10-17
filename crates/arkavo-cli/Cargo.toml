@@ -113,6 +113,7 @@ arkavo-agent-auth = { path = "../arkavo-agent-auth" }
 arkavo-config-encryption = { path = "../arkavo-config-encryption" }
 arkavo-config-bundle = { path = "../arkavo-config-bundle" }
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
+arkavo-swarmkit-delegation = { path = "../arkavo-swarmkit-delegation" }
 base64 = { workspace = true }
 serde_yaml = { workspace = true }
 hex = { workspace = true }

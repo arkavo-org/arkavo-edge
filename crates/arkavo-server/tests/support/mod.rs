@@ -44,6 +44,7 @@ pub fn tool_call_with(tool_name: &str, arguments: serde_json::Value) -> Provider
 /// An agent loop running against a script.
 pub struct RunningAgent {
     script: Arc<Script>,
+    metadata: Arc<tokio::sync::RwLock<arkavo_server::AgentMetadata>>,
     events: mpsc::Sender<AgentEvent>,
     tick: Arc<AtomicU64>,
     handle: tokio::task::JoinHandle<()>,
@@ -68,6 +69,7 @@ impl RunningAgent {
             mode: mode.clone(),
             ..Default::default()
         };
+        let metadata = Arc::new(tokio::sync::RwLock::new(metadata));
         let config = AgentLoopConfig {
             conductor: Arc::new(arkavo_hrm::Conductor::new(
                 arkavo_hrm::store::InMemoryTaskStore::new(),
@@ -89,7 +91,7 @@ impl RunningAgent {
             agent_mode: mode,
             inference_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             context_snapshot: Arc::new(tokio::sync::RwLock::new(None)),
-            agent_metadata: Arc::new(tokio::sync::RwLock::new(metadata)),
+            agent_metadata: metadata.clone(),
             #[cfg(feature = "iroh")]
             iroh_node: None,
             assets,
@@ -97,10 +99,16 @@ impl RunningAgent {
         let handle = tokio::spawn(run_agent_loop(config, event_rx));
         Self {
             script,
+            metadata,
             events,
             tick,
             handle,
         }
+    }
+
+    /// What the agent's role and the server share with the loop.
+    pub fn metadata(&self) -> &tokio::sync::RwLock<arkavo_server::AgentMetadata> {
+        &self.metadata
     }
 
     /// Ticks the loop has started so far.

@@ -77,7 +77,13 @@ fn an_envelope_carries_the_role_and_what_its_host_must_provide() {
     assert_eq!(d.expires - d.issued, TimeDelta::days(1));
     assert_eq!(d.nonce.len(), 22);
 
+    assert_eq!(
+        d.purpose(),
+        "Make game art on request\n\nMake the images people ask for."
+    );
+
     let writer = envelope(&orchestrator, "did:key:z6Mkspecialist", "writer", issued);
+    assert_eq!(writer.delegation().purpose(), "Make game art on request");
     assert_eq!(writer.delegation().host_requirements, Vec::<String>::new());
     assert_ne!(writer.delegation().nonce, d.nonce);
 }

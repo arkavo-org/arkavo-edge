@@ -50,6 +50,11 @@ impl Delegate for FakeDelegate {
     }
 }
 
+/// A host that does not qualify (IMG-001).
+fn nowhere() -> Arc<HostGenerator> {
+    Arc::new(HostGenerator::new(None, true))
+}
+
 fn delegate(fail: bool) -> Arc<FakeDelegate> {
     Arc::new(FakeDelegate {
         calls: Mutex::new(Vec::new()),
@@ -64,7 +69,7 @@ fn delegate(fail: bool) -> Arc<FakeDelegate> {
 async fn incapable_hosts_delegate() {
     let outbox = Arc::new(Outbox::default());
     let member = delegate(false);
-    let tool = GenerateImageTool::new(None, Some(member.clone()), outbox.clone());
+    let tool = GenerateImageTool::new(nowhere(), Some(member.clone()), outbox.clone());
     let result = tool
         .execute(json!({"prompt": "gold coin", "transparent": true}))
         .await
@@ -83,13 +88,36 @@ async fn incapable_hosts_delegate() {
     assert_eq!(outbox.take().len(), 1);
 }
 
+/// ASSET-010, SKD-011: a host that qualifies but whose role does not serve
+/// generation asks a member, and generates here once its role serves.
+#[arkavo_test_macros::spec("ASSET-010", "SKD-011")]
+#[tokio::test]
+async fn a_host_whose_role_does_not_serve_asks_a_member() {
+    let fake = crate::testing::fake_generator(1, std::time::Duration::ZERO).await;
+    let host = Arc::new(HostGenerator::new(Some(fake.generator.clone()), false));
+    let member = delegate(false);
+    let outbox = Arc::new(Outbox::default());
+    let tool = GenerateImageTool::new(host.clone(), Some(member.clone()), outbox.clone());
+    let request = json!({"prompt": "gold coin", "width": 256, "height": 256, "seed": 5});
+    let result = tool.execute(request.clone()).await.unwrap();
+    assert_eq!(result["success"], true, "{result}");
+    assert_eq!(member.calls.lock().unwrap().len(), 1);
+
+    host.set_serving(true);
+    let result = tool.execute(request).await.unwrap();
+    assert_eq!(result["success"], true, "{result}");
+    assert_eq!(member.calls.lock().unwrap().len(), 1, "generated here");
+    assert_eq!(outbox.take().len(), 2);
+    drop(fake.server);
+}
+
 /// IMG-015: with neither a local generator nor a member, nothing is
 /// generated anywhere.
 #[arkavo_test_macros::spec("IMG-015")]
 #[tokio::test]
 async fn no_capable_member_is_a_result_the_model_sees() {
     let outbox = Arc::new(Outbox::default());
-    let tool = GenerateImageTool::new(None, None, outbox);
+    let tool = GenerateImageTool::new(nowhere(), None, outbox);
     let result = tool.execute(json!({"prompt": "coin"})).await.unwrap();
     assert_eq!(result["success"], false);
     assert_eq!(result["code"], "no_capable_member");
@@ -100,7 +128,7 @@ async fn no_capable_member_is_a_result_the_model_sees() {
 async fn invalid_requests_are_refused_before_starting() {
     let outbox = Arc::new(Outbox::default());
     let member = delegate(false);
-    let tool = GenerateImageTool::new(None, Some(member.clone()), outbox.clone());
+    let tool = GenerateImageTool::new(nowhere(), Some(member.clone()), outbox.clone());
     let result = tool
         .execute(json!({"prompt": "coin", "negative_prompt": "blur"}))
         .await
@@ -116,7 +144,7 @@ async fn invalid_requests_are_refused_before_starting() {
 #[tokio::test]
 async fn delegate_failures_reach_the_model() {
     let outbox = Arc::new(Outbox::default());
-    let tool = GenerateImageTool::new(None, Some(delegate(true)), outbox);
+    let tool = GenerateImageTool::new(nowhere(), Some(delegate(true)), outbox);
     let result = tool.execute(json!({"prompt": "coin"})).await.unwrap();
     assert_eq!(result["success"], false);
     assert_eq!(result["code"], "delegation_failed");
@@ -144,6 +172,6 @@ fn the_schema_lists_every_model() {
 #[test]
 fn registration_adds_generate_image() {
     let mut registry = ToolRegistry::empty();
-    register_tools(&mut registry, None, None, Arc::new(Outbox::default()));
+    register_tools(&mut registry, nowhere(), None, Arc::new(Outbox::default()));
     assert!(registry.get("generate_image").is_some());
 }
