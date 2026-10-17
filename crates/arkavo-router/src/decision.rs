@@ -65,6 +65,9 @@ pub enum ModelChoice {
     LocalGemma4_31B,
     /// Gemma-4-12B - Dense 12B, multimodal, strong reasoning for its size
     LocalGemma4_12B,
+    /// Nemotron-3.5-Bolt-74B-A9B - Mamba-2/attention hybrid MoE, 9B active,
+    /// 2-bit QAT experts, 256K context
+    LocalNemotron35Bolt,
     /// Legacy: Gemma-3-270M (if cached)
     LocalGemma270M,
     /// Legacy: Gemma-3-4B (if cached)
@@ -135,6 +138,7 @@ impl ModelChoice {
             Self::LocalGemma4_26B => "gemma-4-26b-a4b",
             Self::LocalGemma4_31B => "gemma-4-31b",
             Self::LocalGemma4_12B => "gemma-4-12b",
+            Self::LocalNemotron35Bolt => "nemotron-3.5-bolt",
             Self::LocalGemma270M => "gemma-3-270m-it",
             Self::LocalGemma4B => "gemma-3-4b-it",
             Self::LocalGemma12B => "gemma-3-12b-it",
@@ -160,6 +164,7 @@ impl ModelChoice {
             | Self::LocalQwen36A3B => "qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "mistral",
             Self::LocalGlm47Flash | Self::Glm52 => "glm",
+            Self::LocalNemotron35Bolt => "nemotron",
             Self::LocalGemma4E2B
             | Self::LocalGemma4E4B
             | Self::LocalGemma4_26B
@@ -200,6 +205,9 @@ impl ModelChoice {
             "gemma-4-26b-a4b" => Some(Self::LocalGemma4_26B),
             "gemma-4-31b" => Some(Self::LocalGemma4_31B),
             "gemma-4-12b" => Some(Self::LocalGemma4_12B),
+            "nemotron-3.5-bolt" | "nemotron-3.5-bolt-74b-a9b" | "nemotron-bolt" => {
+                Some(Self::LocalNemotron35Bolt)
+            }
             "gemma-3-270m-it" => Some(Self::LocalGemma270M),
             "gemma-3-4b-it" => Some(Self::LocalGemma4B),
             "gemma-3-12b-it" => Some(Self::LocalGemma12B),
@@ -265,6 +273,7 @@ impl ModelChoice {
                 | Self::LocalGemma4_26B
                 | Self::LocalGemma4_31B
                 | Self::LocalGemma4_12B
+                | Self::LocalNemotron35Bolt
                 | Self::LocalGemma270M
                 | Self::LocalGemma4B
                 | Self::LocalGemma12B
@@ -292,6 +301,7 @@ impl ModelChoice {
         Self::LocalGemma4_26B,
         Self::LocalGlm47Flash,
         Self::LocalGemma4_31B,
+        Self::LocalNemotron35Bolt,
         Self::LocalQwen36A3B,
         Self::LocalQwen35_27B,
     ];
@@ -413,6 +423,7 @@ impl ModelChoice {
             | Self::LocalQwen36A3B => "local-qwen",
             Self::LocalMinistral3B | Self::LocalMinistral8B => "local-ministral",
             Self::LocalGlm47Flash => "local-glm",
+            Self::LocalNemotron35Bolt => "local-nemotron",
             Self::LocalGemma4E2B
             | Self::LocalGemma4E4B
             | Self::LocalGemma4_26B
@@ -449,6 +460,7 @@ impl ModelChoice {
             | Self::LocalQwen35_27B
             | Self::LocalQwen36A3B
             | Self::LocalGlm47Flash
+            | Self::LocalNemotron35Bolt
             | Self::LocalGemma12B
             | Self::LocalDeepSeekCoder
             | Self::GeminiFlash
@@ -485,6 +497,10 @@ impl ModelChoice {
             Self::LocalGemma4_26B => Some("ggml-org/gemma-4-26B-A4B-it-GGUF"),
             Self::LocalGemma4_31B => Some("ggml-org/gemma-4-31B-it-GGUF"),
             Self::LocalGemma4_12B => Some("ggml-org/gemma-4-12B-it-GGUF"),
+            // unsloth's build keeps the Mamba projections in IQ4_XS, which Metal
+            // runs; NVIDIA's own file stores them as NVFP4, which Metal cannot
+            // multiply, so on Apple Silicon it decodes at under half the speed.
+            Self::LocalNemotron35Bolt => Some("unsloth/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-GGUF"),
             Self::LocalGemma270M => Some("unsloth/gemma-3-270m-it-GGUF"),
             Self::LocalGemma4B => Some("unsloth/gemma-3-4b-it-GGUF"),
             Self::LocalGemma12B => Some("unsloth/gemma-3-12b-it-GGUF"),
@@ -510,6 +526,7 @@ impl ModelChoice {
             Self::LocalGemma4_26B => Some("gemma-4-26B-A4B-it-Q4_0.gguf"),
             Self::LocalGemma4_31B => Some("gemma-4-31B-it-Q4_0.gguf"),
             Self::LocalGemma4_12B => Some("gemma-4-12B-it-Q4_0.gguf"),
+            Self::LocalNemotron35Bolt => Some("NVIDIA-Nemotron-3.5-Bolt-74B-A9B-UD-IQ2_XXS.gguf"),
             Self::LocalGemma270M => Some("gemma-3-270m-it-Q4_0.gguf"),
             Self::LocalGemma4B => Some("gemma-3-4b-it-Q4_0.gguf"),
             Self::LocalGemma12B => Some("gemma-3-12b-it-Q4_0.gguf"),
@@ -550,6 +567,7 @@ impl ModelChoice {
             Self::LocalGemma4_26B => 15_000_000_000,
             Self::LocalGemma4_31B => 18_000_000_000,
             Self::LocalGemma4_12B => 7_200_000_000,
+            Self::LocalNemotron35Bolt => 22_100_000_000,
             Self::LocalGemma270M => 200_000_000,
             Self::LocalGemma4B => 2_500_000_000,
             Self::LocalGemma12B => 7_000_000_000,
@@ -584,6 +602,10 @@ impl ModelChoice {
             Self::LocalGemma4_12B => Some((0.7, 0.9, ThinkingMode::Off)),
             Self::LocalGemma4E2B => Some((0.7, 0.9, ThinkingMode::Off)),
             Self::LocalGemma4E4B => Some((0.7, 0.9, ThinkingMode::Off)),
+            // NVIDIA's recommended sampling. Thinking scored 100% against 94%
+            // without it on our capability suite, but took 3-8x as long per
+            // task, so tool loops run without it.
+            Self::LocalNemotron35Bolt => Some((1.0, 0.95, ThinkingMode::Off)),
             _ => None,
         }
     }
@@ -616,6 +638,7 @@ impl ModelChoice {
         let candidates = [
             Self::LocalQwen35_27B,
             Self::LocalQwen36A3B,
+            Self::LocalNemotron35Bolt,
             Self::LocalGlm47Flash,
             Self::LocalDeepSeekCoder,
             Self::LocalGemma4_12B,
@@ -655,6 +678,7 @@ impl ModelChoice {
             Self::LocalGemma4_26B => "Gemma 4 26B-A4B",
             Self::LocalGemma4_31B => "Gemma 4 31B",
             Self::LocalGemma4_12B => "Gemma 4 12B",
+            Self::LocalNemotron35Bolt => "Nemotron 3.5 Bolt 74B-A9B",
             Self::LocalGemma270M => "Gemma 270M",
             Self::LocalGemma4B => "Gemma 4B",
             Self::LocalGemma12B => "Gemma 12B",
@@ -816,6 +840,9 @@ impl RoutingDecision {
             }
             (ModelChoice::LocalQwen36A3B, _) => {
                 vec![ModelChoice::LocalGlm47Flash, ModelChoice::GeminiFlash]
+            }
+            (ModelChoice::LocalNemotron35Bolt, _) => {
+                vec![ModelChoice::LocalQwen36A3B, ModelChoice::GeminiFlash]
             }
             (ModelChoice::LocalGlm47Flash, _) => vec![ModelChoice::GeminiFlash],
             // Legacy Gemma fallbacks
@@ -997,6 +1024,7 @@ impl RoutingDecision {
             | ModelChoice::LocalGemma4_26B
             | ModelChoice::LocalGemma4_31B
             | ModelChoice::LocalGemma4_12B
+            | ModelChoice::LocalNemotron35Bolt
             | ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B
@@ -1033,6 +1061,7 @@ impl RoutingDecision {
             ModelChoice::LocalGemma4_26B => Duration::from_secs(8),
             ModelChoice::LocalGemma4_31B => Duration::from_secs(12),
             ModelChoice::LocalGemma4_12B => Duration::from_secs(6),
+            ModelChoice::LocalNemotron35Bolt => Duration::from_secs(8),
             ModelChoice::LocalGemma270M => Duration::from_millis(500),
             ModelChoice::LocalGemma4B => Duration::from_secs(2),
             ModelChoice::LocalGemma12B => Duration::from_secs(5),
@@ -1787,6 +1816,7 @@ mod tests {
             ModelChoice::LocalQwen35_27B,
             ModelChoice::LocalQwen36A3B,
             ModelChoice::LocalGlm47Flash,
+            ModelChoice::LocalNemotron35Bolt,
             ModelChoice::KimiK2,
         ] {
             assert_eq!(

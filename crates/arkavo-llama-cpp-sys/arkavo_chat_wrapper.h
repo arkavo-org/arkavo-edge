@@ -15,6 +15,11 @@ struct llama_model;
 // Opaque handle to common_chat_templates
 typedef struct arkavo_chat_templates arkavo_chat_templates;
 
+// Opaque handle to the output parser a template application produced: the PEG
+// parser, its chat format and the generation prompt it expects as a prefix.
+// llama.cpp can no longer serialize a PEG parser, so it stays on the C++ side.
+typedef struct arkavo_chat_parser arkavo_chat_parser;
+
 // A tool call: used both for parsed model output and for carrying an
 // assistant message's prior tool calls back into the chat template.
 typedef struct {
@@ -56,9 +61,9 @@ typedef struct {
     int num_triggers;
     char **additional_stops;
     int num_additional_stops;
-    int format;              // common_chat_format enum value for output parsing
-    char *parser_str;        // PEG parser string for output parsing
-    char *generation_prompt; // generation prompt for grammar prefilling
+    int format;                  // common_chat_format enum value
+    arkavo_chat_parser *parser;  // owned by the caller: free with arkavo_chat_parser_free
+    char *generation_prompt;     // generation prompt for grammar prefilling
 } arkavo_chat_result;
 
 arkavo_chat_templates *arkavo_chat_templates_init(
@@ -76,7 +81,10 @@ arkavo_chat_result arkavo_chat_templates_apply(
     int add_generation_prompt,
     int parallel_tool_calls);
 
+// Frees everything in the result except `parser`, which the caller owns.
 void arkavo_chat_result_free(arkavo_chat_result *result);
+
+void arkavo_chat_parser_free(arkavo_chat_parser *parser);
 
 // Result from parsing model output
 typedef struct {
@@ -86,13 +94,12 @@ typedef struct {
     int num_tool_calls;
 } arkavo_chat_parse_result;
 
-// Parse model output text into structured content + tool calls.
-// Uses llama.cpp's built-in PEG parser (supports Gemma 4, Mistral, etc.)
-// `format` and `parser_str` come from the arkavo_chat_result of template application.
+// Parse model output text into structured content + tool calls with the
+// parser from a template application. `output_text` is the generated text
+// alone: the parser prepends its own generation prompt.
 arkavo_chat_parse_result arkavo_chat_parse(
     const char *output_text,
-    int format,
-    const char *parser_str,
+    const arkavo_chat_parser *parser,
     int is_partial);
 
 void arkavo_chat_parse_result_free(arkavo_chat_parse_result *result);

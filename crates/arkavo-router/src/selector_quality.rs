@@ -96,6 +96,9 @@ impl ModelSelector {
             ModelChoice::LocalGemma4_12B => {
                 "Gemma 4 dense (6s), zero cost, vision, 12B params, strong reasoning"
             }
+            ModelChoice::LocalNemotron35Bolt => {
+                "Nemotron hybrid MoE (8s), zero cost, 9B active/74B total, 256K context"
+            }
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",
@@ -492,6 +495,15 @@ fn static_model_priors(model: &ModelChoice) -> Vec<(&'static str, f64, f64)> {
             ("general", 5.0, 2.0),
             ("code_generation", 5.0, 2.0),
             ("vision_analysis", 4.0, 2.0),
+        ],
+        // Bolt's template emits the same qwen3_coder XML tool calls as Qwen 3.6.
+        ModelChoice::LocalNemotron35Bolt => vec![
+            ("format:xml", 20.0, 1.0),
+            ("format:fence", 1.0, 10.0),
+            ("format:json", 1.0, 5.0),
+            ("format:python", 1.0, 5.0),
+            ("general", 5.0, 2.0),
+            ("code_generation", 5.0, 2.0),
         ],
         ModelChoice::DeepSeekV32 => {
             vec![("code_generation", 5.0, 2.0), ("backend_api", 4.0, 2.0)]

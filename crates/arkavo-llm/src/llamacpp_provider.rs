@@ -2,8 +2,6 @@ use crate::gpu_fault::GpuCircuitBreaker;
 use crate::tool_parser::ToolParser;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 
-/// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
-type TemplateParseTuple = (i32, Option<String>, Option<String>);
 #[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::multimodal::MtmdContext;
 #[cfg(feature = "llama-cpp")]
@@ -44,15 +42,6 @@ pub struct SamplingConfig {
     /// Tool definitions for native template rendering (passed to Jinja engine)
     #[cfg(feature = "llama-cpp")]
     pub chat_tools: Vec<arkavo_llama_cpp::ChatTool>,
-    /// Tool choice for native template rendering
-    #[cfg(feature = "llama-cpp")]
-    pub chat_tool_choice: arkavo_llama_cpp::ToolChoice,
-    /// Chat format from llama.cpp Jinja template (for native output parsing)
-    #[cfg(feature = "llama-cpp")]
-    pub chat_format: i32,
-    /// Serialized PEG parser from Jinja template (for native output parsing)
-    #[cfg(feature = "llama-cpp")]
-    pub chat_parser_str: Option<String>,
     /// Enable NGRAM self-speculative decoding for this provider. The router
     /// flips this per-request based on rolling accept-rate stats; default
     /// false so existing callers keep their exact sampling path.
@@ -74,12 +63,6 @@ impl Default for SamplingConfig {
             grammar_triggers: None,
             #[cfg(feature = "llama-cpp")]
             chat_tools: Vec::new(),
-            #[cfg(feature = "llama-cpp")]
-            chat_tool_choice: arkavo_llama_cpp::ToolChoice::Auto,
-            #[cfg(feature = "llama-cpp")]
-            chat_format: 0,
-            #[cfg(feature = "llama-cpp")]
-            chat_parser_str: None,
             use_spec_decoding: false,
         }
     }
@@ -102,6 +85,14 @@ fn is_small_model(name: &str) -> bool {
         || lower.contains("500m")
 }
 
+/// DRY penalizes repeating any run of tokens seen recently, which code does
+/// legitimately (`for x in xs` ... `len(xs)`): models dropped characters from
+/// identifiers they had already written. GLM-4.7 needs it to stop looping.
+#[cfg(feature = "llama-cpp")]
+fn uses_dry_sampling(format: ModelFormat) -> bool {
+    matches!(format, ModelFormat::GLM4)
+}
+
 #[cfg(feature = "llama-cpp")]
 pub struct LlamaCppProvider {
     /// Model reference - either owned directly or accessed via registry
@@ -118,10 +109,9 @@ pub struct LlamaCppProvider {
     context_wait: std::time::Duration,
     /// GPU fault circuit breaker for retry/fallback logic
     gpu_breaker: std::sync::Mutex<GpuCircuitBreaker>,
-    /// Template-generated format and PEG parser string, stored after generate_streaming
-    /// so complete_with_tools can pass them to the output parser.
-    /// (format, parser_str, generation_prompt) from Jinja template for PEG output parsing
-    template_parse_info: std::sync::Mutex<Option<TemplateParseTuple>>,
+    /// The template's native output parser, stored by generate_streaming so
+    /// complete_with_tools can parse the tool calls it produced.
+    template_parse_info: std::sync::Mutex<Option<arkavo_llama_cpp::ChatParser>>,
 }
 
 #[cfg(not(feature = "llama-cpp"))]
@@ -476,26 +466,23 @@ impl LlamaCppProvider {
         // fall back to legacy pattern-matched templates
         let (
             prompt_bytes,
-            template_grammar,
-            template_grammar_lazy,
-            template_triggers,
-            _thinking_forced_open,
-            template_stops,
-            template_chat_format,
-            template_chat_parser_str,
+            template_additional_stops,
+            template_chat_parser,
             template_generation_prompt,
         ) = match model.chat_templates() {
             Ok(tmpls) => {
                 let inputs = ChatInputs {
                     tools: self.config.chat_tools.clone(),
-                    tool_choice: self.config.chat_tool_choice,
+                    // An agent turn may end in a plain answer. Under Required the
+                    // template's parser rejects any output without a call, and the
+                    // answer fell back unparsed, channel markup and all.
+                    tool_choice: arkavo_llama_cpp::ToolChoice::Auto,
                     enable_thinking,
                     add_generation_prompt: true,
-                    // Cap the grammar at one tool call per inference. Prevents the
-                    // runaway-batch failure mode (repetition-prone models emit the
-                    // same `<|tool_call>` block dozens of times in a single
-                    // response) at the grammar layer, before the downstream
-                    // degenerate-batch dedup has to clean up.
+                    // One tool call per inference. The template's grammar would
+                    // enforce it but is not applied (see below), so this shapes
+                    // only the prompt and the parser; a runaway batch of repeated
+                    // calls is left to the downstream degenerate-batch dedup.
                     parallel_tool_calls: false,
                 };
                 match tmpls.apply_with_meta(&llama_messages, &meta, &inputs) {
@@ -507,58 +494,15 @@ impl LlamaCppProvider {
                             eprintln!(
                                 "✓ Template from GGUF metadata (enable_thinking={enable_thinking})"
                             );
-                            if result.grammar.is_some() {
-                                eprintln!(
-                                    "  grammar: {} bytes, lazy={}",
-                                    result.grammar.as_ref().map_or(0, |g| g.len()),
-                                    result.grammar_lazy
-                                );
-                            }
-                            if result.thinking_forced_open {
-                                eprintln!("  thinking_forced_open=true");
-                            }
                         }
-                        // Pass the template grammar and triggers through.
-                        // Token triggers are converted to word triggers in
-                        // add_grammar_lazy_with_triggers to avoid the
-                        // token_to_piece mismatch issue.
-                        if result.grammar.is_some() && crate::llamacpp_streaming::is_debug() {
-                            eprintln!(
-                                "  grammar: {} bytes, lazy={}, {} triggers",
-                                result.grammar.as_ref().map_or(0, |g| g.len()),
-                                result.grammar_lazy,
-                                result.grammar_triggers.len(),
-                            );
-                            if let Some(ref g) = result.grammar {
-                                eprintln!("  grammar full:\n{g}");
-                            }
-                            for (i, t) in result.grammar_triggers.iter().enumerate() {
-                                eprintln!(
-                                    "  trigger[{i}]: type={:?} value={:?} token={}",
-                                    t.trigger_type, t.value, t.token
-                                );
-                            }
-                        }
-                        // Only use lazy grammars (trigger-activated). Non-lazy grammars
-                        // (e.g., Gemma 4) require full sampler pipeline integration that
-                        // our standalone grammar sampler doesn't support. For those models,
-                        // we skip grammar-constrained generation and rely on the native
-                        // PEG output parser instead.
-                        let (grammar, lazy, triggers) =
-                            if result.grammar_lazy && !result.grammar_triggers.is_empty() {
-                                (result.grammar, true, Some(result.grammar_triggers))
-                            } else {
-                                (None, false, None)
-                            };
+                        // The template's own tool-call grammar is not applied. With
+                        // tool choice Auto it is lazy, and our grammar sampler aborts
+                        // on the trigger token (Gemma 4's `<|tool_call>`); the PEG
+                        // parser and the fence grammar handle tool calls instead.
                         (
                             result.prompt,
-                            grammar,
-                            lazy,
-                            triggers,
-                            result.thinking_forced_open,
                             result.additional_stops,
-                            result.format,
-                            result.parser_str,
+                            result.parser,
                             result.generation_prompt,
                         )
                     }
@@ -589,13 +533,8 @@ impl LlamaCppProvider {
                             match tmpls.apply_with_meta(&fixed_llama, &fixed_meta, &inputs) {
                                 Ok(result) => (
                                     result.prompt,
-                                    None,
-                                    false,
-                                    None,
-                                    result.thinking_forced_open,
                                     result.additional_stops,
-                                    result.format,
-                                    result.parser_str,
+                                    result.parser,
                                     result.generation_prompt,
                                 ),
                                 Err(e2) => {
@@ -609,7 +548,7 @@ impl LlamaCppProvider {
                                                     "Failed to apply chat template: {e}"
                                                 ))
                                             })?;
-                                    (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                                    (bytes, Vec::new(), None, None)
                                 }
                             }
                         } else {
@@ -621,7 +560,7 @@ impl LlamaCppProvider {
                                     .map_err(|e| {
                                         Error::Config(format!("Failed to apply chat template: {e}"))
                                     })?;
-                            (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                            (bytes, Vec::new(), None, None)
                         }
                     }
                 }
@@ -630,59 +569,44 @@ impl LlamaCppProvider {
                 tracing::warn!("Chat templates init failed: {e}, falling back to legacy");
                 let bytes = apply_chat_template_with_format(&llama_messages, true, format)
                     .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
-                (bytes, None, false, None, false, Vec::new(), 0, None, None)
+                (bytes, Vec::new(), None, None)
             }
         };
 
         if crate::llamacpp_streaming::is_debug()
             && let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes)
         {
-            // Only show legacy format checks when using legacy path
-            if template_grammar.is_none() {
-                eprintln!("Chat template output:\n{prompt_str}");
-            }
+            eprintln!("Chat template output:\n{prompt_str}");
         }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Enable dry sampling for repetition prevention (all models can loop)
-        let use_dry_sampling = true;
+        let use_dry_sampling = uses_dry_sampling(format);
 
-        // Merge template grammar with config grammar (template takes precedence)
         // Store template parse info for complete_with_tools to use later
-        if (template_chat_format != 0 || template_chat_parser_str.is_some())
+        if let Some(parser) = template_chat_parser
             && let Ok(mut guard) = self.template_parse_info.lock()
         {
-            *guard = Some((
-                template_chat_format,
-                template_chat_parser_str,
-                template_generation_prompt.clone(),
-            ));
+            *guard = Some(parser);
         }
 
-        let grammar = template_grammar.or_else(|| self.config.grammar.clone());
+        let grammar = self.config.grammar.clone();
         // Convert string-only fence triggers to typed GrammarTrigger::Word
-        let grammar_triggers_merged = template_triggers.or_else(|| {
-            self.config.grammar_triggers.as_ref().map(|strings| {
-                strings
-                    .iter()
-                    .map(|s| arkavo_llama_cpp::GrammarTrigger {
-                        trigger_type: arkavo_llama_cpp::GrammarTriggerType::Word,
-                        value: s.clone(),
-                        token: -1,
-                    })
-                    .collect()
-            })
+        let grammar_triggers_merged = self.config.grammar_triggers.as_ref().map(|strings| {
+            strings
+                .iter()
+                .map(|s| arkavo_llama_cpp::GrammarTrigger {
+                    trigger_type: arkavo_llama_cpp::GrammarTriggerType::Word,
+                    value: s.clone(),
+                    token: -1,
+                })
+                .collect()
         });
 
-        let additional_stops = template_stops;
+        let additional_stops = template_additional_stops;
 
-        // Template grammar_lazy takes precedence; fence grammar is always lazy
-        let grammar_lazy = if template_grammar_lazy {
-            true
-        } else {
-            self.config.grammar.is_some() // fence grammar is lazy by default
-        };
+        // The fence grammar is always lazy
+        let grammar_lazy = grammar.is_some();
 
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
@@ -757,9 +681,8 @@ impl LlamaCppProvider {
             .clone()
             .ok_or_else(|| Error::Config("Vision context not initialized".to_string()))?;
 
-        // Detect if GLM for dry sampling
         let format = detect_model_format(&self.name);
-        let use_dry_sampling = matches!(format, ModelFormat::GLM4);
+        let use_dry_sampling = uses_dry_sampling(format);
 
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
@@ -913,15 +836,17 @@ impl LlamaCppProvider {
 
     /// Build per-message metadata for the chat template.
     ///
-    /// Carries tool_call_id/tool_name for tool-role messages. For Gemma 4,
-    /// also reconstructs each assistant message's structured `tool_calls` from
-    /// the tool-role messages that immediately follow it. The Gemma 4 template
-    /// (via llama.cpp's `convert_tool_responses_gemma4`) only renders a tool
-    /// response when the preceding assistant message carries a non-empty
-    /// `tool_calls` list — otherwise the result is dropped from the prompt and
-    /// the model, never seeing the result, re-issues the same call. Callers
-    /// push assistant turns as plain content (the parser strips the tool-call
-    /// markup), so we re-derive the calls here from the following tool turns.
+    /// Carries tool_call_id/tool_name for tool-role messages, and each
+    /// assistant message's structured `tool_calls` for the tool turns that
+    /// follow it. The parser strips tool-call markup from assistant content,
+    /// so without these a template shows the model results for calls it never
+    /// made, and multi-step tool loops repeat themselves.
+    ///
+    /// Calls carried on the assistant message pass through for every
+    /// template. Gemma 4 alone also reconstructs missing calls from the tool
+    /// turns, with empty arguments: its template (via llama.cpp's
+    /// `convert_tool_responses_gemma4`) drops a tool response entirely unless
+    /// the preceding assistant message has a non-empty `tool_calls` list.
     fn build_chat_meta(messages: &[Message], model_name: &str) -> Vec<ChatMessageMeta> {
         let synthesize = detect_model_format(model_name) == ModelFormat::Gemma4;
         messages
@@ -933,7 +858,7 @@ impl LlamaCppProvider {
                     tool_name: m.tool_name.clone(),
                     tool_calls: Vec::new(),
                 };
-                if synthesize && m.role == Role::Assistant {
+                if m.role == Role::Assistant && (synthesize || !m.tool_calls.is_empty()) {
                     // The tool results that immediately follow this assistant
                     // turn are emitted in the same order as the calls it made,
                     // and their tool_call_id is what the template pairs against.
@@ -945,6 +870,9 @@ impl LlamaCppProvider {
                         .take_while(|next| next.role == Role::Tool);
                     for (j, next) in following_tools.enumerate() {
                         let orig = m.tool_calls.get(j);
+                        if orig.is_none() && !synthesize {
+                            break;
+                        }
                         meta.tool_calls.push(ChatToolCall {
                             id: next.tool_call_id.clone(),
                             name: orig
@@ -1240,7 +1168,6 @@ impl Provider for LlamaCppProvider {
             // Pass tools to the Jinja template engine for native grammar generation
             if !chat_tools.is_empty() {
                 config.chat_tools = chat_tools;
-                config.chat_tool_choice = arkavo_llama_cpp::ToolChoice::Required;
             }
             let custom_provider = Self {
                 model: self.model.clone(),
@@ -1268,20 +1195,31 @@ impl Provider for LlamaCppProvider {
             (result, parse_info)
         };
 
+        // The template's own parser knows its reasoning and tool-call markup,
+        // so it splits the output whenever there is one. GLM keeps its
+        // text-based extraction, and so does any output without a parser.
+        let native = template_parse_info
+            .as_ref()
+            .filter(|_| !is_glm)
+            .map(|parser| arkavo_llama_cpp::parse_tool_calls(&raw_content, parser))
+            .filter(|(c, r, calls)| !c.is_empty() || r.is_some() || !calls.is_empty());
+
         // Extract thinking blocks for GLM models; also strip for sub-1B Qwen defensively
-        let (mut content, reasoning_content) = if is_glm {
+        let (content, reasoning_content, native_calls) = if let Some(parsed) = native {
+            parsed
+        } else if is_glm {
             let extraction = ToolParser::extract_thinking_blocks(&raw_content);
             let reasoning = if extraction.thinking.is_empty() {
                 None
             } else {
                 Some(extraction.thinking)
             };
-            (extraction.content, reasoning)
+            (extraction.content, reasoning, Vec::new())
         } else if format == ModelFormat::Qwen3 && is_small_model(&self.name) {
             let extraction = ToolParser::extract_thinking_blocks(&raw_content);
-            (extraction.content, None)
+            (extraction.content, None, Vec::new())
         } else {
-            (raw_content, None)
+            (raw_content, None, Vec::new())
         };
 
         let tool_calls = if let Some(ref tools_value) = tools {
@@ -1291,63 +1229,29 @@ impl Provider for LlamaCppProvider {
                 .map(|arr| arr.iter().filter_map(|t| t.get("name")?.as_str()).collect())
                 .unwrap_or_default();
 
-            // Try llama.cpp's native PEG parser first (handles Gemma 4, etc.),
-            // then fall back to our custom parser chain.
-            // Use template parse info if available (has PEG parser for correct arg extraction),
-            // otherwise fall back to format-based detection.
-            let (native_format, native_parser_str, gen_prompt) =
-                if let Some((fmt, ref ps, ref gp)) = template_parse_info {
-                    (fmt, ps.as_deref(), gp.clone())
-                } else {
-                    let fmt = match format {
-                        ModelFormat::Gemma4 => 3i32, // COMMON_CHAT_FORMAT_PEG_GEMMA4
-                        _ => 0,
-                    };
-                    (fmt, None, None)
-                };
+            // Prefer the calls llama.cpp's native PEG parser found (handles
+            // Gemma 4, etc.), then fall back to our custom parser chain.
             let parsed = {
-                let mut native_parsed: Vec<crate::tool_parser::ParsedToolCall> = Vec::new();
-
-                if native_format > 0 {
-                    // Prepend generation_prompt if available — the PEG parser_str grammar
-                    // expects the full output including the template-injected prefix.
-                    let parse_input = if let Some(ref gp) = gen_prompt {
-                        format!("{gp}{content}")
-                    } else {
-                        content.clone()
-                    };
-                    let (native_content, _native_reasoning, native_calls) =
-                        arkavo_llama_cpp::parse_tool_calls(
-                            &parse_input,
-                            native_format,
-                            native_parser_str,
-                        );
-                    if !native_calls.is_empty() {
-                        content = native_content;
-                        native_parsed = native_calls
-                            .into_iter()
-                            .map(|tc| crate::tool_parser::ParsedToolCall {
-                                tool_name: tc
-                                    .name
-                                    .strip_prefix("call:")
-                                    .unwrap_or(&tc.name)
-                                    .to_string(),
-                                arguments: serde_json::from_str(&tc.arguments).unwrap_or_else(
-                                    |e| {
-                                        tracing::warn!(
-                                            tool = tc.name,
-                                            args_raw = &tc.arguments[..tc.arguments.len().min(200)],
-                                            error = %e,
-                                            "Failed to parse tool call arguments, defaulting to empty"
-                                        );
-                                        serde_json::Value::Object(serde_json::Map::default())
-                                    },
-                                ),
-                                call_id: if tc.id.is_empty() { None } else { Some(tc.id) },
-                            })
-                            .collect();
-                    }
-                }
+                let native_parsed: Vec<crate::tool_parser::ParsedToolCall> = native_calls
+                    .into_iter()
+                    .map(|tc| crate::tool_parser::ParsedToolCall {
+                        tool_name: tc
+                            .name
+                            .strip_prefix("call:")
+                            .unwrap_or(&tc.name)
+                            .to_string(),
+                        arguments: serde_json::from_str(&tc.arguments).unwrap_or_else(|e| {
+                            tracing::warn!(
+                                tool = tc.name,
+                                args_raw = &tc.arguments[..tc.arguments.len().min(200)],
+                                error = %e,
+                                "Failed to parse tool call arguments, defaulting to empty"
+                            );
+                            serde_json::Value::Object(serde_json::Map::default())
+                        }),
+                        call_id: if tc.id.is_empty() { None } else { Some(tc.id) },
+                    })
+                    .collect();
 
                 if native_parsed.is_empty() {
                     // Fallback to our custom parser chain
@@ -1378,7 +1282,7 @@ impl Provider for LlamaCppProvider {
 
         // Strip tool call syntax from displayed content when tools were parsed
         let display_content = if !tool_calls.is_empty() {
-            ToolParser::strip_fence_blocks(&content)
+            ToolParser::strip_tool_call_blocks(&content)
         } else {
             content
         };
@@ -1456,7 +1360,23 @@ impl Provider for LlamaCppProvider {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "llama-cpp")]
-    use super::is_small_model;
+    use super::{is_small_model, uses_dry_sampling};
+
+    /// Regression: DRY ran for every model and corrupted code it wrote.
+    #[test]
+    #[cfg(feature = "llama-cpp")]
+    fn only_glm_samples_with_dry() {
+        use arkavo_llama_cpp::ModelFormat;
+        assert!(uses_dry_sampling(ModelFormat::GLM4));
+        for format in [
+            ModelFormat::Gemma3,
+            ModelFormat::Gemma4,
+            ModelFormat::MistralV3,
+            ModelFormat::Qwen3,
+        ] {
+            assert!(!uses_dry_sampling(format), "{format:?}");
+        }
+    }
 
     #[test]
     #[cfg(feature = "llama-cpp")]
@@ -1564,6 +1484,31 @@ mod tests {
                     meta.iter().all(|m| m.tool_calls.is_empty()),
                     "{model} should not synthesize assistant tool_calls"
                 );
+            }
+        }
+
+        /// Regression: only Gemma 4 received structured calls, so Qwen and
+        /// Nemotron templates showed tool results after an empty assistant
+        /// turn, and agent loops re-issued the same call until their cap.
+        #[test]
+        fn carried_calls_reach_every_template() {
+            let msgs = vec![
+                Message::user("What's the weather in Paris?"),
+                Message::assistant_with_tool_calls(
+                    "",
+                    vec![ToolCall {
+                        name: "get_weather".to_string(),
+                        arguments: r#"{"location":"Paris"}"#.to_string(),
+                        id: None,
+                    }],
+                ),
+                Message::tool_result("Sunny, 18C", "call_0", "get_weather"),
+            ];
+            for model in ["nemotron-3.5-bolt", "qwen3.6-35b-a3b", "ministral-8b"] {
+                let meta = LlamaCppProvider::build_chat_meta(&msgs, model);
+                assert_eq!(meta[1].tool_calls.len(), 1, "{model}");
+                assert_eq!(meta[1].tool_calls[0].arguments, r#"{"location":"Paris"}"#);
+                assert_eq!(meta[1].tool_calls[0].id.as_deref(), Some("call_0"));
             }
         }
 

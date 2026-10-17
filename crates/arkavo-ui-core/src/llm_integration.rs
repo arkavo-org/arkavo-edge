@@ -80,6 +80,7 @@ impl LlmIntegration {
             | ModelChoice::LocalGemma4_26B
             | ModelChoice::LocalGemma4_31B
             | ModelChoice::LocalGemma4_12B
+            | ModelChoice::LocalNemotron35Bolt
             | ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B

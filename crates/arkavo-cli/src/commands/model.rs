@@ -90,7 +90,8 @@ const DOWNLOADABLE_MODELS: &str = "Available models:
   qwen3.5-0.8b  - Qwen3.5 0.8B (~550 MB) - Best for embedded
   ministral-3b  - Ministral 3B (~2.5 GB)
   ministral-8b  - Ministral 8B (~5.5 GB)
-  glm-4.7-flash - GLM-4.7-Flash (~18 GB) - 30B MoE, requires 32GB+ RAM";
+  glm-4.7-flash - GLM-4.7-Flash (~18 GB) - 30B MoE, requires 32GB+ RAM
+  nemotron-3.5-bolt - Nemotron 3.5 Bolt (~22 GB) - 74B MoE, 9B active, requires 32GB+ RAM";
 
 /// Map a `model download` name to the model it fetches; no name means the
 /// device's recommended model.
@@ -112,6 +113,7 @@ fn resolve_download_model(
         Some("ministral-3b" | "ministral3b" | "ministral") => RecommendedModel::Ministral3B,
         Some("ministral-8b" | "ministral8b") => RecommendedModel::Ministral8B,
         Some("glm-4.7-flash" | "glm" | "glm4") => RecommendedModel::Glm47Flash,
+        Some("nemotron-3.5-bolt" | "nemotron-bolt" | "nemotron") => RecommendedModel::NemotronBolt,
         Some(other) => {
             anyhow::bail!(
                 "unknown model '{other}'\n\n{DOWNLOADABLE_MODELS}\n\n{}",
@@ -210,7 +212,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
         ModelSubcommand::Switch { .. } => anyhow::bail!(SWITCH_UNSUPPORTED),
 
         ModelSubcommand::Download { name } => {
-            use crate::first_run::{RecommendedModel, detect_capabilities, download_model};
+            use crate::first_run::{detect_capabilities, download_model};
 
             if let Some(image_model) = name
                 .as_deref()
@@ -229,8 +231,8 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 );
             }
 
-            // Check system capabilities for GLM-4.7-Flash
-            if matches!(model, RecommendedModel::Glm47Flash) {
+            // Large models: check the system before a multi-GB download
+            if let Some(min_ram_gb) = model.min_ram_gb() {
                 use crate::first_run::DeviceProfile;
                 println!(
                     "System: {} ({} GB RAM)",
@@ -238,12 +240,13 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 );
                 match caps.device_profile {
                     DeviceProfile::Workstation | DeviceProfile::HighMemoryWorkstation => {
-                        println!("System meets GLM-4.7-Flash requirements.");
+                        println!("System meets {} requirements.", model.display_name());
                     }
                     _ => {
                         println!();
                         println!(
-                            "Warning: GLM-4.7-Flash requires 32GB+ RAM for reasonable performance."
+                            "Warning: {} requires {min_ram_gb}GB+ RAM for reasonable performance.",
+                            model.display_name()
                         );
                         println!(
                             "Your system has {} GB RAM ({}).",
@@ -482,7 +485,7 @@ provenance:
             .skip(1)
             .filter_map(|line| line.split_whitespace().next())
             .collect();
-        assert_eq!(names.len(), 7, "{names:?}");
+        assert_eq!(names.len(), 8, "{names:?}");
         for name in names {
             assert!(
                 resolve_download_model(Some(name), RecommendedModel::Gemma4E2B).is_ok(),

@@ -19,6 +19,10 @@ struct arkavo_chat_templates {
     common_chat_templates_ptr ptr;
 };
 
+struct arkavo_chat_parser {
+    common_chat_parser_params params;
+};
+
 static char *strdup_safe(const std::string &s) {
     if (s.empty()) {
         return nullptr;
@@ -83,6 +87,9 @@ arkavo_chat_result arkavo_chat_templates_apply(
         inputs.add_generation_prompt = (add_generation_prompt != 0);
         inputs.use_jinja = true;
         inputs.enable_thinking = (enable_thinking != 0);
+        // Have the output parser split reasoning from the answer, as
+        // llama-server does by default; NONE leaves it inline in content.
+        inputs.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
         inputs.parallel_tool_calls = (parallel_tool_calls != 0);
 
         for (int i = 0; i < num_messages; i++) {
@@ -128,14 +135,16 @@ arkavo_chat_result arkavo_chat_templates_apply(
         common_chat_params params = common_chat_templates_apply(tmpls->ptr.get(), inputs);
 
         // Convert result
-        result.prompt = strdup_safe(params.prompt);
+        result.prompt = strdup_safe(params.prompt.str());
         result.grammar = strdup_safe(params.grammar);
         result.grammar_lazy = params.grammar_lazy ? 1 : 0;
         result.thinking_forced_open = params.supports_thinking ? 1 : 0;
         result.format = static_cast<int>(params.format);
-        // Serialize the PEG parser so Rust can pass it back for output parsing
-        result.parser_str = strdup_safe(params.parser);
         result.generation_prompt = strdup_safe(params.generation_prompt);
+        auto *parser = new arkavo_chat_parser();
+        parser->params = common_chat_parser_params(params);
+        parser->params.parser = std::move(params.parser);
+        result.parser = parser;
 
         // Convert grammar triggers
         if (!params.grammar_triggers.empty()) {
@@ -174,7 +183,6 @@ void arkavo_chat_result_free(arkavo_chat_result *result) {
     }
     free(result->prompt);
     free(result->grammar);
-    free(result->parser_str);
     free(result->generation_prompt);
     for (int i = 0; i < result->num_triggers; i++) {
         free(const_cast<char *>(result->triggers[i].value));
@@ -187,35 +195,30 @@ void arkavo_chat_result_free(arkavo_chat_result *result) {
     *result = {};
 }
 
+void arkavo_chat_parser_free(arkavo_chat_parser *parser) {
+    try {
+        delete parser;
+    } catch (...) {
+        // Suppress exceptions from destructor
+    }
+}
+
 arkavo_chat_parse_result arkavo_chat_parse(
     const char *output_text,
-    int format,
-    const char *parser_str,
+    const arkavo_chat_parser *parser,
     int is_partial)
 {
     arkavo_chat_parse_result result = {};
 
-    if (!output_text) {
+    if (!output_text || !parser) {
         return result;
     }
 
     try {
-        common_chat_parser_params params;
-        params.format = static_cast<common_chat_format>(format);
-        params.parse_tool_calls = true;
+        common_chat_parser_params params = parser->params;
+        params.debug = getenv("ARKAVO_DEBUG_PEG") != nullptr;
 
-        if (getenv("ARKAVO_DEBUG_PEG")) {
-            params.debug = true;
-        }
-
-        common_chat_msg msg;
-        if (parser_str && parser_str[0] != '\0') {
-            common_peg_arena arena;
-            arena.load(parser_str);
-            msg = common_chat_peg_parse(arena, output_text, is_partial != 0, params);
-        } else {
-            msg = common_chat_parse(output_text, is_partial != 0, params);
-        }
+        common_chat_msg msg = common_chat_parse(common_chat_input(output_text), is_partial != 0, params);
 
         if (getenv("ARKAVO_DEBUG_PEG")) {
             fprintf(stderr, "[PEG-RESULT] content_len=%zu tool_calls=%zu\n",
@@ -243,6 +246,9 @@ arkavo_chat_parse_result arkavo_chat_parse(
         }
     } catch (const std::exception &e) {
         fprintf(stderr, "arkavo_chat_parse: %s\n", e.what());
+        if (getenv("ARKAVO_DEBUG_PEG")) {
+            fprintf(stderr, "[PEG-INPUT] %s\n[PEG-INPUT-END]\n", output_text);
+        }
     } catch (...) {
         fprintf(stderr, "arkavo_chat_parse: unknown exception\n");
     }

@@ -13,6 +13,7 @@ pub(super) fn next_rung(current: &ModelChoice) -> Option<ModelChoice> {
         ModelChoice::LocalQwen35_27B => ModelChoice::LocalQwen36A3B,
         ModelChoice::LocalQwen36A3B => ModelChoice::LocalGlm47Flash,
         ModelChoice::LocalGlm47Flash => ModelChoice::GeminiFlash,
+        ModelChoice::LocalNemotron35Bolt => ModelChoice::GeminiFlash,
         // Gemma 4 escalation path
         ModelChoice::LocalGemma4E2B => ModelChoice::LocalGemma4E4B,
         ModelChoice::LocalGemma4E4B => ModelChoice::LocalMinistral8B,

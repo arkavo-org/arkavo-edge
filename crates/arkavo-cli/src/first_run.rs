@@ -51,6 +51,8 @@ pub enum RecommendedModel {
     Qwen35_27B,
     /// GLM-4.7-Flash - 30B MoE, requires 32GB+ RAM (~20GB)
     Glm47Flash,
+    /// Nemotron 3.5 Bolt 74B-A9B - hybrid MoE, requires 32GB+ RAM (~22GB)
+    NemotronBolt,
 }
 
 impl RecommendedModel {
@@ -66,6 +68,16 @@ impl RecommendedModel {
             Self::Ministral8B => ModelChoice::LocalMinistral8B,
             Self::Qwen35_27B => ModelChoice::LocalQwen35_27B,
             Self::Glm47Flash => ModelChoice::LocalGlm47Flash,
+            Self::NemotronBolt => ModelChoice::LocalNemotron35Bolt,
+        }
+    }
+
+    /// RAM below which a download warns and asks first, for models too
+    /// large to run well on an ordinary desktop.
+    pub fn min_ram_gb(&self) -> Option<u64> {
+        match self {
+            Self::Glm47Flash | Self::NemotronBolt => Some(32),
+            _ => None,
         }
     }
 
@@ -121,6 +133,7 @@ pub fn is_first_run() -> bool {
         ModelChoice::LocalMinistral8B,
         ModelChoice::LocalQwen35_27B,
         ModelChoice::LocalGlm47Flash,
+        ModelChoice::LocalNemotron35Bolt,
     ]
     .iter()
     .filter_map(ModelChoice::cache_dir_name)
@@ -178,18 +191,20 @@ fn get_hf_cache_dir() -> Option<PathBuf> {
 pub use crate::hardware::calculate_glm_max_context;
 use crate::hardware::{detect_unified_memory, get_total_ram_gb};
 
-/// Default "medium" model for a device profile.
+/// Default inference model for a device profile.
 ///
 /// Gemma 4 12B is the most capable Gemma 4 for agentic use (see the
 /// `gemma4_compare_test` benchmark — larger models did not beat it), so it is
 /// the default on any machine with the RAM to run it. Memory-constrained
-/// devices fall back to the edge-sized E4B.
+/// devices fall back to the edge-sized E4B. With 64GB or more, Nemotron 3.5
+/// Bolt passed more of `nemotron_compare_test` than the 12B (68 vs 64 of 72),
+/// at about three times the latency per agent call; its 22GB would crowd a
+/// 32GB machine's KV cache and everything else running there.
 pub fn recommended_model_for(profile: DeviceProfile) -> RecommendedModel {
     match profile {
         DeviceProfile::RaspberryPi5 => RecommendedModel::Gemma4E4B,
-        DeviceProfile::Desktop
-        | DeviceProfile::Workstation
-        | DeviceProfile::HighMemoryWorkstation => RecommendedModel::Gemma4_12B,
+        DeviceProfile::Desktop | DeviceProfile::Workstation => RecommendedModel::Gemma4_12B,
+        DeviceProfile::HighMemoryWorkstation => RecommendedModel::NemotronBolt,
     }
 }
 
@@ -423,8 +438,8 @@ mod tests {
 
     #[test]
     fn test_recommended_model_for_profile() {
-        // 12B is the default medium on any machine that can run it; edge
-        // devices fall back to E4B (12B is impractical under 16GB RAM).
+        // 12B is the default on machines that can run it, Bolt with 64GB+;
+        // edge devices fall back to E4B (12B is impractical under 16GB RAM).
         assert_eq!(
             recommended_model_for(DeviceProfile::Desktop),
             RecommendedModel::Gemma4_12B
@@ -435,7 +450,7 @@ mod tests {
         );
         assert_eq!(
             recommended_model_for(DeviceProfile::HighMemoryWorkstation),
-            RecommendedModel::Gemma4_12B
+            RecommendedModel::NemotronBolt
         );
         assert_eq!(
             recommended_model_for(DeviceProfile::RaspberryPi5),

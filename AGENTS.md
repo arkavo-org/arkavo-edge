@@ -104,7 +104,7 @@ cargo test -p arkavo-cli --lib mock_provider::
 ## Local Model Support
 
 ### Local edge models
-First run auto-downloads Gemma 4 sized to the device (E2B + 12B on desktop/workstation; E4B on a Raspberry Pi 5). Ministral 3B/8B (Mistral's edge models, with vision) are also supported:
+First run auto-downloads models sized to the device (Gemma 4 E2B + 12B on desktop/workstation; E2B + Nemotron 3.5 Bolt with 64GB+ RAM; Gemma 4 E4B on a Raspberry Pi 5). Ministral 3B/8B (Mistral's edge models, with vision) are also supported:
 - **Ministral 3B**: Raspberry Pi 5 / low-memory, 8GB RAM minimum
 - **Ministral 8B**: Desktop/laptop, 12GB VRAM recommended
 

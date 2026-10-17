@@ -6,7 +6,7 @@
 
 **Status:** llama.cpp team decision — **do not** open an upstream PR and **do not** add `llama_model_load_from_callback` (or any TDF/AES/zip code) to vendored llama.cpp.
 
-**Vendor pin at time of writing:** llama.cpp `f280b2698` (tag `b10615`). See `docs/vendor-setup.md`.
+**Vendor pin at time of writing:** llama.cpp `620d2225c` (tag `v0.7.0`). See `docs/vendor-setup.md`.
 
 ## Decision
 

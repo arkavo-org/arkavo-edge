@@ -669,6 +669,8 @@ impl LlamaContext {
             ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_DISABLED
         };
         params.kv_unified = kv_unified;
+        // llama.cpp skips its decode timers by default; InferenceTiming reports them.
+        params.no_perf = false;
         // Multi-sequence callers shift and copy ranges between sequences
         // (`seq_add`, `seq_cp`), which needs the sliding-window state of
         // every position, not just the last window. llama.h also warns that
@@ -886,12 +888,36 @@ pub struct ChatResult {
     pub thinking_forced_open: bool,
     pub grammar_triggers: Vec<GrammarTrigger>,
     pub additional_stops: Vec<String>,
-    /// Chat format enum from llama.cpp (for output parsing)
+    /// Chat format enum from llama.cpp
     pub format: i32,
-    /// Serialized PEG parser string (for output parsing)
-    pub parser_str: Option<String>,
+    /// Output parser for templates with a native tool-call format; `None` for plain content
+    pub parser: Option<ChatParser>,
     /// Generation prompt for non-lazy grammar prefilling
     pub generation_prompt: Option<String>,
+}
+
+/// The output parser a template application produced. llama.cpp can no longer
+/// serialize its PEG parsers, so the parser stays in C++ behind this handle.
+#[derive(Clone)]
+pub struct ChatParser(std::sync::Arc<ChatParserHandle>);
+
+struct ChatParserHandle(*mut ffi::arkavo_chat_parser);
+
+// The C++ parser is never mutated after creation, and parsing copies its
+// parameters, so concurrent parses from several threads only read it.
+unsafe impl Send for ChatParserHandle {}
+unsafe impl Sync for ChatParserHandle {}
+
+impl Drop for ChatParserHandle {
+    fn drop(&mut self) {
+        unsafe { ffi::arkavo_chat_parser_free(self.0) };
+    }
+}
+
+impl std::fmt::Debug for ChatParser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ChatParser")
+    }
 }
 
 /// Parsed tool call from llama.cpp's native output parser
@@ -921,16 +947,14 @@ pub fn cap_tool_calls(calls: &mut Vec<ParsedToolCall>) {
 
 /// Parse model output using llama.cpp's built-in PEG parser.
 /// Supports Gemma 4, Mistral, Hermes, and other native tool-call formats.
+/// `output` is the generated text alone; the parser adds its generation prompt.
 pub fn parse_tool_calls(
     output: &str,
-    format: i32,
-    parser_str: Option<&str>,
+    parser: &ChatParser,
 ) -> (String, Option<String>, Vec<ParsedToolCall>) {
     let c_output = CString::new(output).unwrap_or_default();
-    let c_parser = parser_str.and_then(|s| CString::new(s).ok());
-    let parser_ptr = c_parser.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
-    let mut result = unsafe { ffi::arkavo_chat_parse(c_output.as_ptr(), format, parser_ptr, 0) };
+    let mut result = unsafe { ffi::arkavo_chat_parse(c_output.as_ptr(), parser.0 .0, 0) };
 
     let content = if result.content.is_null() {
         String::new()
@@ -1210,6 +1234,12 @@ impl ChatTemplates {
             )
         };
 
+        // Owned before any early return so the handle is always freed. A
+        // content-only format has nothing to parse, so its parser is dropped.
+        let parser = (!result.parser.is_null())
+            .then(|| ChatParser(std::sync::Arc::new(ChatParserHandle(result.parser))))
+            .filter(|_| result.format != 0);
+
         // Extract prompt
         if result.prompt.is_null() {
             return Err("Template application returned null prompt".to_string());
@@ -1268,21 +1298,7 @@ impl ChatTemplates {
             }
         }
 
-        // Extract format, parser string, and generation prompt for output parsing
         let format = result.format;
-        let parser_str = if result.parser_str.is_null() {
-            None
-        } else {
-            let s = unsafe { std::ffi::CStr::from_ptr(result.parser_str) }
-                .to_str()
-                .unwrap_or("")
-                .to_string();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        };
         let generation_prompt = if result.generation_prompt.is_null() {
             None
         } else {
@@ -1305,7 +1321,7 @@ impl ChatTemplates {
             grammar_triggers,
             additional_stops,
             format,
-            parser_str,
+            parser,
             generation_prompt,
         };
 
