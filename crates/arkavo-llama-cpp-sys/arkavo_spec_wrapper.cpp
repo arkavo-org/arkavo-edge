@@ -65,7 +65,9 @@ void arkavo_spec_begin(
 int arkavo_spec_process(arkavo_spec *spec, const struct llama_batch *batch) {
     if (!spec || !batch) return -1;
     try {
-        return common_speculative_process(spec->ptr.get(), *batch) ? 0 : -2;
+        // This handle only builds n-gram drafters, which keep no model state
+        // and ignore the batch, so the llama_batch is not converted.
+        return common_speculative_process(spec->ptr.get(), common_batch()) ? 0 : -2;
     } catch (const std::exception &e) {
         fprintf(stderr, "[arkavo_spec_process] exception: %s\n", e.what());
         return -3;
@@ -98,7 +100,7 @@ uint32_t arkavo_spec_draft(
         auto &params = common_speculative_get_draft_params(spec->ptr.get(), seq_id);
         params.drafting = true;
         params.n_max = n_max;
-        params.n_past = n_past;
+        params.pos0 = n_past;
         params.id_last = id_last;
 
         // ngram_simple scans `*params.prompt` for a match ending in id_last,

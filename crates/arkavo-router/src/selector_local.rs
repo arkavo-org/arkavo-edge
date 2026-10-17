@@ -239,6 +239,11 @@ impl ModelSelector {
             {
                 models.push(ModelChoice::LocalGlm47Flash);
             }
+            if self.is_local_model_cached(&ModelChoice::LocalNemotron35Bolt)
+                && Self::has_sufficient_ram(32)
+            {
+                models.push(ModelChoice::LocalNemotron35Bolt);
+            }
         }
 
         // Per-agent memory budget: exclude local models that exceed the allocation

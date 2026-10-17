@@ -38,6 +38,7 @@ fn local_pricing() -> ProviderPricing {
         ("local-ministral", "ministral-3b"),
         ("local-ministral", "ministral-8b"),
         ("local-glm", "glm-4.7-flash"),
+        ("local-nemotron", "nemotron-3.5-bolt"),
         ("local-gemma", "gemma-4-e2b"),
         ("local-gemma", "gemma-4-e4b"),
         ("local-gemma", "gemma-4-26b-a4b"),

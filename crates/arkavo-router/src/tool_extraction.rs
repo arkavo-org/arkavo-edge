@@ -42,6 +42,7 @@ pub(crate) fn detail_level_for_model(
         | ModelChoice::LocalQwen35_9B
         | ModelChoice::LocalQwen35_27B
         | ModelChoice::LocalQwen36A3B
+        | ModelChoice::LocalNemotron35Bolt
         | ModelChoice::LocalGlm47Flash
         | ModelChoice::GeminiFlash
         | ModelChoice::Gemini35Flash

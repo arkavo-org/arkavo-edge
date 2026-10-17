@@ -323,6 +323,14 @@ mod tests {
             "round 1: expected no further tool call once the result is known, got {:?}",
             r1.tool_calls
         );
+        // Regression: tools were rendered with tool choice Required, whose
+        // parser rejects an answer without a call, so the empty thought channel
+        // Gemma 4 opens after a tool result reached the user as markup.
+        assert!(
+            !r1.content.contains("<|channel>") && !r1.content.contains("<channel|>"),
+            "round 1: channel markup leaked into the answer: {:?}",
+            r1.content
+        );
         // Generation must stop at the <turn|> EOG token, not run to max_tokens
         // repeating the answer. A clean single answer is well under 500 chars;
         // the pre-fix repetition ran to ~2000+ chars.

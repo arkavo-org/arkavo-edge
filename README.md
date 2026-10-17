@@ -63,7 +63,7 @@ runtime:
 
 `--bind` overrides the kit's address and says so. `arkavo security audit` reports the address an agent would listen on in the current directory; add `--bind <address>` to audit an agent started with it.
 
-On first run, Arkavo downloads two local models sized to your device — a small model for fast routing (Gemma 4 E2B) and a larger model for inference (Gemma 4 12B on desktop/workstation; Gemma 4 E4B on a Raspberry Pi 5).
+On first run, Arkavo downloads two local models sized to your device — a small model for fast routing (Gemma 4 E2B) and a larger model for inference (Gemma 4 12B on desktop/workstation; Nemotron 3.5 Bolt 74B-A9B with 64GB+ RAM; Gemma 4 E4B on a Raspberry Pi 5).
 
 ### Trusting an agent
 
@@ -275,7 +275,7 @@ Clone the llama.cpp dependency (not tracked in git):
 ```bash
 git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
 cd vendor/llama.cpp
-git checkout f280b26983ad0fdb705a0d9ebf0503e76f2899b0  # b10615
+git checkout 620d2225cc436ab0b001e3200e590e3b286ef9ab  # v0.7.0
 cd ../..
 ```
 

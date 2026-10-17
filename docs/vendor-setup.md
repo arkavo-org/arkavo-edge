@@ -16,17 +16,19 @@ git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
 
 # Checkout the required version
 cd vendor/llama.cpp
-git checkout f280b26983ad0fdb705a0d9ebf0503e76f2899b0  # b10615
+git checkout 620d2225cc436ab0b001e3200e590e3b286ef9ab  # v0.7.0
 ```
 
 ### Required Version
 
-**Recommended commit:** `f280b2698` (tag `b10615`, 2026-08-24)
+**Recommended commit:** `620d2225c` (tag `v0.7.0`, 2026-10-15)
 
 This pin includes:
-- llama.cpp `b9292` → `b10615` (Metal flash-attn vec per-device tuning, NVFP4, GDN, Ministral 3, Gemma 4)
-- Semantic versioning tags (`vX.Y.Z`) exist upstream; this repo stays on `b` tags to match CI's shallow fetch
-- The Gemma 4 constrained-tool-grammar patch still applies (`gemma4-dict-nonempty`)
+- llama.cpp `b10615` → `v0.7.0` (Nemotron 3.5 Bolt and Super VL, LiLiCorr and DFlash speculative decoding, Nemotron MTP)
+- Upstream now tags releases `vX.Y.Z`; CI fetches the pinned commit by hash, so the tag scheme doesn't matter to it
+- Two patches in `crates/arkavo-llama-cpp-sys/patches/`, applied by the build script:
+  - The Gemma 4 constrained-tool-grammar patch (`gemma4-dict-nonempty`), rebased onto `common/parsers/gemma4.cpp`
+  - The Metal 9-expert MoE kernel that Nemotron 3.5 Bolt needs for prompt processing (ggml-org/llama.cpp#30610)
 
 ### Updating llama.cpp
 

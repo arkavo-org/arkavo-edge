@@ -16,7 +16,7 @@ use arkavo_llama_cpp::speculative::SpeculativeContext;
 use arkavo_llama_cpp::{
     DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_init_with_tokens,
     batch_init_with_tokens_seq, create_sampler_chain, create_sampler_chain_with_dry, decode_batch,
-    perf_context, token_to_bytes, tokenize_with_model,
+    perf_context, perf_context_reset, token_to_bytes, tokenize_with_model,
 };
 #[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
@@ -28,7 +28,8 @@ use tokio::sync::mpsc::UnboundedSender;
 #[cfg(feature = "llama-cpp")]
 use super::{
     ContextReuseOptions, StreamingConfig, classify_decode_error, detect_self_prompting,
-    extract_valid_utf8, generation_budget, process_input_tokens, send_metrics, validate_logits,
+    extract_valid_utf8, generation_budget, process_input_tokens, send_metrics,
+    think_marker_needs_injection, validate_logits,
 };
 
 /// Outcome of emitting a single token through the shared stream/stop pipeline.
@@ -64,7 +65,7 @@ pub(super) fn emit_token(
         detection_buffer.push_str(s);
     }
 
-    if special_text == "<think>" || special_text == "</think>" {
+    if think_marker_needs_injection(vocab, token, &special_text) {
         let _ = tx.send(Ok(StreamResponse {
             content: special_text,
             ..Default::default()
@@ -131,11 +132,14 @@ pub(super) async fn generate_tokens_pooled_with_spec(
     let mut n_accepted_total: u32 = 0;
 
     let result = async {
-        let ctx = pooled_ctx
+        let mut ctx = pooled_ctx
             .lock()
             .map_err(|_| Error::Config("Context mutex poisoned".to_string()))?;
         // Reset KV cache and position tracking for fresh inference.
         ctx.get_memory().clear(true);
+        // A pooled context serves many requests; its perf counters would
+        // otherwise report every request since the context was created.
+        perf_context_reset(&mut ctx);
 
         let vocab = model.get_vocab();
         let input_tokens = tokenize_with_model(vocab, &prompt_bytes)
