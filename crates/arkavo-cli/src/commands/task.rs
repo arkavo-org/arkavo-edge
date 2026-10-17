@@ -571,7 +571,7 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
         // Poll for task completion
         println!("=== Monitoring Task Progress ===\n");
 
-        let mut watch = super::poll::Watch::default();
+        let mut watch = arkavo_protocol::task_watch::Watch::default();
 
         loop {
             let get_request = TaskGetRequest {
@@ -664,8 +664,11 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
                     }
                 }
                 A2aResponse::Error { error, .. } => {
-                    transport.close().await.ok();
-                    return Err(format!("RPC error: {} - {}", error.code, error.message).into());
+                    if let Err(stop) = super::mesh::poll_refused(&watch, &task_id, &error) {
+                        transport.close().await.ok();
+                        return Err(stop.into());
+                    }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             }
         }

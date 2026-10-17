@@ -319,11 +319,15 @@ scenarios:
     then:
       - "Polling goes on while the reported status, progress message or percentage changes, and each new progress message is shown once"
       - "It stops after 5 minutes with no change, saying the task is still running and how to read its result with tasks/get"
+      - "A poll the agent's rate limiter turns away (-32001 Rate limit exceeded) is no change and is made again; any other error answer ends polling"
+    edge_cases:
+      - condition: "Another caller's burst empties the agent's rate limiter while a long task runs"
+        expected: "Polling goes on, and the answer is shown when the task completes"
     refs:
-      - crates/arkavo-cli/src/commands/poll.rs
-      - crates/arkavo-cli/src/commands/mesh.rs:122-214
-      - crates/arkavo-cli/src/commands/task.rs:574-660
-    changed: "2026-10-11"
+      - crates/arkavo-protocol/src/task_watch.rs
+      - crates/arkavo-cli/src/commands/mesh.rs
+      - crates/arkavo-cli/src/commands/task.rs
+    changed: "2026-10-17"
 
   - id: CLI-020
     name: Prefetch the image model

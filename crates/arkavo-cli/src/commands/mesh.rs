@@ -207,7 +207,7 @@ pub async fn send_and_poll_agent(
         }
     };
 
-    let mut watch = super::poll::Watch::default();
+    let mut watch = arkavo_protocol::task_watch::Watch::default();
     loop {
         let get_req = TaskGetRequest {
             task_id: task_id.clone(),
@@ -247,10 +247,27 @@ pub async fn send_and_poll_agent(
                 }
             }
             A2aResponse::Error { error, .. } => {
-                return Err(format!("RPC error: {} - {}", error.code, error.message).into());
+                poll_refused(&watch, &task_id, &error)?;
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
     }
+}
+
+/// What an error answer to a `tasks/get` poll means: `Ok` to poll again,
+/// `Err` with what to tell the user. An agent's rate limiter is shared by
+/// every caller, so a burst from elsewhere can turn a poll away while the
+/// task runs on; that poll is no change, and polling stops at the CLI-019
+/// limit as it would for a task that reports nothing new.
+pub(super) fn poll_refused(
+    watch: &arkavo_protocol::task_watch::Watch,
+    task_id: &str,
+    error: &arkavo_protocol::transport::JsonRpcError,
+) -> Result<(), String> {
+    if arkavo_protocol::rate_limit::is_rate_limited(error.code, &error.message) {
+        return watch.unanswered(task_id);
+    }
+    Err(format!("RPC error: {} - {}", error.code, error.message))
 }
 
 /// The text of an agent's answer, one line per text part.
@@ -298,6 +315,103 @@ mod tests {
         assert!(!Listen::ALL.done(ms(700), ms(600), 1));
         assert!(!Listen::ALL.done(ms(4_900), ms(4_000), 1));
         assert!(Listen::ALL.done(ms(5_000), ms(0), 3));
+    }
+
+    /// An agent whose rate limiter turns away its first `refusals` polls
+    /// of `tasks/get` before the task completes.
+    async fn busy_agent(refusals: usize) -> arkavo_protocol::http::HttpTransport {
+        use arkavo_protocol::rate_limit::{RATE_LIMITED, RATE_LIMITED_MESSAGE};
+        use arkavo_protocol::transport::{A2aEndpoint, A2aTransport, TlsConfig, TransportConfig};
+        use axum::{Json, Router, routing::post};
+        use serde_json::{Value, json};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let polls = Arc::new(AtomicUsize::new(0));
+        let app = Router::new().route(
+            "/rpc",
+            post(move |Json(request): Json<Value>| {
+                let polls = polls.clone();
+                async move {
+                    let mut answer = match request["method"].as_str() {
+                        Some("message/send") => {
+                            json!({"result": {"task_id": "t1", "status": "submitted"}})
+                        }
+                        _ if polls.fetch_add(1, Ordering::SeqCst) < refusals => json!({
+                            "error": {"code": RATE_LIMITED, "message": RATE_LIMITED_MESSAGE}
+                        }),
+                        _ => json!({"result": {
+                            "task_id": "t1",
+                            "status": "completed",
+                            "result": {"parts": [{"type": "text", "content": "Done."}]}
+                        }}),
+                    };
+                    answer["jsonrpc"] = json!("2.0");
+                    answer["id"] = request["id"].clone();
+                    Json(answer)
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("loopback");
+        let url = format!("http://{}", listener.local_addr().expect("bound"));
+        tokio::spawn(async move { axum::serve(listener, app).await });
+
+        let transport = arkavo_protocol::http::HttpTransport::new(TransportConfig {
+            tls_config: TlsConfig {
+                require_tls: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .expect("transport");
+        transport
+            .connect(&A2aEndpoint {
+                url,
+                agent_id: "writer".into(),
+                public_key: None,
+            })
+            .await
+            .expect("connects");
+        transport
+    }
+
+    /// Regression (CLI-019): the agent's rate limiter is shared by every
+    /// caller, and one refused poll ended `arkavo chat` while the task ran
+    /// on. A refused poll is polled again.
+    #[arkavo_test_macros::spec("CLI-019")]
+    #[tokio::test]
+    async fn a_poll_the_rate_limiter_refuses_is_made_again() {
+        let transport = busy_agent(2).await;
+
+        let answer = send_and_poll_agent(&transport, "Make a coin", &mut |_| {})
+            .await
+            .expect("answered after two refused polls");
+
+        assert_eq!(answer_text(&answer.parts), "Done.");
+    }
+
+    /// CLI-019: only a refusal by the rate limiter is polled again; another
+    /// error with the same code still ends the poll, and refusals end it
+    /// once the task has been quiet for the limit.
+    #[arkavo_test_macros::spec("CLI-019")]
+    #[test]
+    fn only_a_rate_limit_refusal_is_polled_again() {
+        use arkavo_protocol::task_watch::Watch;
+        use arkavo_protocol::transport::JsonRpcError;
+        let error = |code, message: &str| JsonRpcError {
+            code,
+            message: message.into(),
+            data: None,
+        };
+        let refused = error(-32001, "Rate limit exceeded");
+
+        assert_eq!(poll_refused(&Watch::default(), "t1", &refused), Ok(()));
+        let other = poll_refused(&Watch::default(), "t1", &error(-32001, "Session not found"));
+        assert_eq!(other, Err("RPC error: -32001 - Session not found".into()));
+        let quiet = poll_refused(&Watch::with_limit(Duration::ZERO), "t1", &refused);
+        assert!(quiet.unwrap_err().contains("still running"));
     }
 
     #[test]

@@ -32,6 +32,17 @@ pub struct Member {
     pub report: AgentCapabilitiesGetResponse,
 }
 
+/// What one round of reads found.
+#[derive(Debug, Default)]
+pub struct Reports {
+    /// The members that answered, with their reports.
+    pub members: Vec<Member>,
+    /// Members discovery found that did not answer at the address it has
+    /// for them. One that restarted answers on a new port, which only a new
+    /// discovery learns.
+    pub silent: Vec<String>,
+}
+
 struct Cached {
     read_at: Instant,
     address: String,
@@ -47,23 +58,28 @@ pub(crate) struct ReportCache {
 impl MeshToolsState {
     /// The report of every member discovery found, reusing one read within
     /// [`REPORT_TTL`] from the same address. Members that do not answer are
-    /// left out.
-    pub async fn member_reports(&self) -> Vec<Member> {
+    /// named apart.
+    pub async fn member_reports(&self) -> Reports {
         // A copy, so no lock is held while members answer.
         let addresses = self.agent_addresses.read().await.clone();
         let reads = addresses.into_iter().map(|(agent_id, address)| async move {
-            let report = self.report(&agent_id, &address).await?;
-            Some(Member {
-                agent_id,
-                address,
-                report,
-            })
+            match self.report(&agent_id, &address).await {
+                Some(report) => Ok(Member {
+                    agent_id,
+                    address,
+                    report,
+                }),
+                None => Err(agent_id),
+            }
         });
-        futures::future::join_all(reads)
-            .await
-            .into_iter()
-            .flatten()
-            .collect()
+        let mut reports = Reports::default();
+        for read in futures::future::join_all(reads).await {
+            match read {
+                Ok(member) => reports.members.push(member),
+                Err(agent_id) => reports.silent.push(agent_id),
+            }
+        }
+        reports
     }
 
     async fn report(&self, agent_id: &str, address: &str) -> Option<AgentCapabilitiesGetResponse> {

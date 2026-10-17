@@ -61,11 +61,12 @@ async fn reports_are_read_from_members_and_cached() {
         .await
         .extend([("artist".into(), address), ("gone".into(), gone)]);
 
-    let members = mesh.member_reports().await;
-    assert_eq!(members.len(), 1, "{members:?}");
-    assert_eq!(members[0].agent_id, "artist");
-    assert_eq!(members[0].report.image_generation, Some(descriptor));
-    assert_eq!(mesh.member_reports().await.len(), 1);
+    let reports = mesh.member_reports().await;
+    assert_eq!(reports.members.len(), 1, "{reports:?}");
+    assert_eq!(reports.members[0].agent_id, "artist");
+    assert_eq!(reports.members[0].report.image_generation, Some(descriptor));
+    assert_eq!(reports.silent, ["gone"]);
+    assert_eq!(mesh.member_reports().await.members.len(), 1);
     assert_eq!(calls.load(Ordering::SeqCst), 1, "the second read is cached");
 
     handle.stop().unwrap();
@@ -83,7 +84,7 @@ async fn a_new_address_is_read_again() {
         .await
         .insert("artist".into(), first);
     assert!(
-        mesh.member_reports().await[0]
+        mesh.member_reports().await.members[0]
             .report
             .image_generation
             .is_none()
@@ -92,7 +93,7 @@ async fn a_new_address_is_read_again() {
         .write()
         .await
         .insert("artist".into(), second);
-    assert_eq!(mesh.member_reports().await.len(), 1);
+    assert_eq!(mesh.member_reports().await.members.len(), 1);
     assert_eq!(first_calls.load(Ordering::SeqCst), 1);
     assert_eq!(second_calls.load(Ordering::SeqCst), 1);
     for handle in [first_handle, second_handle] {

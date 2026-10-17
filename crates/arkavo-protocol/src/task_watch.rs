@@ -2,11 +2,12 @@
 //!
 //! Polling lasts as long as what the task reports keeps changing.
 //! Generating images can take far longer than an answer in text, and a
-//! fixed timeout gave up on work that was still moving.
+//! fixed timeout gave up on work that was still moving. `arkavo task`,
+//! `arkavo chat` and the `arkavo ui` gateway all poll by this rule.
 
 use std::time::{Duration, Instant};
 
-use arkavo_protocol::types::{TaskGetResponse, TaskStatus};
+use crate::types::{TaskGetResponse, TaskStatus};
 
 /// A task that reports nothing new for this long is left running.
 pub const QUIET_LIMIT: Duration = Duration::from_mins(5);
@@ -53,6 +54,16 @@ impl Watch {
         self.changed_at = Instant::now();
         Ok(message)
     }
+
+    /// Note a poll of `task_id` that got no report, such as one the agent's
+    /// rate limiter turned away: nothing new, so `Err` once the limit has
+    /// passed. A task whose polls are all refused is not polled forever.
+    pub fn unanswered(&self, task_id: &str) -> Result<(), String> {
+        if self.changed_at.elapsed() >= self.limit {
+            return Err(still_running(task_id, self.limit));
+        }
+        Ok(())
+    }
 }
 
 fn still_running(task_id: &str, limit: Duration) -> String {
@@ -66,7 +77,7 @@ fn still_running(task_id: &str, limit: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_protocol::types::TaskProgress;
+    use crate::types::TaskProgress;
     use arkavo_test_macros::spec;
 
     fn working(message: Option<&str>) -> TaskGetResponse {
@@ -105,5 +116,21 @@ mod tests {
         let stopped = watch.observe(&working(Some("step 2 of 8"))).unwrap_err();
         assert!(stopped.contains("still running"), "{stopped}");
         assert!(stopped.contains("tasks/get"), "{stopped}");
+    }
+
+    /// CLI-019: a poll the agent did not answer is no change, so polls that
+    /// are all turned away end at the same limit.
+    #[spec("CLI-019")]
+    #[test]
+    fn an_unanswered_poll_is_no_change() {
+        let mut watch = Watch::with_limit(Duration::from_millis(50));
+        assert_eq!(
+            watch.observe(&working(Some("step 1 of 8"))),
+            Ok(Some("step 1 of 8".into()))
+        );
+        assert_eq!(watch.unanswered("t1"), Ok(()));
+        std::thread::sleep(Duration::from_millis(60));
+        let stopped = watch.unanswered("t1").unwrap_err();
+        assert!(stopped.contains("Task t1 is still running"), "{stopped}");
     }
 }

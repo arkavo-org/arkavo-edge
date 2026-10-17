@@ -43,7 +43,7 @@ mod peer;
 mod request;
 
 use members::ReportCache;
-pub use members::{Member, REPORT_TTL};
+pub use members::{Member, REPORT_TTL, Reports};
 use peer::text_of;
 pub use peer::{Patience, Peer, PeerError, TaskData};
 pub use request::{RequestError, TaskAnswer, send_and_wait};
