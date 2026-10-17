@@ -176,6 +176,8 @@ pub fn single_sequence_params(
     params.n_threads = n_threads;
     params.n_threads_batch = n_threads;
     params.swa_full = false;
+    // llama.cpp skips its decode timers by default; InferenceTiming reports them.
+    params.no_perf = false;
     match backend {
         Backend::Gpu => {
             params.offload_kqv = true;
@@ -297,6 +299,19 @@ mod tests {
             assert!(!params.swa_full, "{backend:?} context keeps full-size SWA");
             assert_eq!(params.n_seq_max, 1);
             assert_eq!(params.n_ctx, 16_384);
+        }
+    }
+
+    /// Regression: llama.cpp defaults `no_perf` to true, so every local
+    /// response reported 0 ms of prompt and generation time.
+    #[test]
+    fn single_sequence_contexts_measure_decode_time() {
+        let shape = resolve_context_shape(8_192, None, DeviceClass::Standard, Backend::Gpu);
+        for backend in [Backend::Gpu, Backend::Cpu] {
+            assert!(
+                !single_sequence_params(shape, backend, 4).no_perf,
+                "{backend:?}"
+            );
         }
     }
 

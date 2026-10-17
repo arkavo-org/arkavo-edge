@@ -669,6 +669,8 @@ impl LlamaContext {
             ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_DISABLED
         };
         params.kv_unified = kv_unified;
+        // llama.cpp skips its decode timers by default; InferenceTiming reports them.
+        params.no_perf = false;
         // Multi-sequence callers shift and copy ranges between sequences
         // (`seq_add`, `seq_cp`), which needs the sliding-window state of
         // every position, not just the last window. llama.h also warns that

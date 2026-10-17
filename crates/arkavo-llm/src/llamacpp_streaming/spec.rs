@@ -16,7 +16,7 @@ use arkavo_llama_cpp::speculative::SpeculativeContext;
 use arkavo_llama_cpp::{
     DrySamplingConfig, LlamaContext, LlamaModel, batch_free, batch_init_with_tokens,
     batch_init_with_tokens_seq, create_sampler_chain, create_sampler_chain_with_dry, decode_batch,
-    perf_context, token_to_bytes, tokenize_with_model,
+    perf_context, perf_context_reset, token_to_bytes, tokenize_with_model,
 };
 #[cfg(feature = "llama-cpp")]
 use std::sync::Arc;
@@ -131,11 +131,14 @@ pub(super) async fn generate_tokens_pooled_with_spec(
     let mut n_accepted_total: u32 = 0;
 
     let result = async {
-        let ctx = pooled_ctx
+        let mut ctx = pooled_ctx
             .lock()
             .map_err(|_| Error::Config("Context mutex poisoned".to_string()))?;
         // Reset KV cache and position tracking for fresh inference.
         ctx.get_memory().clear(true);
+        // A pooled context serves many requests; its perf counters would
+        // otherwise report every request since the context was created.
+        perf_context_reset(&mut ctx);
 
         let vocab = model.get_vocab();
         let input_tokens = tokenize_with_model(vocab, &prompt_bytes)
