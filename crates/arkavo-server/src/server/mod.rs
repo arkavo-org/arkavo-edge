@@ -46,6 +46,8 @@ mod policy_cache;
 mod rlm_bridge;
 #[cfg(feature = "routines")]
 mod routine_tools;
+#[cfg(test)]
+mod scripted_model;
 mod startup;
 #[cfg(feature = "swarm-apply")]
 mod swarm_apply_tool;
