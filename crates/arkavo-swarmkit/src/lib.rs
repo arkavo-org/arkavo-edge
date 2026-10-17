@@ -45,9 +45,9 @@ pub use pricing::ModelPricingEntry;
 #[allow(deprecated)]
 pub use role::ArpRule;
 pub use role::{
-    AgentProvisioning, AuthMode, Budget, ContextScope, Failure, Handoff, Inference, McpToolGrant,
-    Model, Observability, Plane, RoleSpec, Skill, SkillSource, TdfAttributeReleasePolicy,
-    TdfReleaseRule, ToolUse,
+    AgentProvisioning, AuthMode, Budget, ContextScope, Failure, Handoff, IMAGE_GENERATION,
+    Inference, McpToolGrant, Model, Observability, Plane, RoleSpec, Skill, SkillSource,
+    TdfAttributeReleasePolicy, TdfReleaseRule, ToolUse,
 };
 pub use runtime_config::{
     AgentRuntimeConfig, CloudPolicyKind, KitRuntimeConfig, PreflightAction, PreflightPolicySpec,

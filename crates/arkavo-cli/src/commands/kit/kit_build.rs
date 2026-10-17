@@ -208,6 +208,7 @@ fn build_role(
         },
         skills: vec![manifest_template::identity_skill(&instructions)],
         mcp_tools,
+        host_requirements: Vec::new(),
         tdf_attribute_release_policy: None,
         handoffs: vec![],
         context_scope: None,

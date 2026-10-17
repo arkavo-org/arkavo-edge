@@ -88,6 +88,7 @@ members = [
     "crates/arkavo-adaptation",
     "crates/arkavo-arp-runtime",
     "crates/arkavo-swarmkit",
+    "crates/arkavo-swarmkit-delegation",
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
     "crates/arkavo-mcp-proxy",
@@ -162,6 +163,7 @@ default-members = [
     "crates/arkavo-adaptation",
     "crates/arkavo-arp-runtime",
     "crates/arkavo-swarmkit",
+    "crates/arkavo-swarmkit-delegation",
     "crates/arkavo-swarmkit-runtime",
     "crates/arkavo-mcp-identity",
     "crates/arkavo-mcp-proxy",
@@ -174,7 +176,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.103.1"
+version = "0.104.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

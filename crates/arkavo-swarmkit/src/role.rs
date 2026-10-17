@@ -33,12 +33,39 @@ pub struct RoleSpec {
     pub skills: Vec<Skill>,
     #[serde(default)]
     pub mcp_tools: Vec<McpToolGrant>,
+    /// Capabilities the specialist's host must provide (spec draft-02
+    /// §4.3.1). Empty is omitted, so kits without it keep their `kit.id`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_requirements: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tdf_attribute_release_policy: Option<TdfAttributeReleasePolicy>,
     #[serde(default)]
     pub handoffs: Vec<Handoff>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_scope: Option<ContextScope>,
+}
+
+/// The host capability a role needs to generate images (§4.3.1).
+pub const IMAGE_GENERATION: &str = "image_generation";
+
+impl RoleSpec {
+    /// The host capabilities this role needs: its `host_requirements`, plus
+    /// `image_generation` when a tool grant names it, the way kits written
+    /// for `arkavo agent -n` grant generation (ASSET-010). Sorted, no
+    /// duplicates.
+    pub fn required_capabilities(&self) -> Vec<String> {
+        let granted = self
+            .mcp_tools
+            .iter()
+            .any(|grant| grant.tools.iter().any(|tool| tool == IMAGE_GENERATION));
+        let mut needed = self.host_requirements.clone();
+        if granted {
+            needed.push(IMAGE_GENERATION.to_string());
+        }
+        needed.sort();
+        needed.dedup();
+        needed
+    }
 }
 
 /// Per-role provisioning block per spec §5.

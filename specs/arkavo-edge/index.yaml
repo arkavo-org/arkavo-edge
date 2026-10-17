@@ -643,6 +643,18 @@ components:
       - Health and ROI metrics
       - Context topology aggregated from pushed telemetry
 
+  - name: swarmkit-delegation
+    file: swarmkit-delegation.spec.yaml
+    module: arkavo_swarmkit_delegation
+    description: Signed SwarmKit delegation envelopes, the specialist's orchestrator binding, and roles assigned to running agents (SwarmKit draft-02 §7)
+    criticality: critical
+    scenario_count: 9
+    invariants:
+      - A role is applied only from an envelope whose signature verifies over the JSON received
+      - A bound specialist takes roles and revocations from its bound orchestrator only
+      - An unreadable binding is an error, never an absent one
+      - Envelopes carry no credentials
+
   - name: swarmkit
     file: swarmkit.spec.yaml
     module: arkavo_swarmkit

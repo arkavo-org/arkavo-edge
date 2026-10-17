@@ -1,0 +1,159 @@
+# yaml-language-server: $schema=../schema.json
+
+feature: SwarmKit Delegation
+module: arkavo_swarmkit_delegation
+version: 0.104.0
+
+# Implements SwarmKit draft-02 §7 (arkavo-org/specifications#8): an
+# orchestrator hands a kit role to a running agent in a signed envelope,
+# and the agent accepts roles only from the orchestrator it is bound to.
+# Agents start with first-use binding; operator binding is the stronger
+# mode, and pairing is specified but not built yet.
+#
+# The specialist key is the agent's own identity key (agent_identity_keypair,
+# the did:key `--trust` shows), the workload key of docs/swarm-trust-model.md.
+# Every agent process on one host shares it, so enlistment gives a host one
+# role; several roles on one Mac keep `arkavo agent -c <kit> -n <role>`.
+
+invariants:
+  - "A specialist applies a role only from an envelope whose Ed25519 signature verifies over the JCS form of the JSON it received, never over a re-serialization"
+  - "A bound specialist accepts envelopes and revocations from its bound orchestrator only; nothing an envelope or discovery carries changes the binding"
+  - "A binding that cannot be read is an error, never an absent binding that the next orchestrator could take on first use"
+  - "An envelope carries no credentials: grants with auth delegated are refused when the envelope is built"
+
+scenarios:
+  - id: SKD-001
+    name: An envelope is signed over its JCS form
+    criticality: critical
+    given:
+      - An orchestrator key and a delegation for one role
+    when: The orchestrator signs it and a specialist receives it
+    then:
+      - "delegation_signature is Ed25519 by the orchestrator's key over BLAKE3 of the JCS form of the envelope without delegation.signing, base64url without padding (draft-02 §7.2)"
+      - "The specialist verifies the JSON it received, so the envelope verifies after a round trip through text and envelope_blake3 is the same on both sides"
+      - "Changing any field, or claiming another orchestrator, fails as bad_signature; a missing or unknown algorithm, an unparseable signature or an orchestrator that is not an Ed25519 did:key fails as invalid_envelope"
+      - "Only the key the envelope names as orchestrator can sign it"
+    refs:
+      - crates/arkavo-swarmkit-delegation/src/signing.rs
+      - crates/arkavo-swarmkit-delegation/src/envelope.rs
+    changed: "2026-10-16"
+
+  - id: SKD-002
+    name: An envelope is for one specialist, one window and one use
+    criticality: critical
+    given:
+      - A specialist with its own did:key
+    when: An envelope arrives
+    then:
+      - "An envelope naming another specialist is refused as wrong_specialist"
+      - "An envelope issued more than 5 minutes ahead of the specialist's clock is not_yet_valid; one past its expires, or whose window is empty or longer than 30 days, is expired"
+      - "A nonce that is not 128 bits of base64url is invalid_envelope; a nonce already accepted from the same orchestrator is replayed"
+      - "An envelope larger than 1 MiB is refused before it is parsed"
+    refs:
+      - crates/arkavo-swarmkit-delegation/src/acceptance.rs
+      - crates/arkavo-swarmkit-delegation/src/specialist.rs
+    changed: "2026-10-16"
+
+  - id: SKD-003
+    name: The first orchestrator whose role is accepted becomes the only one
+    criticality: critical
+    given:
+      - An unbound specialist whose policy binds on first use
+    when: Orchestrators send it delegations
+    then:
+      - "Its status lists first-use in binds_by until it is bound"
+      - "Accepting a delegation binds it to that envelope's orchestrator; a role the host refuses is never committed and binds nothing"
+      - "Once bound it refuses every other orchestrator as not_bound_orchestrator, and a new delegation from its own orchestrator replaces the role it holds"
+      - "A specialist whose policy does not bind on first use refuses as binding_required until its operator binds it"
+    refs:
+      - crates/arkavo-swarmkit-delegation/src/specialist.rs
+    changed: "2026-10-16"
+
+  - id: SKD-004
+    name: The binding is kept on disk and never read as absent by mistake
+    criticality: critical
+    given:
+      - A specialist's state directory
+    when: The binding is saved and loaded
+    then:
+      - "The binding and the active envelope are written through a sibling file renamed into place, readable and writable by the owner only"
+      - "A binding file that is not a binding fails to load and names `arkavo agent release` as the way out; it does not load as no binding"
+      - "A delegation file that is not JSON loads as no delegation, which loses the role but keeps the binding"
+    refs:
+      - crates/arkavo-swarmkit-delegation/src/store.rs
+    changed: "2026-10-16"
+
+  - id: SKD-005
+    name: Only the bound orchestrator revokes, once
+    criticality: high
+    given:
+      - A specialist holding a delegation from its bound orchestrator
+    when: A swarmkit/revoke revocation arrives
+    then:
+      - "The revocation is signed like an envelope and names the specialist; its flight_id is null to revoke whatever delegation the specialist holds"
+      - "A revocation from any other key is not_bound_orchestrator; one issued more than 5 minutes either side of the specialist's clock is refused; a nonce seen in the last 10 minutes is replayed"
+      - "A revocation for another flight leaves the delegation; one for its flight drops it; release_binding also clears the binding, on disk too"
+    refs:
+      - crates/arkavo-swarmkit-delegation/src/revocation.rs
+      - crates/arkavo-swarmkit-delegation/src/specialist.rs
+    changed: "2026-10-16"
+
+  - id: SKD-006
+    name: A role survives a restart until it expires, and cannot be rolled back
+    criticality: high
+    given:
+      - A specialist that accepted a delegation and restarts
+    when: It loads its state
+    then:
+      - "It holds the same role and binding, and its status reports the delegation"
+      - "A stored envelope that no longer verifies, has expired, names another specialist, or comes from an orchestrator other than the bound one is dropped from disk"
+      - "An envelope from the same orchestrator issued before the active one is refused as replayed, though the nonce cache starts empty after a restart"
+      - "When a delegation expires it is dropped, on disk too, and the binding stays"
+    refs:
+      - crates/arkavo-swarmkit-delegation/src/specialist.rs
+    changed: "2026-10-16"
+
+  - id: SKD-007
+    name: The local operator names or releases the orchestrator
+    criticality: high
+    given:
+      - A specialist, bound or not
+    when: Its operator binds an orchestrator or releases it
+    then:
+      - "Binding by the operator replaces any binding, records mode operator, and drops a delegation another orchestrator issued"
+      - "An orchestrator that is not an Ed25519 did:key is refused"
+      - "Releasing clears the binding and the delegation, on disk too"
+    refs:
+      - crates/arkavo-swarmkit-delegation/src/specialist.rs
+    changed: "2026-10-16"
+
+  - id: SKD-008
+    name: An orchestrator builds the envelope from a kit role
+    criticality: high
+    given:
+      - A validated kit and one of its roles
+    when: The orchestrator builds a delegation for a specialist
+    then:
+      - "The envelope carries the role's provisioning, skills and tool grants, the objective, the role's description and its handoff targets as peer_roles, and a fresh 128-bit nonce"
+      - "host_requirements is the role's own list, plus image_generation when a tool grant names it, as kits written for arkavo agent -n grant generation (ASSET-010)"
+      - "issued is whole seconds; expires is issued plus a lifetime of more than zero and at most 30 days, never past kit.expires, and a kit that has expired builds no envelope"
+      - "A grant with auth delegated is refused: no token broker issues its tokens, and envelopes carry no bearer_token"
+      - "Adding host_requirements to RoleSpec omits it when empty, so existing kit.id values are unchanged"
+    refs:
+      - crates/arkavo-swarmkit-delegation/src/envelope.rs
+      - crates/arkavo-swarmkit/src/role.rs
+    changed: "2026-10-16"
+
+  - id: SKD-009
+    name: Signed skills are verified against a did:key
+    criticality: high
+    given:
+      - An envelope whose skills carry signatures
+    when: The specialist admits it
+    then:
+      - "A signed skill must name a did:key signer whose Ed25519 signature verifies over BLAKE3 of the JCS form of its payload (draft-01 §8.1.2)"
+      - "A skill signed by a did:web, or whose payload changed after signing, is refused as skill_unverified"
+      - "An unsigned skill passes, as it does when an agent reads the kit itself"
+    refs:
+      - crates/arkavo-swarmkit-delegation/src/envelope.rs
+    changed: "2026-10-16"

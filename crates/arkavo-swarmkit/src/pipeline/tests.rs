@@ -66,6 +66,7 @@ fn kit(topology: Topology, roles: &[Role]) -> Manifest {
                 agent_provisioning: AgentProvisioning::default(),
                 skills: vec![],
                 mcp_tools: vec![],
+                host_requirements: Vec::new(),
                 tdf_attribute_release_policy: None,
                 handoffs: r
                     .to

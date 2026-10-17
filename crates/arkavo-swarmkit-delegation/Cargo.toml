@@ -1,0 +1,28 @@
+[package]
+name = "arkavo-swarmkit-delegation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SwarmKit delegation envelopes: signing, specialist acceptance and orchestrator binding"
+
+[dependencies]
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-swarmkit = { path = "../arkavo-swarmkit" }
+base64 = { workspace = true }
+blake3 = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+arkavo-test-macros = { path = "../arkavo-test-macros" }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
