@@ -12,6 +12,8 @@ use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
 // SECURITY FIX (CRI-001): NoOpAuthBackend removed
 // Use JwtAuthBackend or MultiAuthBackend for production
+#[cfg(feature = "kas")]
+use arkavo_device_identity::subordinate_key::SubordinateKey;
 use arkavo_device_identity::workload_key::WorkloadKey;
 use arkavo_protocol::chat_session;
 use arkavo_protocol::config::{BufferConfig, ServerConfig};
@@ -68,6 +70,9 @@ pub struct A2aServer {
     public_key: Arc<tokio::sync::RwLock<Option<String>>>,
     /// The agent's account key (#766), which signs its card
     workload_key: Arc<tokio::sync::RwLock<Option<Arc<WorkloadKey>>>>,
+    /// The KAS key the agent keeps across restarts (TDFS-016)
+    #[cfg(feature = "kas")]
+    kas_key: Arc<tokio::sync::RwLock<Option<Arc<SubordinateKey>>>>,
     /// Budget manager loaded from SwarmKit config
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
     /// Cached SwarmKit agent config to avoid repeated discovery reads
@@ -135,6 +140,8 @@ impl A2aServer {
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
             public_key: Arc::new(tokio::sync::RwLock::new(None)),
             workload_key: Arc::new(tokio::sync::RwLock::new(None)),
+            #[cfg(feature = "kas")]
+            kas_key: Arc::new(tokio::sync::RwLock::new(None)),
             budget_manager: Arc::new(tokio::sync::RwLock::new(None)),
             agent_config: Arc::new(tokio::sync::RwLock::new(
                 arkavo_router::load_agent_config().unwrap_or_default(),
@@ -187,6 +194,13 @@ impl A2aServer {
     /// Set the key the agent's identity is, so its card goes out signed
     pub async fn set_workload_key(&self, key: Arc<WorkloadKey>) {
         *self.workload_key.write().await = Some(key);
+    }
+
+    /// Set the KAS key the agent keeps, so TDFs wrapped to it still open
+    /// after a restart
+    #[cfg(feature = "kas")]
+    pub async fn set_kas_key(&self, key: Arc<SubordinateKey>) {
+        *self.kas_key.write().await = Some(key);
     }
 
     /// Get the agent's public key
@@ -1384,7 +1398,11 @@ impl A2aServer {
                     None => (arkavo_tdf::KasA2aConfig::default(), Vec::new()),
                 };
                 let mut handler = KasA2aHandler::new(trusted_roots, kas_config);
-                handler.set_keypair(arkavo_tdf::KasKeypair::generate());
+                if let Some(keypair) =
+                    super::handlers::kas::kas_keypair(self.kas_key.read().await.as_deref())
+                {
+                    handler.set_keypair(keypair);
+                }
                 Some(Arc::new(handler))
             },
             #[cfg(feature = "kas")]
