@@ -97,8 +97,8 @@ scenarios:
         expected: Re-asserts a key the replayer does not hold; harmless since bound keys are not replaced, so no nonce is stored
       - condition: Peer restarted cleanly with a new gossip key
         expected: Its goodbye unbinds the old key and the new one is accepted
-      - condition: Peer crashed and came back
-        expected: Its kept gossip key binds again (INGRESS-017). A peer from before kept gossip keys makes a new key on every start and is refused with a warning until the receiver restarts
+      - condition: Peer crashed and came back on a new port, with no goodbye
+        expected: Discovery reports it again at its new address, so gossip follows it there. Its kept gossip key binds again (INGRESS-017). A peer from before kept gossip keys makes a new key on every start and is refused with a warning until the receiver restarts
       - condition: A host on the link spoofing mDNS announcements
         expected: Can still add a peer id and vote under it; membership (INGRESS-015) closes this
       - condition: A host on the link sends a spoofed mDNS goodbye for a peer, or races a real restart
@@ -109,6 +109,7 @@ scenarios:
       - crates/arkavo-gossip/src/protocol.rs:163-179
       - crates/arkavo-server/src/server/mod.rs
       - crates/arkavo-cli/src/commands/agent/gossip_keys.rs
+      - crates/arkavo-cli/src/commands/agent/discovered.rs
       - crates/arkavo-cli/src/commands/agent/advertise.rs
     changed: "2026-10-18"
 
