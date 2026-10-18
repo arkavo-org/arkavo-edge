@@ -442,6 +442,28 @@ impl P256VerifyingKey {
         let pk_bytes = &decoded[2..];
         Self::from_sec1_bytes(pk_bytes)
     }
+
+    /// The key a `did:key` key id names, and its DID. A `did:key` has one
+    /// key, `did:key:<multibase>#<multibase>`; any other fragment names a key
+    /// the DID does not have. Only the canonical, compressed form is read, so
+    /// one key answers to one DID.
+    pub fn from_did_key_id(key_id: &str) -> Result<(Self, &str), CryptoError> {
+        let invalid = |why: &str| CryptoError::InvalidKeyFormat(format!("{key_id} {why}"));
+        let (did, fragment) = key_id
+            .split_once('#')
+            .ok_or_else(|| invalid("is not a did:key key id"))?;
+        let multibase = did
+            .strip_prefix("did:key:")
+            .ok_or_else(|| invalid("is not a did:key key id"))?;
+        if fragment != multibase {
+            return Err(invalid("names a key its DID does not have"));
+        }
+        let key = Self::from_did_key(did)?;
+        if key.to_did_key() != did {
+            return Err(invalid("is not the canonical did:key of its key"));
+        }
+        Ok((key, did))
+    }
 }
 
 impl fmt::Display for P256VerifyingKey {
@@ -675,6 +697,44 @@ mod tests {
 
         let restored = P256VerifyingKey::from_did_key(&did).expect("Should parse P-256 DID:key");
         assert_eq!(public_key.to_sec1_bytes(), restored.to_sec1_bytes());
+    }
+
+    #[spec("CRYPTO-012")]
+    #[test]
+    fn a_did_key_key_id_names_its_dids_one_key() {
+        let public_key = P256SigningKeypair::generate().public_key();
+        let did = public_key.to_did_key();
+        let multibase = &did["did:key:".len()..];
+
+        let key_id = format!("{did}#{multibase}");
+        let (key, named) = P256VerifyingKey::from_did_key_id(&key_id).unwrap();
+        assert_eq!(named, did);
+        assert_eq!(key.to_sec1_bytes(), public_key.to_sec1_bytes());
+
+        for refused in [
+            did.clone(),
+            format!("{did}#key-1"),
+            format!("did:web:example.com#{multibase}"),
+        ] {
+            assert!(
+                P256VerifyingKey::from_did_key_id(&refused).is_err(),
+                "{refused}"
+            );
+        }
+    }
+
+    #[spec("CRYPTO-012")]
+    #[test]
+    fn a_key_id_in_uncompressed_form_is_refused() {
+        let public_key = P256SigningKeypair::generate().public_key();
+        let mut prefixed = vec![0x80, 0x24];
+        prefixed.extend_from_slice(&public_key.to_sec1_bytes());
+        let did = format!("did:key:z{}", bs58::encode(&prefixed).into_string());
+        assert!(P256VerifyingKey::from_did_key(&did).is_ok());
+
+        let key_id = format!("{did}#{}", &did["did:key:".len()..]);
+        let err = P256VerifyingKey::from_did_key_id(&key_id).unwrap_err();
+        assert!(err.to_string().contains("canonical"), "{err}");
     }
 
     // Second tests to bump scenarios from Partial → Covered

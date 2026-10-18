@@ -49,6 +49,7 @@ members = [
     "crates/arkavo-cef",
     "crates/arkavo-device-identity",
     "crates/arkavo-secure-enclave",
+    "crates/arkavo-key-statement",
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
     "crates/arkavo-cwt",
@@ -144,6 +145,7 @@ default-members = [
     "crates/arkavo-orchestrator",
     "crates/arkavo-device-identity",
     "crates/arkavo-secure-enclave",
+    "crates/arkavo-key-statement",
     "crates/arkavo-identity",
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
@@ -178,7 +180,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.108.0"
+version = "0.109.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
