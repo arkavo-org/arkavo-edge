@@ -6,7 +6,7 @@ version: 0.89.4
 
 invariants:
   - The agent verifies its own credential rather than treating it as an opaque bearer string
-  - ES256 only; any other COSE algorithm is refused before a key is even looked up
+  - ES256 only, under its polymorphic (-7) or RFC 9864 fully-specified (ESP256, -9) identifier; any other COSE algorithm is refused before a key is even looked up
   - Signing keys come from the issuer's published COSE key set, matched on raw kid bytes
   - An unknown kid never turns into a key-set fetch per verification
   - The audience check cannot be skipped; an empty expected audience refuses every token
@@ -58,3 +58,22 @@ scenarios:
       - Repeated verification of an unknown kid does not repeat the fetch
     refs:
       - crates/arkavo-cwt/src/keys.rs
+
+  - id: ACWT-004
+    name: RFC 9864's fully-specified algorithm identifiers are read as the ones they specialize
+    criticality: high
+    given:
+      - A CWT, permit or COSE key whose alg is ESP256 (-9) or Ed25519 (-19)
+    when: It is parsed and verified
+    then:
+      - ESP256 verifies as ES256 over P-256 and Ed25519 as EdDSA over Ed25519, for agent CWTs, permits and published keys alike
+      - A fully-specified identifier is checked only with a key of its own curve
+      - What this edge writes keeps the polymorphic ES256 (-7) and EdDSA (-8), which the identity provider and the opentdf-platform fork read today
+    edge_cases:
+      - condition: A published key declaring ESP256 on an Ed25519 key, or Ed25519 on a P-256 key
+        expected: Refused
+    refs:
+      - crates/arkavo-cwt/src/key.rs
+      - crates/arkavo-cwt/src/sign1.rs
+      - crates/arkavo-cwt/src/verify.rs
+    changed: "2026-10-18"

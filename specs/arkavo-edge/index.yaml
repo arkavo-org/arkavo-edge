@@ -1054,7 +1054,7 @@ components:
     module: arkavo_cwt
     description: COSE_Sign1/ES256 verification of the agent CWT against the published COSE key set
     criticality: critical
-    scenario_count: 3
+    scenario_count: 4
     invariants:
       - ES256 only
       - Keys matched on raw kid bytes from the published COSE key set

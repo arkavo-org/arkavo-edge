@@ -286,6 +286,39 @@ mod tests {
         assert!(verify(&untagged, &keys, &opts("arkavo-kas")).is_ok());
     }
 
+    /// An agent CWT from an issuer that has moved to RFC 9864's ESP256, with
+    /// its key published under the same identifier, verifies as ES256 does.
+    #[test]
+    #[spec("ACWT-004")]
+    fn verifies_an_esp256_agent_cwt() {
+        let signer = new_key();
+        let kid = [0x44u8; 32];
+        let point = signer.verifying_key().to_encoded_point(false);
+        let published = CoseKeyBuilder::new_ec2_pub_key(
+            coset::iana::EllipticCurve::P_256,
+            point.x().expect("x coordinate").to_vec(),
+            point.y().expect("y coordinate").to_vec(),
+        )
+        .algorithm(coset::iana::Algorithm::ESP256)
+        .key_id(kid.to_vec())
+        .build();
+        let keys = KeySet::from_cbor(&CoseKeySet(vec![published]).to_vec().unwrap())
+            .expect("parse key set");
+        let aud = Value::Array(vec![Value::Text("arkavo-kas".into())]);
+        let token = encode_sign1(
+            &signer,
+            HeaderBuilder::new()
+                .algorithm(coset::iana::Algorithm::ESP256)
+                .key_id(kid.to_vec())
+                .build(),
+            Header::default(),
+            claims_cbor(ISS, aud, NOW + 600, NOW - 60, None, None),
+            true,
+        );
+        let claims = verify(&token, &keys, &opts("arkavo-kas")).expect("verify ESP256 CWT");
+        assert_eq!(claims.sub, "did:key:zAgentUnderTest");
+    }
+
     #[test]
     #[spec("ACWT-002")]
     fn rejects_wrong_key_expired_and_wrong_audience() {

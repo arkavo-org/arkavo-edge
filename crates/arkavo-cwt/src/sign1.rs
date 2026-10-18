@@ -12,6 +12,8 @@ pub const MAX_TOKEN_BYTES: usize = 16 * 1024;
 
 pub struct ParsedSign1 {
     pub sign1: CoseSign1,
+    /// The signature algorithm, EdDSA or ES256. RFC 9864's fully-specified
+    /// Ed25519 and ESP256 are read as the algorithm they specialize.
     pub algorithm: Algorithm,
 }
 
@@ -35,8 +37,13 @@ pub fn parse(bytes: &[u8]) -> Result<ParsedSign1, CwtError> {
         .or_else(|_| CoseSign1::from_slice(body))
         .map_err(|e| CwtError::Cose(e.to_string()))?;
     let algorithm = match &sign1.protected.header.alg {
-        Some(RegisteredLabelWithPrivate::Assigned(alg @ (Algorithm::EdDSA | Algorithm::ES256))) => {
-            *alg
+        Some(RegisteredLabelWithPrivate::Assigned(alg))
+            if matches!(
+                crate::key::polymorphic(*alg),
+                Algorithm::EdDSA | Algorithm::ES256
+            ) =>
+        {
+            crate::key::polymorphic(*alg)
         }
         Some(other) => return Err(CwtError::UnsupportedAlgorithm(format!("{other:?}"))),
         None => return Err(CwtError::UnsupportedAlgorithm("none".into())),
@@ -100,6 +107,86 @@ mod tests {
             bytes.extend(sign1.to_vec().unwrap());
         }
         (bytes, VerifyingKey::Ed25519(signing.verifying_key()))
+    }
+
+    fn signed_with(algorithm: coset::iana::Algorithm, key: &VerifyingKeyMaker) -> Vec<u8> {
+        let protected = HeaderBuilder::new()
+            .algorithm(algorithm)
+            .key_id(b"k1".to_vec())
+            .build();
+        CoseSign1Builder::new()
+            .protected(protected)
+            .payload(b"payload".to_vec())
+            .create_signature(b"", |data| key.sign(data))
+            .build()
+            .to_tagged_vec()
+            .unwrap()
+    }
+
+    enum VerifyingKeyMaker {
+        Ed25519(ed25519_dalek::SigningKey),
+        P256(p256::ecdsa::SigningKey),
+    }
+
+    impl VerifyingKeyMaker {
+        fn sign(&self, data: &[u8]) -> Vec<u8> {
+            match self {
+                Self::Ed25519(key) => key.sign(data).to_bytes().to_vec(),
+                Self::P256(key) => {
+                    let signature: p256::ecdsa::Signature = key.sign(data);
+                    signature.to_bytes().to_vec()
+                }
+            }
+        }
+
+        fn verifying(&self) -> VerifyingKey {
+            match self {
+                Self::Ed25519(key) => VerifyingKey::Ed25519(key.verifying_key()),
+                Self::P256(key) => VerifyingKey::P256(*key.verifying_key()),
+            }
+        }
+    }
+
+    /// RFC 9864's fully-specified identifiers verify as the algorithms they
+    /// specialize.
+    #[arkavo_test_macros::spec("ACWT-004")]
+    #[test]
+    fn fully_specified_algorithms_verify_as_the_ones_they_specialize() {
+        use coset::iana::Algorithm;
+        let ed25519 =
+            VerifyingKeyMaker::Ed25519(ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng));
+        let p256 = VerifyingKeyMaker::P256(p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng));
+        for (algorithm, key, read_as) in [
+            (Algorithm::Ed25519, &ed25519, Algorithm::EdDSA),
+            (Algorithm::EdDSA, &ed25519, Algorithm::EdDSA),
+            (Algorithm::ESP256, &p256, Algorithm::ES256),
+            (Algorithm::ES256, &p256, Algorithm::ES256),
+        ] {
+            let parsed = parse(&signed_with(algorithm, key)).unwrap();
+            assert_eq!(parsed.algorithm, read_as, "{algorithm:?}");
+            parsed.verify(&key.verifying()).unwrap();
+        }
+    }
+
+    /// A fully-specified identifier names its curve: ESP256 is not checked
+    /// with an Ed25519 key, nor Ed25519 with a P-256 one.
+    #[arkavo_test_macros::spec("ACWT-004")]
+    #[test]
+    fn a_fully_specified_algorithm_does_not_verify_with_another_curves_key() {
+        use coset::iana::Algorithm;
+        let ed25519 =
+            VerifyingKeyMaker::Ed25519(ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng));
+        let p256 = VerifyingKeyMaker::P256(p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng));
+        let esp256 = parse(&signed_with(Algorithm::ESP256, &p256)).unwrap();
+        assert!(matches!(
+            esp256.verify(&ed25519.verifying()),
+            Err(CwtError::KeyAlgorithmMismatch)
+        ));
+        let eddsa = parse(&signed_with(Algorithm::Ed25519, &ed25519)).unwrap();
+        assert!(matches!(
+            eddsa.verify(&p256.verifying()),
+            Err(CwtError::KeyAlgorithmMismatch)
+        ));
     }
 
     #[test]
