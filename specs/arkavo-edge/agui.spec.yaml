@@ -453,8 +453,10 @@ scenarios:
       - "Retry task submits the task's objective again as a new task and closes the notice; Dismiss closes it"
       - "The gateway keeps at most 20 notices of its own; a second failure of the same task replaces the first"
     edge_cases:
-      - condition: "The agent's answer is a tool call its model wrote out as text (<|tool_call>, <tool_call>, [TOOL_CALLS], <|python_tag|>)"
+      - condition: "The agent's whole answer is a tool call its model wrote out as text: it opens with <|tool_call>, <tool_call>, [TOOL_CALLS] or <|python_tag|> and came with no files"
         expected: "The task fails with the reason and the notice offers Retry: the workspace never shows control tokens as an answer, and routing records a failure, not a success"
+      - condition: "An answer only mentions a marker, or delivered files beside its text"
+        expected: "It is an answer: the task completes with its output"
     refs:
       - crates/arkavo-agui/src/gateway_notices.rs
       - crates/arkavo-agui/src/gateway_task_dispatch.rs

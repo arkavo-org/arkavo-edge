@@ -365,7 +365,7 @@ async fn poll_agent_task(
                         // A model that wrote its tool call out as text did
                         // nothing: the operator gets a failure with a retry,
                         // never control tokens, and routing learns it failed.
-                        if let Some(marker) = unparsed_tool_call(&result_text) {
+                        if let Some(marker) = unparsed_tool_call(&parts) {
                             let why = format!(
                                 "The agent's model wrote a tool call ({marker}) instead of making it, so nothing was done."
                             );
@@ -537,7 +537,19 @@ async fn poll_agent_task(
 
 /// The control tokens a model writes when it spells out a tool call instead
 /// of making it, as Gemma, Qwen, Mistral and Llama do.
-fn unparsed_tool_call(text: &str) -> Option<&'static str> {
+/// The marker of a tool call the model wrote out as its whole answer. Only
+/// an answer that opens with one and came with nothing else counts: an
+/// answer that explains the syntax, or one that delivered files beside its
+/// text, did its work.
+fn unparsed_tool_call(parts: &[arkavo_protocol::types::MessagePart]) -> Option<&'static str> {
+    let mut text = String::new();
+    for part in parts {
+        match part {
+            arkavo_protocol::types::MessagePart::Text { content } => text.push_str(content),
+            _ => return None,
+        }
+    }
+    let text = text.trim_start();
     [
         "<|tool_call>",
         "<tool_call>",
@@ -545,7 +557,7 @@ fn unparsed_tool_call(text: &str) -> Option<&'static str> {
         "<|python_tag|>",
     ]
     .into_iter()
-    .find(|marker| text.contains(marker))
+    .find(|marker| text.starts_with(marker))
 }
 
 /// The parts of a completed task's answer, as the agent sent them.
@@ -756,15 +768,46 @@ mod tests {
     #[spec("AGUI-028")]
     #[test]
     fn a_tool_call_written_out_is_not_an_answer() {
+        use arkavo_protocol::types::MessagePart;
+        let text = |content: &str| MessagePart::Text {
+            content: content.into(),
+        };
         let leaked =
             "<|tool_call>call:generate_image\nprompt: A transparent sprite of a gold coin.";
-        assert_eq!(unparsed_tool_call(leaked), Some("<|tool_call>"));
+        assert_eq!(unparsed_tool_call(&[text(leaked)]), Some("<|tool_call>"));
         assert_eq!(
-            unparsed_tool_call("[TOOL_CALLS][{\"name\": \"x\"}]"),
+            unparsed_tool_call(&[text("\n[TOOL_CALLS][{\"name\": \"x\"}]")]),
             Some("[TOOL_CALLS]")
         );
         assert_eq!(
-            unparsed_tool_call("Your gold coin sprite is attached."),
+            unparsed_tool_call(&[text("Your gold coin sprite is attached.")]),
+            None
+        );
+    }
+
+    /// AGUI-028: an answer that only mentions a marker, or that delivered
+    /// files beside its text, is an answer.
+    #[spec("AGUI-028")]
+    #[test]
+    fn an_answer_that_mentions_tool_call_syntax_is_an_answer() {
+        use arkavo_protocol::types::MessagePart;
+        let text = |content: &str| MessagePart::Text {
+            content: content.into(),
+        };
+        assert_eq!(
+            unparsed_tool_call(&[text(
+                "Mistral marks a call with [TOOL_CALLS] followed by a JSON list."
+            )]),
+            None
+        );
+        let file = MessagePart::File {
+            name: "coin.png".into(),
+            mime_type: "image/png".into(),
+            data: "iroh://coin".into(),
+            is_uri: true,
+        };
+        assert_eq!(
+            unparsed_tool_call(&[text("<|tool_call>call:generate_image"), file]),
             None
         );
     }
