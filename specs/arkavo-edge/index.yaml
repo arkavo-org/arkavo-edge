@@ -194,9 +194,9 @@ components:
   - name: device-identity
     file: device-identity.spec.yaml
     module: arkavo_device_identity
-    description: Device ID, agent identity keys and the Secure Enclave workload key
+    description: Device ID, agent identity keys and each agent's Secure Enclave workload key
     criticality: high
-    scenario_count: 9
+    scenario_count: 10
     invariants:
       - Device ID unique per installation
       - Persists across restarts

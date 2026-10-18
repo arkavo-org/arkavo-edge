@@ -16,6 +16,7 @@ use std::fmt;
 use std::path::Path;
 
 const WORKLOAD_KEY_FILENAME: &str = "workload_key";
+const AGENTS_DIR: &str = "agents";
 
 // The agent slot beside this file holds a bare 32-byte Ed25519 seed, the
 // same size as a P-256 scalar, so a key file is never read without its
@@ -114,19 +115,49 @@ impl fmt::Debug for WorkloadKey {
     }
 }
 
-/// The agent's workload key, made on first use. On a Mac whose Secure
-/// Enclave this process can use, the key is made there; if the enclave is
-/// present but refuses, this fails rather than settle for a software key
-/// that would pass for an enclave one.
-pub fn load_or_create() -> Result<WorkloadKey> {
-    load_or_create_at(&crate::keypair::slot_path(WORKLOAD_KEY_FILENAME)?)
+/// The workload key of the agent named `agent`, made on first use. Each
+/// name is its own account, so two agents one user runs on one machine are
+/// two agents to their peers. On a Mac whose Secure Enclave this process can
+/// use, the key is made there; if the enclave is present but refuses, this
+/// fails rather than settle for a software key that would pass for an
+/// enclave one.
+pub fn load_or_create(agent: &str) -> Result<WorkloadKey> {
+    if agent.is_empty() {
+        return Err(DeviceIdentityError::WorkloadKey(
+            "an agent needs a name to hold a workload key".to_string(),
+        ));
+    }
+    let dir = crate::keypair::slot_path(AGENTS_DIR)?.join(agent_dir_name(agent));
+    load_or_create_at(&dir.join(WORKLOAD_KEY_FILENAME))
+}
+
+/// The directory name for an agent's keys. Names compare without case, as
+/// the mDNS instance names agents announce do, and every byte but ASCII
+/// letters, digits, `-` and `_` is percent-encoded: no name reaches outside
+/// the agents directory, and two names share a directory only when they
+/// differ in case alone.
+fn agent_dir_name(agent: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut name = String::with_capacity(agent.len());
+    for byte in agent.to_lowercase().bytes() {
+        if byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' {
+            name.push(char::from(byte));
+        } else {
+            let _ = write!(name, "%{byte:02x}");
+        }
+    }
+    name
 }
 
 /// [`load_or_create`] for a key file at `path` instead of the agent's own
-/// identity directory.
+/// directory.
 pub fn load_or_create_at(path: &Path) -> Result<WorkloadKey> {
     if let Some(key) = load(path)? {
         return Ok(key);
+    }
+    if let Some(dir) = path.parent() {
+        crate::private_file::create_private_dir(dir)?;
     }
     let (record, key) = create()?;
     if crate::private_file::create_private(path, &record)? {
@@ -333,6 +364,63 @@ mod tests {
         let err = load_or_create_at(&path).unwrap_err().to_string();
         assert!(err.contains("move it aside"), "{err}");
         assert_eq!(std::fs::read(&path).unwrap(), record);
+    }
+
+    fn agents_dir() -> std::path::PathBuf {
+        crate::keypair::slot_path(AGENTS_DIR).unwrap()
+    }
+
+    #[spec("DEVICE-010")]
+    #[test]
+    fn each_agent_name_is_its_own_account() {
+        let planner = load_or_create("planner-own-account").unwrap();
+        let coder = load_or_create("coder-own-account").unwrap();
+        assert_ne!(planner.did(), coder.did());
+        assert_eq!(
+            load_or_create("planner-own-account").unwrap().did(),
+            planner.did()
+        );
+    }
+
+    #[spec("DEVICE-010")]
+    #[test]
+    fn names_that_differ_in_case_alone_are_one_agent() {
+        let upper = load_or_create("Planner-Case").unwrap();
+        assert_eq!(load_or_create("planner-case").unwrap().did(), upper.did());
+    }
+
+    #[spec("DEVICE-010")]
+    #[test]
+    fn no_name_reaches_outside_the_agents_directory() {
+        assert_eq!(agent_dir_name("../escape"), "%2e%2e%2fescape");
+        assert_eq!(agent_dir_name("a/b\\c"), "a%2fb%5cc");
+        assert_eq!(agent_dir_name("Pauls-Mac_mini"), "pauls-mac_mini");
+        assert_eq!(agent_dir_name("caf\u{e9}"), "caf%c3%a9");
+
+        load_or_create("../escape-agents-dir").unwrap();
+        let inside = agents_dir().join("%2e%2e%2fescape-agents-dir");
+        assert!(inside.join(WORKLOAD_KEY_FILENAME).is_file());
+        assert!(!agents_dir().join("../escape-agents-dir").exists());
+    }
+
+    #[spec("DEVICE-010")]
+    #[test]
+    fn an_agent_without_a_name_has_no_key() {
+        let err = load_or_create("").unwrap_err().to_string();
+        assert!(err.contains("needs a name"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[spec("DEVICE-010")]
+    #[test]
+    fn an_agent_directory_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        load_or_create("private-dir").unwrap();
+        let mode = std::fs::metadata(agents_dir().join("private-dir"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700);
     }
 
     #[cfg(target_os = "macos")]
