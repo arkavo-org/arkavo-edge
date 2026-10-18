@@ -44,11 +44,12 @@ impl Agent {
         }
     }
 
+    fn voucher(&self) -> Arc<Voucher> {
+        Arc::new(Voucher::new(self.workload.clone(), &self.gossip_key))
+    }
+
     fn statement(&self) -> String {
-        let key = self.keypair.public_key().to_did_key();
-        Voucher::new(self.workload.clone(), &self.gossip_key, key)
-            .statement()
-            .unwrap()
+        self.voucher().statement().unwrap()
     }
 
     fn request(&self, peer_id: &str) -> (KeyExchangeRequest, Vec<u8>) {
@@ -75,7 +76,7 @@ async fn serving(agent: &Agent) -> (RpcModule<super::A2aRpcImpl>, Arc<LearningBu
         Arc::new(AgentKeypair::from_bytes(agent.gossip_key.secret()).unwrap()),
         GossipConfig::default(),
     );
-    bus.vouch_with(agent.workload.clone(), &agent.gossip_key);
+    bus.set_gossip_voucher(agent.voucher());
     let bus = Arc::new(bus);
     let mut rpc = rpc_impl(Arc::new(RwLock::new(AgentMetadata::default()))).await;
     rpc.learning_bus = Some(bus.clone());
@@ -176,4 +177,21 @@ async fn a_statement_for_another_key_is_refused() {
     bus.register_peer_key("alpha".into(), stranger.public_key())
         .await
         .expect("nothing was bound");
+}
+
+/// A voucher for another key would have the agent vouch for a key it does
+/// not sign gossip with; the bus shows no statement instead.
+#[spec("INGRESS-017")]
+#[tokio::test]
+async fn a_voucher_for_another_key_is_not_shown() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = Agent::in_dir(&dir.path().join("beta"));
+    let bus = LearningBus::new(
+        AGENT.to_string(),
+        "test-swarm".to_string(),
+        Arc::new(AgentKeypair::generate()),
+        GossipConfig::default(),
+    );
+    bus.set_gossip_voucher(agent.voucher());
+    assert_eq!(bus.gossip_statement().await, None);
 }

@@ -318,3 +318,28 @@ scenarios:
       - crates/arkavo-agui/src/agent_connection/identity.rs
       - crates/arkavo-agui/static/js/panels/agent-detail.js
     changed: "2026-10-18"
+
+  - id: SRV-018
+    name: The agent card carries the statements vouching for the agent's other keys
+    criticality: high
+    given:
+      - An agent with a workload key and gossip, TDF and iroh keys kept in its directory (INGRESS-005)
+    when: Its card is served
+    then:
+      - "The card carries an extension with uri https://arkavo.com/a2a/key-statements/v1 whose data holds one key statement (INGRESS-006) for each of those keys, inside what the card signature covers"
+      - Each statement is renewed before it runs out, so a card is never served with an expired one
+      - "The arkavo ui gateway checks each statement against the did:key that signed the card and lists, on the agent's page, the keys that identity vouches for, by purpose"
+    edge_cases:
+      - condition: A statement signed by another workload key, or one that does not hold
+        expected: Not listed; it names no key of this agent's
+      - condition: A key whose statement cannot be signed
+        expected: Left out of the card, with a warning in the agent's log
+      - condition: An agent from before key statements, or whose card is unsigned
+        expected: The page lists no keys for it
+    refs:
+      - crates/arkavo-server/src/server/well_known.rs
+      - crates/arkavo-cli/src/commands/agent/keys.rs
+      - crates/arkavo-key-statement/src/lib.rs
+      - crates/arkavo-agui/src/agent_connection/identity.rs
+      - crates/arkavo-agui/static/js/panels/agent-detail.js
+    changed: "2026-10-18"

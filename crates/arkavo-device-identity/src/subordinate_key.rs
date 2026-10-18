@@ -41,6 +41,7 @@ pub struct SubordinateKey {
     purpose: Purpose,
     generation: u64,
     secret: [u8; 32],
+    did: String,
 }
 
 impl SubordinateKey {
@@ -59,6 +60,30 @@ impl SubordinateKey {
     pub fn secret(&self) -> &[u8; 32] {
         &self.secret
     }
+
+    /// The public half, as the `did:key` a key statement names.
+    pub fn did(&self) -> &str {
+        &self.did
+    }
+
+    fn new(purpose: Purpose, generation: u64, secret: [u8; 32]) -> Option<Self> {
+        let did = match purpose {
+            Purpose::Gossip | Purpose::Iroh => AgentKeypair::from_bytes(&secret)
+                .ok()?
+                .public_key()
+                .to_did_key(),
+            Purpose::Tdf => P256SigningKeypair::from_bytes(&secret)
+                .ok()?
+                .public_key()
+                .to_did_key(),
+        };
+        Some(Self {
+            purpose,
+            generation,
+            secret,
+            did,
+        })
+    }
 }
 
 impl fmt::Debug for SubordinateKey {
@@ -66,6 +91,7 @@ impl fmt::Debug for SubordinateKey {
         f.debug_struct("SubordinateKey")
             .field("purpose", &self.purpose)
             .field("generation", &self.generation)
+            .field("did", &self.did)
             .finish_non_exhaustive()
     }
 }
@@ -98,14 +124,12 @@ pub fn load_or_create_at(path: &Path, purpose: Purpose) -> Result<SubordinateKey
     let secret = match purpose {
         Purpose::Gossip | Purpose::Iroh => AgentKeypair::generate().to_bytes(),
         Purpose::Tdf => P256SigningKeypair::generate().to_bytes(),
-    }
-    .try_into()
-    .map_err(|_| DeviceIdentityError::WorkloadKey("a new key is not 32 bytes".to_string()))?;
-    let key = SubordinateKey {
-        purpose,
-        generation: unix_now(),
-        secret,
     };
+    let key = secret
+        .try_into()
+        .ok()
+        .and_then(|secret| SubordinateKey::new(purpose, unix_now(), secret))
+        .ok_or_else(|| DeviceIdentityError::WorkloadKey("a new key is unusable".to_string()))?;
     let record = serde_json::to_vec(&Record {
         format: FORMAT.to_string(),
         purpose,
@@ -149,16 +173,13 @@ fn load(path: &Path, purpose: Purpose) -> Result<Option<SubordinateKey>> {
     if record.purpose != purpose {
         return Err(refuse(&format!("holds the {:?} key", record.purpose)));
     }
-    let secret: [u8; 32] = STANDARD
+    STANDARD
         .decode(&record.key)
         .ok()
         .and_then(|secret| secret.try_into().ok())
-        .ok_or_else(|| refuse("is damaged"))?;
-    Ok(Some(SubordinateKey {
-        purpose,
-        generation: record.generation,
-        secret,
-    }))
+        .and_then(|secret| SubordinateKey::new(purpose, record.generation, secret))
+        .map(Some)
+        .ok_or_else(|| refuse("is damaged"))
 }
 
 /// Signs, and renews before it runs out, the statement in which the workload
@@ -172,15 +193,19 @@ pub struct Voucher {
 }
 
 impl Voucher {
-    /// `key` is the subordinate key's `did:key`.
-    pub fn new(workload: Arc<WorkloadKey>, subordinate: &SubordinateKey, key: String) -> Self {
+    pub fn new(workload: Arc<WorkloadKey>, subordinate: &SubordinateKey) -> Self {
         Self {
             workload,
             purpose: subordinate.purpose,
-            key,
+            key: subordinate.did.clone(),
             generation: subordinate.generation,
             current: Mutex::new(None),
         }
+    }
+
+    /// The `did:key` of the key this voucher vouches for.
+    pub fn key(&self) -> &str {
+        &self.key
     }
 
     /// The statement to show a peer now. Signing may reach the Secure

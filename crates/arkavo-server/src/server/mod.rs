@@ -489,6 +489,8 @@ pub struct A2aRpcImpl {
     pub(crate) swarmkit: Option<Arc<swarmkit::SpecialistService>>,
     /// The agent's account key (#766), which signs its card
     pub(crate) workload_key: Option<Arc<arkavo_device_identity::workload_key::WorkloadKey>>,
+    /// Sign the statements the card carries for the agent's other keys
+    pub(crate) key_vouchers: Vec<Arc<arkavo_device_identity::subordinate_key::Voucher>>,
 }
 
 impl A2aRpcImpl {
@@ -1303,6 +1305,7 @@ impl A2aRpcServer for A2aRpcImpl {
         };
         let mut card = well_known::build_agent_card(&state).await;
         if let Some(key) = self.workload_key.clone() {
+            card = well_known::with_key_statements(card, &self.key_vouchers).await;
             card = well_known::signed(card, key).await;
         }
         serde_json::to_value(card).map_err(|e| {

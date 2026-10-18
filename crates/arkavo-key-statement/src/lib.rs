@@ -24,6 +24,10 @@ use std::collections::hash_map::Entry;
 /// The JWS `typ` of a key statement.
 pub const MEDIA_TYPE: &str = "key-statement+jwt";
 
+/// The agent card extension that carries an agent's key statements, as
+/// `{"statements": [<compact JWS>, ...]}` in its data.
+pub const CARD_EXTENSION: &str = "https://arkavo.com/a2a/key-statements/v1";
+
 const ALGORITHM: &str = "ES256";
 
 /// The job a subordinate key does. Each fixes the key's algorithm.

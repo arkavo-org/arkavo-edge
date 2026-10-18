@@ -164,6 +164,46 @@ pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
     }
 }
 
+/// The card carrying the statements in which the workload key vouches for
+/// the agent's other keys (SRV-018), so whoever reads the card can check
+/// which gossip, TDF and iroh keys speak for the agent. Signing a statement
+/// may reach the Secure Enclave, so it is done off the async workers; a key
+/// whose statement cannot be signed is left out, with a warning.
+pub(super) async fn with_key_statements(
+    mut card: AgentCard,
+    vouchers: &[Arc<arkavo_device_identity::subordinate_key::Voucher>],
+) -> AgentCard {
+    if vouchers.is_empty() {
+        return card;
+    }
+    let vouchers = vouchers.to_vec();
+    let signing = tokio::task::spawn_blocking(move || {
+        vouchers
+            .iter()
+            .filter_map(|voucher| {
+                voucher
+                    .statement()
+                    .inspect_err(|e| {
+                        tracing::warn!("Leaving {} out of the agent card: {e}", voucher.key());
+                    })
+                    .ok()
+            })
+            .collect::<Vec<_>>()
+    });
+    match signing.await {
+        Ok(statements) if !statements.is_empty() => {
+            card.extensions
+                .push(arkavo_protocol::types::AgentExtension {
+                    uri: arkavo_key_statement::CARD_EXTENSION.to_string(),
+                    data: Some(serde_json::json!({ "statements": statements })),
+                });
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Serving the agent card without key statements: {e}"),
+    }
+    card
+}
+
 /// The card signed by the agent's workload key (SRV-017). A signature from
 /// the Secure Enclave takes a few milliseconds, so it is made off the async
 /// workers. A card that cannot be signed goes out unsigned, which a verifier
