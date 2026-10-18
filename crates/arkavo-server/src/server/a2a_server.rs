@@ -67,8 +67,6 @@ pub struct A2aServer {
     agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
     /// Learning bus for gossip-based learning propagation
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
-    /// Base64-encoded ECDSA P-256 public key for TDF encryption
-    public_key: Arc<tokio::sync::RwLock<Option<String>>>,
     /// The agent's account key (#766), which signs its card
     workload_key: Arc<tokio::sync::RwLock<Option<Arc<WorkloadKey>>>>,
     /// Sign the statements the card carries for the agent's other keys
@@ -144,7 +142,6 @@ impl A2aServer {
             planning_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
-            public_key: Arc::new(tokio::sync::RwLock::new(None)),
             workload_key: Arc::new(tokio::sync::RwLock::new(None)),
             key_vouchers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             #[cfg(feature = "kas")]
@@ -195,11 +192,6 @@ impl A2aServer {
         &self.role_specialization
     }
 
-    /// Set the agent's public key for TDF encryption
-    pub async fn set_public_key(&self, key: String) {
-        *self.public_key.write().await = Some(key);
-    }
-
     /// Set the key the agent's identity is, so its card goes out signed
     pub async fn set_workload_key(&self, key: Arc<WorkloadKey>) {
         *self.workload_key.write().await = Some(key);
@@ -225,9 +217,18 @@ impl A2aServer {
         *self.iroh_key.write().await = Some(key);
     }
 
-    /// Get the agent's public key
-    pub async fn public_key(&self) -> Option<String> {
-        self.public_key.read().await.clone()
+    /// The public key the agent gives for TDF, base64 SEC1: the one its KAS
+    /// rewraps with, kept across restarts. None until a KAS key is set.
+    pub async fn tdf_public_key(&self) -> Option<String> {
+        #[cfg(feature = "kas")]
+        return self
+            .kas_key
+            .read()
+            .await
+            .as_deref()
+            .and_then(super::handlers::kas::tdf_public_key);
+        #[cfg(not(feature = "kas"))]
+        None
     }
 
     pub fn mcp_registry(&self) -> Arc<McpRegistry> {
@@ -1402,7 +1403,7 @@ impl A2aServer {
             conductor: self.conductor.read().await.clone(),
             router,
             learning_bus: learning_bus_for_rpc,
-            public_key: self.public_key.read().await.clone(),
+            public_key: self.tdf_public_key().await,
             budget_manager: self.budget_manager.read().await.clone(),
             orchestrator_tick: self.orchestrator_tick.clone(),
             compute_budget: self.compute_budget.clone(),

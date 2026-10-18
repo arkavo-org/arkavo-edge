@@ -295,6 +295,7 @@ scenarios:
     then:
       - It loads the same KAS key, kept in the agent's directory as its TDF key, so those TDFs still rewrap
       - Each agent name keeps its own KAS key, in an owner-only file
+      - "The public key its mDNS announcement (public_key) and agent.capabilities.get give is that KAS key, as kas.publicKey serves it; the agent makes no other TDF key on start"
     edge_cases:
       - condition: The kept key file cannot be read as a TDF key
         expected: The agent does not start, and names the file
@@ -305,4 +306,5 @@ scenarios:
       - crates/arkavo-server/src/server/a2a_server.rs
       - crates/arkavo-device-identity/src/subordinate_key.rs
       - crates/arkavo-cli/src/commands/agent.rs
+      - crates/arkavo-cli/src/commands/agent/keys.rs
     changed: "2026-10-18"
