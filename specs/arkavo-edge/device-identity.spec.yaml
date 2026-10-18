@@ -124,7 +124,7 @@ scenarios:
     given: ["A workload key file that cannot be used"]
     when: "The agent starts"
     then:
-      - "The agent refuses to start and names the file; moving it aside starts a new agent"
+      - "The agent refuses to start and names the file; moving it aside starts a new agent, which takes a new name because peers know the old name by the old key"
       - "The file is left as it was"
     edge_cases:
       - condition: The file holds the old agent slot's bare 32-byte seed, or anything that is not a workload key

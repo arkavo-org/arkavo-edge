@@ -55,7 +55,7 @@ components:
     module: arkavo_server
     description: Signed, sealed agent envelopes, one workload key, minimal mDNS announcement, --trust enrollment and membership
     criticality: critical
-    scenario_count: 16
+    scenario_count: 17
     invariants:
       - Transport and discovery are untrusted
       - Every message is a signed, sealed envelope verified before unwrap

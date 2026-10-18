@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 mod advertise;
 mod enlist;
+mod gossip_keys;
 mod gpu_residency;
 pub mod listen;
 
@@ -527,7 +528,13 @@ pub async fn start_agent_server(
 
     // Initialize LearningBus FIRST (before set_agent_metadata which initializes router)
     let learning_bus = {
-        let keypair = Arc::new(AgentKeypair::generate());
+        // Kept across restarts, so peers that bound it once bind it again
+        // rather than refuse a new key under the same name (INGRESS-017).
+        let gossip_key = arkavo_device_identity::subordinate_key::load_or_create(
+            &config.name,
+            arkavo_device_identity::subordinate_key::Purpose::Gossip,
+        )?;
+        let keypair = Arc::new(AgentKeypair::from_bytes(gossip_key.secret())?);
         let gossip_config = GossipConfig::default();
         let swarm_id = config.swarm.clone().unwrap_or_else(|| {
             std::env::current_dir()
@@ -537,6 +544,7 @@ pub async fn start_agent_server(
         });
         let mut bus = LearningBus::new(config.name.clone(), swarm_id, keypair, gossip_config);
         bus.set_pain_sender(pain_tx);
+        bus.vouch_with(workload_key.clone(), &gossip_key);
         Arc::new(bus)
     };
     // Initialize persistent learning store (SQLite) for lessons
@@ -912,106 +920,20 @@ pub async fn start_agent_server(
         // Start peer discovery handler (receives from mDNS thread, updates LearningBus)
         let learning_bus_peers = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
-            use arkavo_protocol::http::HttpTransport;
-            use arkavo_protocol::transport::{
-                A2aEndpoint, A2aRequest, A2aTransport, TransportConfig,
-            };
-
             while let Some((peer_id, is_add, address)) = peer_rx.recv().await {
                 if is_add {
                     learning_bus_peers
                         .add_peer_discovered(peer_id.clone(), address.clone())
                         .await;
-
-                    // Initiate key exchange with the peer
-                    if let Some(addr) = address {
-                        // Prove we hold our key, addressed to this peer, and
-                        // keep the challenge its reply must sign.
-                        let (exchange, challenge) = arkavo_gossip::key_exchange::sign_request(
-                            learning_bus_peers.keypair(),
-                            learning_bus_peers.agent_id(),
-                            &peer_id,
-                        );
-                        let params = match serde_json::to_value(&exchange) {
-                            Ok(params) => params,
+                    if let Some(address) = address {
+                        match gossip_keys::exchange(&learning_bus_peers, &peer_id, &address).await {
+                            Ok(vouched_by) => tracing::info!(
+                                peer = %peer_id,
+                                agent = vouched_by.as_deref().unwrap_or("unvouched"),
+                                "Key exchange completed"
+                            ),
                             Err(e) => {
-                                tracing::warn!("Failed to encode key exchange: {}", e);
-                                continue;
-                            }
-                        };
-                        let request = A2aRequest::new("agent/exchangeKeys", params);
-
-                        let mut config = TransportConfig::default();
-                        config.tls_config.require_tls = false;
-                        let transport = match HttpTransport::new(config) {
-                            Ok(t) => t,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to create transport for key exchange: {}",
-                                    e
-                                );
-                                continue;
-                            }
-                        };
-
-                        let endpoint = A2aEndpoint {
-                            url: addr.clone(),
-                            agent_id: peer_id.clone(),
-                            public_key: None,
-                        };
-
-                        if let Err(e) = transport.connect(&endpoint).await {
-                            tracing::warn!(
-                                "Failed to connect for key exchange with {}: {}",
-                                peer_id,
-                                e
-                            );
-                            continue;
-                        }
-
-                        match transport.send_request(request).await {
-                            Ok(response) => {
-                                use arkavo_gossip::key_exchange::{
-                                    KeyExchangeResponse, verify_response,
-                                };
-                                use arkavo_protocol::transport::A2aResponse;
-                                // Bind their key only once their reply proves
-                                // they hold it.
-                                if let A2aResponse::Success { result, .. } = response {
-                                    let proven =
-                                        serde_json::from_value::<KeyExchangeResponse>(result)
-                                            .map_err(|e| e.to_string())
-                                            .and_then(|reply| {
-                                                verify_response(
-                                                    &reply,
-                                                    &peer_id,
-                                                    learning_bus_peers.agent_id(),
-                                                    &challenge,
-                                                )
-                                                .map_err(|e| e.to_string())
-                                            });
-                                    let bound = match proven {
-                                        Ok(their_key) => learning_bus_peers
-                                            .register_peer_key(peer_id.clone(), their_key)
-                                            .await
-                                            .map_err(|e| e.to_string()),
-                                        Err(e) => Err(e),
-                                    };
-                                    match bound {
-                                        Ok(()) => tracing::info!(
-                                            "Key exchange completed with peer: {}",
-                                            peer_id
-                                        ),
-                                        Err(e) => tracing::warn!(
-                                            "Key exchange with {} refused: {}",
-                                            peer_id,
-                                            e
-                                        ),
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Key exchange failed with {}: {}", peer_id, e);
+                                tracing::warn!("Key exchange with {} failed: {}", peer_id, e);
                             }
                         }
                     }

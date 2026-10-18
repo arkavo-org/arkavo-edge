@@ -549,6 +549,21 @@ impl GossipProtocol {
             .register(agent_id, pubkey)
     }
 
+    /// Bind a key its agent's workload key vouched for; see
+    /// [`crate::KeyRegistry::register_vouched`].
+    pub async fn register_vouched_key(
+        &self,
+        agent_id: String,
+        pubkey: arkavo_crypto::AgentPublicKey,
+        statement: &arkavo_key_statement::KeyStatement,
+    ) -> GossipResult<()> {
+        self.verifier
+            .write()
+            .await
+            .registry_mut()
+            .register_vouched(agent_id, pubkey, statement)
+    }
+
     /// Clean up expired entries based on max_message_age
     ///
     /// Removes patches, lessons, and seen entries older than the configured TTL.

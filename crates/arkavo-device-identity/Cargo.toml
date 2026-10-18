@@ -12,6 +12,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 base64.workspace = true
 arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-key-statement = { path = "../arkavo-key-statement" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 arkavo-secure-enclave = { path = "../arkavo-secure-enclave" }
