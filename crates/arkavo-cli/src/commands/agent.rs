@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod advertise;
+mod discovered;
 mod enlist;
 mod gossip_keys;
 mod gpu_residency;
@@ -1188,11 +1189,9 @@ fn broadcast_agent_mdns_sync(
         // Spawn a thread to handle discovered services
         let discovery_thread = thread::spawn(move || {
             use mdns_sd::ServiceEvent;
-            use std::collections::HashSet;
             println!("Starting discovery of other agents...");
 
-            // Track discovered peers to avoid duplicates
-            let mut discovered_peers: HashSet<String> = HashSet::new();
+            let mut discovered_peers = discovered::DiscoveredPeers::default();
 
             loop {
                 match receiver.recv_timeout(Duration::from_secs(1)) {
@@ -1211,19 +1210,16 @@ fn broadcast_agent_mdns_sync(
                                 if let Some(purpose) = info.get_property_val_str("purpose") {
                                     println!("  - Purpose: {purpose}");
                                 }
-                                // Get peer address
-                                let peer_addr = info
-                                    .get_addresses()
-                                    .iter()
-                                    .next()
-                                    .map(|addr| format!("http://{}:{}", addr, info.get_port()));
+                                let peer_addr =
+                                    discovered::peer_address(info.get_addresses(), info.get_port());
 
                                 if let Some(ref addr) = peer_addr {
                                     println!("  - Address: {addr}");
                                 }
 
-                                // Notify LearningBus of new peer (only once per agent_id)
-                                if discovered_peers.insert(agent_id.to_string()) {
+                                // Tell gossip of a new peer, or of one back at a
+                                // new address after a restart.
+                                if discovered_peers.resolved(agent_id, peer_addr.clone()) {
                                     let _ = peer_tx.blocking_send((
                                         agent_id.to_string(),
                                         true,
@@ -1236,7 +1232,7 @@ fn broadcast_agent_mdns_sync(
                             println!("Agent disconnected: {fullname}");
                             // Extract agent_id from fullname (e.g., "rover-beta._a2a._tcp.local.")
                             if let Some(agent_id) = fullname.split("._a2a._tcp.local.").next()
-                                && discovered_peers.remove(agent_id)
+                                && discovered_peers.removed(agent_id)
                             {
                                 let _ = peer_tx.blocking_send((agent_id.to_string(), false, None));
                             }
