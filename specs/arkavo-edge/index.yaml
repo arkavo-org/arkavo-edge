@@ -194,9 +194,9 @@ components:
   - name: device-identity
     file: device-identity.spec.yaml
     module: arkavo_device_identity
-    description: Device ID management and secure storage
+    description: Device ID, agent identity keys and the Secure Enclave workload key
     criticality: high
-    scenario_count: 7
+    scenario_count: 9
     invariants:
       - Device ID unique per installation
       - Persists across restarts
@@ -985,7 +985,7 @@ components:
     module: arkavo_server
     description: A2A server and runtime orchestration
     criticality: critical
-    scenario_count: 16
+    scenario_count: 17
     invariants:
       - Server binds localhost by default
       - JSON-RPC 2.0 protocol

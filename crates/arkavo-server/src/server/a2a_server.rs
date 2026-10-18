@@ -12,6 +12,7 @@ use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
 // SECURITY FIX (CRI-001): NoOpAuthBackend removed
 // Use JwtAuthBackend or MultiAuthBackend for production
+use arkavo_device_identity::workload_key::WorkloadKey;
 use arkavo_protocol::chat_session;
 use arkavo_protocol::config::{BufferConfig, ServerConfig};
 use arkavo_protocol::error::{A2aError, Result};
@@ -65,6 +66,8 @@ pub struct A2aServer {
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
     /// Base64-encoded ECDSA P-256 public key for TDF encryption
     public_key: Arc<tokio::sync::RwLock<Option<String>>>,
+    /// The agent's account key (#766), which signs its card
+    workload_key: Arc<tokio::sync::RwLock<Option<Arc<WorkloadKey>>>>,
     /// Budget manager loaded from SwarmKit config
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
     /// Cached SwarmKit agent config to avoid repeated discovery reads
@@ -131,6 +134,7 @@ impl A2aServer {
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
             public_key: Arc::new(tokio::sync::RwLock::new(None)),
+            workload_key: Arc::new(tokio::sync::RwLock::new(None)),
             budget_manager: Arc::new(tokio::sync::RwLock::new(None)),
             agent_config: Arc::new(tokio::sync::RwLock::new(
                 arkavo_router::load_agent_config().unwrap_or_default(),
@@ -178,6 +182,11 @@ impl A2aServer {
     /// Set the agent's public key for TDF encryption
     pub async fn set_public_key(&self, key: String) {
         *self.public_key.write().await = Some(key);
+    }
+
+    /// Set the key the agent's identity is, so its card goes out signed
+    pub async fn set_workload_key(&self, key: Arc<WorkloadKey>) {
+        *self.workload_key.write().await = Some(key);
     }
 
     /// Get the agent's public key
@@ -1386,6 +1395,7 @@ impl A2aServer {
             iroh_node: self.iroh_node.read().await.clone(),
             assets,
             swarmkit,
+            workload_key: self.workload_key.read().await.clone(),
         };
 
         if let Err(e) = self.start_file_watcher().await {

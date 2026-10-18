@@ -73,6 +73,7 @@ mdns-sd = { workspace = true, optional = true }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 
 [dev-dependencies]
+arkavo-crypto = { path = "../arkavo-crypto" }
 uuid = { workspace = true }
 tempfile = { workspace = true }
 chrono = { workspace = true }

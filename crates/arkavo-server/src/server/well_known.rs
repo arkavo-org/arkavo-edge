@@ -160,7 +160,34 @@ pub(super) async fn build_agent_card(state: &WellKnownState) -> AgentCard {
         security_schemes: vec![],
         security: vec![],
         extensions: vec![],
-        signature: None,
+        signatures: vec![],
+    }
+}
+
+/// The card signed by the agent's workload key (SRV-017). A signature from
+/// the Secure Enclave takes a few milliseconds, so it is made off the async
+/// workers. A card that cannot be signed goes out unsigned, which a verifier
+/// reports as such, rather than not at all.
+pub(super) async fn signed(
+    card: AgentCard,
+    key: Arc<arkavo_device_identity::workload_key::WorkloadKey>,
+) -> AgentCard {
+    let unsigned = card.clone();
+    let signing = tokio::task::spawn_blocking(move || {
+        let mut card = card;
+        arkavo_protocol::card_signature::sign(&mut card, &key.key_id(), |input| key.sign(input))
+            .map(|()| card)
+    });
+    match signing.await {
+        Ok(Ok(card)) => card,
+        Ok(Err(e)) => {
+            tracing::warn!("Serving the agent card unsigned: {e}");
+            unsigned
+        }
+        Err(e) => {
+            tracing::warn!("Serving the agent card unsigned: {e}");
+            unsigned
+        }
     }
 }
 

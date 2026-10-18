@@ -482,6 +482,8 @@ pub struct A2aRpcImpl {
     pub(crate) assets: Option<Arc<AssetService>>,
     /// Roles an orchestrator assigns, for an agent set up to take them
     pub(crate) swarmkit: Option<Arc<swarmkit::SpecialistService>>,
+    /// The agent's account key (#766), which signs its card
+    pub(crate) workload_key: Option<Arc<arkavo_device_identity::workload_key::WorkloadKey>>,
 }
 
 impl A2aRpcImpl {
@@ -1280,7 +1282,10 @@ impl A2aRpcServer for A2aRpcImpl {
                 .as_ref()
                 .is_some_and(|a| a.descriptor().is_some()),
         };
-        let card = well_known::build_agent_card(&state).await;
+        let mut card = well_known::build_agent_card(&state).await;
+        if let Some(key) = self.workload_key.clone() {
+            card = well_known::signed(card, key).await;
+        }
         serde_json::to_value(card).map_err(|e| {
             ErrorObjectOwned::owned(-32603, format!("Serialization error: {e}"), None::<()>)
         })

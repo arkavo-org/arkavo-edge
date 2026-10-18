@@ -467,6 +467,11 @@ pub async fn start_agent_server(
     };
     let device_did = device_keypair.public_key().to_did_key();
 
+    // The key the agent's account is (#766), made in the Secure Enclave
+    // where this Mac has one. It signs the agent card; the identity
+    // provider moves to it with authnz-rs#102.
+    let workload_key = Arc::new(arkavo_device_identity::workload_key::load_or_create()?);
+
     // Create AgentCredential for TDF encryption/decryption
     let mut identity_attributes = HashMap::new();
     identity_attributes.insert("agent.id".to_string(), config.name.clone());
@@ -513,6 +518,7 @@ pub async fn start_agent_server(
 
     // Set the public key for TDF encryption (used in agent.capabilities.get RPC)
     server.set_public_key(public_key_b64.clone()).await;
+    server.set_workload_key(workload_key.clone()).await;
 
     // Create pain signal channel before LearningBus (lock-free hot path)
     let (pain_tx, pain_rx) = tokio::sync::mpsc::channel::<arkavo_server::PainSignal>(128);
@@ -1129,6 +1135,7 @@ pub async fn start_agent_server(
     }
 
     if !quiet {
+        println!("Identity {} ({})", workload_key.did(), workload_key.store());
         // The bound address carries the port the OS assigned when the kit asked for port 0.
         println!("Ready at {bound_addr}");
     }

@@ -77,6 +77,7 @@ pub(super) async fn rpc_impl(agent_metadata: Arc<RwLock<AgentMetadata>>) -> A2aR
         #[cfg(feature = "iroh")]
         iroh_node: None,
         assets: None,
+        workload_key: None,
         swarmkit: None,
     }
 }
