@@ -664,11 +664,8 @@ fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
                     }
                 }
                 A2aResponse::Error { error, .. } => {
-                    if let Err(stop) = super::mesh::poll_refused(&watch, &task_id, &error) {
-                        transport.close().await.ok();
-                        return Err(stop.into());
-                    }
-                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    transport.close().await.ok();
+                    return Err(format!("RPC error: {} - {}", error.code, error.message).into());
                 }
             }
         }
@@ -694,7 +691,8 @@ fn execute_ai_task_v2(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
     };
 
     // Run task in async context
-    let result = tokio::runtime::Runtime::new()?.block_on(async {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(async {
         // Create local strategy (with tools when mcp-tools feature is enabled)
         #[cfg(feature = "mcp-tools")]
         let local_strategy = {
@@ -723,12 +721,28 @@ fn execute_ai_task_v2(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std
         executor.run_task(task, &orch_config, &ui).await
     })?;
 
-    if result.success {
-        println!("\nTask completed: {}", result.message);
-        Ok(())
-    } else {
-        Err(result.message.into())
+    if !result.success {
+        return Err(result.message.into());
     }
+    println!("\nTask completed: {}", result.message);
+    match &result.answer {
+        Some(answer) => runtime.block_on(save_answer_assets(answer)),
+        None => Ok(()),
+    }
+}
+
+/// Save the assets a mesh agent's answer references, as `arkavo chat` does
+/// (CLI-018), under ./arkavo-assets/<task id>.
+async fn save_answer_assets(
+    answer: &arkavo_orchestrator::task_executor::MeshAnswer,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let deliveries = arkavo_server::server::assets::deliveries_in(&answer.message.parts);
+    if deliveries.is_empty() {
+        return Ok(());
+    }
+    let dir = super::assets::task_dir(Path::new(super::assets::DEFAULT_DIR), &answer.task_id);
+    println!("\n=== Assets ({}) ===\n", dir.display());
+    super::assets::save(&deliveries, &dir, &mut std::io::stdout()).await
 }
 
 fn execute_ai_task(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::error::Error>> {

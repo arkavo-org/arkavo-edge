@@ -64,6 +64,18 @@ impl Watch {
         }
         Ok(())
     }
+
+    /// Note a poll of `task_id` answered with an error: `Ok` to poll again
+    /// when the agent's rate limiter turned it away, `Err` with what to tell
+    /// the user otherwise. The limiter is shared by every caller of the
+    /// agent, so a burst from elsewhere can refuse a poll while the task
+    /// runs on.
+    pub fn refused(&self, task_id: &str, code: i32, message: &str) -> Result<(), String> {
+        if crate::rate_limit::is_rate_limited(code, message) {
+            return self.unanswered(task_id);
+        }
+        Err(format!("RPC error: {code} - {message}"))
+    }
 }
 
 fn still_running(task_id: &str, limit: Duration) -> String {
@@ -132,5 +144,22 @@ mod tests {
         std::thread::sleep(Duration::from_millis(60));
         let stopped = watch.unanswered("t1").unwrap_err();
         assert!(stopped.contains("Task t1 is still running"), "{stopped}");
+    }
+
+    /// CLI-019: only a refusal by the rate limiter is polled again; another
+    /// error with the same code still ends the poll, and refusals end it
+    /// once the task has been quiet for the limit.
+    #[spec("CLI-019")]
+    #[test]
+    fn only_a_rate_limit_refusal_is_polled_again() {
+        let refused = (-32001, "Rate limit exceeded");
+
+        assert_eq!(Watch::default().refused("t1", refused.0, refused.1), Ok(()));
+        assert_eq!(
+            Watch::default().refused("t1", -32001, "Session not found"),
+            Err("RPC error: -32001 - Session not found".into())
+        );
+        let quiet = Watch::with_limit(Duration::ZERO).refused("t1", refused.0, refused.1);
+        assert!(quiet.unwrap_err().contains("still running"));
     }
 }

@@ -304,11 +304,15 @@ scenarios:
       - "For each file the CLI prints the path, size, dimensions and whether it has alpha, then one line naming the model and its license (IMG-013)"
       - "No asset bytes or base64 are printed"
       - "An asset that fails a check is reported and the command exits with an error, keeping the files that passed"
+    edge_cases:
+      - condition: "arkavo task sends the task to a mesh agent, which answers with text and a generated image"
+        expected: "The answer's text is the task's result and the image is saved under ./arkavo-assets/<task id>, not a bare \"Completed via mesh agent\" with both dropped"
     refs:
       - crates/arkavo-cli/src/commands/assets.rs
+      - crates/arkavo-orchestrator/src/task_executor/mesh_follow.rs
+      - crates/arkavo-cli/src/commands/task.rs
       - crates/arkavo-cli/src/commands/chat.rs:428-453
-      - crates/arkavo-cli/src/commands/task.rs:597-623
-    changed: "2026-10-11"
+    changed: "2026-10-17"
 
   - id: CLI-019
     name: Polling lasts while the task makes progress
@@ -326,7 +330,7 @@ scenarios:
     refs:
       - crates/arkavo-protocol/src/task_watch.rs
       - crates/arkavo-cli/src/commands/mesh.rs
-      - crates/arkavo-cli/src/commands/task.rs
+      - crates/arkavo-orchestrator/src/task_executor/mesh_follow.rs
     changed: "2026-10-17"
 
   - id: CLI-020
