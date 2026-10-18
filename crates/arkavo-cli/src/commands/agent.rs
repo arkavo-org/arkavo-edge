@@ -532,6 +532,15 @@ pub async fn start_agent_server(
             )?,
         ))
         .await;
+    #[cfg(feature = "iroh")]
+    server
+        .set_iroh_key(Arc::new(
+            arkavo_device_identity::subordinate_key::load_or_create(
+                &config.name,
+                arkavo_device_identity::subordinate_key::Purpose::Iroh,
+            )?,
+        ))
+        .await;
 
     // Create pain signal channel before LearningBus (lock-free hot path)
     let (pain_tx, pain_rx) = tokio::sync::mpsc::channel::<arkavo_server::PainSignal>(128);
