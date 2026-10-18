@@ -1,0 +1,214 @@
+//! Explicit peers complement LAN discovery when multicast is unavailable.
+
+use crate::agent_connection::{AgentConnection, TelemetryEvent};
+use crate::gateway::AppState;
+use crate::types::AgUiEvent;
+use serde_json::{Value, json};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::mpsc;
+
+pub fn parse_endpoint(value: &str) -> Result<SocketAddr, String> {
+    let address: SocketAddr = value
+        .parse()
+        .map_err(|_| "Agent endpoint must be IP:PORT (IPv6: [IP]:PORT)".to_string())?;
+    let ip = address.ip().to_canonical();
+    if address.port() == 0
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || matches!(ip, std::net::IpAddr::V4(ip) if ip.is_broadcast())
+    {
+        return Err("Agent endpoint must name a unicast address and nonzero port".into());
+    }
+    Ok(address)
+}
+
+fn agent_record(card: &Value, endpoint: SocketAddr) -> Result<Value, String> {
+    let name = card["name"]
+        .as_str()
+        .filter(|name| !name.trim().is_empty() && name.len() <= 256)
+        .ok_or("Agent card must include a nonempty name of at most 256 bytes")?;
+    // A peer's card describes it; it cannot redirect the operator's connection.
+    Ok(json!({
+        "id": name,
+        "name": name,
+        "purpose": card["description"].as_str().unwrap_or_default(),
+        "endpoint": endpoint.to_string(),
+        "discovery": "direct",
+    }))
+}
+
+async fn read_card(
+    endpoint: SocketAddr,
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .build()?;
+    let mut response = client
+        .get(format!("http://{endpoint}/.well-known/agent.json"))
+        .send()
+        .await?
+        .error_for_status()?;
+    if !response.status().is_success() {
+        return Err("Agent card redirects are not followed".into());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > 65536 {
+            return Err("Agent card exceeds 64 KiB".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(serde_json::from_slice(&body)?)
+}
+
+/// Connect to `endpoint`, trying again with a growing pause until it
+/// answers. A peer that is down when `arkavo ui` starts, or restarts later,
+/// joins the workspace when it comes up rather than stopping it.
+pub async fn keep_connecting(
+    state: AppState,
+    telemetry_tx: mpsc::Sender<TelemetryEvent>,
+    endpoint: SocketAddr,
+) {
+    let mut pause = std::time::Duration::from_secs(2);
+    loop {
+        match connect(&state, telemetry_tx.clone(), endpoint).await {
+            Ok(()) => return,
+            Err(error) => {
+                tracing::warn!(%endpoint, %error, "agent not reached; trying again in {}s", pause.as_secs());
+            }
+        }
+        tokio::time::sleep(pause).await;
+        pause = (pause * 2).min(std::time::Duration::from_mins(1));
+    }
+}
+
+pub async fn connect(
+    state: &AppState,
+    telemetry_tx: mpsc::Sender<TelemetryEvent>,
+    endpoint: SocketAddr,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let record = agent_record(&read_card(endpoint).await?, endpoint)?;
+    let id = record["id"]
+        .as_str()
+        .ok_or("Missing agent identity")?
+        .to_owned();
+    let connection = Arc::new(AgentConnection::new(
+        id.clone(),
+        endpoint.to_string(),
+        telemetry_tx,
+    ));
+    connection.connect().await?;
+
+    // Reserve the name before subscribing. The endpoint the operator named
+    // wins over one discovery found for the same agent, which may be another
+    // interface of the same host; two --agent peers never share a name.
+    let mut agents = state.agents.write().await;
+    match agents.iter_mut().find(|agent| agent["id"] == id) {
+        Some(existing) if existing["discovery"] == "direct" => {
+            if existing["endpoint"] != endpoint.to_string() {
+                return Err(format!(
+                    "Agent name {id:?} already belongs to another --agent endpoint"
+                )
+                .into());
+            }
+        }
+        Some(existing) => *existing = record,
+        None => agents.push(record),
+    }
+    let previous = state
+        .agent_connections
+        .write()
+        .await
+        .insert(id.clone(), connection.clone());
+    drop(agents);
+    if let Some(previous) = previous {
+        connection.inherit_notices(&previous).await;
+    }
+
+    let (tx, mut rx) = mpsc::channel::<AgUiEvent>(32);
+    match connection
+        .subscribe_metrics(tx, state.security_handler.clone())
+        .await
+    {
+        Ok(()) => {
+            let browsers = state.connections.clone();
+            let topology = state.context_topology_cache.clone();
+            tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    if let AgUiEvent::TelemetryEvent {
+                        event_type,
+                        details,
+                        ..
+                    } = &event
+                        && event_type == "context_topology"
+                    {
+                        topology.write().await.insert(id.clone(), details.clone());
+                    }
+                    for browser in browsers.read().await.values() {
+                        let _ = browser._ws_tx.send(event.clone()).await;
+                    }
+                }
+            });
+        }
+        Err(error) => {
+            tracing::warn!(%endpoint, %error, "Agent metrics subscription unavailable; polling remains active")
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[arkavo_test_macros::spec("AGUI-026")]
+    #[test]
+    fn direct_endpoint_accepts_ipv4_and_ipv6_without_wildcards_or_urls() {
+        for value in ["127.0.0.1:8342", "10.0.0.2:8342", "[::1]:8342"] {
+            assert!(parse_endpoint(value).is_ok(), "{value}");
+        }
+        for value in [
+            "0.0.0.0:8342",
+            "[::]:8342",
+            "224.0.0.251:5353",
+            "[ff02::fb]:5353",
+            "127.0.0.1:0",
+            "http://127.0.0.1:8342",
+            "example.com:8342",
+            "[::ffff:0.0.0.0]:8342",
+            "255.255.255.255:8342",
+            "[::ffff:255.255.255.255]:8342",
+        ] {
+            assert!(parse_endpoint(value).is_err(), "{value}");
+        }
+    }
+
+    #[arkavo_test_macros::spec("AGUI-026")]
+    #[test]
+    fn card_cannot_redirect_a_direct_peer_or_invent_model_metadata() {
+        let endpoint = "127.0.0.1:8342".parse().unwrap();
+        let record = agent_record(&json!({"name": "triage", "description": "Read-only triage", "url": "http://untrusted.invalid"}), endpoint).unwrap();
+        assert_eq!(record["id"], "triage");
+        assert_eq!(record["endpoint"], "127.0.0.1:8342");
+        assert_eq!(record["discovery"], "direct");
+        assert!(record.get("model").is_none());
+    }
+
+    #[arkavo_test_macros::spec("AGUI-026")]
+    #[test]
+    fn malformed_card_cannot_register_an_unnamed_peer() {
+        let endpoint = "127.0.0.1:8342".parse().unwrap();
+        for card in [
+            json!({}),
+            json!({"name": " "}),
+            json!({"name": 5}),
+            json!({"name": "x".repeat(257)}),
+        ] {
+            assert!(agent_record(&card, endpoint).is_err());
+        }
+    }
+}

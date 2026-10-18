@@ -208,14 +208,35 @@ impl Client {
         let mut seen = Vec::new();
         tokio::time::timeout(Duration::from_secs(30), async {
             loop {
-                let task: TaskGetResponse = self
-                    .call(
-                        "tasks/get",
-                        json!([TaskGetRequest {
-                            task_id: task_id.to_string(),
-                        }]),
-                    )
-                    .await;
+                // Poll as the real clients do: under the agent's rate limit,
+                // and again after a refusal (CLI-019). Every 5 ms outran the
+                // limit whenever the pipeline took longer than ~150 ms.
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                let request = A2aRequest::new(
+                    "tasks/get",
+                    json!([TaskGetRequest {
+                        task_id: task_id.to_string(),
+                    }]),
+                );
+                let task: TaskGetResponse = match self
+                    .0
+                    .send_request(request)
+                    .await
+                    .expect("the agent replied")
+                {
+                    A2aResponse::Success { result, .. } => {
+                        serde_json::from_value(result).expect("the reply has the method's shape")
+                    }
+                    A2aResponse::Error { error, .. }
+                        if arkavo_protocol::rate_limit::is_rate_limited(
+                            error.code,
+                            &error.message,
+                        ) =>
+                    {
+                        continue;
+                    }
+                    A2aResponse::Error { error, .. } => panic!("tasks/get failed: {error:?}"),
+                };
                 if let Some(message) = task.progress.as_ref().and_then(|p| p.message.clone())
                     && seen.last() != Some(&message)
                 {
@@ -224,7 +245,6 @@ impl Client {
                 if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed) {
                     return (task, seen);
                 }
-                tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
         .await

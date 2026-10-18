@@ -28,7 +28,7 @@ function openAgentChat(agentId) {
     var area = document.getElementById('chat-area-' + agentId);
     if (area) area.classList.add('active');
 
-    var btn = document.querySelector('[data-chat-toggle="' + agentId + '"]');
+    var btn = document.querySelector('[data-chat-toggle="' + CSS.escape(agentId) + '"]');
     if (btn) btn.classList.add('active');
 
     wsSend({ type: 'chatOpen', agentId: agentId });
@@ -45,7 +45,7 @@ function closeAgentChat(agentId) {
     var area = document.getElementById('chat-area-' + agentId);
     if (area) area.classList.remove('active');
 
-    var btn = document.querySelector('[data-chat-toggle="' + agentId + '"]');
+    var btn = document.querySelector('[data-chat-toggle="' + CSS.escape(agentId) + '"]');
     if (btn) btn.classList.remove('active');
 
     wsSend({ type: 'chatClose', agentId: agentId });
@@ -157,11 +157,14 @@ function sendAgentChatMessage(agentId) {
     var content = input.value.trim();
     if (!content) return;
 
+    if (!wsSend({ type: 'userMessage', agentId: agentId, content: content })) {
+        showToast('Not sent · gateway disconnected. Message retained.', 'warning');
+        return;
+    }
     var chat = getAgentChat(agentId);
     chat.messages.push({ id: Date.now().toString(), role: 'user', content: content });
     renderAgentChatMessages(agentId);
 
-    wsSend({ type: 'userMessage', agentId: agentId, content: content });
     input.value = '';
 }
 

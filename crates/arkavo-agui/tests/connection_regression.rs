@@ -1,6 +1,56 @@
 //! Regression tests for A2A connection bugs fixed in a15189a
+// Tokio's test entrypoints create a runtime outside async execution.
+#![allow(clippy::disallowed_methods)]
 
 use arkavo_agui::types::AgUiEvent;
+
+#[arkavo_test_macros::spec("AGUI-003")]
+#[tokio::test]
+async fn closed_transport_does_not_remain_connected_without_monitor() {
+    use arkavo_agui::agent_connection::{AgentConnection, ConnectionStatus};
+    use axum::{Router, extract::WebSocketUpgrade, routing::get};
+    use std::{sync::Arc, time::Duration};
+
+    let close = Arc::new(tokio::sync::Notify::new());
+    let signal = close.clone();
+    let app = Router::new().route(
+        "/",
+        get(move |upgrade: WebSocketUpgrade| {
+            let signal = signal.clone();
+            async move {
+                upgrade.on_upgrade(move |mut socket| async move {
+                    signal.notified().await;
+                    socket
+                        .send(axum::extract::ws::Message::Close(None))
+                        .await
+                        .unwrap();
+                })
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (tx, _rx) = tokio::sync::mpsc::channel(8);
+    let connection = AgentConnection::new("peer".into(), address.to_string(), tx);
+    connection.connect().await.unwrap();
+    assert!(connection.is_connected().await);
+    assert_eq!(connection.get_status().await, ConnectionStatus::Connected);
+
+    close.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while connection.is_connected().await {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("transport should notice its peer closed");
+    assert!(matches!(
+        connection.get_status().await,
+        ConnectionStatus::Failed { .. }
+    ));
+    server.abort();
+}
 
 /// Regression: chat_send RPC returns () (null JSON) but the client previously
 /// deserialized the response as String, causing "invalid type: null, expected

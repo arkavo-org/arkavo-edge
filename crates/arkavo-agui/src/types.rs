@@ -301,6 +301,8 @@ pub enum AgUiEvent {
 
     // Mesh dashboard events
     RequestMeshStatus,
+    /// Lightweight connection snapshot without remote key-service probes.
+    RequestFleetSnapshot,
     MeshStatus {
         agents: Vec<MeshAgentInfo>,
         timestamp: String,
@@ -615,10 +617,14 @@ pub enum AgUiEvent {
     },
     SubmitTask {
         description: String,
+        #[serde(rename = "requestId", default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
         #[serde(rename = "targetAgent", skip_serializing_if = "Option::is_none")]
         target_agent: Option<String>,
     },
     TaskSubmitted {
+        #[serde(rename = "requestId", default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
         #[serde(rename = "taskId")]
         task_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -640,7 +646,64 @@ pub enum AgUiEvent {
         result: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         metrics: Option<TaskMetrics>,
+        /// Images the agent delivered with its answer
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assets: Vec<crate::gateway_assets::TaskAsset>,
+        /// Where the task's images stand when they are not shown yet
+        #[serde(rename = "assetNote", default, skip_serializing_if = "Option::is_none")]
+        asset_note: Option<String>,
         timestamp: String,
+    },
+    /// An anomaly an agent, or this gateway, brings to the operator (#759).
+    OperatorNotice {
+        notice: arkavo_protocol::operator_notice::OperatorNotice,
+    },
+    /// A notice that closed: acknowledged, expired or replaced.
+    OperatorNoticeResolved {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "noticeId")]
+        notice_id: String,
+    },
+    /// Every notice open now, for a view that just connected.
+    NoticeList {
+        notices: Vec<arkavo_protocol::operator_notice::OperatorNotice>,
+    },
+    /// Ask for the open notices.
+    RequestNotices,
+    /// The operator chose one of a notice's actions.
+    NoticeAction {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "noticeId")]
+        notice_id: String,
+        #[serde(rename = "actionId")]
+        action_id: String,
+    },
+    /// What came of a chosen action, to every view.
+    NoticeActionResult {
+        #[serde(rename = "noticeId")]
+        notice_id: String,
+        #[serde(rename = "actionId")]
+        action_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// Ask for one task's output, which the task list leaves out.
+    RequestTask {
+        #[serde(rename = "taskId")]
+        task_id: String,
+    },
+    /// One task's output, for a view that opened it without one.
+    TaskDetail {
+        #[serde(rename = "taskId")]
+        task_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assets: Vec<crate::gateway_assets::TaskAsset>,
+        #[serde(rename = "assetNote", default, skip_serializing_if = "Option::is_none")]
+        asset_note: Option<String>,
     },
 }
 
@@ -710,6 +773,12 @@ pub struct TaskInfo {
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    /// Whether the task has output to ask for with `RequestTask`: the list
+    /// leaves outputs out, since it is sent every few seconds to every view.
+    #[serde(rename = "hasResult", default)]
+    pub has_result: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<crate::gateway_assets::TaskAsset>,
     pub status: String,
     #[serde(rename = "targetAgent", skip_serializing_if = "Option::is_none")]
     pub target_agent: Option<String>,

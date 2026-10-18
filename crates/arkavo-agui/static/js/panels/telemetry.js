@@ -26,14 +26,18 @@ function addTelemetry(event) {
     AppState.telemetry.unshift(event);
     if (AppState.telemetry.length > MAX_TELEMETRY) {
         AppState.telemetry.pop();
+        AppState.evictedEvents++;
     }
     AppState.eventCount++;
     renderTelemetry();
+    // Drawn when its view opens; rebuilding 200 hidden rows per event made
+    // every metrics push and chat token cost a full re-render.
+    if (AppState.activeView === 'telemetry') renderEvidence();
     updateStats();
 }
 
 function renderTelemetry() {
-    var container = document.getElementById('telemetry-container');
+    var container = document.getElementById('diagnostics-container');
     if (!container) return;
 
     var snap = AppState.lastMetricsSnapshot;

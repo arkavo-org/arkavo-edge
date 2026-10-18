@@ -26,11 +26,11 @@ pub fn spawn_agent_task_sync(
         // Create router for task summarization (best-effort)
         let router = match arkavo_router::Router::new().await {
             Ok(r) => {
-                println!("AG-UI: task summarizer ready");
+                tracing::debug!("AG-UI: task summarizer ready");
                 Some(Arc::new(r))
             }
             Err(e) => {
-                eprintln!("AG-UI: task summarizer unavailable: {e}");
+                tracing::warn!("AG-UI: task summarizer unavailable: {e}");
                 None
             }
         };
@@ -51,7 +51,7 @@ pub fn spawn_agent_task_sync(
             )
             .await
             {
-                eprintln!("AG-UI: task sync error: {e}");
+                tracing::warn!("AG-UI: task sync error: {e}");
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
@@ -138,7 +138,7 @@ async fn judge_agent_task(
             j.quality_score = j.quality_score * 0.4 + llm_score * 0.6;
         }
         if !j.issues.is_empty() {
-            println!(
+            tracing::debug!(
                 "AG-UI: Agent task {} quality={:.2}, issues: {:?}",
                 crate::gateway_events::short_id(task_id),
                 j.quality_score,
@@ -182,9 +182,11 @@ async fn judge_agent_task(
         response_snippet: result_text.map(|r| r[..r.len().min(200)].to_string()),
     };
     if let Some(lesson) = crate::lesson_extractor::extract_lesson(&judgment, &ctx) {
-        println!(
+        tracing::debug!(
             "AG-UI: Lesson extracted for {} on {}: {}",
-            agent_id, task_cat, lesson.pattern.condition
+            agent_id,
+            task_cat,
+            lesson.pattern.condition
         );
         let lesson_event = AgUiEvent::LessonExtracted {
             agent_id: agent_id.to_string(),
@@ -336,13 +338,18 @@ async fn poll_agent_tasks(
                         first_working_at,
                         source: "agent".to_string(),
                         summary: summary.clone(),
+                        request_id: None,
+                        assets: Vec::new(),
+                        asset_note: None,
                     };
-                    task_store
-                        .write()
-                        .await
-                        .insert(composite_key.clone(), tracked);
+                    {
+                        let mut store = task_store.write().await;
+                        store.insert(composite_key.clone(), tracked);
+                        super::gateway::prune_tasks(&mut store);
+                    }
 
                     let submitted = AgUiEvent::TaskSubmitted {
+                        request_id: None,
                         task_id: composite_key.clone(),
                         description: Some(objective.to_string()),
                         summary,
@@ -374,6 +381,8 @@ async fn poll_agent_tasks(
                             progress: Some(progress as f32),
                             result: None,
                             metrics,
+                            assets: Vec::new(),
+                            asset_note: None,
                             timestamp: chrono::Utc::now().to_rfc3339(),
                         };
                         broadcast_event(&changed, connections).await;
@@ -462,6 +471,8 @@ async fn poll_agent_tasks(
                             progress: Some(progress as f32),
                             result: None,
                             metrics,
+                            assets: Vec::new(),
+                            asset_note: None,
                             timestamp: chrono::Utc::now().to_rfc3339(),
                         };
                         broadcast_event(&changed, connections).await;

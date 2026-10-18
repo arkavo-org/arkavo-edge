@@ -44,6 +44,41 @@ pub struct TrackedTask {
     pub source: String,
     /// LLM-generated short summary for task list display
     pub summary: Option<String>,
+    /// The browser's id for the submission, so a resubmission after a lost
+    /// receipt is answered with this task instead of opening another
+    pub request_id: Option<String>,
+    /// Images the agent delivered with its answer, fetched for the browser
+    pub assets: Vec<crate::gateway_assets::StoredAsset>,
+    /// Where the task's images stand while they are not in `assets`
+    pub asset_note: Option<String>,
+}
+
+/// The most tasks the gateway keeps. The task list goes to every view every
+/// few seconds, so a store that only grew made a long session's polls ever
+/// larger.
+pub(crate) const MAX_TRACKED_TASKS: usize = 500;
+
+/// Drop the oldest finished tasks beyond [`MAX_TRACKED_TASKS`]; a task still
+/// running is never dropped.
+pub(crate) fn prune_tasks(store: &mut HashMap<String, TrackedTask>) {
+    let excess = store.len().saturating_sub(MAX_TRACKED_TASKS);
+    if excess == 0 {
+        return;
+    }
+    let mut finished: Vec<(String, String)> = store
+        .values()
+        .filter(|task| {
+            matches!(
+                task.status.as_str(),
+                "completed" | "failed" | "canceled" | "rejected"
+            )
+        })
+        .map(|task| (task.created_at.clone(), task.id.clone()))
+        .collect();
+    finished.sort();
+    for (_, id) in finished.into_iter().take(excess) {
+        store.remove(&id);
+    }
 }
 
 #[derive(Clone)]
@@ -72,6 +107,10 @@ pub struct AppState {
     /// `flight:<flight_id>:<role_id>` so the AG-UI ARP panel can render
     /// per-role runtime state alongside regular mesh agents.
     pub swarm_flights: Arc<SwarmFlightRegistry>,
+    /// Fetches the images a task's agent delivers, when this process can
+    pub asset_fetcher: Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
+    /// Notices this gateway raised about the tasks it dispatched (#759)
+    pub gateway_notices: crate::gateway_notices::GatewayNotices,
 }
 
 pub struct AgUiGateway {
@@ -86,6 +125,9 @@ pub struct AgUiGateway {
     security_handler: Arc<RwLock<SecurityHandler>>,
     debug_handler: Option<Arc<DebugHandler>>,
     initial_prompt: Option<String>,
+    direct_agents: Vec<SocketAddr>,
+    listening: Option<tokio::sync::oneshot::Sender<SocketAddr>>,
+    asset_fetcher: Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
 }
 
 impl AgUiGateway {
@@ -103,11 +145,39 @@ impl AgUiGateway {
             security_handler: Arc::new(RwLock::new(SecurityHandler::new())),
             debug_handler: None,
             initial_prompt: None,
+            direct_agents: Vec::new(),
+            listening: None,
+            asset_fetcher: None,
         }
+    }
+
+    /// Fetch the images agents deliver with their answers, so the
+    /// workspace shows them with the task.
+    pub fn with_asset_fetcher(
+        mut self,
+        fetcher: Arc<dyn crate::gateway_assets::AssetFetcher>,
+    ) -> Self {
+        self.asset_fetcher = Some(fetcher);
+        self
+    }
+
+    /// Hear the address the gateway serves on once it is listening, so a
+    /// caller opens the browser on a page that answers.
+    pub fn on_listening(&mut self, listening: tokio::sync::oneshot::Sender<SocketAddr>) {
+        self.listening = Some(listening);
     }
 
     pub fn set_initial_prompt(&mut self, prompt: String) {
         self.initial_prompt = Some(prompt);
+    }
+
+    /// Add a known peer when multicast discovery is unavailable.
+    pub fn add_agent_endpoint(&mut self, endpoint: &str) -> Result<(), String> {
+        let address = crate::gateway_direct::parse_endpoint(endpoint)?;
+        if !self.direct_agents.contains(&address) {
+            self.direct_agents.push(address);
+        }
+        Ok(())
     }
 
     pub async fn with_debug_handler(
@@ -155,7 +225,7 @@ impl AgUiGateway {
             Arc::new(RwLock::new(HashMap::new()));
         let topo_cache_for_mdns = context_topology_cache.clone();
         tokio::spawn(async move {
-            println!("AG-UI: Starting mDNS discovery...");
+            tracing::debug!("AG-UI: Starting mDNS discovery...");
             match crate::gateway_mdns::run_mdns_discovery(
                 agents_clone,
                 agent_connections_for_mdns,
@@ -166,8 +236,8 @@ impl AgUiGateway {
             )
             .await
             {
-                Ok(_) => println!("AG-UI: mDNS discovery completed"),
-                Err(e) => eprintln!("AG-UI: mDNS discovery error: {e}"),
+                Ok(_) => tracing::debug!("AG-UI: mDNS discovery completed"),
+                Err(e) => tracing::warn!("AG-UI: mDNS discovery error: {e}"),
             }
         });
 
@@ -203,7 +273,7 @@ impl AgUiGateway {
             registry
                 .register(Arc::new(GlobalHealthReporterWrapper))
                 .await;
-            println!("AG-UI: Health reporters registered");
+            tracing::debug!("AG-UI: Health reporters registered");
         }
 
         let (health_alert_tx, mut health_alert_rx) = mpsc::channel::<AgUiEvent>(100);
@@ -218,7 +288,7 @@ impl AgUiGateway {
                 .await?
                 .with_interval(30);
             let _health_task = health_monitor.start(health_alert_tx.clone()).await?;
-            println!("AG-UI: Health monitor started (30s interval)");
+            tracing::debug!("AG-UI: Health monitor started (30s interval)");
         }
 
         // Start command health collector
@@ -232,7 +302,7 @@ impl AgUiGateway {
             let _timeout_task = timeout_handler
                 .start(command_health_rx, health_alert_tx.clone())
                 .await;
-            println!("AG-UI: Command health collector started");
+            tracing::debug!("AG-UI: Command health collector started");
         }
 
         // Broadcast health alerts
@@ -368,9 +438,11 @@ impl AgUiGateway {
         tokio::spawn(async move {
             const MAX_LESSONS_PER_KEY: usize = 5;
             while let Some(lesson) = lesson_rx.recv().await {
-                println!(
+                tracing::debug!(
                     "AG-UI: Caching lesson for {} on {}: {}",
-                    lesson.agent_id, lesson.category, lesson.pattern.condition
+                    lesson.agent_id,
+                    lesson.category,
+                    lesson.pattern.condition
                 );
                 let mut store = lesson_store_for_rx.write().await;
                 store.push(lesson);
@@ -405,7 +477,19 @@ impl AgUiGateway {
                 handler
             },
             swarm_flights: Arc::new(SwarmFlightRegistry::new()),
+            asset_fetcher: self.asset_fetcher.clone(),
+            gateway_notices: Arc::new(RwLock::new(Vec::new())),
         };
+
+        // Peers named with --agent connect in the background, so the
+        // workspace opens at once and one that is down does not stop it.
+        for endpoint in self.direct_agents.drain(..) {
+            tokio::spawn(crate::gateway_direct::keep_connecting(
+                state.clone(),
+                self.telemetry_tx.clone(),
+                endpoint,
+            ));
+        }
 
         // Auto-launch a SwarmFlight when ARKAVO_SWARMKIT_PATH points at a
         // manifest. Mirrors the ARKAVO_ARP_PATH pattern: errors are logged
@@ -481,6 +565,10 @@ impl AgUiGateway {
             .route(
                 "/static/*path",
                 get(crate::gateway_static::static_file_handler),
+            )
+            .route(
+                "/assets/:task/:name",
+                get(crate::gateway_assets::asset_handler),
             );
 
         let addr = crate::gateway_bind::resolve_bind_addr(self.port);
@@ -494,18 +582,21 @@ impl AgUiGateway {
             ))
             .with_state(state);
         if addr.ip().is_loopback() {
-            println!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
-            println!("Open http://127.0.0.1:{} in your web browser", self.port);
+            tracing::debug!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
+            tracing::debug!("Open http://127.0.0.1:{} in your web browser", self.port);
         } else {
-            println!("Starting AG-UI Gateway on http://{addr}");
+            tracing::debug!("Starting AG-UI Gateway on http://{addr}");
             eprintln!(
-                "AG-UI: WARNING — gateway has no authentication and is reachable from the network ({}={})",
+                "Warning: arkavo ui has no authentication and is reachable from the network ({}={})",
                 crate::gateway_bind::BIND_ENV_VAR,
                 addr.ip()
             );
         }
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
+        if let Some(listening) = self.listening.take() {
+            let _ = listening.send(listener.local_addr()?);
+        }
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -552,6 +643,33 @@ fn load_budget_config_from_kit() -> arkavo_budget::BudgetConfig {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    /// AGUI-024: the store keeps its newest tasks and every running one.
+    #[arkavo_test_macros::spec("AGUI-024")]
+    #[test]
+    fn the_task_store_drops_only_its_oldest_finished_tasks() {
+        let mut store = HashMap::new();
+        let running =
+            crate::test_support::tracked_task("running", "working", "2000-01-01T00:00:00Z");
+        store.insert(running.id.clone(), running);
+        for n in 0..MAX_TRACKED_TASKS {
+            let id = format!("done-{n:04}");
+            let created = format!("2026-10-18T00:{:02}:{:02}Z", n / 60, n % 60);
+            store.insert(
+                id.clone(),
+                crate::test_support::tracked_task(&id, "completed", &created),
+            );
+        }
+
+        prune_tasks(&mut store);
+
+        assert_eq!(store.len(), MAX_TRACKED_TASKS);
+        assert!(store.contains_key("running"), "a running task is kept");
+        assert!(
+            !store.contains_key("done-0000"),
+            "the oldest finished task goes"
+        );
+    }
     use arkavo_test_macros::spec;
 
     #[tokio::test]

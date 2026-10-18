@@ -338,3 +338,149 @@ scenarios:
       - crates/arkavo-agui/src/gateway_task_dispatch.rs
       - crates/arkavo-protocol/src/task_watch.rs
     changed: "2026-10-17"
+
+  - id: AGUI-023
+    name: A task request is accepted once, and its receipt reaches every view
+    criticality: high
+    given:
+      - An operator creates a task in arkavo ui, over localhost or a LAN address
+    when: The browser sends submitTask with a request id
+    then:
+      - "The request id comes from crypto.randomUUID where the browser offers it, and from crypto.getRandomValues otherwise: browsers offer randomUUID only on HTTPS or localhost"
+      - "The gateway records the request id on the task it opens and sends the receipt (taskSubmitted with requestId) to every open view, so one that reconnected after sending still hears it"
+      - "The same request sent again while the first is still being routed or announced is still one task: the gateway stores the task before it waits on anything"
+      - "A request whose id the gateway already holds opens no second task: the gateway answers it with the first task's receipt"
+      - "With no receipt after 15 seconds or a dropped socket, the composer says the outcome is unknown, keeps the draft and offers Send again, which reuses the request id while the draft is unchanged"
+      - "Reconnecting sends nothing by itself"
+    edge_cases:
+      - condition: "A policy review or an end-tracking request whose receipt does not come"
+        expected: "Its buttons unlock with the outcome reported unknown; a late receipt still reports the outcome. End-tracking receipts reach every view"
+    refs:
+      - crates/arkavo-agui/static/js/task-composer.js
+      - crates/arkavo-agui/src/gateway_task_dispatch.rs
+      - crates/arkavo-agui/src/gateway_ws.rs
+    changed: "2026-10-18"
+
+  - id: AGUI-024
+    name: The task list stays light, and an opened task fetches its own output
+    criticality: medium
+    given:
+      - A long arkavo ui session with many tasks and large outputs
+    when: Views poll the task list every few seconds
+    then:
+      - "The task list says whether each task has output (hasResult) and lists its images, without carrying the output"
+      - "A view that opens a task without its output asks for it (requestTask) and gets the whole of it (taskDetail), after a reload included"
+      - "The gateway keeps its 500 newest tasks, dropping the oldest finished ones first; a running task is never dropped"
+      - "The open view is drawn at most once per animation frame, and Evidence rows are rebuilt only while Evidence is shown"
+    refs:
+      - crates/arkavo-agui/src/gateway_events.rs
+      - crates/arkavo-agui/src/gateway.rs
+      - crates/arkavo-agui/static/js/panels/tasks.js
+      - crates/arkavo-agui/static/js/app.js
+    changed: "2026-10-18"
+
+  - id: AGUI-025
+    name: Images a task's agent delivers are shown with the task
+    criticality: high
+    given:
+      - A task submitted from arkavo ui completes with an answer whose data part lists assets (urn:arkavo:asset:manifest:v1, ASSET-008)
+    when: The gateway sees the task complete
+    then:
+      - "The answer's text parts are its output, joined in order"
+      - "The process running arkavo ui fetches each asset over the data plane and checks it against the manifest as arkavo chat does (CLI-018), into the user's data directory"
+      - "Every open view gets the task with its images: name, size, dimensions, whether it has alpha, and the license line naming the generating agent (IMG-013)"
+      - "The task's Output shows each image, transparent ones on a checkerboard, and the Overview shows the latest images"
+      - "GET /assets/<task>/<name> serves only a file a fetch recorded on that task, as image/png"
+    edge_cases:
+      - condition: A build without a fetcher
+        expected: "The task says the images stayed on the agent, rather than showing nothing"
+      - condition: A fetch that fails
+        expected: "The task says the images could not be fetched and why; its output text is kept"
+    refs:
+      - crates/arkavo-agui/src/gateway_assets.rs
+      - crates/arkavo-cli/src/commands/ui_assets.rs
+      - crates/arkavo-agui/static/js/task-assets.js
+    changed: "2026-10-18"
+
+  - id: AGUI-026
+    name: Agents named with --agent join when they answer and keep their endpoint
+    criticality: medium
+    given:
+      - arkavo ui started with --agent IP:PORT for a peer multicast cannot find
+    when: The workspace starts, or the peer is down, or mDNS reports the same agent
+    then:
+      - "The workspace starts at once; each named peer is connected in the background, trying again with a pause that grows to one minute"
+      - "The endpoint the operator named wins over one discovery found for the same agent, and two --agent peers never share a name"
+      - "mDNS rediscovery does not replace a named peer's record, and an mDNS goodbye, which any host on the LAN can send, does not remove it"
+    refs:
+      - crates/arkavo-agui/src/gateway_direct.rs
+      - crates/arkavo-agui/src/mdns_impl.rs
+      - crates/arkavo-agui/src/gateway.rs
+    changed: "2026-10-18"
+
+  - id: AGUI-027
+    name: Agents' notices reach every view, and may take the view where they point
+    criticality: high
+    given:
+      - An arkavo ui workspace connected to agents that raise notices (SRV-016)
+    when: A snapshot reports a notice that is new, changed or gone
+    then:
+      - "Each new or changed notice reaches every view once, though every snapshot repeats it; one no longer reported is resolved in every view"
+      - "A view that connects asks for the open notices and gets every one, the gateway's own included"
+      - "The header shows how many are open; warnings and critical notices wait in a banner with their actions, and the notices dialog lists them all"
+      - "A critical notice takes the view to where it points (an agent, a task, a workspace view); the viewer can make that every notice or none, a setting kept in their browser"
+      - "A notice that moved the view stays in the banner, so the operator sees why the view changed"
+      - "A view that connects after a notice was raised shows it in the banner with its actions too, without moving the view; one the viewer hid stays hidden when the view reconnects"
+      - "Nothing moves the view while the operator types or has a dialog open: the notice waits, says so, and opens once they stop"
+      - "Titles, text and details are shown as text, never as markup"
+      - "When an agent restarts, on the same port or a new one, the workspace subscribes to it again and its notices keep coming"
+      - "A new connection to the same agent closes the notices it no longer reports and does not show again the ones it still does; when discovery drops an agent, its notices close in every view"
+    refs:
+      - crates/arkavo-agui/src/gateway_notices.rs
+      - crates/arkavo-agui/src/agent_connection.rs
+      - crates/arkavo-agui/src/mdns_impl.rs
+      - crates/arkavo-agui/static/js/notices.js
+    changed: "2026-10-18"
+
+  - id: AGUI-028
+    name: A workspace task that fails is a notice with a retry
+    criticality: medium
+    given:
+      - A task submitted from arkavo ui
+    when: The agent refuses it, it fails, or it reports nothing new for five minutes
+    then:
+      - "The gateway raises a warning to every view: what went wrong, the task to open, Retry task and Dismiss"
+      - "Retry task submits the task's objective again as a new task and closes the notice; Dismiss closes it"
+      - "The gateway keeps at most 20 notices of its own; a second failure of the same task replaces the first"
+    edge_cases:
+      - condition: "The agent's whole answer is a tool call its model wrote out as text: it opens with <|tool_call>, <tool_call>, [TOOL_CALLS] or <|python_tag|> and came with no files"
+        expected: "The task fails with the reason and the notice offers Retry: the workspace never shows control tokens as an answer, and routing records a failure, not a success"
+      - condition: "An answer only mentions a marker, or delivered files beside its text"
+        expected: "It is an answer: the task completes with its output"
+    refs:
+      - crates/arkavo-agui/src/gateway_notices.rs
+      - crates/arkavo-agui/src/gateway_task_dispatch.rs
+    changed: "2026-10-18"
+
+  - id: AGUI-029
+    name: An operator's answer to a notice reaches the agent, and is on the record
+    criticality: high
+    given:
+      - A notice open in arkavo ui
+    when: The operator chooses one of its actions
+    then:
+      - "Inspect and Open act in the browser; every choice still goes to the gateway, which records it (target audit) with the session, agent, notice and action"
+      - "Acknowledging an agent's notice calls that agent's operator.notices.respond; once it accepts, the notice is resolved in every view"
+      - "Every view hears what came of the choice (noticeActionResult), with the reason when it was not done"
+      - "An answer acts with the agent's own grants and checks: choosing an action grants nothing new"
+    edge_cases:
+      - condition: An action the notice does not offer, a notice no longer open, or an agent no longer connected
+        expected: "Not done, with the reason"
+      - condition: The gateway is disconnected
+        expected: "Acknowledge and Retry are disabled; Inspect still opens"
+    refs:
+      - crates/arkavo-agui/src/gateway_notices.rs
+      - crates/arkavo-agui/src/gateway_ws.rs
+      - crates/arkavo-agui/static/js/notices.js
+    changed: "2026-10-18"
+

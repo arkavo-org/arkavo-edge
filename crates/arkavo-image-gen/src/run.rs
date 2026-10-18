@@ -69,6 +69,7 @@ struct State {
     last_step: Option<StdInstant>,
     step_total: f64,
     step_count: u32,
+    gpu_failed: bool,
 }
 
 /// Run to completion, reporting events as they are printed.
@@ -145,6 +146,9 @@ async fn run_inner(
             stderr: tail,
         });
     }
+    if state.gpu_failed {
+        return Err(ImageGenError::GpuFailed { stderr: tail });
+    }
     Ok(RunOutput {
         seeds: state.seeds,
         seconds_per_step: (state.step_count > 0)
@@ -215,6 +219,7 @@ fn parse(state: &mut State, line: &[u8]) -> Option<Event> {
                 state.step_count += 1;
             }
         }
+        Event::GpuFailed => state.gpu_failed = true,
     }
     Some(event)
 }

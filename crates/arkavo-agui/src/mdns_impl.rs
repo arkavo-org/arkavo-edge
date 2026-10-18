@@ -19,12 +19,12 @@ pub mod mdns {
         security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
         context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("AG-UI: mDNS daemon starting...");
+        tracing::debug!("AG-UI: mDNS daemon starting...");
 
         let mdns = ServiceDaemon::new()?;
         let service_type = "_a2a._tcp.local.";
         let receiver = mdns.browse(service_type)?;
-        println!("AG-UI: mDNS browsing for {service_type}");
+        tracing::debug!("AG-UI: mDNS browsing for {service_type}");
 
         // Channels bridge blocking mDNS recv thread → async handlers
         let (info_tx, mut info_rx) = mpsc::channel::<ServiceInfo>(16);
@@ -33,6 +33,7 @@ pub mod mdns {
         // Clone Arcs for removal handler before they move into discovery handler
         let remove_agents = agents.clone();
         let remove_connections = agent_connections.clone();
+        let remove_browsers = browser_connections.clone();
 
         // Blocking thread: receive mDNS events, forward resolved/removed services
         tokio::task::spawn_blocking(move || {
@@ -40,23 +41,23 @@ pub mod mdns {
                 if let Ok(event) = receiver.recv_timeout(Duration::from_secs(5)) {
                     match event {
                         ServiceEvent::ServiceResolved(info) => {
-                            println!("AG-UI: mDNS ServiceResolved: {}", info.get_fullname());
+                            tracing::debug!("AG-UI: mDNS ServiceResolved: {}", info.get_fullname());
                             if info_tx.blocking_send(info).is_err() {
                                 break;
                             }
                         }
                         ServiceEvent::ServiceFound(_, fullname) => {
-                            println!("AG-UI: mDNS ServiceFound: {fullname}");
+                            tracing::debug!("AG-UI: mDNS ServiceFound: {fullname}");
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
-                            println!("AG-UI: mDNS ServiceRemoved: {fullname}");
+                            tracing::debug!("AG-UI: mDNS ServiceRemoved: {fullname}");
                             let _ = remove_tx.blocking_send(fullname);
                         }
                         ServiceEvent::SearchStarted(stype) => {
-                            println!("AG-UI: mDNS SearchStarted: {stype}");
+                            tracing::debug!("AG-UI: mDNS SearchStarted: {stype}");
                         }
                         ServiceEvent::SearchStopped(stype) => {
-                            println!("AG-UI: mDNS SearchStopped: {stype}");
+                            tracing::debug!("AG-UI: mDNS SearchStopped: {stype}");
                         }
                         _ => {}
                     }
@@ -83,7 +84,13 @@ pub mod mdns {
         // Async task: remove agents when mDNS service disappears
         tokio::spawn(async move {
             while let Some(fullname) = remove_rx.recv().await {
-                handle_service_removed(&fullname, &remove_agents, &remove_connections).await;
+                handle_service_removed(
+                    &fullname,
+                    &remove_agents,
+                    &remove_connections,
+                    &remove_browsers,
+                )
+                .await;
             }
         });
 
@@ -100,6 +107,7 @@ pub mod mdns {
         agent_connections: &Arc<
             RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>,
         >,
+        browser_connections: &Arc<RwLock<HashMap<String, crate::gateway::ConnectionInfo>>>,
     ) {
         // Extract agent_id: fullname is like "commander._a2a._tcp.local."
         let agent_id = fullname
@@ -110,17 +118,23 @@ pub mod mdns {
 
         let mut agents_list = agents.write().await;
         let before = agents_list.len();
+        // A peer the operator named with --agent stays: a goodbye on the LAN,
+        // which any host can send, does not remove it.
         agents_list.retain(|a| {
             a.get("id")
                 .and_then(|v| v.as_str())
                 .is_none_or(|id| id != agent_id)
+                || a["discovery"] == "direct"
         });
         let removed = before - agents_list.len();
+        drop(agents_list);
 
         if removed > 0 {
-            println!("AG-UI: Removed agent from list: {agent_id}");
-            let mut connections = agent_connections.write().await;
-            connections.remove(&agent_id);
+            tracing::debug!("AG-UI: Removed agent from list: {agent_id}");
+            let connection = agent_connections.write().await.remove(&agent_id);
+            if let Some(connection) = connection {
+                crate::gateway_notices::connection_removed(&connection, browser_connections).await;
+            }
         }
     }
 
@@ -146,9 +160,11 @@ pub mod mdns {
             .map(|addr| addr.to_string())
             .unwrap_or_else(|| "127.0.0.1".to_string());
 
-        println!(
+        tracing::debug!(
             "AG-UI: Discovered service: {} at {}:{}",
-            service_name, host, port
+            service_name,
+            host,
+            port
         );
 
         // Extract agent information from properties
@@ -178,7 +194,7 @@ pub mod mdns {
             if let Some(ip_prop) = properties.get("ip") {
                 ip_prop.val_str().to_string()
             } else {
-                println!(
+                tracing::debug!(
                     "AG-UI: Service advertised 0.0.0.0 with no IP in TXT records, using 127.0.0.1"
                 );
                 "127.0.0.1".to_string()
@@ -202,9 +218,18 @@ pub mod mdns {
         let exists = agents_list
             .iter()
             .any(|a| a.get("id") == agent_info.get("id"));
+        // An agent that restarted answers on a new port. The connection to
+        // the old one never comes back, so the moved agent gets a new one,
+        // as a newly found agent does; one named with --agent keeps the
+        // endpoint the operator gave.
+        let moved = agents_list.iter().any(|a| {
+            a.get("id") == agent_info.get("id")
+                && a["discovery"] != "direct"
+                && a.get("endpoint") != agent_info.get("endpoint")
+        });
 
-        if !exists {
-            println!("AG-UI: Adding new agent to list: {}", agent_id);
+        if !exists || moved {
+            tracing::debug!("AG-UI: Adding new agent to list: {}", agent_id);
 
             // Auto-connect to discovered agent
             let agent_id_clone = agent_id.clone();
@@ -212,9 +237,10 @@ pub mod mdns {
             let telemetry_tx_clone = telemetry_tx.clone();
             let agent_connections_clone = agent_connections.clone();
             tokio::spawn(async move {
-                println!(
+                tracing::debug!(
                     "AG-UI: Auto-connecting to agent: {} at {}",
-                    agent_id_clone, endpoint
+                    agent_id_clone,
+                    endpoint
                 );
 
                 let connection = Arc::new(crate::agent_connection::AgentConnection::new(
@@ -222,14 +248,23 @@ pub mod mdns {
                     endpoint.clone(),
                     telemetry_tx_clone,
                 ));
+                let previous = agent_connections_clone
+                    .read()
+                    .await
+                    .get(&agent_id_clone)
+                    .cloned();
+                if let Some(previous) = previous {
+                    connection.inherit_notices(&previous).await;
+                }
 
                 if let Err(e) = connection.connect().await {
-                    println!(
+                    tracing::debug!(
                         "AG-UI: Failed to connect to agent {}: {}",
-                        agent_id_clone, e
+                        agent_id_clone,
+                        e
                     );
                 } else {
-                    println!("AG-UI: Connected to agent: {}", agent_id_clone);
+                    tracing::debug!("AG-UI: Connected to agent: {}", agent_id_clone);
 
                     // Subscribe to push-based metrics stream
                     let (metrics_tx, mut metrics_rx) = mpsc::channel::<crate::types::AgUiEvent>(32);
@@ -237,12 +272,16 @@ pub mod mdns {
                         .subscribe_metrics(metrics_tx, security_handler.clone())
                         .await
                     {
-                        println!(
+                        tracing::debug!(
                             "AG-UI: Metrics subscription failed for {}: {} (falling back to polling)",
-                            agent_id_clone, e
+                            agent_id_clone,
+                            e
                         );
                     } else {
-                        println!("AG-UI: Metrics subscription active for {}", agent_id_clone);
+                        tracing::debug!(
+                            "AG-UI: Metrics subscription active for {}",
+                            agent_id_clone
+                        );
                         // Forward metrics events to all browser sessions
                         let browser_conns = browser_connections.clone();
                         let topo_cache = context_topology_cache.clone();
@@ -275,12 +314,21 @@ pub mod mdns {
                 }
             });
 
-            agents_list.push(agent_info);
+            if let Some(existing) = agents_list
+                .iter_mut()
+                .find(|a| a.get("id") == agent_info.get("id"))
+            {
+                *existing = agent_info;
+            } else {
+                agents_list.push(agent_info);
+            }
         } else if let Some(existing) = agents_list
             .iter_mut()
             .find(|a| a.get("id") == agent_info.get("id"))
+            && existing["discovery"] != "direct"
         {
-            // Update existing agent with fresh mDNS data (e.g. model change)
+            // Update existing agent with fresh mDNS data (e.g. model change).
+            // A peer named with --agent keeps the endpoint the operator gave.
             *existing = agent_info;
         }
     }
@@ -404,6 +452,43 @@ pub mod mdns {
                 list[0].get("model").and_then(|v| v.as_str()),
                 Some("ministral-8b")
             );
+        }
+
+        /// Regression (AGUI-026): a peer named with --agent was replaced by
+        /// what mDNS found for the same name, and removed by a LAN goodbye
+        /// any host can send.
+        #[tokio::test]
+        #[spec("AGUI-026")]
+        async fn a_peer_named_with_agent_survives_mdns() {
+            let (agents, connections, telemetry_tx, browsers, security, topo_cache) =
+                test_fixtures();
+            agents.write().await.push(serde_json::json!({
+                "id": "reviewer", "endpoint": "10.0.0.7:7600", "discovery": "direct"
+            }));
+
+            let mut properties = HashMap::new();
+            properties.insert("agent_id".to_string(), "reviewer".to_string());
+            let info = test_service_info("arkavo-agent-reviewer", properties);
+            handle_service_discovered(
+                info,
+                agents.clone(),
+                connections.clone(),
+                telemetry_tx,
+                browsers.clone(),
+                security,
+                topo_cache,
+            )
+            .await;
+            assert_eq!(agents.read().await[0]["endpoint"], "10.0.0.7:7600");
+
+            handle_service_removed(
+                "reviewer._a2a._tcp.local.",
+                &agents,
+                &connections,
+                &browsers,
+            )
+            .await;
+            assert_eq!(agents.read().await.len(), 1, "a goodbye does not remove it");
         }
     }
 }

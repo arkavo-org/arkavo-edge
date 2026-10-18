@@ -457,3 +457,24 @@ scenarios:
     refs:
       - crates/arkavo-image-gen/src/store.rs
     changed: "2026-10-12"
+
+  - id: IMG-021
+    name: A run the GPU failed delivers no image
+    criticality: critical
+    given:
+      - A generation on a host whose GPU runs out of memory, as when chat models and other agents share its unified memory with the image model
+    when: sd-cli reports a failed Metal command buffer (kIOGPUCommandBufferCallbackErrorOutOfMemory) yet writes an image and exits 0
+    then:
+      - "The run fails: what sd-cli wrote is garbage left in GPU memory, never the image asked for"
+      - "The job runs once more with tiled VAE decoding (--vae-tiling), which needs a fraction of the decode memory"
+      - "When that run fails too, nothing is delivered and the requester hears generation_failed naming the GPU failure"
+    edge_cases:
+      - condition: "2026-10-17: the M6 artist, sharing 32 GB with two agents and the arkavo ui summarizer, delivered a uniform beige 1024x1024 PNG for every prompt"
+        expected: "Retried with tiled decoding, or reported as a failure"
+    refs:
+      - crates/arkavo-image-gen/src/progress.rs
+      - crates/arkavo-image-gen/src/run.rs
+      - crates/arkavo-image-gen/src/generator.rs
+      - crates/arkavo-image-gen/src/args.rs
+    changed: "2026-10-18"
+

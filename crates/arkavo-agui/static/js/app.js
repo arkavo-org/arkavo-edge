@@ -1,8 +1,8 @@
 "use strict";
 
 function routeEvent(event) {
-    // Notify showcase mode of incoming events for intelligent view switching
-    if (typeof showcaseOnEvent === 'function') showcaseOnEvent(event);
+    var snapshot = { meshStatus: 'swarm', taskList: 'tasks', arpStatusUpdate: 'policy' }[event.type];
+    if (snapshot) AppState.observations[snapshot] = Date.now();
 
     switch (event.type) {
         case 'meshStatus':
@@ -28,6 +28,21 @@ function routeEvent(event) {
             break;
         case 'taskSubmitted':
             handleTaskSubmitted(event);
+            break;
+        case 'taskDetail':
+            handleTaskDetail(event);
+            break;
+        case 'operatorNotice':
+            handleOperatorNotice(event);
+            break;
+        case 'operatorNoticeResolved':
+            handleNoticeResolved(event);
+            break;
+        case 'noticeList':
+            handleNoticeList(event);
+            break;
+        case 'noticeActionResult':
+            handleNoticeActionResult(event);
             break;
         case 'taskStatusChanged':
             handleTaskStatusChanged(event);
@@ -96,10 +111,10 @@ function routeEvent(event) {
             handleArpStatusUpdate(event);
             break;
         case 'arpProposalActionResult':
-            if (event.error) {
-                console.warn('ARP proposal action failed:', event.proposalId, event.error);
-            }
-            // State change arrives via the paired arpStatusUpdate.
+            handlePolicyReviewResult(event);
+            break;
+        case 'flightStopped':
+            handleFlightStopped(event);
             break;
         case 'publishedTrustUpdate':
             handlePublishedTrustUpdate(event);
@@ -120,6 +135,24 @@ function routeEvent(event) {
                 });
             }
     }
+    scheduleViewRender();
+}
+
+var viewRenderScheduled = false;
+
+// Events arrive in bursts (metrics pushes, chat tokens, task polls); the open
+// view is drawn once per frame rather than once per event.
+function scheduleViewRender() {
+    if (viewRenderScheduled) return;
+    viewRenderScheduled = true;
+    requestAnimationFrame(function() {
+        viewRenderScheduled = false;
+        if (AppState.activeView === 'overview') renderOverview();
+        if (AppState.activeView === 'decisions') renderDecisions();
+        if (AppState.activeView === 'tasks' && AppState.selectedTaskId) renderTaskDetail();
+        if (AppState.activeView === 'agents' && AppState.selectedAgentId) renderAgentDetail();
+        updateComposerAvailability();
+    });
 }
 
 function updateStats() {
@@ -127,14 +160,12 @@ function updateStats() {
     document.getElementById('task-count').textContent = Object.keys(AppState.tasks).length;
 }
 
-function switchView(viewId) {
+function activateView(viewId) {
+    if (!document.getElementById('view-' + viewId)) return;
     AppState.activeView = viewId;
 
     // Update nav buttons
-    var btns = document.querySelectorAll('.nav-btn');
-    for (var i = 0; i < btns.length; i++) {
-        btns[i].classList.toggle('active', btns[i].dataset.view === viewId);
-    }
+    updateNavigation(viewId);
 
     // Update view panels
     var panels = document.querySelectorAll('.view-panel');
@@ -143,9 +174,34 @@ function switchView(viewId) {
     }
 
     // Request data for panels that need it
-    if (viewId === 'budget') {
+    if (viewId === 'overview' || viewId === 'decisions') {
+        wsSend({ type: 'requestArpStatus' });
+        wsSend({ type: 'requestTaskList' });
+        if (viewId === 'overview') renderOverview();
+        else renderDecisions();
+    } else if (viewId === 'tasks') {
+        wsSend({ type: 'requestTaskList' });
+        if (AppState.selectedTaskId) {
+            wsSend({ type: 'requestLearningStatus' });
+            wsSend({ type: 'requestArpStatus' });
+        }
+        renderTasks();
+    } else if (viewId === 'agents') {
+        wsSend({ type: 'requestFleetSnapshot' });
+        if (AppState.selectedAgentId) {
+            wsSend({ type: 'requestTaskList' });
+            wsSend({ type: 'requestArpStatus' });
+        }
+        renderAgents();
+        renderAgentDetail();
+    } else if (viewId === 'telemetry') {
+        renderEvidence();
+    } else if (viewId === 'diagnostics') {
+        renderTelemetry();
+    } else if (viewId === 'budget') {
         requestBudgetData();
     } else if (viewId === 'security') {
+        wsSend({ type: 'requestMeshStatus' });
         requestSecurityData();
         requestDataPlaneData();
     } else if (viewId === 'learning' || viewId === 'router') {
@@ -156,6 +212,7 @@ function switchView(viewId) {
         startContextPolling();
     } else if (viewId === 'arp') {
         wsSend({ type: 'requestArpStatus' });
+        renderArp();
         startArpPolling();
     }
 
@@ -201,11 +258,6 @@ document.querySelectorAll('.nav-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { switchView(btn.dataset.view); });
 });
 
-var showcaseBtn = document.getElementById('showcase-toggle');
-if (showcaseBtn) showcaseBtn.addEventListener('click', function() {
-    if (typeof showcaseToggle === 'function') showcaseToggle();
-});
-
 var addTaskBtn = document.getElementById('add-task-btn');
 if (addTaskBtn) addTaskBtn.addEventListener('click', showAddTaskModal);
 
@@ -216,5 +268,7 @@ var taskSubmitBtn = document.getElementById('task-submit-btn');
 if (taskSubmitBtn) taskSubmitBtn.addEventListener('click', submitTask);
 
 // Initialize
+initializeOperations();
+initializeNotices();
 connect();
-switchView('agents');
+initializeRoutes();

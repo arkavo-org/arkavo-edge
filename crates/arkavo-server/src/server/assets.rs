@@ -245,6 +245,9 @@ async fn wait_on_task(
     loop {
         let step = (Instant::now() + PROGRESS_INTERVAL).min(until);
         if let Some(outcome) = job.wait_until(step).await {
+            if let Err(e) = &outcome {
+                raise_failed(e);
+            }
             return outcome.map_err(|e| owned(&e));
         }
         if Instant::now() >= until {
@@ -265,6 +268,27 @@ async fn wait_on_task(
             reported = progress;
         }
     }
+}
+
+/// Bring image work that failed to the operator (#759). A request the
+/// requester withdrew is not an anomaly.
+fn raise_failed(error: &ImageGenError) {
+    use super::operator_notices::{Anomaly, OperatorNotices, detail};
+    if matches!(error, ImageGenError::Canceled) {
+        return;
+    }
+    OperatorNotices::global().raise(Anomaly {
+        key: "image-generation-failed".into(),
+        severity: arkavo_protocol::operator_notice::NoticeSeverity::Warning,
+        title: "Image generation failed".into(),
+        text: error.to_string(),
+        focus: Some(arkavo_protocol::operator_notice::NoticeFocus {
+            view: "agents".into(),
+            agent: None,
+            task: None,
+        }),
+        details: vec![detail("Code", error.code())],
+    });
 }
 
 /// A shared error as one the caller owns, keeping its code and message.

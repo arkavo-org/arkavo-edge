@@ -1,6 +1,5 @@
 "use strict";
 
-var _pendingTaskDescription = null;
 var MAX_TASK_EVENTS = 50;
 
 function addTaskEvent(taskId, evt) {
@@ -13,17 +12,20 @@ function addTaskEvent(taskId, evt) {
     if (task._events.length > MAX_TASK_EVENTS) task._events.pop();
 }
 
-function safeTaskKey(key) {
-    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return null;
-    return key;
-}
 
 function handleTaskList(event) {
+    var previous = AppState.tasks;
     AppState.tasks = Object.create(null);
     if (event.tasks) {
         event.tasks.forEach(function(task) {
             var key = safeTaskKey(task.id);
-            if (key) AppState.tasks[key] = task;
+            if (key) {
+                // Older gateways omit output; session metrics and events also survive polling.
+                var merged = Object.assign({}, previous[key] || {}, task);
+                merged._events = previous[key] ? previous[key]._events : [];
+                merged.completed_at = task.completed_at || task.completedAt || merged.completed_at;
+                AppState.tasks[key] = merged;
+            }
         });
     }
     renderTasks();
@@ -32,16 +34,17 @@ function handleTaskList(event) {
 function handleTaskSubmitted(event) {
     var task = {
         id: event.taskId || event.task_id,
-        description: event.description || _pendingTaskDescription || 'Task',
+        description: event.description || 'Task',
         summary: event.summary || null,
         status: event.status || 'submitted',
         source: event.source || 'ui',
         created_at: event.timestamp,
         _events: []
     };
-    if (task.source === 'ui') _pendingTaskDescription = null;
     var safeId = safeTaskKey(task.id);
-    if (safeId) AppState.tasks[safeId] = task;
+    if (!safeId) return;
+    acceptTaskSubmission(event);
+    AppState.tasks[safeId] = task;
     AppState.taskCount++;
 
     var evt = {
@@ -70,6 +73,10 @@ function handleTaskStatusChanged(event) {
         if (event.metrics) {
             AppState.tasks[id].metrics = event.metrics;
         }
+        if (event.assets || event.assetNote !== undefined) {
+            AppState.tasks[id].assets = event.assets || AppState.tasks[id].assets || [];
+            AppState.tasks[id].assetNote = event.assetNote || null;
+        }
         if (event.status === 'completed') {
             AppState.tasks[id].completed_at = event.timestamp;
         }
@@ -94,43 +101,31 @@ function handleTaskStatusChanged(event) {
     }
 }
 
+// The task list leaves outputs out; a view that opens a task asks for it.
+function handleTaskDetail(event) {
+    var id = safeTaskKey(event.taskId);
+    var task = id && AppState.tasks[id];
+    if (!task) return;
+    task.result = event.result || task.result;
+    task.assets = event.assets || task.assets || [];
+    task.assetNote = event.assetNote || null;
+    task._detailRequested = false;
+    if (AppState.selectedTaskId === id) renderTaskDetail();
+}
+
 function updateTaskCardInPlace(taskId) {
-    var card = document.querySelector('.task-card-clickable[data-task-id="' + CSS.escape(taskId) + '"]');
-    if (!card) return false;
+    if (!taskId) return false;
+    var row = document.getElementById('tasks-container').querySelector('[data-task-row="' + CSS.escape(taskId) + '"]');
     var task = AppState.tasks[taskId];
-    if (!task) return false;
-
-    var statusEl = card.querySelector('.task-status');
-    if (statusEl) {
-        var status = task.status || '';
-        statusEl.textContent = status;
-        statusEl.className = 'task-status ' + status.replace(/[^a-zA-Z0-9-]/g, '');
-    }
-
-    var progressBar = card.querySelector('.task-progress-bar');
-    if (progressBar && typeof task.progress === 'number') {
-        var pct = Math.min(100, Math.max(0, task.progress * 100));
-        progressBar.style.width = pct + '%';
-    } else if (!progressBar && typeof task.progress === 'number') {
-        var wrapper = document.createElement('div');
-        wrapper.className = 'task-progress';
-        var bar = document.createElement('div');
-        bar.className = 'task-progress-bar';
-        bar.style.width = Math.min(100, Math.max(0, task.progress * 100)) + '%';
-        wrapper.appendChild(bar);
-        card.appendChild(wrapper);
+    if (!row || !task) return false;
+    var cell = row.querySelector('.task-row-state');
+    cell.innerHTML = uiState(task.status);
+    if (task.status === 'input-required' || task.status === 'auth-required') {
+        cell.innerHTML += '<span class="row-secondary">' + (task.status === 'input-required' ? 'Input required' : 'Authorization required') + '</span>';
+    } else if (task.status === 'failed' || task.status === 'blocked') {
+        cell.innerHTML += '<span class="row-secondary">' + escapeHtml(task.result ? String(task.result).slice(0, 160) : 'Reason not reported') + '</span>';
     }
     return true;
-}
-
-function selectTask(taskId) {
-    AppState.selectedTaskId = taskId;
-    renderTaskDetail();
-}
-
-function deselectTask() {
-    AppState.selectedTaskId = null;
-    renderTasks();
 }
 
 function renderTasks() {
@@ -140,72 +135,12 @@ function renderTasks() {
     }
     var container = document.getElementById('tasks-container');
     if (!container) return;
-    var tasks = Object.values(AppState.tasks);
-
-    if (tasks.length === 0) {
-        container.innerHTML =
-            '<div class="empty-state">' +
-            '<h3>No Tasks</h3>' +
-            '<p>Click "+ Add Task" to submit work</p>' +
-            '</div>';
-        return;
-    }
-
-    tasks.sort(function(a, b) {
-        return new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt);
-    });
-
-    container.innerHTML = tasks.map(function(task) {
-        var taskId = escapeHtml((task.id || '').slice(0, 8));
-        var status = escapeHtml(task.status || '');
-        var statusClass = status.replace(/[^a-zA-Z0-9-]/g, '');
-        var agent = getTaskAgent(task, task.id);
-        var agentDisplay = agent ? shortAgentName(agent) : 'Routing...';
-        var progress = typeof task.progress === 'number' ? Math.min(100, Math.max(0, task.progress * 100)) : null;
-        var sourceBadge = task.source === 'agent' ? '<span class="source-badge agent">auto</span> ' : '';
-        return '<div class="task-card task-card-clickable" data-task-id="' + escapeHtml(task.id) + '">' +
-            '<div class="task-header">' +
-            sourceBadge + '<span class="task-id">#' + taskId + '</span>' +
-            '<span class="task-status ' + statusClass + '">' + status + '</span>' +
-            '</div>' +
-            '<div class="task-description">' + escapeHtml(task.summary || task.description || 'Task') + '</div>' +
-            '<div class="task-meta">' +
-            escapeHtml(agentDisplay) +
-            ((task.created_at || task.createdAt) ? ' | ' + escapeHtml(formatTime(task.created_at || task.createdAt)) : '') +
-            '</div>' +
-            (progress !== null ? '<div class="task-progress"><div class="task-progress-bar" style="width:' + progress + '%"></div></div>' : '') +
-            '</div>';
-    }).join('');
-
-    var cards = container.querySelectorAll('.task-card-clickable');
-    for (var i = 0; i < cards.length; i++) {
-        (function(card) {
-            card.addEventListener('click', function() {
-                selectTask(card.getAttribute('data-task-id'));
-            });
-        })(cards[i]);
-    }
-
+    delete container.dataset.detailFingerprint;
+    var tasks = sortedTasks();
+    var fingerprint = taskListFingerprint(tasks);
+    if (container.dataset.fingerprint === fingerprint) return;
+    container.dataset.fingerprint = fingerprint;
+    container.innerHTML = tasks.length ? '<section class="ops-section">' + taskRows(tasks) + '</section>' :
+        '<div class="ops-empty"><strong>No tasks reported</strong>Create a task when an agent is available.</div>';
     document.getElementById('task-count').textContent = tasks.length;
-}
-
-function showAddTaskModal() {
-    document.getElementById('add-task-modal').classList.add('active');
-    document.getElementById('task-description').focus();
-}
-
-function hideAddTaskModal() {
-    document.getElementById('add-task-modal').classList.remove('active');
-    document.getElementById('task-description').value = '';
-}
-
-function submitTask() {
-    var description = document.getElementById('task-description').value.trim();
-    if (!description) {
-        alert('Please enter a task description');
-        return;
-    }
-    _pendingTaskDescription = description;
-    wsSend({ type: 'submitTask', description: description });
-    hideAddTaskModal();
 }

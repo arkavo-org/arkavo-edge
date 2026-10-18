@@ -4,110 +4,132 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;">
-    <title>Arkavo Edge</title>
+    <title>Arkavo Operations</title>
+    <link rel="icon" type="image/svg+xml" href="/static/icons/arkavo.svg">
     <link rel="stylesheet" href="/static/styles/base.css">
     <link rel="stylesheet" href="/static/styles/panels.css">
     <link rel="stylesheet" href="/static/styles/dashboard.css">
+    <link rel="stylesheet" href="/static/styles/operations.css">
 </head>
 <body>
-    <header>
-        <h1>Arkavo Edge</h1>
-        <span id="connection-status" class="disconnected">Connecting...</span>
-        <span id="cost-badge" class="cost-badge">$0.00</span>
-        <div id="stats">
-            <span>Agents: <span class="stat-value" id="agent-count">0</span></span>
-            <span>Tasks: <span class="stat-value" id="task-count">0</span></span>
-            <span>Events: <span class="stat-value" id="event-count">0</span></span>
-        </div>
+    <a href="#workspace" class="skip-link">Skip to workspace</a>
+    <header class="operations-header">
+        <a class="brand" href="#/overview"><span class="brand-mark" aria-hidden="true">A</span><span class="brand-name">Arkavo <small>Operations</small></span><span class="sr-only"> overview</span></a>
+        <div class="header-scope">Scope <strong>This gateway</strong><span data-info="scope"></span></div>
+        <button type="button" id="notices-toggle" class="notices-toggle" aria-label="Notices"></button>
+        <div class="gateway-link"><span id="connection-status" role="status">Connecting</span><span data-info="gateway"></span></div>
+        <div id="stats" class="sr-only" aria-hidden="true"><span id="agent-count">0</span><span id="task-count">0</span><span id="event-count">0</span></div>
+        <span id="cost-badge" class="cost-badge" hidden>Unknown</span>
     </header>
 
     <div class="main-container">
         <main>
-            <nav class="nav-sidebar">
-                <button class="nav-btn active" data-view="agents" title="Agent Mesh">&#x25C8;</button>
-                <button class="nav-btn" data-view="tasks" title="Tasks">&#x2637;</button>
-                <button class="nav-btn" data-view="budget" title="Budget &amp; ROI">&#x24;</button>
-                <button class="nav-btn" data-view="health" title="Health">&#x2665;</button>
-                <button class="nav-btn" data-view="security" title="Security &amp; Data Plane">&#x1F512;</button>
-                <button class="nav-btn" data-view="router" title="Router">&#x21C4;</button>
-                <button class="nav-btn" data-view="telemetry" title="Telemetry">&#x223F;</button>
-                <button class="nav-btn" data-view="learning" title="Learning">&#x1F9E0;</button>
-                <button class="nav-btn" data-view="context" title="Context Topology">&#x2B21;</button>
-                <button class="nav-btn" data-view="arp" title="Agent Runtime Policy">&#x2696;</button>
-                <button class="nav-btn showcase-btn" id="showcase-toggle" title="Showcase Mode">&#x25B6;</button>
+            <nav class="nav-sidebar" aria-label="Workspaces">
+                <div class="nav-section-label">WORKSPACE</div>
+                <button type="button" class="nav-btn" data-view="overview" data-nav-term="overview">Overview</button>
+                <button type="button" class="nav-btn" data-view="tasks" data-nav-term="tasks">Missions</button>
+                <button type="button" class="nav-btn" data-view="agents" data-nav-term="agents">Swarm</button>
+                <button type="button" class="nav-btn" data-view="decisions" data-nav-term="decisions">Decisions</button>
+                <button type="button" class="nav-btn" data-view="security" data-nav-term="security">Data & Trust</button>
+                <button type="button" class="nav-btn" data-view="telemetry" data-nav-term="telemetry">Evidence</button>
+                <button type="button" class="nav-btn" data-view="health" data-nav-term="health">Runtime</button>
+                <button type="button" id="lexicon-toggle" class="lexicon-toggle">Lexicon</button>
+                <div class="nav-foot">LOCAL GATEWAY</div>
             </nav>
 
-            <div class="content-area">
-                <div class="view-panel active" id="view-agents">
-                    <div class="panel-header">Agent Mesh</div>
+            <div class="content-area" id="workspace" tabindex="-1">
+                <div id="connection-notice" class="connection-notice" role="status" hidden></div>
+                <div id="notice-banner" class="notice-banner" role="alert" hidden></div>
+                <section class="view-panel active" id="view-overview" aria-label="Overview">
+                    <div class="panel-header"><h1>Overview <span data-info="overview"></span></h1><button type="button" class="add-btn" data-create-task>Create task</button></div>
+                    <div id="workspace-subnav" class="workspace-subnav" aria-label="Workspace sections"></div>
+                    <div class="scope-line">This gateway <span class="scope-separator">/</span> Operations</div>
+                    <div id="overview-container"></div>
+                </section>
+                <section class="view-panel" id="view-decisions" aria-label="Decisions">
+                    <div class="panel-header"><h1>Decisions <span data-info="decisions"></span></h1></div>
+                    <div class="scope-line">Runtime policy <span class="scope-separator">/</span> Local gateway review <span data-info="authority"></span></div>
+                    <div id="decisions-container"></div>
+                </section>
+                <div class="view-panel" id="view-agents">
+                    <div class="panel-header"><h1>Swarm <span data-info="agents"></span></h1></div>
+                    <p class="scope-line">Gateway snapshot · <span data-observation="swarm">Unknown</span><span data-info="freshness"></span></p>
+                    <div id="agent-inspector"></div>
                     <div id="agents-container">
-                        <div class="empty-state"><h3>No Agents Discovered</h3><p>Agents will appear here when they connect</p></div>
+                        <div class="empty-state"><h2>No agents discovered</h2><p>Awaiting agent discovery</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-tasks">
                     <div class="panel-header">
-                        <span>Task Queue</span>
-                        <button class="add-btn" id="add-task-btn">+ Add Task</button>
+                        <h1>Tasks <span data-info="task"></span></h1>
+                        <button class="add-btn" id="add-task-btn">Create task</button>
                     </div>
+                    <div class="scope-line">Missions <span class="scope-separator">/</span> Standalone tasks <span data-info="tasks"></span> · Snapshot <span data-observation="tasks">Unknown</span></div>
                     <div id="tasks-container">
-                        <div class="empty-state"><h3>No Tasks</h3><p>Click "+ Add Task" to submit work</p></div>
+                        <div class="empty-state"><h2>No tasks</h2><p>Create a task to begin</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-budget">
-                    <div class="panel-header">Budget &amp; ROI</div>
+                    <div class="panel-header"><h1>Resources</h1></div>
                     <div id="budget-container">
-                        <div class="empty-state"><h3>Loading Budget Data...</h3><p>Requesting dashboard metrics</p></div>
+                        <div class="empty-state"><h2>Resources not reported</h2><p>Awaiting gateway snapshot</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-health">
-                    <div class="panel-header">Health &amp; Observability</div>
+                    <div class="panel-header"><h1>Health</h1></div>
                     <div id="health-container">
-                        <div class="empty-state"><h3>Waiting for Status</h3><p>Status updates arrive every 30 seconds</p></div>
+                        <div class="empty-state"><h2>Status not reported</h2><p>Awaiting gateway snapshot</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-security">
-                    <div class="panel-header">Security &amp; Data Plane</div>
+                    <div class="panel-header"><h1>Data &amp; Trust</h1></div>
                     <div id="security-container">
-                        <div class="empty-state"><h3>Loading Security Status...</h3><p>Requesting KAS and TDF audit data</p></div>
+                        <div class="empty-state"><h2>Security data not reported</h2><p>Awaiting gateway snapshot</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-router">
-                    <div class="panel-header">Router Decisions</div>
+                    <div class="panel-header"><h1>Routing</h1></div>
                     <div id="router-container">
-                        <div class="empty-state"><h3>No Decisions Yet</h3><p>Model routing decisions will appear here</p></div>
+                        <div class="empty-state"><h2>No routing decisions</h2><p>Awaiting routing events</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-telemetry">
-                    <div class="panel-header">Telemetry Stream</div>
-                    <div id="telemetry-container">
-                        <div class="empty-state"><h3>Waiting for Events</h3><p>Telemetry events will stream here</p></div>
-                    </div>
+                    <div class="panel-header"><h1>Evidence</h1></div>
+                    <p class="scope-line">Session events · gateway observations · unverified <span data-info="session"></span></p>
+                    <div id="evidence-scope" class="inspection-toolbar"></div>
+                    <div class="evidence-controls"><label class="sr-only" for="evidence-filter">Filter events</label><input id="evidence-filter" type="search" placeholder="Filter events"><button type="button" id="evidence-pause" aria-pressed="false">Pause stream</button><span id="evidence-count" class="muted">0 events</span><button type="button" id="evidence-updates" hidden>Show updates</button></div>
+                    <p id="evidence-retention" class="scope-line"></p>
+                    <div id="evidence-rows" class="ops-section"><div class="ops-empty">No events received</div></div>
+                </div>
+                <div class="view-panel" id="view-diagnostics">
+                    <div class="panel-header"><h1>Diagnostics</h1></div>
+                    <div id="diagnostics-container"></div>
                 </div>
 
                 <div class="view-panel" id="view-learning">
-                    <div class="panel-header">Cortical Routing Map</div>
+                    <div class="panel-header"><h1>Adaptation</h1></div>
                     <div id="learning-container">
-                        <div class="empty-state"><h3>Waiting for Routing Data</h3><p>Submit tasks to watch the mesh brain think</p></div>
+                        <div class="empty-state"><h2>No adaptation data</h2><p>Awaiting routing observations</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-context">
-                    <div class="panel-header">Context Topology Matrix</div>
+                    <div class="panel-header"><h1>Context</h1></div>
                     <div id="context-container">
-                        <div class="empty-state"><h3>Waiting for Context Data</h3><p>Submit tasks to populate context topology</p></div>
+                        <div class="empty-state"><h2>Context not reported</h2><p>Awaiting context snapshot</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-arp">
-                    <div class="panel-header">Agent Runtime Policy (ARP)</div>
+                    <div class="panel-header"><h1>Runtime policy</h1></div>
                     <div id="arp-container">
-                        <div class="empty-state"><h3>Loading ARP Status...</h3><p>Requesting policy document and runtime state</p></div>
+                        <div class="empty-state"><h2>Policy not reported</h2><p>Awaiting policy snapshot</p></div>
                     </div>
                 </div>
 
@@ -116,26 +138,33 @@
 
     </div>
 
-    <div class="modal-overlay" id="add-task-modal">
-        <div class="modal">
-            <h3>Add New Task</h3>
-            <div class="modal-field">
-                <label>Task Description</label>
-                <textarea id="task-description" placeholder="Describe what you want to accomplish..."></textarea>
-            </div>
-            <p class="modal-hint">Tasks are sent to the orchestrator for decomposition and delegation.</p>
-            <div class="modal-actions">
-                <button class="btn-cancel" id="task-cancel-btn">Cancel</button>
-                <button class="btn-submit" id="task-submit-btn">Submit to Orchestrator</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="toast-container" class="toast-container"></div>
+    <dialog id="add-task-modal" class="task-dialog" aria-labelledby="task-dialog-title">
+        <div class="dialog-heading"><h2 id="task-dialog-title">Create task</h2><span data-info="task"></span></div>
+        <p class="scope-line">Scope: this gateway · automatic agent selection</p>
+        <label for="task-description">Objective</label>
+        <textarea id="task-description" rows="6" placeholder="Describe the work and its success criteria" aria-describedby="task-submission-status"></textarea>
+        <p id="task-submission-status" class="submission-status" role="status">Draft · kept until accepted</p>
+        <div class="modal-actions"><button type="button" class="btn-cancel" id="task-cancel-btn">Close</button><button type="button" class="btn-submit" id="task-submit-btn">Create task</button></div>
+    </dialog>
+    <dialog id="notices-dialog" class="notices-dialog" aria-labelledby="notices-title">
+        <div class="dialog-heading"><h2 id="notices-title">Notices</h2><button type="button" id="notices-close">Close</button></div>
+        <div id="notices-list"></div>
+    </dialog>
+    <dialog id="lexicon-dialog" class="lexicon-dialog" aria-labelledby="lexicon-title">
+        <div class="dialog-heading"><h2 id="lexicon-title">Lexicon</h2><button type="button" id="lexicon-close">Close</button></div>
+        <div id="lexicon-content"></div>
+    </dialog>
+    <div id="toast-container" class="toast-container" role="status" aria-live="polite"></div>
 
     <script src="/static/js/state.js"></script>
+    <script src="/static/js/icons.js"></script>
+    <script src="/static/js/lexicon.js"></script>
+    <script src="/static/js/help.js"></script>
+    <script src="/static/js/inspection.js"></script>
+    <script src="/static/js/routes.js"></script>
     <script src="/static/js/websocket.js"></script>
     <script src="/static/js/panels/agents.js"></script>
+    <script src="/static/js/panels/agent-detail.js"></script>
     <script src="/static/js/panels/tasks.js"></script>
     <script src="/static/js/panels/telemetry.js"></script>
     <script src="/static/js/panels/budget.js"></script>
@@ -150,7 +179,12 @@
     <script src="/static/js/panels/published-trust.js"></script>
     <script src="/static/js/panels/task-detail.js"></script>
     <script src="/static/js/chat.js"></script>
-    <script src="/static/js/showcase.js"></script>
+    <script src="/static/js/task-assets.js"></script>
+    <script src="/static/js/panels/operations.js"></script>
+    <script src="/static/js/panels/evidence.js"></script>
+    <script src="/static/js/task-composer.js"></script>
+    <script src="/static/js/notices.js"></script>
+    <script src="/static/js/navigation.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

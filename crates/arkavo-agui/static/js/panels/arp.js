@@ -2,6 +2,8 @@
 
 var ARP_POLL_INTERVAL_MS = 5000;
 var arpPollHandle = null;
+var flightRequests = Object.create(null);
+var flightResult = '';
 
 var VIOLATION_EVENT_TYPES = {
     quarantine: true,
@@ -59,16 +61,22 @@ function renderArp() {
 
     var snap = AppState.arpStatus;
     if (!snap) {
-        container.innerHTML = '<div class="empty-state"><h3>Loading ARP Status...</h3><p>Requesting policy document and runtime state</p></div>';
+        container.innerHTML = '<div class="empty-state"><h3>Policy not reported</h3><code>' +
+            escapeHtml(AppState.arpSelectedAgent || '') + '</code></div>';
         return;
     }
 
     var agents = snap.agents || [];
+    var requested = AppState.route && AppState.route.view === 'arp' && AppState.route.agent;
+    if (requested && !agents.some(function(agent) { return agent.agentId === requested; })) {
+        container.innerHTML = '<div class="ops-empty"><strong>Policy not reported</strong><code>' + escapeHtml(requested) + '</code></div>';
+        return;
+    }
     if (agents.length === 0) {
         container.innerHTML =
+            (flightResult ? '<p class="review-result" role="status">' + escapeHtml(flightResult) + '</p>' : '') +
             '<div class="empty-state">' +
-              '<h3>No Agent Policies</h3>' +
-              '<p>Each agent in the mesh owns its own ARP. None loaded yet -- set ARKAVO_ARP_PATH or wait for agents to push policies.</p>' +
+              '<h3>No runtime policy reported ' + uiHelp('policy') + '</h3>' +
             '</div>';
         return;
     }
@@ -78,6 +86,7 @@ function renderArp() {
     }
 
     var html = '';
+    if (flightResult) html += '<p class="review-result" role="status">' + escapeHtml(flightResult) + '</p>';
     html += renderSwarmkitLaunchErrors(snap);
     html += renderArpFlightsSection(agents);
     html += renderArpAgentSelector(agents);
@@ -100,8 +109,7 @@ function renderArp() {
     var sel = document.getElementById('arp-agent-select');
     if (sel) {
         sel.addEventListener('change', function(e) {
-            AppState.arpSelectedAgent = e.target.value;
-            renderArp();
+            navigateRoute('arp', { agent: e.target.value });
         });
     }
 
@@ -113,8 +121,7 @@ function renderArp() {
         pill.addEventListener('click', function() {
             var id = pill.getAttribute('data-agent-id');
             if (!id) return;
-            AppState.arpSelectedAgent = id;
-            renderArp();
+            navigateRoute('arp', { agent: id });
         });
     });
 
@@ -129,14 +136,9 @@ function renderArp() {
             var agentId = btn.getAttribute('data-agent-id');
             var action = btn.getAttribute('data-action');
             if (!pid || !agentId || !action) return;
-            btn.disabled = true;
-            btn.textContent = action === 'approve' ? 'Approving…' : 'Rejecting…';
-            wsSend({
-                type: 'requestArpProposalAction',
-                agentId: agentId,
-                proposalId: pid,
-                action: action
-            });
+            // Show the decision only when the review went out; a review
+            // refused here stays beside the policy it is about.
+            if (submitPolicyReview(agentId, pid, action)) switchView('decisions');
         });
     });
 
@@ -149,11 +151,32 @@ function renderArp() {
             e.stopPropagation();
             var fid = btn.getAttribute('data-flight-id');
             if (!fid) return;
+            if (flightRequests[fid]) return;
+            if (!confirm('End tracking for flight ' + fid + '? Remote work will continue. This only removes the gateway registry entry.')) return;
+            if (!wsSend({ type: 'requestStopFlight', flightId: fid })) {
+                showToast('Not sent · gateway disconnected', 'warning');
+                return;
+            }
             btn.disabled = true;
-            btn.textContent = 'Stopping…';
-            wsSend({ type: 'requestStopFlight', flightId: fid });
+            btn.textContent = 'Awaiting receipt';
+            flightRequests[fid] = 'Awaiting receipt';
+            setTimeout(function() {
+                if (!flightRequests[fid]) return;
+                // Unlock the button: a late receipt still reports the outcome.
+                delete flightRequests[fid];
+                flightResult = 'Outcome unknown · no receipt for ending tracking of flight ' + fid + '. Check the flight list before trying again.';
+                renderArp();
+            }, 15000);
         });
     });
+}
+
+function handleFlightStopped(event) {
+    delete flightRequests[event.flightId];
+    flightResult = event.error ? 'End tracking rejected · ' + event.error : 'Tracking ended · remote execution unchanged';
+    AppState.arpLastFingerprint = null;
+    renderArp();
+    wsSend({ type: 'requestArpStatus' });
 }
 
 function renderArpAgentSelector(agents) {
@@ -227,7 +250,7 @@ function renderArpFlightsSection(agents) {
     var flights = groupFlightRoles(agents);
     if (flights.length === 0) return '';
 
-    var html = '<div class="section-title">Active SwarmFlights</div>';
+    var html = '<div class="section-title">Tracked flights</div>';
     html += '<div class="cost-table"><table><tbody>';
 
     flights.forEach(function(flight) {
@@ -293,8 +316,9 @@ function renderArpFlightsSection(agents) {
         var stopBtn =
             '<button type="button" class="arp-flight-stop"' +
             ' data-flight-id="' + escapeHtml(flight.flightId) + '"' +
-            ' title="Stop this SwarmFlight and remove its roles from the panel">' +
-            'Stop</button>';
+            (flightRequests[flight.flightId] ? ' disabled' : '') +
+            ' title="Remove this flight from the gateway registry; remote work continues">' +
+            (flightRequests[flight.flightId] || 'End tracking') + '</button>' + uiHelp('tracking');
 
         html += '<tr><td>' +
             '<strong>' + escapeHtml(flight.kitName) + '</strong> ' + stopBtn +
@@ -378,7 +402,7 @@ var PROPOSAL_STATE_CLASS = {
 function renderArpProposalsSection(snap) {
     var proposals = snap.proposals || [];
     var pending = proposals.filter(function(p) { return p.state === 'proposed'; }).length;
-    var html = '<div class="section-title">Findings Inbox' +
+    var html = '<div class="section-title">Policy changes' +
         (pending > 0 ? ' <span class="status-warn">(' + pending + ' awaiting review)</span>' : '') +
         '</div>';
     if (proposals.length === 0) {
@@ -407,10 +431,10 @@ function renderArpProposalsSection(snap) {
             html += '<tr><td>Review</td><td>' +
                 '<button type="button" class="arp-proposal-action"' +
                 ' data-action="approve" data-proposal-id="' + escapeHtml(p.id) + '"' +
-                ' data-agent-id="' + escapeHtml(snap.agentId) + '">Approve</button> ' +
+                ' data-agent-id="' + escapeHtml(snap.agentId) + '">Approve change</button> ' +
                 '<button type="button" class="arp-proposal-action"' +
                 ' data-action="reject" data-proposal-id="' + escapeHtml(p.id) + '"' +
-                ' data-agent-id="' + escapeHtml(snap.agentId) + '">Reject</button>' +
+                ' data-agent-id="' + escapeHtml(snap.agentId) + '">Reject change</button>' +
                 '</td></tr>';
         } else if (p.state === 'observed') {
             html += '<tr><td>Review</td><td><span class="status-ok">auto-applied</span> — ' +

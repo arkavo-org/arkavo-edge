@@ -74,7 +74,7 @@ pub(super) fn tool_call_permitted(
     name: &str,
     granted: Option<&std::collections::HashSet<String>>,
 ) -> bool {
-    granted.is_none_or(|g| g.contains(name))
+    granted.is_none_or(|g| g.contains(name)) || name == super::operator_notices::NOTIFY_OPERATOR
 }
 
 /// What the model is told about a call `tool_call_permitted` refused.

@@ -52,6 +52,7 @@ pub mod metrics_subscription;
 pub mod network;
 pub mod oauth2;
 pub mod openrpc;
+pub mod operator_notice;
 pub mod peer_manager;
 pub mod push_notifications;
 pub mod rate_limit;

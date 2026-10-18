@@ -91,6 +91,35 @@ async fn failures_carry_status_and_output() {
     }
 }
 
+/// Regression (IMG-021): Metal ran out of memory decoding, sd-cli wrote an
+/// image from what the GPU left behind and exited 0, and that garbage was
+/// delivered as the result. A run the GPU failed is a failed run.
+#[arkavo_test_macros::spec("IMG-021")]
+#[tokio::test]
+async fn a_gpu_failure_fails_a_run_that_exited_cleanly() {
+    let tools = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let fixture = tools.path().join("f.png");
+    std::fs::write(&fixture, png(8, 8, false)).unwrap();
+    let cli = fake_cli(tools.path(), &fixture, Behavior::OutOfMemory);
+    let pattern = out.path().join("a_%03d.png");
+    let args = ["-o", pattern.to_str().unwrap(), "--steps", "4"];
+
+    let err = run(
+        spec(&cli, out.path(), &args, Duration::from_secs(30)),
+        &|_| {},
+    )
+    .await
+    .unwrap_err();
+
+    match err {
+        ImageGenError::GpuFailed { stderr } => {
+            assert!(stderr.contains("Insufficient Memory"), "{stderr}")
+        }
+        other => panic!("expected GpuFailed, got {other:?}"),
+    }
+}
+
 /// IMG-012: the deadline kills the process.
 #[arkavo_test_macros::spec("IMG-006", "IMG-012")]
 #[tokio::test]

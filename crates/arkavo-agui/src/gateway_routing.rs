@@ -63,7 +63,7 @@ pub(crate) async fn update_task_status(
                 };
                 let j = crate::response_judge::judge(&task_desc, result_text);
                 if !j.issues.is_empty() {
-                    println!(
+                    tracing::debug!(
                         "AG-UI: Task {} quality={:.2}, issues: {:?}",
                         crate::gateway_events::short_id(task_id),
                         j.quality_score,
@@ -124,9 +124,11 @@ pub(crate) async fn update_task_status(
                 response_snippet: result.as_deref().map(|r| r[..r.len().min(200)].to_string()),
             };
             if let Some(lesson) = crate::lesson_extractor::extract_lesson(j, &ctx) {
-                println!(
+                tracing::debug!(
                     "AG-UI: Lesson extracted for {} on {}: {}",
-                    aid, task_cat, lesson.pattern.condition
+                    aid,
+                    task_cat,
+                    lesson.pattern.condition
                 );
                 let lesson_event = AgUiEvent::LessonExtracted {
                     agent_id: aid.clone(),
@@ -186,6 +188,8 @@ pub(crate) async fn update_task_status(
         progress,
         result,
         metrics,
+        assets: Vec::new(),
+        asset_note: None,
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
 
@@ -303,7 +307,7 @@ pub(crate) async fn handle_request_learning_status(
     task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
     tx: &tokio::sync::mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("AG-UI: Received RequestLearningStatus");
+    tracing::debug!("AG-UI: Received RequestLearningStatus");
 
     // Collect local learning data
     let lm = learning_module.read().await;
@@ -417,7 +421,7 @@ pub(crate) async fn handle_request_learning_status(
                 }
             }
             Err(e) => {
-                println!("AG-UI: Failed to query agent learning/status: {e}");
+                tracing::debug!("AG-UI: Failed to query agent learning/status: {e}");
             }
         }
     }

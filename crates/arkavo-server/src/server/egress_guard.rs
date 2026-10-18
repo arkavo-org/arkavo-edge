@@ -285,6 +285,30 @@ impl EgressGuard {
             disposition = %decision.disposition.as_str(),
             "egress gate refused a call"
         );
+        // The operator hears of it as it happens (#759). The notice names
+        // the class of destination, never the destination itself, which may
+        // carry the data that was stopped.
+        super::operator_notices::OperatorNotices::global().raise(
+            super::operator_notices::Anomaly {
+                key: "egress-blocked".into(),
+                severity: arkavo_protocol::operator_notice::NoticeSeverity::Critical,
+                title: "Data stopped at the egress gate".into(),
+                text: format!(
+                    "{tool_name} tried to send data to a {} destination and was refused.",
+                    destination.class()
+                ),
+                focus: Some(arkavo_protocol::operator_notice::NoticeFocus {
+                    view: "security".into(),
+                    agent: None,
+                    task: None,
+                }),
+                details: vec![
+                    super::operator_notices::detail("Tool", tool_name),
+                    super::operator_notices::detail("Destination", destination.class()),
+                    super::operator_notices::detail("Decision", decision.disposition.as_str()),
+                ],
+            },
+        );
 
         if let Some(trace) = arkavo_observability::decision_trace::current() {
             trace.record_sequence_evidence(

@@ -76,7 +76,7 @@ impl HealthMonitor {
         // 3. Execute auto-fixes silently
         for action in &analysis.auto_actions {
             if let Err(e) = self.execute_auto_action(action).await {
-                eprintln!("Auto-action failed: {action} - {e}");
+                tracing::warn!("Auto-action failed: {action} - {e}");
             }
         }
 

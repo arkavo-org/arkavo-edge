@@ -65,6 +65,10 @@ async fn build_full_registry(
         }
     }
     arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
+    super::operator_notices::register(
+        &mut registry,
+        super::operator_notices::OperatorNotices::global(),
+    );
     if let Some(assets) = &config.assets {
         assets.register_tools(&mut registry, outbox.clone());
     }
@@ -96,7 +100,10 @@ async fn derive_filtered_registry(
     granted: &std::collections::HashSet<String>,
 ) -> Arc<arkavo_mcp_tools::ToolRegistry> {
     let mut registry = build_full_registry(config, outbox).await;
-    registry.retain_granted(granted);
+    // Every role can tell the operator something is wrong (SRV-016).
+    let mut granted = granted.clone();
+    granted.insert(super::operator_notices::NOTIFY_OPERATOR.to_string());
+    registry.retain_granted(&granted);
     Arc::new(registry)
 }
 
@@ -253,6 +260,27 @@ pub async fn run_agent_loop(
                     let snapshot = budget.snapshot();
                     if !snapshot.has_remaining {
                         drop(budget);
+                        // Refusing a requester is the anomaly; an idle
+                        // agent with no budget left is not (#759).
+                        if !pending_messages.is_empty() {
+                            super::operator_notices::OperatorNotices::global().raise(
+                                super::operator_notices::Anomaly {
+                                    key: "compute-budget-exhausted".into(),
+                                    severity: arkavo_protocol::operator_notice::NoticeSeverity::Warning,
+                                    title: "Compute budget spent".into(),
+                                    text: "Requests to this agent are refused until its compute budget refreshes.".into(),
+                                    focus: Some(arkavo_protocol::operator_notice::NoticeFocus {
+                                        view: "budget".into(),
+                                        agent: None,
+                                        task: None,
+                                    }),
+                                    details: vec![super::operator_notices::detail(
+                                        "Refused",
+                                        format!("{} request(s)", pending_messages.len()),
+                                    )],
+                                },
+                            );
+                        }
                         reject_pending(
                             &mut pending_messages,
                             CycleId(cycle),
@@ -350,6 +378,7 @@ pub async fn run_agent_loop(
                 let drained = drain_pending_messages(&mut pending_messages, CycleId(cycle));
                 let message_block = drained.block;
                 let cycle_waiters = drained.waiters;
+                let served_requester = !cycle_waiters.is_empty();
                 for (sender, receipt) in drained.receipts {
                     let _ = sender.send(receipt);
                 }
@@ -608,17 +637,19 @@ pub async fn run_agent_loop(
                         }
                         drop(memory_guard);
 
-                        if had_action || !pushed_to_act {
-                            consecutive_no_action_cycles = 0;
+                        consecutive_no_action_cycles = cycle_prompt::idle_streak(
+                            consecutive_no_action_cycles,
+                            had_action,
+                            pushed_to_act,
+                            served_requester,
+                        );
+                        if consecutive_no_action_cycles == 0 {
                             consecutive_duplicate_prompts = 0;
-                        } else {
-                            consecutive_no_action_cycles += 1;
-                            if consecutive_no_action_cycles >= 3 {
-                                warn!(
-                                    "Dead-man's switch: {} consecutive ticks without meaningful action",
-                                    consecutive_no_action_cycles
-                                );
-                            }
+                        } else if consecutive_no_action_cycles >= 3 {
+                            warn!(
+                                "Dead-man's switch: {} consecutive ticks without meaningful action",
+                                consecutive_no_action_cycles
+                            );
                         }
 
                         // 12. Degenerate reset (8+ no-action cycles)

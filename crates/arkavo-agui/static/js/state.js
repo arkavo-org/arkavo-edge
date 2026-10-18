@@ -1,10 +1,15 @@
 "use strict";
 
 var AppState = {
-    agents: {},
-    tasks: {},
+    notices: Object.create(null),
+    noticeActionsPending: Object.create(null),
+    agents: Object.create(null),
+    tasks: Object.create(null),
+    connection: 'reconnecting',
+    observations: Object.create(null),
     telemetry: [],
     eventCount: 0,
+    evictedEvents: 0,
     taskCount: 0,
     totalCost: 0,
     budgetStatus: null,
@@ -17,7 +22,7 @@ var AppState = {
     policyLog: [],
     dataPlaneStatus: null,
     dataPlaneTransfers: [],
-    activeView: 'agents',
+    activeView: 'overview',
     learningAgents: {},
     routingHistory: [],
     routingAnimations: [],
@@ -26,6 +31,8 @@ var AppState = {
     lessons: [],
     lessonCount: 0,
     selectedTaskId: null,
+    selectedAgentId: null,
+    route: null,
     teachingEvents: [],
     agentSystemMetrics: {},
     optimalConfigs: [],
@@ -50,9 +57,9 @@ var MAX_ROUTING_HISTORY = 50;
 
 function escapeHtml(text) {
     if (text == null) return '';
-    var div = document.createElement('div');
-    div.textContent = String(text);
-    return div.innerHTML;
+    return String(text).replace(/[&<>"']/g, function(character) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character];
+    });
 }
 
 function formatTime(ts) {
@@ -65,4 +72,10 @@ function formatCost(dollars) {
     if (dollars == null || dollars === 0) return '$0.00';
     if (dollars < 0.01) return '<$0.01';
     return '$' + dollars.toFixed(2);
+}
+
+// A key from the gateway (task or notice id) safe to index a plain object.
+function safeTaskKey(key) {
+    if (typeof key !== 'string' || !key || key === '__proto__' || key === 'constructor' || key === 'prototype') return null;
+    return key;
 }
