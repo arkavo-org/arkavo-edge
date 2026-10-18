@@ -350,6 +350,7 @@ pub async fn run_agent_loop(
                 let drained = drain_pending_messages(&mut pending_messages, CycleId(cycle));
                 let message_block = drained.block;
                 let cycle_waiters = drained.waiters;
+                let served_requester = !cycle_waiters.is_empty();
                 for (sender, receipt) in drained.receipts {
                     let _ = sender.send(receipt);
                 }
@@ -608,17 +609,19 @@ pub async fn run_agent_loop(
                         }
                         drop(memory_guard);
 
-                        if had_action || !pushed_to_act {
-                            consecutive_no_action_cycles = 0;
+                        consecutive_no_action_cycles = cycle_prompt::idle_streak(
+                            consecutive_no_action_cycles,
+                            had_action,
+                            pushed_to_act,
+                            served_requester,
+                        );
+                        if consecutive_no_action_cycles == 0 {
                             consecutive_duplicate_prompts = 0;
-                        } else {
-                            consecutive_no_action_cycles += 1;
-                            if consecutive_no_action_cycles >= 3 {
-                                warn!(
-                                    "Dead-man's switch: {} consecutive ticks without meaningful action",
-                                    consecutive_no_action_cycles
-                                );
-                            }
+                        } else if consecutive_no_action_cycles >= 3 {
+                            warn!(
+                                "Dead-man's switch: {} consecutive ticks without meaningful action",
+                                consecutive_no_action_cycles
+                            );
                         }
 
                         // 12. Degenerate reset (8+ no-action cycles)

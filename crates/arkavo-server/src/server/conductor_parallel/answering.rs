@@ -17,9 +17,13 @@ use tracing::warn;
 /// What the model is told when its rounds ended on tool calls and a
 /// requester is still owed an answer. Small models given only "answer from
 /// the results" copied the last tool result, JSON and all, as the reply.
+/// Generated images travel with this reply (ASSET-008); told nothing about
+/// that, the model promised to send them later while they sat beside its
+/// words (#764).
 const ANSWER_FROM_RESULTS: &str = "Reply to the request now in one or two sentences of your own \
-     words: say what you did and what the requester gets. Do not copy the tool output or any \
-     JSON, and do not call any tool.";
+     words: say what you did and what the requester gets. Anything the tools produced, such as \
+     a generated image, is attached to this reply, so do not promise to send it later. Do not \
+     copy the tool output or any JSON, and do not call any tool.";
 
 tokio::task_local! {
     static REQUESTER_WAITING: ();

@@ -135,6 +135,14 @@ async fn a_requester_gets_an_answer_round_without_tools() {
         *script.offered_tools.lock().expect("tool offers"),
         [true, true, false]
     );
+    // SRV-015 (#764): the model promised to send an image already attached
+    // to its reply.
+    let prompts = script.prompts.lock().expect("prompts");
+    assert!(
+        prompts[2].contains("attached to this reply"),
+        "{}",
+        prompts[2]
+    );
 }
 
 /// SRV-014: an answer round that calls a tool anyway answers nothing, and

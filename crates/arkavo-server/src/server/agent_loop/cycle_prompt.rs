@@ -93,6 +93,24 @@ pub(super) fn dead_man_switch_applies(mode: &AgentMode) -> bool {
     *mode != AgentMode::Specialist
 }
 
+/// The run of cycles without action after one more cycle. A cycle that
+/// answered a requester did its job whatever tools it called: counted as
+/// idle, three answers in a row set off the switch, and the forced cycle
+/// replayed the last request from history, generating its image again for
+/// nobody (#764).
+pub(super) const fn idle_streak(
+    previous: u32,
+    had_action: bool,
+    pushed_to_act: bool,
+    served_requester: bool,
+) -> u32 {
+    if had_action || !pushed_to_act || served_requester {
+        0
+    } else {
+        previous + 1
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,6 +123,29 @@ mod tests {
             has_mcp_tools: false,
             serving_delegated_task,
         }
+    }
+
+    /// Regression (SRV-015, #764): an orchestrator answering requesters with
+    /// image work was pushed to act after three answers and replayed the last.
+    #[arkavo_test_macros::spec("SRV-015")]
+    #[test]
+    fn answering_a_requester_is_not_idle() {
+        let mut streak = 0;
+        for _ in 0..5 {
+            streak = idle_streak(streak, false, true, true);
+        }
+        assert_eq!(streak, 0);
+        assert_eq!(
+            idle_streak(2, false, true, false),
+            3,
+            "a cycle nobody asked for still counts"
+        );
+        assert_eq!(idle_streak(2, true, true, false), 0);
+        assert_eq!(
+            idle_streak(2, false, false, false),
+            0,
+            "specialists are never pushed"
+        );
     }
 
     #[test]
