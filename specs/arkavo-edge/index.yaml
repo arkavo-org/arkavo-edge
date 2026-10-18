@@ -90,7 +90,7 @@ components:
     module: arkavo_crypto
     description: Cryptographic primitives and key management
     criticality: critical
-    scenario_count: 11
+    scenario_count: 12
     invariants:
       - Ed25519: 32-byte keys, 64-byte signatures
       - P-256 SEC1: 65-byte uncompressed keys

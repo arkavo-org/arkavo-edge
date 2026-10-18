@@ -136,20 +136,26 @@ scenarios:
     criticality: critical
     wip: true
     given:
-      - A TDF or iroh key the agent uses
+      - A gossip, iroh or TDF key the agent uses
     when: A peer is asked to use that key
     then:
-      - The peer requires a statement signed by the workload key naming purpose, key, validity window and generation
-      - A statement with a lower generation than one already seen is refused
-      - The workload key itself is never used as a TLS or TDF key
+      - "The peer requires a statement signed by the workload key naming purpose, key, validity window and generation: a compact JWS, ES256, typ key-statement+jwt, whose kid is the workload did:key"
+      - The key is named by its canonical did:key and is of the purpose's kind (Ed25519 for gossip and iroh, P-256 for TDF)
+      - A statement with a lower generation than one already seen is refused, and so is a second key for a generation already seen
+      - The workload key itself is never used as a TLS or TDF key, nor named as its own subordinate
     edge_cases:
       - condition: Statement signed after the workload's quarantine generation
         expected: Refused; quarantine covers every key the workload signs
       - condition: Statement past its validity window
         expected: Refused
+      - condition: Another token the workload key signs, such as its agent card signature
+        expected: Not read as a statement; its typ differs
+      - condition: A statement signed by one workload key in another's name
+        expected: Refused
     refs:
+      - crates/arkavo-key-statement/src/lib.rs
       - docs/swarm-trust-model.md
-    changed: "2026-10-02"
+    changed: "2026-10-18"
 
   - id: INGRESS-007
     name: Minimal announcement with no DID before enrollment

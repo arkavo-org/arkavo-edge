@@ -96,9 +96,8 @@ fn verify_one(signature: &Value, payload: &str) -> Result<String, String> {
         .get("kid")
         .and_then(Value::as_str)
         .ok_or("the protected header names no key")?;
-    let did = did_of(kid)?;
-    let key = P256VerifyingKey::from_did_key(did)
-        .map_err(|e| format!("{kid} is not a P-256 did:key: {e}"))?;
+    let (key, did) = P256VerifyingKey::from_did_key_id(kid)
+        .map_err(|e| format!("{kid} is not a P-256 did:key key id: {e}"))?;
     let value = signature
         .get("signature")
         .and_then(Value::as_str)
@@ -111,20 +110,6 @@ fn verify_one(signature: &Value, payload: &str) -> Result<String, String> {
     key.verify(signing_input(protected, payload).as_bytes(), &value)
         .map_err(|_| format!("the signature by {did} does not match the card"))?;
     Ok(did.to_string())
-}
-
-/// A `did:key` has one key, named `did:key:<multibase>#<multibase>`.
-fn did_of(kid: &str) -> Result<&str, String> {
-    let (did, fragment) = kid
-        .split_once('#')
-        .ok_or_else(|| format!("{kid} is not a did:key key id"))?;
-    let multibase = did
-        .strip_prefix("did:key:")
-        .ok_or_else(|| format!("{kid} is not a did:key key id"))?;
-    if fragment != multibase {
-        return Err(format!("{kid} names a key its DID does not have"));
-    }
-    Ok(did)
 }
 
 fn signing_input(protected: &str, payload: &str) -> String {
