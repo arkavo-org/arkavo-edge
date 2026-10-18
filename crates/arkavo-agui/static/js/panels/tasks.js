@@ -77,6 +77,10 @@ function handleTaskStatusChanged(event) {
         if (event.metrics) {
             AppState.tasks[id].metrics = event.metrics;
         }
+        if (event.assets || event.assetNote !== undefined) {
+            AppState.tasks[id].assets = event.assets || AppState.tasks[id].assets || [];
+            AppState.tasks[id].assetNote = event.assetNote || null;
+        }
         if (event.status === 'completed') {
             AppState.tasks[id].completed_at = event.timestamp;
         }
@@ -99,6 +103,18 @@ function handleTaskStatusChanged(event) {
     if (!updateTaskCardInPlace(id)) {
         renderTasks();
     }
+}
+
+// The task list leaves outputs out; a view that opens a task asks for it.
+function handleTaskDetail(event) {
+    var id = safeTaskKey(event.taskId);
+    var task = id && AppState.tasks[id];
+    if (!task) return;
+    task.result = event.result || task.result;
+    task.assets = event.assets || task.assets || [];
+    task.assetNote = event.assetNote || null;
+    task._detailRequested = false;
+    if (AppState.selectedTaskId === id) renderTaskDetail();
 }
 
 function updateTaskCardInPlace(taskId) {
@@ -125,7 +141,7 @@ function renderTasks() {
     if (!container) return;
     delete container.dataset.detailFingerprint;
     var tasks = sortedTasks();
-    var fingerprint = JSON.stringify(tasks);
+    var fingerprint = taskListFingerprint(tasks);
     if (container.dataset.fingerprint === fingerprint) return;
     container.dataset.fingerprint = fingerprint;
     container.innerHTML = tasks.length ? '<section class="ops-section">' + taskRows(tasks) + '</section>' :

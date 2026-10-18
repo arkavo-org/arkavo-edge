@@ -136,8 +136,9 @@ function renderArp() {
             var agentId = btn.getAttribute('data-agent-id');
             var action = btn.getAttribute('data-action');
             if (!pid || !agentId || !action) return;
-            submitPolicyReview(agentId, pid, action);
-            switchView('decisions');
+            // Show the decision only when the review went out; a review
+            // refused here stays beside the policy it is about.
+            if (submitPolicyReview(agentId, pid, action)) switchView('decisions');
         });
     });
 
@@ -161,8 +162,9 @@ function renderArp() {
             flightRequests[fid] = 'Awaiting receipt';
             setTimeout(function() {
                 if (!flightRequests[fid]) return;
-                flightRequests[fid] = 'Outcome unknown';
-                flightResult = 'Outcome unknown · no receipt for ending tracking of flight ' + fid;
+                // Unlock the button: a late receipt still reports the outcome.
+                delete flightRequests[fid];
+                flightResult = 'Outcome unknown · no receipt for ending tracking of flight ' + fid + '. Check the flight list before trying again.';
                 renderArp();
             }, 15000);
         });

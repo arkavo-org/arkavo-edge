@@ -30,7 +30,7 @@ impl TimeoutHandler {
         tokio::spawn(async move {
             while let Some(batch) = batch_rx.recv().await {
                 if let Err(e) = self.process_batch(batch, &event_tx).await {
-                    eprintln!("Timeout handler error: {e}");
+                    tracing::warn!("Timeout handler error: {e}");
                 }
             }
         })
@@ -86,7 +86,7 @@ async fn send_notification(message: String, severity: &str, event_tx: &mpsc::Sen
     };
 
     if let Err(e) = event_tx.send(event).await {
-        eprintln!("Failed to send timeout notification: {e}");
+        tracing::warn!("Failed to send timeout notification: {e}");
     }
 }
 

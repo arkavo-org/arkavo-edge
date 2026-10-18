@@ -146,9 +146,10 @@ impl AgentConnection {
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
-                    eprintln!(
+                    tracing::warn!(
                         "Failed to connect to agent {}: {}",
-                        self.agent_id, error_msg
+                        self.agent_id,
+                        error_msg
                     );
                     *self.status.write().await = ConnectionStatus::Failed { reason: error_msg };
                 }
@@ -170,9 +171,11 @@ impl AgentConnection {
                 })
                 .await;
 
-            println!(
+            tracing::debug!(
                 "Reconnecting to agent {} in {:?} (attempt {})",
-                self.agent_id, backoff, reconnect_attempts
+                self.agent_id,
+                backoff,
+                reconnect_attempts
             );
 
             sleep(backoff).await;
@@ -188,7 +191,7 @@ impl AgentConnection {
         *self.status.write().await = ConnectionStatus::Connecting;
 
         let url = format!("ws://{}", self.endpoint);
-        println!("Connecting to agent {} at {}", self.agent_id, url);
+        tracing::debug!("Connecting to agent {} at {}", self.agent_id, url);
 
         let client = WsClientBuilder::default()
             .request_timeout(Duration::from_secs(10))
@@ -227,9 +230,11 @@ impl AgentConnection {
                     }
                     Err(e) => {
                         consecutive_failures += 1;
-                        eprintln!(
+                        tracing::warn!(
                             "Agent {} health check failed ({}): {}",
-                            self.agent_id, consecutive_failures, e
+                            self.agent_id,
+                            consecutive_failures,
+                            e
                         );
                         false
                     }
@@ -241,9 +246,10 @@ impl AgentConnection {
 
             if !is_healthy && consecutive_failures >= MAX_FAILURES {
                 // Connection definitively lost
-                eprintln!(
+                tracing::warn!(
                     "Agent {} connection lost after {} failures",
-                    self.agent_id, consecutive_failures
+                    self.agent_id,
+                    consecutive_failures
                 );
 
                 // Clear the dead client so callers don't use a stale connection
@@ -352,7 +358,7 @@ impl AgentConnection {
             return Err(first_err.into());
         }
 
-        eprintln!(
+        tracing::warn!(
             "Agent {} request {method} failed with connection error, reconnecting: {first_err}",
             self.agent_id
         );
@@ -542,7 +548,7 @@ impl AgentConnection {
                                     .await;
                             }
                             Some(Err(e)) => {
-                                eprintln!("Subscription error: {e}");
+                                tracing::warn!("Subscription error: {e}");
                                 break;
                             }
                             None => {

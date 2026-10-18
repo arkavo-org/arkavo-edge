@@ -30,7 +30,9 @@ function addTelemetry(event) {
     }
     AppState.eventCount++;
     renderTelemetry();
-    renderEvidence();
+    // Drawn when its view opens; rebuilding 200 hidden rows per event made
+    // every metrics push and chat token cost a full re-render.
+    if (AppState.activeView === 'telemetry') renderEvidence();
     updateStats();
 }
 

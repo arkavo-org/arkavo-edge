@@ -3,8 +3,6 @@
 function routeEvent(event) {
     var snapshot = { meshStatus: 'swarm', taskList: 'tasks', arpStatusUpdate: 'policy' }[event.type];
     if (snapshot) AppState.observations[snapshot] = Date.now();
-    // Notify showcase mode of incoming events for intelligent view switching
-    if (typeof showcaseOnEvent === 'function') showcaseOnEvent(event);
 
     switch (event.type) {
         case 'meshStatus':
@@ -30,6 +28,9 @@ function routeEvent(event) {
             break;
         case 'taskSubmitted':
             handleTaskSubmitted(event);
+            break;
+        case 'taskDetail':
+            handleTaskDetail(event);
             break;
         case 'taskStatusChanged':
             handleTaskStatusChanged(event);
@@ -122,11 +123,24 @@ function routeEvent(event) {
                 });
             }
     }
-    if (AppState.activeView === 'overview') renderOverview();
-    if (AppState.activeView === 'decisions') renderDecisions();
-    if (AppState.activeView === 'tasks' && AppState.selectedTaskId) renderTaskDetail();
-    if (AppState.activeView === 'agents' && AppState.selectedAgentId) renderAgentDetail();
-    updateComposerAvailability();
+    scheduleViewRender();
+}
+
+var viewRenderScheduled = false;
+
+// Events arrive in bursts (metrics pushes, chat tokens, task polls); the open
+// view is drawn once per frame rather than once per event.
+function scheduleViewRender() {
+    if (viewRenderScheduled) return;
+    viewRenderScheduled = true;
+    requestAnimationFrame(function() {
+        viewRenderScheduled = false;
+        if (AppState.activeView === 'overview') renderOverview();
+        if (AppState.activeView === 'decisions') renderDecisions();
+        if (AppState.activeView === 'tasks' && AppState.selectedTaskId) renderTaskDetail();
+        if (AppState.activeView === 'agents' && AppState.selectedAgentId) renderAgentDetail();
+        updateComposerAvailability();
+    });
 }
 
 function updateStats() {
@@ -230,11 +244,6 @@ function showToast(message, severity) {
 // Bind event listeners (CSP blocks inline onclick)
 document.querySelectorAll('.nav-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { switchView(btn.dataset.view); });
-});
-
-var showcaseBtn = document.getElementById('showcase-toggle');
-if (showcaseBtn) showcaseBtn.addEventListener('click', function() {
-    if (typeof showcaseToggle === 'function') showcaseToggle();
 });
 
 var addTaskBtn = document.getElementById('add-task-btn');

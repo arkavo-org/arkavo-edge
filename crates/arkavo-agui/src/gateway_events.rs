@@ -13,7 +13,7 @@ pub async fn handle_submit_prompt(
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("AG-UI: Received SubmitPrompt: {text}");
+    tracing::debug!("AG-UI: Received SubmitPrompt: {text}");
 
     let (cleaned_text, api_keys) = crate::api_keys::extract_api_keys(&text);
     if !api_keys.is_empty() {
@@ -45,7 +45,7 @@ pub async fn handle_submit_prompt(
         })
         .collect();
 
-    println!(
+    tracing::debug!(
         "AG-UI: Sending Plan event with {} parts to frontend",
         parts.len()
     );
@@ -57,7 +57,7 @@ pub async fn handle_request_status(
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("AG-UI: Received RequestStatus");
+    tracing::debug!("AG-UI: Received RequestStatus");
     send_status_update(connections, tx).await
 }
 
@@ -129,7 +129,7 @@ async fn send_status_update(
 
     tx.send(status_event).await?;
 
-    println!(
+    tracing::debug!(
         "AG-UI: Health Status - Overall: {:?}, Components: {}",
         overall_health,
         health_reports.len()
@@ -176,8 +176,9 @@ pub async fn handle_request_fleet_snapshot(
         if let Some(connection) = connections.get(&agent.id) {
             agent.status = match connection.get_status().await {
                 crate::agent_connection::ConnectionStatus::Connected => "connected",
-                crate::agent_connection::ConnectionStatus::Connecting
-                | crate::agent_connection::ConnectionStatus::Reconnecting { .. } => "reconnecting",
+                // An agent that has never answered is not reconnecting.
+                crate::agent_connection::ConnectionStatus::Connecting => "connecting",
+                crate::agent_connection::ConnectionStatus::Reconnecting { .. } => "reconnecting",
                 crate::agent_connection::ConnectionStatus::Failed { .. } => "disconnected",
             }
             .to_string();
@@ -236,7 +237,7 @@ pub async fn handle_apply_part(
     connections: &Arc<RwLock<HashMap<String, super::gateway::ConnectionInfo>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("AG-UI: Received ApplyPart: {part_id}");
+    tracing::debug!("AG-UI: Received ApplyPart: {part_id}");
 
     let conn_guard = connections.read().await;
     let conn_info = conn_guard.get(session_id);
@@ -295,9 +296,10 @@ pub async fn handle_apply_part(
             }
 
             if chunk.done {
-                println!(
+                tracing::debug!(
                     "AG-UI: Stream complete for part {} after {} chunks",
-                    part_id_clone, chunk_count
+                    part_id_clone,
+                    chunk_count
                 );
                 let applied_event = AgUiEvent::AppliedPart {
                     part_id: part_id_clone.clone(),
@@ -316,7 +318,7 @@ pub async fn handle_request_task_list(
     task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("AG-UI: Received RequestTaskList");
+    tracing::debug!("AG-UI: Received RequestTaskList");
 
     let store = task_store.read().await;
     let tasks: Vec<TaskInfo> = store
@@ -325,7 +327,8 @@ pub async fn handle_request_task_list(
             id: t.id.clone(),
             description: t.description.clone(),
             summary: t.summary.clone(),
-            result: t.result.clone(),
+            has_result: t.result.is_some(),
+            assets: t.assets.iter().map(|stored| stored.asset.clone()).collect(),
             status: t.status.clone(),
             target_agent: t.target_agent.clone(),
             created_at: t.created_at.clone(),
@@ -334,13 +337,33 @@ pub async fn handle_request_task_list(
         })
         .collect();
 
-    println!("AG-UI: Sending TaskList with {} tasks", tasks.len());
+    tracing::debug!("AG-UI: Sending TaskList with {} tasks", tasks.len());
     tx.send(AgUiEvent::TaskList {
         tasks,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
     .await?;
-    println!("AG-UI: Sent TaskList");
+    tracing::debug!("AG-UI: Sent TaskList");
+    Ok(())
+}
+
+/// One task's output for a view that opened the task without it: after a
+/// reload, or for a task another view submitted.
+pub async fn handle_request_task(
+    task_id: &str,
+    task_store: &Arc<RwLock<HashMap<String, super::gateway::TrackedTask>>>,
+    tx: &mpsc::Sender<AgUiEvent>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(task) = task_store.read().await.get(task_id).cloned() else {
+        return Ok(());
+    };
+    tx.send(AgUiEvent::TaskDetail {
+        task_id: task.id,
+        result: task.result,
+        assets: task.assets.into_iter().map(|stored| stored.asset).collect(),
+        asset_note: task.asset_note,
+    })
+    .await?;
     Ok(())
 }
 
@@ -352,8 +375,12 @@ pub async fn handle_request_task_list(
 mod tests {
     use super::*;
 
+    /// AGUI-024: the task list, sent every few seconds to every view, says
+    /// a task has output without carrying it; a view that opens the task
+    /// asks for the whole of it.
+    #[arkavo_test_macros::spec("AGUI-024")]
     #[tokio::test]
-    async fn fresh_browser_snapshot_receives_complete_output_separately_from_summary() {
+    async fn a_fresh_view_gets_the_complete_output_on_request() {
         let output = "Observation — 未確認\n".repeat(200);
         let task = crate::gateway::TrackedTask {
             id: "triage-1".into(),
@@ -368,15 +395,25 @@ mod tests {
             task_category: None,
             first_working_at: None,
             source: "ui".into(),
+            request_id: None,
+            assets: Vec::new(),
+            asset_note: None,
         };
         let store = Arc::new(RwLock::new(HashMap::from([(task.id.clone(), task)])));
         let (tx, mut rx) = mpsc::channel(1);
         handle_request_task_list(&store, &tx).await.unwrap();
-        let event = serde_json::to_value(rx.recv().await.unwrap()).unwrap();
-        assert_eq!(event["tasks"][0]["result"], output);
-        assert_eq!(event["tasks"][0]["summary"], "Triage observations");
+        let list = serde_json::to_value(rx.recv().await.unwrap()).unwrap();
+        assert_eq!(list["tasks"][0]["hasResult"], true);
+        assert!(list["tasks"][0].get("result").is_none(), "{list}");
+        assert_eq!(list["tasks"][0]["summary"], "Triage observations");
+
+        handle_request_task("triage-1", &store, &tx).await.unwrap();
+        let detail = serde_json::to_value(rx.recv().await.unwrap()).unwrap();
+        assert_eq!(detail["type"], "taskDetail");
+        assert_eq!(detail["result"], output);
     }
 
+    #[arkavo_test_macros::spec("AGUI-003")]
     #[tokio::test]
     async fn discovery_does_not_imply_a_connected_agent() {
         let agents = Arc::new(RwLock::new(vec![
@@ -401,6 +438,6 @@ mod tests {
             panic!("expected fleet snapshot");
         };
         assert_eq!(agents[0].status, "disconnected");
-        assert_eq!(agents[1].status, "reconnecting");
+        assert_eq!(agents[1].status, "connecting");
     }
 }

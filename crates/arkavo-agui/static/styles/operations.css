@@ -178,3 +178,16 @@ dialog::backdrop { background: #060c14bb; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Images a task delivered (AGUI-025). Transparent images sit on a
+   checkerboard so their alpha shows. */
+.task-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 440px)); gap: 12px; margin-top: 12px; }
+.task-gallery.compact { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 0; }
+.task-asset { margin: 0; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; background: var(--bg-secondary); }
+.task-asset a { display: block; line-height: 0; }
+.task-asset img { width: 100%; height: auto; aspect-ratio: 1 / 1; object-fit: contain; display: block; }
+.task-asset.has-alpha a { background-color: #e9ecf1; background-image: linear-gradient(45deg, #cfd5de 25%, transparent 25%), linear-gradient(-45deg, #cfd5de 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #cfd5de 75%), linear-gradient(-45deg, transparent 75%, #cfd5de 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+.task-asset figcaption { display: grid; gap: 2px; padding: 8px 10px; line-height: 1.35; }
+.task-asset figcaption span, .task-asset figcaption small { color: var(--text-secondary); }
+.task-asset figcaption small { font-size: 11px; overflow-wrap: anywhere; }
+.asset-note { margin: 8px 0 0; color: var(--text-secondary); }

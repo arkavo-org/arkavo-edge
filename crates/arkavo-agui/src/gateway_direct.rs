@@ -65,6 +65,27 @@ async fn read_card(
     Ok(serde_json::from_slice(&body)?)
 }
 
+/// Connect to `endpoint`, trying again with a growing pause until it
+/// answers. A peer that is down when `arkavo ui` starts, or restarts later,
+/// joins the workspace when it comes up rather than stopping it.
+pub async fn keep_connecting(
+    state: AppState,
+    telemetry_tx: mpsc::Sender<TelemetryEvent>,
+    endpoint: SocketAddr,
+) {
+    let mut pause = std::time::Duration::from_secs(2);
+    loop {
+        match connect(&state, telemetry_tx.clone(), endpoint).await {
+            Ok(()) => return,
+            Err(error) => {
+                tracing::warn!(%endpoint, %error, "agent not reached; trying again in {}s", pause.as_secs());
+            }
+        }
+        tokio::time::sleep(pause).await;
+        pause = (pause * 2).min(std::time::Duration::from_mins(1));
+    }
+}
+
 pub async fn connect(
     state: &AppState,
     telemetry_tx: mpsc::Sender<TelemetryEvent>,
@@ -82,16 +103,21 @@ pub async fn connect(
     ));
     connection.connect().await?;
 
-    // Reserve the name before subscribing; never replace a different peer.
+    // Reserve the name before subscribing. The endpoint the operator named
+    // wins over one discovery found for the same agent, which may be another
+    // interface of the same host; two --agent peers never share a name.
     let mut agents = state.agents.write().await;
-    if let Some(existing) = agents.iter().find(|agent| agent["id"] == id) {
-        if existing["endpoint"] != endpoint.to_string() {
-            return Err(
-                format!("Agent name {id:?} already belongs to a different endpoint").into(),
-            );
+    match agents.iter_mut().find(|agent| agent["id"] == id) {
+        Some(existing) if existing["discovery"] == "direct" => {
+            if existing["endpoint"] != endpoint.to_string() {
+                return Err(format!(
+                    "Agent name {id:?} already belongs to another --agent endpoint"
+                )
+                .into());
+            }
         }
-    } else {
-        agents.push(record);
+        Some(existing) => *existing = record,
+        None => agents.push(record),
     }
     state
         .agent_connections
@@ -136,6 +162,7 @@ pub async fn connect(
 mod tests {
     use super::*;
 
+    #[arkavo_test_macros::spec("AGUI-026")]
     #[test]
     fn direct_endpoint_accepts_ipv4_and_ipv6_without_wildcards_or_urls() {
         for value in ["127.0.0.1:8342", "10.0.0.2:8342", "[::1]:8342"] {
@@ -157,6 +184,7 @@ mod tests {
         }
     }
 
+    #[arkavo_test_macros::spec("AGUI-026")]
     #[test]
     fn card_cannot_redirect_a_direct_peer_or_invent_model_metadata() {
         let endpoint = "127.0.0.1:8342".parse().unwrap();
@@ -167,6 +195,7 @@ mod tests {
         assert!(record.get("model").is_none());
     }
 
+    #[arkavo_test_macros::spec("AGUI-026")]
     #[test]
     fn malformed_card_cannot_register_an_unnamed_peer() {
         let endpoint = "127.0.0.1:8342".parse().unwrap();

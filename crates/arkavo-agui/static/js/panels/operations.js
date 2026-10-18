@@ -24,11 +24,25 @@ function taskRows(tasks) {
         var timestamp = task.created_at || task.createdAt;
         var agent = getTaskAgent(task, task.id);
         var reason = taskBlocker(task);
-        return '<tr data-task-row="' + escapeHtml(task.id) + '"><td>' + routeLink('tasks', { task: task.id }, task.summary || task.description || 'Task', 'task-row-button') + '<span class="row-secondary">' + escapeHtml(task.id.slice(0, 8)) + '</span></td>' +
+        return '<tr data-task-row="' + escapeHtml(task.id) + '"><td>' + routeLink('tasks', { task: task.id }, task.summary || task.description || 'Task', 'task-row-button') + '<span class="row-secondary">' + escapeHtml(shortTaskId(task.id)) + '</span></td>' +
             '<td class="task-row-state">' + uiState(task.status) + (reason ? '<span class="row-secondary">' + escapeHtml(reason) + '</span>' : '') + '</td>' +
             '<td class="optional-column muted">' + escapeHtml(agent || 'Not assigned') + '</td>' +
             '<td class="age" title="' + escapeHtml(timestamp || 'Unknown') + '" data-time="' + escapeHtml(timestamp || '') + '">' + observationAge(timestamp) + '</td></tr>';
     }).join('') + '</tbody></table></div>';
+}
+
+// What decides whether a list is drawn again: never outputs or event logs,
+// which are large and change nothing in a row.
+function taskListFingerprint(tasks) {
+    return JSON.stringify(tasks.map(function(t) {
+        return [t.id, t.status, t.summary, t.description, t.target_agent || t.targetAgent, t.created_at || t.createdAt, (t.assets || []).length];
+    }));
+}
+
+// Tasks an agent reported are keyed agent:task; the short form is the task's
+// own id, not the first letters of the agent's name.
+function shortTaskId(id) {
+    return String(id).split(':').pop().slice(0, 8);
 }
 
 function sortedTasks() {
@@ -70,7 +84,7 @@ function renderOverview() {
     if (!attention.length && !pending.length) html += '<div class="ops-empty"><strong>' + (AppState.observations.tasks && AppState.observations.policy ? 'No exceptions reported' : 'Awaiting observations') + '</strong>Task and policy snapshots determine this queue.</div>';
     html += '</section><section class="ops-section"><div class="ops-section-heading"><h2>Recent tasks ' + uiHelp('task') + '</h2><button data-navigate="tasks">All tasks</button></div>';
     html += tasks.length ? taskRows(tasks.slice(0, 8)) : '<div class="ops-empty"><strong>No tasks reported</strong>Create a task when an agent is available.</div>';
-    html += '</section></div><aside><section class="ops-section"><div class="ops-section-heading"><h2>Observations ' + uiHelp('freshness') + '</h2></div>';
+    html += '</section>' + latestImages(tasks) + '</div><aside><section class="ops-section"><div class="ops-section-heading"><h2>Observations ' + uiHelp('freshness') + '</h2></div>';
     html += '<div class="observation-row"><span>Gateway link</span><span>' + uiState(AppState.connection) + '</span></div>';
     [['swarm', 'Swarm'], ['tasks', 'Tasks'], ['policy', 'Runtime policy']].forEach(function(item) {
         html += '<div class="observation-row"><span>' + item[1] + '<small>Gateway snapshot</small></span><span class="observation-value">' + receivedAge(item[0]) + '</span></div>';
@@ -79,7 +93,7 @@ function renderOverview() {
     html += '<div class="observation-row"><span>Containment receipt</span><span class="muted">Not reported</span></div></section>';
     html += '<section class="ops-section"><div class="ops-section-heading"><h2>Evidence ' + uiHelp('session') + '</h2><button data-navigate="telemetry">Inspect</button></div><div class="observation-row"><span>Session events</span><span>' + AppState.telemetry.length + ' retained</span></div></section></aside></div>';
     // Ignore snapshot receipt times when deciding whether to rebuild interactive rows.
-    var fingerprint = JSON.stringify([tasks, agents, pending, AppState.connection, AppState.telemetry.length, Object.keys(AppState.observations)]);
+    var fingerprint = JSON.stringify([taskListFingerprint(tasks), agents, pending, AppState.connection, AppState.telemetry.length, Object.keys(AppState.observations)]);
     if (container.dataset.fingerprint !== fingerprint) {
         container.innerHTML = html;
         container.dataset.fingerprint = fingerprint;
@@ -114,7 +128,7 @@ function renderDecisions() {
         html += '<dl><dt>Scope</dt><dd>' + routeLink('agents', { agent: item.agent.agentId }, item.agent.agentId) + ' · ' + escapeHtml(p.blastRadius || 'Not reported') + '</dd><dt>Change</dt><dd>' + escapeHtml(p.effectSummary || 'Not reported') + '</dd><dt>Reason</dt><dd>' + escapeHtml(p.rationale || 'Not reported') + '</dd><dt>Evidence</dt><dd>' + (evidence || 'Not reported') + '</dd><dt>Authority</dt><dd>Local gateway review · operator grant not verified</dd></dl>';
         html += '<div class="review-actions">';
         (p.state === 'proposed' ? ['approve', 'reject'] : []).forEach(function(action) {
-            html += '<button type="button" data-review="' + action + '" data-agent="' + escapeHtml(item.agent.agentId) + '" data-proposal="' + escapeHtml(p.id) + '"' + (AppState.connection !== 'connected' || snapshotState('policy') !== 'current' || AppState.reviewPending ? ' disabled' : '') + '>' + uiIcon(action === 'approve' ? 'check' : 'x') + (action === 'approve' ? ' Approve change' : ' Reject change') + '</button>';
+            html += '<button type="button" data-review="' + action + '" data-agent="' + escapeHtml(item.agent.agentId) + '" data-proposal="' + escapeHtml(p.id) + '"' + (AppState.connection !== 'connected' || snapshotState('policy') !== 'current' || (AppState.reviewPending && !AppState.reviewPending.unknown) ? ' disabled' : '') + '>' + uiIcon(action === 'approve' ? 'check' : 'x') + (action === 'approve' ? ' Approve change' : ' Reject change') + '</button>';
         });
         html += routeLink('decisions', { agent: item.agent.agentId, proposal: p.id }, 'Direct link') + routeLink('arp', { agent: item.agent.agentId }, 'Runtime policy');
         html += '</div></details>';
@@ -129,25 +143,30 @@ function renderDecisions() {
 }
 
 function submitPolicyReview(agentId, proposalId, action) {
-    if (AppState.reviewPending) return;
+    if (AppState.reviewPending && !AppState.reviewPending.unknown) return false;
     if (snapshotState('policy') !== 'current') {
         AppState.reviewResult = 'Not sent · current policy snapshot required';
         renderDecisions();
-        return;
+        return false;
     }
-    if (!wsSend({ type: 'requestArpProposalAction', agentId: agentId, proposalId: proposalId, action: action })) {
+    var sent = wsSend({ type: 'requestArpProposalAction', agentId: agentId, proposalId: proposalId, action: action });
+    if (!sent) {
         AppState.reviewResult = 'Not sent · gateway disconnected';
     } else {
         AppState.reviewPending = { agentId: agentId, proposalId: proposalId };
         AppState.reviewResult = 'Sending · awaiting gateway receipt';
         setTimeout(function() {
             if (AppState.reviewPending && AppState.reviewPending.proposalId === proposalId) {
+                // Unlock the buttons, but keep the request: a late receipt
+                // still reports what the gateway did.
+                AppState.reviewPending = Object.assign({}, AppState.reviewPending, { unknown: true });
                 AppState.reviewResult = 'Outcome unknown · receipt not received. Inspect runtime policy before another action.';
                 renderDecisions();
             }
         }, 15000);
     }
     renderDecisions();
+    return sent;
 }
 
 function handlePolicyReviewResult(event) {

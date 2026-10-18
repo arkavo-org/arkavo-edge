@@ -41,7 +41,7 @@ pub fn set_api_keys(keys: &HashMap<String, String>) {
     for (key, value) in keys {
         let count = map.len();
         map.insert(key.clone(), value.clone());
-        eprintln!("AG-UI: API key configured ({} total)", count + 1);
+        tracing::debug!("AG-UI: API key configured ({} total)", count + 1);
     }
 }
 

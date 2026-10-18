@@ -32,6 +32,7 @@ pub async fn websocket_handler(
             state.context_topology_cache,
             state.arp_handler,
             state.swarm_flights,
+            state.asset_fetcher,
         )
     })
 }
@@ -54,6 +55,7 @@ async fn handle_websocket(
     context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     arp_handler: Arc<ArpHandler>,
     swarm_flights: Arc<crate::swarm_flight_registry::SwarmFlightRegistry>,
+    asset_fetcher: Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -73,7 +75,7 @@ async fn handle_websocket(
         }
     });
 
-    println!("AG-UI: New WebSocket connection: {session_tag}...");
+    tracing::debug!("AG-UI: New WebSocket connection: {session_tag}...");
 
     {
         let conn_info = super::gateway::ConnectionInfo {
@@ -91,7 +93,7 @@ async fn handle_websocket(
 
     let prompt_guard = initial_prompt.read().await;
     if let Some(prompt_text) = prompt_guard.as_ref() {
-        println!("AG-UI: Auto-submitting initial prompt: {prompt_text}");
+        tracing::debug!("AG-UI: Auto-submitting initial prompt: {prompt_text}");
         let submit_event = AgUiEvent::SubmitPrompt {
             text: prompt_text.clone(),
         };
@@ -113,11 +115,12 @@ async fn handle_websocket(
             &context_topology_cache,
             &arp_handler,
             &swarm_flights,
+            &asset_fetcher,
             &tx,
         )
         .await
         {
-            eprintln!("AG-UI: Error auto-submitting initial prompt: {e}");
+            tracing::warn!("AG-UI: Error auto-submitting initial prompt: {e}");
         }
     }
 
@@ -143,15 +146,16 @@ async fn handle_websocket(
                         &context_topology_cache,
                         &arp_handler,
                         &swarm_flights,
+                        &asset_fetcher,
                         &tx,
                     )
                     .await
                     {
-                        eprintln!("AG-UI: Error handling event: {e}");
+                        tracing::warn!("AG-UI: Error handling event: {e}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("AG-UI: Failed to parse event: {e}");
+                    tracing::warn!("AG-UI: Failed to parse event: {e}");
                     let _ = tx
                         .send(AgUiEvent::Error {
                             code: "INVALID_EVENT".to_string(),
@@ -162,7 +166,7 @@ async fn handle_websocket(
             },
             Some(Ok(Message::Close(_))) | None => break,
             Some(Err(e)) => {
-                eprintln!("AG-UI: WebSocket error: {e}");
+                tracing::warn!("AG-UI: WebSocket error: {e}");
                 break;
             }
             _ => {}
@@ -175,7 +179,7 @@ async fn handle_websocket(
         }
     }
     forward_task.abort();
-    println!("AG-UI: WebSocket connection closed: {session_tag}...");
+    tracing::debug!("AG-UI: WebSocket connection closed: {session_tag}...");
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -196,9 +200,10 @@ async fn dispatch_event(
     context_topology_cache: &Arc<RwLock<HashMap<String, serde_json::Value>>>,
     arp_handler: &Arc<ArpHandler>,
     swarm_flights: &Arc<crate::swarm_flight_registry::SwarmFlightRegistry>,
+    asset_fetcher: &Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("AG-UI: Received {:?}", std::mem::discriminant(&event));
+    tracing::debug!("AG-UI: Received {:?}", std::mem::discriminant(&event));
     match event {
         AgUiEvent::Connect {
             agent_id,
@@ -209,7 +214,7 @@ async fn dispatch_event(
         }
         AgUiEvent::ChatOpen { ref agent_id } => {
             let ac = agent_connections.read().await;
-            println!(
+            tracing::debug!(
                 "AG-UI: ChatOpen for agent: {agent_id} (agent_connections has {} entries: {:?})",
                 ac.len(),
                 ac.keys().collect::<Vec<_>>()
@@ -229,7 +234,7 @@ async fn dispatch_event(
             if let Some(c) = ac.get(&agent_id)
                 && let Err(e) = c.unsubscribe_chat(&agent_id).await
             {
-                eprintln!("Failed to unsubscribe from chat: {e}");
+                tracing::warn!("Failed to unsubscribe from chat: {e}");
             }
         }
         AgUiEvent::UserMessage {
@@ -237,7 +242,7 @@ async fn dispatch_event(
             content,
             attachments: _,
         } => {
-            println!(
+            tracing::debug!(
                 "AG-UI: UserMessage for agent: {agent_id}, content length: {}",
                 content.len()
             );
@@ -318,6 +323,9 @@ async fn dispatch_event(
         AgUiEvent::RequestTaskList => {
             gateway_events::handle_request_task_list(task_store, tx).await?;
         }
+        AgUiEvent::RequestTask { task_id } => {
+            gateway_events::handle_request_task(&task_id, task_store, tx).await?;
+        }
         AgUiEvent::SubmitTask {
             description,
             request_id,
@@ -335,7 +343,7 @@ async fn dispatch_event(
                 routing_history,
                 lesson_tx,
                 lesson_store,
-                tx,
+                asset_fetcher.clone(),
             )
             .await?;
         }
@@ -414,7 +422,9 @@ async fn dispatch_event(
                     error: Some(format!("invalid flight_id: {e}")),
                 },
             };
-            tx.send(response).await?;
+            // Every open view hears it, so one that reconnected after asking
+            // is not left waiting for a receipt that went to its old socket.
+            crate::gateway_routing::broadcast_event(&response, connections).await;
 
             // Also push a fresh ArpStatusUpdate so any panel that has the
             // stopped flight selected drops it on the same render cycle
@@ -480,7 +490,7 @@ async fn dispatch_event(
             .await?;
         }
         _ => {
-            println!("AG-UI: Received event: {event:?}");
+            tracing::debug!("AG-UI: Received event: {event:?}");
         }
     }
     Ok(())
@@ -494,7 +504,7 @@ async fn handle_connect(
     agents: &Arc<RwLock<Vec<serde_json::Value>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("AG-UI: Connect request for agent {agent_id} (version {agui_version})");
+    tracing::debug!("AG-UI: Connect request for agent {agent_id} (version {agui_version})");
     let agents_list = agents.read().await;
     let found = agents_list
         .iter()

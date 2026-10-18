@@ -52,13 +52,13 @@ impl CommandHealthCollector {
 
                 let batch = self.collect_batch().await;
 
-                println!(
+                tracing::debug!(
                     "[HEARTBEAT] CommandHealthCollector: {} commands in batch",
                     batch.commands.len()
                 );
 
                 if !batch.commands.is_empty() {
-                    println!(
+                    tracing::debug!(
                         "[HEARTBEAT] Stuck commands detected: {:?}",
                         batch
                             .commands
@@ -67,10 +67,10 @@ impl CommandHealthCollector {
                             .collect::<Vec<_>>()
                     );
                     if let Err(e) = llm_tx.send(batch).await {
-                        eprintln!("Failed to send health batch: {e}");
+                        tracing::warn!("Failed to send health batch: {e}");
                     }
                 } else {
-                    println!("[HEARTBEAT] No stuck commands");
+                    tracing::debug!("[HEARTBEAT] No stuck commands");
                 }
             }
         });
@@ -84,14 +84,16 @@ impl CommandHealthCollector {
         let registry = HealthRegistry::global();
         let reports = registry.check_all().await;
 
-        println!(
+        tracing::debug!(
             "[HEARTBEAT] Health reports from registry: {} total",
             reports.len()
         );
         for report in &reports {
-            println!(
+            tracing::debug!(
                 "[HEARTBEAT]   - {}: {} ({:?})",
-                report.component, report.message, report.status
+                report.component,
+                report.message,
+                report.status
             );
         }
 
@@ -101,9 +103,9 @@ impl CommandHealthCollector {
                 if report.component == "cef" {
                     let parsed = Self::parse_cef_health(&report.message, &report.component);
                     if parsed.is_some() {
-                        println!("[HEARTBEAT] Parsed CEF health data: {:?}", parsed);
+                        tracing::debug!("[HEARTBEAT] Parsed CEF health data: {:?}", parsed);
                     } else {
-                        println!(
+                        tracing::debug!(
                             "[HEARTBEAT] Failed to parse CEF message: '{}'",
                             report.message
                         );

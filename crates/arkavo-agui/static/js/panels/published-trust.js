@@ -93,6 +93,12 @@ function dimByName(score, name) {
 // of its own output. Reuses budget.js's renderStatCard and the shared
 // `section-title` / `cost-table` / `stats-grid` / `budget-alert` classes
 // so the trust section visually matches the rest of the panel.
+// The page's CSP refuses inline handlers, so the selector's onchange never
+// ran; one listener on the document serves every rendering of it.
+document.addEventListener('change', function(e) {
+    if (e.target && e.target.id === 'published-trust-agent-select') selectPublishedTrustAgent(e.target.value);
+});
+
 function renderPublishedTrustSection() {
     var html = '<div class="section-title">Published Trust (MCP-T)</div>';
 
@@ -113,8 +119,7 @@ function renderPublishedTrustSection() {
         var defaultAttr = selected ? '' : ' selected';
         html += '<div class="trust-agent-selector">' +
             '<label>View as agent: ' +
-            '<select id="published-trust-agent-select" ' +
-            'onchange="selectPublishedTrustAgent(this.value)">' +
+            '<select id="published-trust-agent-select">' +
             '<option value=""' + defaultAttr + '>(first connected)</option>' +
             options +
             '</select></label></div>';

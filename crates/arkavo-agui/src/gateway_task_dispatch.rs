@@ -22,8 +22,23 @@ pub async fn handle_submit_task(
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     lesson_store: &Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
-    tx: &mpsc::Sender<AgUiEvent>,
+    asset_fetcher: Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // A browser that lost its receipt (a dropped socket, a slow gateway)
+    // sends the same request again. It gets the first task's receipt back
+    // rather than a second task doing the same work.
+    if let Some(request) = request_id.as_deref() {
+        let existing = task_store
+            .read()
+            .await
+            .values()
+            .find(|task| task.request_id.as_deref() == Some(request))
+            .cloned();
+        if let Some(task) = existing {
+            broadcast_event(&receipt(&task), connections).await;
+            return Ok(());
+        }
+    }
     let task_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -57,7 +72,7 @@ pub async fn handle_submit_task(
     };
 
     let agent_name = selected_agent.as_deref().unwrap_or("unassigned");
-    println!(
+    tracing::debug!(
         "AG-UI: Task {} targeting agent: {} (exploration={})",
         short_id(&task_id),
         agent_name,
@@ -115,20 +130,18 @@ pub async fn handle_submit_task(
         first_working_at: None,
         source: "ui".to_string(),
         summary: None,
-    };
-    task_store.write().await.insert(task_id.clone(), tracked);
-
-    // Notify UI of submission
-    tx.send(AgUiEvent::TaskSubmitted {
         request_id,
-        task_id: task_id.clone(),
-        description: Some(description.clone()),
-        summary: None,
-        status: "submitted".to_string(),
-        source: Some("ui".to_string()),
-        timestamp: now.clone(),
-    })
-    .await?;
+        assets: Vec::new(),
+        asset_note: None,
+    };
+    // Every open view hears the receipt, so one that reconnected after
+    // sending still learns its task was accepted.
+    broadcast_event(&receipt(&tracked), connections).await;
+    {
+        let mut store = task_store.write().await;
+        store.insert(task_id.clone(), tracked);
+        super::gateway::prune_tasks(&mut store);
+    }
 
     // Forward task to agent via A2A message/send
     if let Some(ref agent_id) = selected_agent {
@@ -177,6 +190,7 @@ pub async fn handle_submit_task(
                     &learning_clone,
                     &history_clone,
                     &lesson_tx_clone,
+                    asset_fetcher.as_ref(),
                 )
                 .await;
             });
@@ -184,6 +198,19 @@ pub async fn handle_submit_task(
     }
 
     Ok(())
+}
+
+/// The receipt for an accepted submission.
+fn receipt(task: &super::gateway::TrackedTask) -> AgUiEvent {
+    AgUiEvent::TaskSubmitted {
+        request_id: task.request_id.clone(),
+        task_id: task.id.clone(),
+        description: Some(task.description.clone()),
+        summary: task.summary.clone(),
+        status: task.status.clone(),
+        source: Some(task.source.clone()),
+        timestamp: task.created_at.clone(),
+    }
 }
 
 async fn augment_with_lessons(
@@ -222,7 +249,7 @@ async fn augment_with_lessons(
             .join("\n"),
         description
     );
-    println!(
+    tracing::debug!(
         "AG-UI: Injecting {} chars of behavior guidance ({} lessons)",
         guidance.len() - description.len(),
         unique.len()
@@ -242,6 +269,7 @@ async fn poll_agent_task(
     learning_module: &Arc<RwLock<LearningModule>>,
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
+    asset_fetcher: Option<&Arc<dyn crate::gateway_assets::AssetFetcher>>,
 ) {
     // Submit task to agent — returns immediately with task_id
     let agent_task_id = match conn.send_request("message/send", request, task_id).await {
@@ -251,7 +279,7 @@ async fn poll_agent_task(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            println!(
+            tracing::debug!(
                 "AG-UI: Task {} submitted to {}, agent_task_id={}",
                 short_id(task_id),
                 agent_id,
@@ -260,7 +288,7 @@ async fn poll_agent_task(
             tid
         }
         Err(e) => {
-            eprintln!(
+            tracing::warn!(
                 "AG-UI: Task {} submit failed on {}: {}",
                 short_id(task_id),
                 agent_id,
@@ -315,17 +343,10 @@ async fn poll_agent_task(
 
                 match status {
                     "Completed" | "completed" => {
-                        let result_text = poll_response
-                            .get("result")
-                            .and_then(|r| r.get("parts"))
-                            .and_then(|p| p.as_array())
-                            .and_then(|arr| arr.first())
-                            .and_then(|p| p.get("content"))
-                            .and_then(|c| c.as_str())
-                            .unwrap_or("Task completed")
-                            .to_string();
+                        let parts = answer_parts(&poll_response);
+                        let result_text = answer_text(&parts);
 
-                        println!(
+                        tracing::debug!(
                             "AG-UI: Task {} completed by {} ({} chars)",
                             short_id(task_id),
                             agent_id,
@@ -354,6 +375,14 @@ async fn poll_agent_task(
                             lesson_tx,
                         )
                         .await;
+                        crate::gateway_assets::deliver(
+                            asset_fetcher,
+                            task_id,
+                            &parts,
+                            task_store,
+                            connections,
+                        )
+                        .await;
                         return;
                     }
                     "Failed" | "failed" => {
@@ -364,7 +393,7 @@ async fn poll_agent_task(
                             .unwrap_or("Task failed")
                             .to_string();
 
-                        eprintln!(
+                        tracing::warn!(
                             "AG-UI: Task {} failed on {}: {}",
                             short_id(task_id),
                             agent_id,
@@ -415,6 +444,8 @@ async fn poll_agent_task(
                             progress: Some(progress),
                             result: None,
                             metrics: None,
+                            assets: Vec::new(),
+                            asset_note: None,
                             timestamp: chrono::Utc::now().to_rfc3339(),
                         };
                         broadcast_event(&event, connections).await;
@@ -424,7 +455,7 @@ async fn poll_agent_task(
             Err(e) => {
                 // A poll the agent turned away, its rate limiter included,
                 // is no change: the task goes on.
-                eprintln!("AG-UI: Task {} poll error: {}", short_id(task_id), e);
+                tracing::warn!("AG-UI: Task {} poll error: {}", short_id(task_id), e);
                 if let Err(quiet) = watch.unanswered(&agent_task_id) {
                     break quiet;
                 }
@@ -432,7 +463,7 @@ async fn poll_agent_task(
         }
     };
 
-    eprintln!("AG-UI: Task {}: {quiet}", short_id(task_id));
+    tracing::warn!("AG-UI: Task {}: {quiet}", short_id(task_id));
     update_task_status(
         task_store,
         task_id,
@@ -445,6 +476,33 @@ async fn poll_agent_task(
         lesson_tx,
     )
     .await;
+}
+
+/// The parts of a completed task's answer, as the agent sent them.
+fn answer_parts(report: &serde_json::Value) -> Vec<arkavo_protocol::types::MessagePart> {
+    report
+        .get("result")
+        .and_then(|result| result.get("parts"))
+        .and_then(|parts| serde_json::from_value(parts.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// The text of an answer, one line per text part, as the CLI prints it: the
+/// first part alone dropped the rest of a multi-part answer.
+fn answer_text(parts: &[arkavo_protocol::types::MessagePart]) -> String {
+    let text = parts
+        .iter()
+        .filter_map(|part| match part {
+            arkavo_protocol::types::MessagePart::Text { content } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.trim().is_empty() {
+        "Task completed".to_string()
+    } else {
+        text
+    }
 }
 
 /// Note a poll that found the task still going: `Err` once it has
@@ -495,6 +553,7 @@ async fn select_target_agent(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use std::time::Duration;
 
@@ -502,6 +561,59 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    async fn submit(state: &crate::gateway::AppState, request_id: &str) {
+        handle_submit_task(
+            "Make a gold coin sprite".into(),
+            Some(request_id.into()),
+            None,
+            &state.agents,
+            &state.agent_connections,
+            &state.task_store,
+            &state.connections,
+            &state.learning_module,
+            &state.routing_history,
+            &state.lesson_tx,
+            &state.lesson_store,
+            None,
+        )
+        .await
+        .expect("submitted");
+    }
+
+    /// Regression (AGUI-023): a browser that lost its receipt and sent the
+    /// draft again opened a second task, and the receipt went only to the
+    /// socket that sent it, so a view that reconnected never heard it. The
+    /// same request is one task, and every view hears its receipt.
+    #[spec("AGUI-023")]
+    #[tokio::test]
+    async fn a_resent_request_is_one_task_with_its_receipt_to_every_view() {
+        let state = crate::test_support::app_state();
+        let (tx, mut rx) = mpsc::channel(8);
+        state.connections.write().await.insert(
+            "reconnected-view".into(),
+            crate::gateway::ConnectionInfo {
+                _ws_tx: tx,
+                _agent_id: None,
+                subscriptions: Vec::new(),
+                current_plan: None,
+                current_prompt: None,
+            },
+        );
+
+        submit(&state, "draft-1").await;
+        submit(&state, "draft-1").await;
+
+        assert_eq!(state.task_store.read().await.len(), 1);
+        let first = serde_json::to_value(rx.recv().await.unwrap()).unwrap();
+        let second = serde_json::to_value(rx.recv().await.unwrap()).unwrap();
+        assert_eq!(first["type"], "taskSubmitted");
+        assert_eq!(first["requestId"], "draft-1");
+        assert_eq!(
+            second["taskId"], first["taskId"],
+            "the resend gets the same task"
+        );
+    }
 
     fn working(step: u32) -> serde_json::Value {
         json!({

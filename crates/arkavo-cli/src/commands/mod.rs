@@ -31,3 +31,5 @@ pub mod terminal_ui;
 #[cfg(all(target_os = "macos", feature = "mcp-macos"))]
 pub mod test;
 pub mod ui;
+#[cfg(feature = "web-ui")]
+mod ui_assets;

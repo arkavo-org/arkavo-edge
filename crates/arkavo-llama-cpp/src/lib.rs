@@ -130,11 +130,28 @@ fn is_suppressed_log_line(text: &str) -> bool {
         "control-looking token",
         "is not in special_eog_ids",
         "special_eog_ids contains",
+        "is a normal token here, removing it from EOG list",
         // llama.cpp rewriting a model's tokenizer metadata at load (e.g. forcing
         // add_bos_token for Gemma 4) — a model-file quirk it auto-corrects.
         "override 'tokenizer",
     ];
     BENIGN_SUBSTRINGS.iter().any(|p| text.contains(p))
+}
+
+/// Whether the last message that was not a continuation was shown, which
+/// its continuations follow.
+static LAST_SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// Whether a llama.cpp log message is shown: any in debug, otherwise
+/// warnings and errors that are not benign. A continuation
+/// (`GGML_LOG_LEVEL_CONT`) is shown when the message it continues was:
+/// judged by its own level, which is numerically above an error, the tail
+/// of every info message reached the terminal as stray text and blank lines.
+fn shows_log(level: ffi::ggml_log_level, text: &str, debug: bool, continues_shown: bool) -> bool {
+    if level == ffi::ggml_log_level_GGML_LOG_LEVEL_CONT {
+        return continues_shown;
+    }
+    debug || (level >= ffi::ggml_log_level_GGML_LOG_LEVEL_WARN && !is_suppressed_log_line(text))
 }
 
 // Custom log callback that filters based on log level and our debug flag
@@ -143,24 +160,25 @@ extern "C" fn llama_log_callback_filtered(
     text: *const c_char,
     _user_data: *mut c_void,
 ) {
-    // Only show logs if:
-    // - Debug is enabled AND it's any level, OR
-    // - It's a warning/error (always show these)
-    let is_warning_or_error = level >= ffi::ggml_log_level_GGML_LOG_LEVEL_WARN;
+    if text.is_null() {
+        return;
+    }
+    // SAFETY: llama.cpp passes a valid null-terminated string for the duration of the call
+    let Ok(line) = (unsafe { std::ffi::CStr::from_ptr(text) }).to_str() else {
+        return;
+    };
     let debug_enabled = LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed);
-
-    if (is_warning_or_error || debug_enabled) && !text.is_null() {
-        // SAFETY: CString is valid null-terminated UTF-8; pointer is valid for the duration of the call
-        unsafe {
-            let c_str = std::ffi::CStr::from_ptr(text);
-            if let Ok(str_slice) = c_str.to_str() {
-                // Hide benign/unfixable llama.cpp chatter unless debug logging is on.
-                if !debug_enabled && is_suppressed_log_line(str_slice) {
-                    return;
-                }
-                eprint!("{}", str_slice);
-            }
-        }
+    let shown = shows_log(
+        level,
+        line,
+        debug_enabled,
+        LAST_SHOWN.load(Ordering::Relaxed),
+    );
+    if level != ffi::ggml_log_level_GGML_LOG_LEVEL_CONT {
+        LAST_SHOWN.store(shown, Ordering::Relaxed);
+    }
+    if shown {
+        eprint!("{line}");
     }
 }
 
@@ -2162,6 +2180,43 @@ mod tests {
         assert!(is_suppressed_log_line(
             "load: override 'tokenizer.ggml.add_bos_token' to 'true' for Gemma4\n"
         ));
+    }
+
+    /// Regression: `arkavo ui` printed blank lines and "is a normal token
+    /// here" at every model load. A continuation took its own level, above an
+    /// error, so the tail of each info message was shown.
+    #[test]
+    fn continuations_follow_the_message_they_continue() {
+        let (info, warn, cont) = (
+            ffi::ggml_log_level_GGML_LOG_LEVEL_INFO,
+            ffi::ggml_log_level_GGML_LOG_LEVEL_WARN,
+            ffi::ggml_log_level_GGML_LOG_LEVEL_CONT,
+        );
+        assert!(!shows_log(
+            info,
+            "llama_model_loader: loaded meta data",
+            false,
+            false
+        ));
+        assert!(
+            !shows_log(cont, "\n", false, false),
+            "an info message's tail is hidden"
+        );
+        assert!(
+            shows_log(cont, " more detail\n", false, true),
+            "a warning's tail is shown"
+        );
+        assert!(!shows_log(
+            warn,
+            "load: '</s>' is a normal token here, removing it from EOG list\n",
+            false,
+            false
+        ));
+        assert!(shows_log(warn, "error loading model\n", false, false));
+        assert!(
+            shows_log(info, "anything\n", true, false),
+            "debug shows everything"
+        );
     }
 
     #[test]

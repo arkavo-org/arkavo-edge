@@ -19,12 +19,12 @@ pub mod mdns {
         security_handler: Arc<RwLock<crate::security_handler::SecurityHandler>>,
         context_topology_cache: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("AG-UI: mDNS daemon starting...");
+        tracing::debug!("AG-UI: mDNS daemon starting...");
 
         let mdns = ServiceDaemon::new()?;
         let service_type = "_a2a._tcp.local.";
         let receiver = mdns.browse(service_type)?;
-        println!("AG-UI: mDNS browsing for {service_type}");
+        tracing::debug!("AG-UI: mDNS browsing for {service_type}");
 
         // Channels bridge blocking mDNS recv thread → async handlers
         let (info_tx, mut info_rx) = mpsc::channel::<ServiceInfo>(16);
@@ -40,23 +40,23 @@ pub mod mdns {
                 if let Ok(event) = receiver.recv_timeout(Duration::from_secs(5)) {
                     match event {
                         ServiceEvent::ServiceResolved(info) => {
-                            println!("AG-UI: mDNS ServiceResolved: {}", info.get_fullname());
+                            tracing::debug!("AG-UI: mDNS ServiceResolved: {}", info.get_fullname());
                             if info_tx.blocking_send(info).is_err() {
                                 break;
                             }
                         }
                         ServiceEvent::ServiceFound(_, fullname) => {
-                            println!("AG-UI: mDNS ServiceFound: {fullname}");
+                            tracing::debug!("AG-UI: mDNS ServiceFound: {fullname}");
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
-                            println!("AG-UI: mDNS ServiceRemoved: {fullname}");
+                            tracing::debug!("AG-UI: mDNS ServiceRemoved: {fullname}");
                             let _ = remove_tx.blocking_send(fullname);
                         }
                         ServiceEvent::SearchStarted(stype) => {
-                            println!("AG-UI: mDNS SearchStarted: {stype}");
+                            tracing::debug!("AG-UI: mDNS SearchStarted: {stype}");
                         }
                         ServiceEvent::SearchStopped(stype) => {
-                            println!("AG-UI: mDNS SearchStopped: {stype}");
+                            tracing::debug!("AG-UI: mDNS SearchStopped: {stype}");
                         }
                         _ => {}
                     }
@@ -110,15 +110,18 @@ pub mod mdns {
 
         let mut agents_list = agents.write().await;
         let before = agents_list.len();
+        // A peer the operator named with --agent stays: a goodbye on the LAN,
+        // which any host can send, does not remove it.
         agents_list.retain(|a| {
             a.get("id")
                 .and_then(|v| v.as_str())
                 .is_none_or(|id| id != agent_id)
+                || a["discovery"] == "direct"
         });
         let removed = before - agents_list.len();
 
         if removed > 0 {
-            println!("AG-UI: Removed agent from list: {agent_id}");
+            tracing::debug!("AG-UI: Removed agent from list: {agent_id}");
             let mut connections = agent_connections.write().await;
             connections.remove(&agent_id);
         }
@@ -146,9 +149,11 @@ pub mod mdns {
             .map(|addr| addr.to_string())
             .unwrap_or_else(|| "127.0.0.1".to_string());
 
-        println!(
+        tracing::debug!(
             "AG-UI: Discovered service: {} at {}:{}",
-            service_name, host, port
+            service_name,
+            host,
+            port
         );
 
         // Extract agent information from properties
@@ -178,7 +183,7 @@ pub mod mdns {
             if let Some(ip_prop) = properties.get("ip") {
                 ip_prop.val_str().to_string()
             } else {
-                println!(
+                tracing::debug!(
                     "AG-UI: Service advertised 0.0.0.0 with no IP in TXT records, using 127.0.0.1"
                 );
                 "127.0.0.1".to_string()
@@ -204,7 +209,7 @@ pub mod mdns {
             .any(|a| a.get("id") == agent_info.get("id"));
 
         if !exists {
-            println!("AG-UI: Adding new agent to list: {}", agent_id);
+            tracing::debug!("AG-UI: Adding new agent to list: {}", agent_id);
 
             // Auto-connect to discovered agent
             let agent_id_clone = agent_id.clone();
@@ -212,9 +217,10 @@ pub mod mdns {
             let telemetry_tx_clone = telemetry_tx.clone();
             let agent_connections_clone = agent_connections.clone();
             tokio::spawn(async move {
-                println!(
+                tracing::debug!(
                     "AG-UI: Auto-connecting to agent: {} at {}",
-                    agent_id_clone, endpoint
+                    agent_id_clone,
+                    endpoint
                 );
 
                 let connection = Arc::new(crate::agent_connection::AgentConnection::new(
@@ -224,12 +230,13 @@ pub mod mdns {
                 ));
 
                 if let Err(e) = connection.connect().await {
-                    println!(
+                    tracing::debug!(
                         "AG-UI: Failed to connect to agent {}: {}",
-                        agent_id_clone, e
+                        agent_id_clone,
+                        e
                     );
                 } else {
-                    println!("AG-UI: Connected to agent: {}", agent_id_clone);
+                    tracing::debug!("AG-UI: Connected to agent: {}", agent_id_clone);
 
                     // Subscribe to push-based metrics stream
                     let (metrics_tx, mut metrics_rx) = mpsc::channel::<crate::types::AgUiEvent>(32);
@@ -237,12 +244,16 @@ pub mod mdns {
                         .subscribe_metrics(metrics_tx, security_handler.clone())
                         .await
                     {
-                        println!(
+                        tracing::debug!(
                             "AG-UI: Metrics subscription failed for {}: {} (falling back to polling)",
-                            agent_id_clone, e
+                            agent_id_clone,
+                            e
                         );
                     } else {
-                        println!("AG-UI: Metrics subscription active for {}", agent_id_clone);
+                        tracing::debug!(
+                            "AG-UI: Metrics subscription active for {}",
+                            agent_id_clone
+                        );
                         // Forward metrics events to all browser sessions
                         let browser_conns = browser_connections.clone();
                         let topo_cache = context_topology_cache.clone();
@@ -279,8 +290,10 @@ pub mod mdns {
         } else if let Some(existing) = agents_list
             .iter_mut()
             .find(|a| a.get("id") == agent_info.get("id"))
+            && existing["discovery"] != "direct"
         {
-            // Update existing agent with fresh mDNS data (e.g. model change)
+            // Update existing agent with fresh mDNS data (e.g. model change).
+            // A peer named with --agent keeps the endpoint the operator gave.
             *existing = agent_info;
         }
     }
@@ -404,6 +417,37 @@ pub mod mdns {
                 list[0].get("model").and_then(|v| v.as_str()),
                 Some("ministral-8b")
             );
+        }
+
+        /// Regression (AGUI-026): a peer named with --agent was replaced by
+        /// what mDNS found for the same name, and removed by a LAN goodbye
+        /// any host can send.
+        #[tokio::test]
+        #[spec("AGUI-026")]
+        async fn a_peer_named_with_agent_survives_mdns() {
+            let (agents, connections, telemetry_tx, browsers, security, topo_cache) =
+                test_fixtures();
+            agents.write().await.push(serde_json::json!({
+                "id": "reviewer", "endpoint": "10.0.0.7:7600", "discovery": "direct"
+            }));
+
+            let mut properties = HashMap::new();
+            properties.insert("agent_id".to_string(), "reviewer".to_string());
+            let info = test_service_info("arkavo-agent-reviewer", properties);
+            handle_service_discovered(
+                info,
+                agents.clone(),
+                connections.clone(),
+                telemetry_tx,
+                browsers,
+                security,
+                topo_cache,
+            )
+            .await;
+            assert_eq!(agents.read().await[0]["endpoint"], "10.0.0.7:7600");
+
+            handle_service_removed("reviewer._a2a._tcp.local.", &agents, &connections).await;
+            assert_eq!(agents.read().await.len(), 1, "a goodbye does not remove it");
         }
     }
 }

@@ -347,3 +347,28 @@ scenarios:
       - crates/arkavo-cli/src/commands/model_image.rs
       - crates/arkavo-cli/src/commands/model.rs:213-221
     changed: "2026-10-11"
+
+  - id: CLI-021
+    name: arkavo ui opens the Operations workspace in the default browser
+    criticality: medium
+    given:
+      - arkavo ui with no options
+    when: The workspace is listening
+    then:
+      - "It serves the Arkavo Operations workspace and opens it in the default browser (open on macOS, xdg-open on Linux, start on Windows)"
+      - "The terminal shows where the workspace is and how to stop it, and nothing else; gateway activity goes to the log, which RUST_LOG turns up"
+      - "llama.cpp's continuation lines follow the level of the message they continue, so no stray text or blank lines reach the terminal"
+    edge_cases:
+      - condition: "--no-open, or no browser opener on the host"
+        expected: "It prints the address only"
+      - condition: "The port is taken"
+        expected: "It exits with the bind error before printing an address"
+      - condition: "--native in a build with the cef-ui feature"
+        expected: "The native CEF window instead of the browser; without the feature, an error naming it"
+      - condition: "A bind beyond loopback (ARKAVO_AGUI_BIND)"
+        expected: "It still warns that the workspace has no authentication and is reachable from the network"
+    refs:
+      - crates/arkavo-cli/src/commands/ui.rs
+      - crates/arkavo-agui/src/gateway.rs
+      - crates/arkavo-llama-cpp/src/lib.rs
+    changed: "2026-10-18"

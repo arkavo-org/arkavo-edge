@@ -39,7 +39,7 @@ impl DebugHandler {
                 let storage = storage_clone.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_event_batch(storage, events).await {
-                        eprintln!("Failed to store event batch: {e}");
+                        tracing::warn!("Failed to store event batch: {e}");
                     }
                 });
             })

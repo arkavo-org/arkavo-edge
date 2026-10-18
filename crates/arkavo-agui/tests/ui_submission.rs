@@ -1,6 +1,7 @@
 use arkavo_agui::AgUiEvent;
 use serde_json::json;
 
+#[arkavo_test_macros::spec("AGUI-023")]
 #[test]
 fn legacy_task_submission_remains_compatible() {
     let event: AgUiEvent = serde_json::from_value(json!({
@@ -16,6 +17,7 @@ fn legacy_task_submission_remains_compatible() {
     ));
 }
 
+#[arkavo_test_macros::spec("AGUI-023")]
 #[test]
 fn request_correlation_round_trips_without_changing_task_identity() {
     let request: AgUiEvent = serde_json::from_value(json!({

@@ -26,7 +26,8 @@ function routeHref(view, params) {
     ROUTE_FIELDS[view].forEach(function(key) {
         if (params && params[key]) query.set(key, params[key]);
     });
-    return '#/' + view + (query.size ? '?' + query.toString() : '');
+    var search = query.toString();
+    return '#/' + view + (search ? '?' + search : '');
 }
 
 function routeLink(view, params, label, className) {

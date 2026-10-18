@@ -10,6 +10,7 @@ function renderTaskDetail() {
             JSON.stringify([taskId, !!AppState.observations.tasks]));
         return;
     }
+    requestTaskDetail(task);
     var agent = getTaskAgent(task, taskId);
     var route = latestTaskRoute(taskId);
     var events = AppState.telemetry.filter(function(event) { return eventMatchesScope(event, { task: taskId }); });
@@ -25,7 +26,8 @@ function renderTaskDetail() {
     html += inspectionField('Completed', escapeHtml(task.completed_at || task.completedAt || 'Not reported'));
     html += inspectionField('Snapshot ' + uiHelp('freshness'), receivedAge('tasks')) + '</dl></section>';
     html += inspectionSection('objective', 'Objective', '<pre class="inspection-text">' + escapeHtml(task.description || 'Not reported') + '</pre>', true);
-    html += inspectionSection('output', 'Output', '<pre class="inspection-text">' + escapeHtml(task.result || 'Not reported') + '</pre>', true);
+    var output = task.result ? escapeHtml(task.result) : task.hasResult ? 'Loading output' : 'Not reported';
+    html += inspectionSection('output', 'Output', '<pre class="inspection-text">' + output + '</pre>' + taskGallery(task), true);
     html += renderTaskRouting(taskId, task);
     html += inspectionSection('policy', 'Agent policy ' + uiHelp('task-policy'),
         '<dl class="inspection-fields">' + inspectionField('Task policy binding', 'Not reported') +
@@ -36,7 +38,8 @@ function renderTaskDetail() {
     html += inspectionSection('events', 'Task events · ' + (task._events || []).length, renderTaskTelemetry(taskId, task), false);
     html += inspectionSection('evidence', 'Session evidence · ' + events.length + ' ' + uiHelp('correlation'),
         routeLink('telemetry', { task: taskId }, 'Inspect task evidence'), false);
-    updateInspector(container, html, JSON.stringify([taskId, task, route, agent, policy, events, !!AppState.observations.tasks, !!AppState.observations.policy]));
+    var shown = Object.assign({}, task, { _events: (task._events || []).length });
+    updateInspector(container, html, JSON.stringify([taskId, shown, route, agent, policy, events.length, !!AppState.observations.tasks, !!AppState.observations.policy]));
 }
 
 function getTaskAgent(task, taskId) {
@@ -90,4 +93,10 @@ function renderTaskTelemetry(taskId, task) {
         return '<li><time>' + escapeHtml(formatTime(event.timestamp)) + '</time><strong>' +
             escapeHtml(event.eventType || event.event_type || 'Event') + '</strong><span>' + escapeHtml(event.agentId || 'Not reported') + '</span></li>';
     }).join('') + '</ol>';
+}
+
+// The task list leaves outputs out; an opened task asks for its own.
+function requestTaskDetail(task) {
+    if (!task || task.result || !task.hasResult || task._detailRequested) return;
+    task._detailRequested = wsSend({ type: 'requestTask', taskId: task.id });
 }

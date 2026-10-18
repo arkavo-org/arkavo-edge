@@ -4,6 +4,7 @@
 
 use arkavo_agui::types::AgUiEvent;
 
+#[arkavo_test_macros::spec("AGUI-003")]
 #[tokio::test]
 async fn closed_transport_does_not_remain_connected_without_monitor() {
     use arkavo_agui::agent_connection::{AgentConnection, ConnectionStatus};

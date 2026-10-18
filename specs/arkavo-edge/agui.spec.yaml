@@ -338,3 +338,82 @@ scenarios:
       - crates/arkavo-agui/src/gateway_task_dispatch.rs
       - crates/arkavo-protocol/src/task_watch.rs
     changed: "2026-10-17"
+
+  - id: AGUI-023
+    name: A task request is accepted once, and its receipt reaches every view
+    criticality: high
+    given:
+      - An operator creates a task in arkavo ui, over localhost or a LAN address
+    when: The browser sends submitTask with a request id
+    then:
+      - "The request id comes from crypto.randomUUID where the browser offers it, and from crypto.getRandomValues otherwise: browsers offer randomUUID only on HTTPS or localhost"
+      - "The gateway records the request id on the task it opens and sends the receipt (taskSubmitted with requestId) to every open view, so one that reconnected after sending still hears it"
+      - "A request whose id the gateway already holds opens no second task: the gateway answers it with the first task's receipt"
+      - "With no receipt after 15 seconds or a dropped socket, the composer says the outcome is unknown, keeps the draft and offers Send again, which reuses the request id while the draft is unchanged"
+      - "Reconnecting sends nothing by itself"
+    edge_cases:
+      - condition: "A policy review or an end-tracking request whose receipt does not come"
+        expected: "Its buttons unlock with the outcome reported unknown; a late receipt still reports the outcome. End-tracking receipts reach every view"
+    refs:
+      - crates/arkavo-agui/static/js/task-composer.js
+      - crates/arkavo-agui/src/gateway_task_dispatch.rs
+      - crates/arkavo-agui/src/gateway_ws.rs
+    changed: "2026-10-18"
+
+  - id: AGUI-024
+    name: The task list stays light, and an opened task fetches its own output
+    criticality: medium
+    given:
+      - A long arkavo ui session with many tasks and large outputs
+    when: Views poll the task list every few seconds
+    then:
+      - "The task list says whether each task has output (hasResult) and lists its images, without carrying the output"
+      - "A view that opens a task without its output asks for it (requestTask) and gets the whole of it (taskDetail), after a reload included"
+      - "The gateway keeps its 500 newest tasks, dropping the oldest finished ones first; a running task is never dropped"
+      - "The open view is drawn at most once per animation frame, and Evidence rows are rebuilt only while Evidence is shown"
+    refs:
+      - crates/arkavo-agui/src/gateway_events.rs
+      - crates/arkavo-agui/src/gateway.rs
+      - crates/arkavo-agui/static/js/panels/tasks.js
+      - crates/arkavo-agui/static/js/app.js
+    changed: "2026-10-18"
+
+  - id: AGUI-025
+    name: Images a task's agent delivers are shown with the task
+    criticality: high
+    given:
+      - A task submitted from arkavo ui completes with an answer whose data part lists assets (urn:arkavo:asset:manifest:v1, ASSET-008)
+    when: The gateway sees the task complete
+    then:
+      - "The answer's text parts are its output, joined in order"
+      - "The process running arkavo ui fetches each asset over the data plane and checks it against the manifest as arkavo chat does (CLI-018), into the user's data directory"
+      - "Every open view gets the task with its images: name, size, dimensions, whether it has alpha, and the license line naming the generating agent (IMG-013)"
+      - "The task's Output shows each image, transparent ones on a checkerboard, and the Overview shows the latest images"
+      - "GET /assets/<task>/<name> serves only a file a fetch recorded on that task, as image/png"
+    edge_cases:
+      - condition: A build without a fetcher
+        expected: "The task says the images stayed on the agent, rather than showing nothing"
+      - condition: A fetch that fails
+        expected: "The task says the images could not be fetched and why; its output text is kept"
+    refs:
+      - crates/arkavo-agui/src/gateway_assets.rs
+      - crates/arkavo-cli/src/commands/ui_assets.rs
+      - crates/arkavo-agui/static/js/task-assets.js
+    changed: "2026-10-18"
+
+  - id: AGUI-026
+    name: Agents named with --agent join when they answer and keep their endpoint
+    criticality: medium
+    given:
+      - arkavo ui started with --agent IP:PORT for a peer multicast cannot find
+    when: The workspace starts, or the peer is down, or mDNS reports the same agent
+    then:
+      - "The workspace starts at once; each named peer is connected in the background, trying again with a pause that grows to one minute"
+      - "The endpoint the operator named wins over one discovery found for the same agent, and two --agent peers never share a name"
+      - "mDNS rediscovery does not replace a named peer's record, and an mDNS goodbye, which any host on the LAN can send, does not remove it"
+    refs:
+      - crates/arkavo-agui/src/gateway_direct.rs
+      - crates/arkavo-agui/src/mdns_impl.rs
+      - crates/arkavo-agui/src/gateway.rs
+    changed: "2026-10-18"
+

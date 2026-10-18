@@ -57,7 +57,7 @@ function environment(...files) {
         bindAgentChatListeners() {}, updateComposerAvailability() {}, markSubmissionUnknown() {},
         acceptTaskSubmission() {}, agentChats: {}
     });
-    for (const file of ['state.js', 'icons.js', 'lexicon.js', 'inspection.js', 'routes.js', ...files]) {
+    for (const file of ['state.js', 'icons.js', 'lexicon.js', 'inspection.js', 'routes.js', 'task-assets.js', ...files]) {
         vm.runInContext(readFileSync(join(root, file), 'utf8'), context, { filename: join(root, file) });
     }
     return { context, element, listeners, documentListeners, timers, sent, historyEntries };
@@ -90,6 +90,17 @@ test('agent workspace uses Swarm and distinguishes kits from executions', () => 
     assert.match(html, /data-nav-term="agents">Swarm</);
     assert.doesNotMatch(html, /\bFleet\b/);
     for (const term of Object.values(c.UI_TERMS)) assert.ok(c.UI_ICONS[term[1]], term[0]);
+});
+
+// Regression: the page's CSP (script-src 'self') refuses inline handlers, so
+// a rendered onchange= never ran and logged a violation instead.
+test('no shipped script renders an inline event handler', () => {
+    for (const directory of [root, join(root, 'panels')]) {
+        for (const file of readdirSync(directory).filter(file => file.endsWith('.js'))) {
+            assert.doesNotMatch(readFileSync(join(directory, file), 'utf8'), /\son[a-z]+="/, file);
+        }
+    }
+    assert.doesNotMatch(readFileSync(join(root, '..', 'index.html'), 'utf8'), /\son[a-z]+="/);
 });
 
 test('untrusted text is escaped in both content and quoted attributes', () => {
@@ -174,18 +185,37 @@ test('submission clears the draft only for its matching gateway receipt', () => 
     assert.equal(e.element('task-description').readOnly, false);
 });
 
-test('lost acceptance becomes outcome unknown without automatic replay', () => {
+// Regression (AGUI-023): an unknown outcome locked the composer until a
+// reload. Reconnecting still sends nothing by itself; sending again is the
+// operator's choice and reuses the request id, so the gateway answers it with
+// the task it may already have opened.
+test('lost acceptance becomes outcome unknown; sending again reuses the request id', () => {
     const e = environment('websocket.js', 'task-composer.js');
     ready(e);
     e.context.submitTask();
     e.context.setConnectionStatus('disconnected', 'Disconnected');
     assert.match(e.element('task-submission-status').textContent, /Outcome unknown/);
     e.context.setConnectionStatus('connected', 'Connected');
+    assert.equal(e.sent.length, 1, 'reconnecting sends nothing');
+    assert.equal(e.element('task-submit-btn').disabled, false, 'the composer is not locked');
+    assert.equal(e.element('task-submit-btn').textContent, 'Send again');
     e.context.submitTask();
-    assert.equal(e.sent.length, 1);
+    assert.equal(e.sent.length, 2);
+    assert.equal(e.sent[1].requestId, e.sent[0].requestId);
     assert.equal(e.element('task-description').value, 'Inspect the local build');
     e.context.acceptTaskSubmission({ requestId: 'request-123' });
     assert.equal(e.context.taskSubmission, null);
+});
+
+// Regression (AGUI-023): browsers provide crypto.randomUUID only on HTTPS or
+// localhost, so creating a task over a LAN address threw before sending.
+test('a task is created where crypto.randomUUID is absent', () => {
+    const e = environment('websocket.js', 'task-composer.js');
+    ready(e);
+    e.context.crypto = { getRandomValues: bytes => bytes.fill(7) };
+    e.context.submitTask();
+    assert.equal(e.sent.length, 1);
+    assert.match(e.sent[0].requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
 
 test('receipt timeout and page unload retain unsent work', () => {

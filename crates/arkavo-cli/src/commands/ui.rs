@@ -1,3 +1,5 @@
+//! `arkavo ui`: the Arkavo Operations workspace in the default browser.
+
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if !args.is_empty() && matches!(args[0].as_str(), "help" | "-h" | "--help") {
@@ -8,6 +10,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut port = 7700;
     let mut initial_prompt: Option<String> = None;
     let mut direct_agents = Vec::new();
+    let mut open_browser = true;
+    let mut native = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -19,56 +23,56 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 i += 2;
             }
             "--prompt" | "-p" => {
-                if i + 1 < args.len() {
-                    initial_prompt = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Error: --prompt requires a value");
-                    return Err("Missing prompt value".into());
-                }
+                let prompt = args.get(i + 1).ok_or("--prompt requires a value")?;
+                initial_prompt = Some(prompt.clone());
+                i += 2;
             }
             "--port" => {
-                if i + 1 < args.len() {
-                    port = args[i + 1].parse::<u16>().unwrap_or(7700);
-                    i += 2;
-                } else {
-                    i += 1;
-                }
+                let value = args.get(i + 1).ok_or("--port requires a number")?;
+                port = value
+                    .parse::<u16>()
+                    .map_err(|_| format!("--port {value} is not a port number"))?;
+                i += 2;
+            }
+            "--no-open" => {
+                open_browser = false;
+                i += 1;
+            }
+            "--native" => {
+                native = true;
+                i += 1;
             }
             arg => {
-                if let Ok(p) = arg.parse::<u16>() {
-                    port = p;
-                }
+                port = arg
+                    .parse::<u16>()
+                    .map_err(|_| format!("Unknown option {arg}; see arkavo ui --help"))?;
                 i += 1;
             }
         }
     }
 
     let run_async = async move {
-        #[cfg(feature = "cef-ui")]
-        {
-            if !direct_agents.is_empty() {
-                return Err("--agent requires the web UI renderer".into());
+        if native {
+            #[cfg(feature = "cef-ui")]
+            {
+                if !direct_agents.is_empty() {
+                    return Err("--agent requires the browser workspace, not --native".into());
+                }
+                return use_cef_renderer(port, initial_prompt).await;
             }
-            println!("Starting Arkavo UI with native CEF renderer...");
-            use_cef_renderer(port, initial_prompt).await
+            #[cfg(not(feature = "cef-ui"))]
+            return Err("--native needs a build with the cef-ui feature".into());
         }
 
-        #[cfg(all(feature = "web-ui", not(feature = "cef-ui")))]
+        #[cfg(feature = "web-ui")]
         {
-            println!("Starting Arkavo UI with web renderer...");
-            use_web_gateway(port, initial_prompt, direct_agents).await
+            use_web_gateway(port, initial_prompt, direct_agents, open_browser).await
         }
 
-        #[cfg(not(any(feature = "cef-ui", feature = "web-ui")))]
+        #[cfg(not(feature = "web-ui"))]
         {
-            let _ = port;
-            let _ = initial_prompt;
-            let _ = direct_agents;
-            Err(
-                "No UI renderer available. Build with --features cef-ui or --features web-ui"
-                    .into(),
-            )
+            let _ = (port, initial_prompt, direct_agents, open_browser);
+            Err("No UI available. Build with --features web-ui".into())
         }
     };
 
@@ -1008,50 +1012,98 @@ async fn create_client_from_routing(
     Ok(arkavo_llm::LlmClient::new(provider))
 }
 
-#[cfg(all(feature = "web-ui", not(feature = "cef-ui")))]
+/// Serve the workspace and open it in the default browser. The terminal
+/// shows where it is and how to stop it; everything else goes to the log,
+/// which `RUST_LOG` turns up.
+#[cfg(feature = "web-ui")]
 async fn use_web_gateway(
     port: u16,
     initial_prompt: Option<String>,
     direct_agents: Vec<String>,
+    open_browser: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Creating web UI gateway...");
-    let mut gateway = arkavo_agui::AgUiGateway::new(port);
+    let mut gateway = arkavo_agui::AgUiGateway::new(port)
+        .with_asset_fetcher(std::sync::Arc::new(super::ui_assets::WorkspaceAssets::new()));
     for endpoint in direct_agents {
         gateway.add_agent_endpoint(&endpoint)?;
     }
-
     if let Some(prompt) = initial_prompt {
-        println!("Starting UI with initial prompt: {prompt}");
-        println!("UI will generate incrementally - you can interrupt and modify at any time");
         gateway.set_initial_prompt(prompt);
     }
+    let (listening, ready) = tokio::sync::oneshot::channel();
+    gateway.on_listening(listening);
 
-    println!("Web UI is available at http://localhost:{port}");
-    println!("Press Ctrl+C to exit");
+    let serving = gateway.start();
+    tokio::pin!(serving);
+    tokio::select! {
+        // The gateway ended before it listened: the port is taken, say.
+        ended = &mut serving => return ended,
+        Ok(address) = ready => {
+            let url = format!("http://localhost:{}", address.port());
+            if open_browser && open_in_browser(&url).is_ok() {
+                println!("Arkavo Operations is open in your browser at {url}");
+            } else {
+                println!("Arkavo Operations is at {url}");
+            }
+            println!("Press Ctrl+C to stop.");
+        }
+    }
+    serving.await
+}
 
-    gateway.start().await
+/// Open `url` in the user's default browser.
+#[cfg(feature = "web-ui")]
+fn open_in_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", ""]);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = std::process::Command::new("xdg-open");
+    command
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .and_then(|status| {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(std::io::Error::other(format!(
+                    "browser opener exited with {status}"
+                )))
+            }
+        })
 }
 
 fn print_usage() {
-    println!("Arkavo UI - Web interface for AI-driven UI generation");
+    println!("Arkavo Operations - watch and direct the agents on your network");
     println!();
     println!("USAGE:");
     println!("    arkavo ui [OPTIONS]");
     println!();
+    println!("Opens the workspace in your default browser.");
+    println!();
     println!("OPTIONS:");
-    println!("    --port <PORT>              Port to run the UI server on (default: 7700)");
+    println!("    --port <PORT>              Port to serve the workspace on (default: 7700)");
     println!("    --agent <IP:PORT>          Connect a known agent; repeat for multiple peers");
     println!("                              LAN discovery remains enabled by default");
-    println!("    --prompt, -p <PROMPT>      Initial prompt for UI generation");
+    println!("    --prompt, -p <PROMPT>      Submit this prompt when the workspace opens");
+    println!("    --no-open                  Do not open a browser; print the address only");
+    #[cfg(feature = "cef-ui")]
+    println!("    --native                   Use the native CEF window instead of the browser");
     println!("    <PORT>                     Port number (shorthand)");
     println!();
     println!("ENVIRONMENT:");
-    println!("    GEMINI_API_KEY             Gemini API key for UI generation");
+    println!("    ARKAVO_AGUI_BIND           Address to listen on (default: 127.0.0.1)");
+    println!("    RUST_LOG                   Log detail, e.g. RUST_LOG=arkavo_agui=debug");
     println!();
     println!("EXAMPLES:");
     println!("    arkavo ui");
-    println!("    arkavo ui 8080");
-    println!("    arkavo ui --prompt \"Build a bank account page\"");
-    println!("    arkavo ui --prompt \"Create a dashboard with charts\"");
-    println!("    GEMINI_API_KEY=xxx arkavo ui --prompt \"bank + portfolio\"");
+    println!("    arkavo ui --port 8080");
+    println!("    arkavo ui --agent 192.168.1.20:7600 --no-open");
 }

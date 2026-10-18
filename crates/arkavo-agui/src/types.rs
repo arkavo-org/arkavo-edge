@@ -646,7 +646,29 @@ pub enum AgUiEvent {
         result: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         metrics: Option<TaskMetrics>,
+        /// Images the agent delivered with its answer
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assets: Vec<crate::gateway_assets::TaskAsset>,
+        /// Where the task's images stand when they are not shown yet
+        #[serde(rename = "assetNote", default, skip_serializing_if = "Option::is_none")]
+        asset_note: Option<String>,
         timestamp: String,
+    },
+    /// Ask for one task's output, which the task list leaves out.
+    RequestTask {
+        #[serde(rename = "taskId")]
+        task_id: String,
+    },
+    /// One task's output, for a view that opened it without one.
+    TaskDetail {
+        #[serde(rename = "taskId")]
+        task_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assets: Vec<crate::gateway_assets::TaskAsset>,
+        #[serde(rename = "assetNote", default, skip_serializing_if = "Option::is_none")]
+        asset_note: Option<String>,
     },
 }
 
@@ -716,8 +738,12 @@ pub struct TaskInfo {
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<String>,
+    /// Whether the task has output to ask for with `RequestTask`: the list
+    /// leaves outputs out, since it is sent every few seconds to every view.
+    #[serde(rename = "hasResult", default)]
+    pub has_result: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<crate::gateway_assets::TaskAsset>,
     pub status: String,
     #[serde(rename = "targetAgent", skip_serializing_if = "Option::is_none")]
     pub target_agent: Option<String>,

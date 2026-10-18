@@ -14,7 +14,7 @@ pub async fn debug_websocket_handler(
 
 async fn handle_debug_websocket(mut ws: WebSocket, debug_handler: Option<Arc<DebugHandler>>) {
     if let Some(handler) = debug_handler {
-        println!("New debug WebSocket connection");
+        tracing::debug!("New debug WebSocket connection");
         let (tx, mut rx) = mpsc::channel::<AgUiEvent>(100);
 
         let ws_clone = Arc::new(tokio::sync::Mutex::new(ws));
@@ -50,7 +50,7 @@ async fn handle_debug_websocket(mut ws: WebSocket, debug_handler: Option<Arc<Deb
         }
 
         forward_task.abort();
-        println!("Debug WebSocket connection closed");
+        tracing::debug!("Debug WebSocket connection closed");
     } else {
         let error = AgUiEvent::Error {
             code: "DEBUG_DISABLED".to_string(),

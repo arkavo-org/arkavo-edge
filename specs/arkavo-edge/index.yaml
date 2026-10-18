@@ -395,7 +395,7 @@ components:
     module: arkavo_image_gen
     description: Local Qwen-Image-2.1 and 2.1-Turbo generation on Apple Silicon from a pinned model catalog through a pinned stable-diffusion.cpp runtime
     criticality: critical
-    scenario_count: 20
+    scenario_count: 21
     invariants:
       - Local generation only; no cloud fallback
       - Runtime and weights pinned by revision, size and SHA-256
@@ -519,7 +519,7 @@ components:
     module: arkavo_cli
     description: Arkavo Edge CLI interface with interactive REPL commands
     criticality: high
-    scenario_count: 20
+    scenario_count: 21
     invariants:
       - Tracing initialized once
       - First-run checks models
@@ -636,7 +636,7 @@ components:
     module: arkavo_agui
     description: Arkavo GUI application gateway
     criticality: high
-    scenario_count: 22
+    scenario_count: 26
     invariants:
       - AgUiGateway manages connections
       - mDNS discovery for peers
@@ -985,7 +985,7 @@ components:
     module: arkavo_server
     description: A2A server and runtime orchestration
     criticality: critical
-    scenario_count: 14
+    scenario_count: 15
     invariants:
       - Server binds localhost by default
       - JSON-RPC 2.0 protocol
@@ -1074,7 +1074,7 @@ components:
 
 stats:
   total_specs: 88
-  total_scenarios: 874
+  total_scenarios: 881
   critical_scenarios: 285
   coverage_areas:
     - authentication

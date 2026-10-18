@@ -80,7 +80,7 @@ pub fn spawn_status_broadcaster(connections: Arc<RwLock<HashMap<String, Connecti
             let storage = match MemoryStorage::new().await {
                 Ok(s) => Arc::new(s),
                 Err(e) => {
-                    eprintln!("Failed to init storage for health: {e}");
+                    tracing::warn!("Failed to init storage for health: {e}");
                     continue;
                 }
             };

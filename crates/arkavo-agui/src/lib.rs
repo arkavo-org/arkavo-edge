@@ -10,6 +10,7 @@ pub mod dataflow_handler;
 pub mod debug_handler;
 pub mod gateway;
 pub mod gateway_agent;
+pub mod gateway_assets;
 pub mod gateway_bind;
 pub mod gateway_config;
 pub mod gateway_context;
@@ -42,6 +43,9 @@ pub mod swarm_flight_registry;
 pub mod timeout_handler;
 pub mod types;
 pub mod ui_handler;
+
+#[cfg(test)]
+mod test_support;
 
 pub use coding_agent_bridge::CodingAgentBridge;
 pub use command_health_collector::{

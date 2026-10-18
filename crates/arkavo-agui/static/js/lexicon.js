@@ -38,6 +38,7 @@ var UI_STATES = {
     connected: ['Connected', 'plug', 'good'],
     disconnected: ['Disconnected', 'unplug', 'warn'],
     reconnecting: ['Reconnecting', 'unplug', 'warn'],
+    connecting: ['Connecting', 'plug', 'neutral'],
     submitted: ['Submitted', 'inbox', 'neutral'],
     queued: ['Queued', '', 'neutral'],
     working: ['Running', 'circle-play', 'info'],

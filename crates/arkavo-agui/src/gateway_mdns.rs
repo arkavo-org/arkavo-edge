@@ -35,7 +35,7 @@ pub async fn run_mdns_discovery(
             security_handler,
             context_topology_cache,
         );
-        println!("mDNS discovery not compiled in");
+        tracing::debug!("mDNS discovery not compiled in");
         loop {
             tokio::time::sleep(tokio::time::Duration::from_mins(1)).await;
         }
