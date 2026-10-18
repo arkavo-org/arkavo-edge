@@ -1,11 +1,12 @@
 mod config;
 mod local_strategy;
+mod mesh_follow;
 mod mesh_strategy;
 mod planning;
 mod strategy;
 mod ui;
 
-pub use config::{ModelCapability, ModelInfo, SelectedModels, TaskConfig, TaskResult};
+pub use config::{MeshAnswer, ModelCapability, ModelInfo, SelectedModels, TaskConfig, TaskResult};
 pub use local_strategy::LocalTaskStrategy;
 pub use mesh_strategy::MeshTaskStrategy;
 pub use planning::{CollaborativePlanner, TaskPlan};

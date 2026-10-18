@@ -69,6 +69,7 @@ scenarios:
     when: It chooses where the work runs
     then:
       - "It reads the capabilities of the members discovery found (MESH-010) and keeps those, other than itself, that report image_generation"
+      - "When none reports it, or a member discovery found does not answer at the address it has, it looks for members once more before choosing, so a member that restarted on a new port is read there"
       - "It keeps members whose descriptor offers the entry the request names, as an id or an alias the member resolves, with a largest pixel count at least the request's for its guidance"
       - "Among them it prefers state ready, then the larger weight set, then the shorter estimated time (steps times seconds per step times megapixels, for the images queued and requested), then the shorter queue"
       - "It sends that member one message/send whose data part has schema urn:arkavo:asset:request:v1: the items to generate, each with the IMG-007 fields, the seconds left to its deadline, and its own did:key as requester"
@@ -88,11 +89,16 @@ scenarios:
         expected: Fails with too_large_for_host naming the largest size any member offers
       - condition: Every capable member refuses
         expected: Fails with no_capable_member listing each member's refusal
+      - condition: "The ready member restarted on a new port, and another member reports the capability with its weights still to fetch"
+        expected: "The requester looks again, finds the restarted member at its new port and offers it the work first, rather than the member that must fetch its weights"
+      - condition: A member that has stopped for good still has an address from discovery
+        expected: "Each request looks for members once more, a few seconds, before choosing among those that answer"
     refs:
       - crates/arkavo-server/src/server/assets/delegate.rs
+      - crates/arkavo-mcp-mesh/src/members.rs
       - crates/arkavo-image-gen/src/descriptor.rs
       - crates/arkavo-image-gen/src/tool.rs
-    changed: "2026-10-11"
+    changed: "2026-10-17"
 
   - id: ASSET-003
     name: A capable member answers an asset request without its model

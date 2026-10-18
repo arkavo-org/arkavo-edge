@@ -73,6 +73,7 @@ pub mod taint_tracker;
 pub mod task_contract;
 pub mod task_executor;
 pub mod task_store;
+pub mod task_watch;
 #[cfg(feature = "taint")]
 pub mod taxonomy;
 pub mod transport;

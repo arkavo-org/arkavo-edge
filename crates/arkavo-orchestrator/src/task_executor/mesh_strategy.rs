@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::Duration;
 
 use super::config::{TaskConfig, TaskResult};
 use super::strategy::TaskStrategy;
@@ -11,10 +10,7 @@ use arkavo_protocol::{
     agent_registry::{AgentInfo, AgentRegistry},
     http::HttpTransport,
     transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TlsConfig, TransportConfig},
-    types::{
-        Message, MessagePart, MessageSendRequest, MessageSendResponse, TaskGetRequest,
-        TaskGetResponse, TaskStatus,
-    },
+    types::{Message, MessagePart, MessageSendRequest, MessageSendResponse},
 };
 
 /// Mesh task execution strategy
@@ -44,6 +40,7 @@ impl MeshTaskStrategy {
     pub fn discover_agents() -> Result<Vec<AgentInfo>> {
         use mdns_sd::{ServiceDaemon, ServiceEvent};
         use std::collections::HashMap;
+        use std::time::Duration;
 
         tracing::info!("Discovering mesh agents via mDNS...");
 
@@ -477,81 +474,16 @@ impl MeshTaskStrategy {
             }
         };
 
-        // Poll for completion
         ui.section("Monitoring Task Progress");
-
-        let start = std::time::Instant::now();
-        let timeout = Duration::from_mins(5);
-
-        loop {
-            if start.elapsed() > timeout {
-                let _ = transport.close().await;
-                return Err(Error::TaskExecution {
-                    operation: "execute task via mesh".to_string(),
-                    details: "task execution timed out after 5 minutes".to_string(),
-                });
-            }
-
-            let get_request = TaskGetRequest {
-                task_id: task_id.clone(),
-            };
-
-            let rpc_request = A2aRequest::new("tasks/get", serde_json::json!([get_request]));
-
-            let response =
-                transport
-                    .send_request(rpc_request)
-                    .await
-                    .map_err(|e| Error::TaskExecution {
-                        operation: "poll task status".to_string(),
-                        details: e.to_string(),
-                    })?;
-
-            match response {
-                A2aResponse::Success { result, .. } => {
-                    let task_response: TaskGetResponse =
-                        serde_json::from_value(result).map_err(|e| Error::TaskExecution {
-                            operation: "parse task status response".to_string(),
-                            details: e.to_string(),
-                        })?;
-
-                    match task_response.status {
-                        TaskStatus::Completed => {
-                            let _ = transport.close().await;
-                            ui.success("Task completed successfully!");
-                            return Ok(TaskResult::success("Completed via mesh agent"));
-                        }
-                        TaskStatus::Failed => {
-                            let _ = transport.close().await;
-                            ui.error("Task failed");
-                            return Ok(TaskResult::failure("Task failed on mesh agent"));
-                        }
-                        TaskStatus::Canceled => {
-                            let _ = transport.close().await;
-                            return Ok(TaskResult::failure("Task was cancelled"));
-                        }
-                        status => {
-                            // Show progress if available
-                            if let Some(progress) = &task_response.progress {
-                                if let Some(msg) = &progress.message {
-                                    ui.progress(msg, progress.percentage);
-                                }
-                            }
-                            ui.status(&format!("Status: {:?}", status));
-                        }
-                    }
-                }
-                A2aResponse::Error { error, .. } => {
-                    let _ = transport.close().await;
-                    return Err(Error::TaskExecution {
-                        operation: "poll task status".to_string(),
-                        details: format!("RPC error {}: {}", error.code, error.message),
-                    });
-                }
-            }
-
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
+        let followed = super::mesh_follow::follow(
+            transport.as_ref(),
+            &task_id,
+            ui,
+            arkavo_protocol::task_watch::Watch::default(),
+        )
+        .await;
+        let _ = transport.close().await;
+        followed
     }
 
     /// Query agent capabilities via RPC

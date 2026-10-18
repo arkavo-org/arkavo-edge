@@ -308,6 +308,83 @@ async fn members_are_looked_for_when_none_is_known() {
     own_plane.shutdown().await.unwrap();
 }
 
+/// `descriptor` with every model ready, or every model still to fetch.
+fn readied(mut descriptor: serde_json::Value, ready: bool) -> serde_json::Value {
+    for model in descriptor["models"].as_array_mut().expect("models") {
+        model["ready"] = json!(ready);
+    }
+    descriptor
+}
+
+/// Regression (ASSET-002): the artist restarted on a new port, and the
+/// requester still held the old one. The artist did not answer there and
+/// was left out, and the job went to a member that had to fetch its
+/// weights first. A member that does not answer sends the requester
+/// looking again.
+#[spec("ASSET-002")]
+#[tokio::test]
+async fn a_member_that_moved_is_found_again() {
+    let fake = fake_generator(0, Duration::ZERO).await;
+    let descriptor = serde_json::to_value(fake.generator.descriptor()).unwrap();
+    let mesh = Arc::new(MeshToolsState::new());
+    let laptop = Member::start(
+        &mesh,
+        "laptop",
+        Some(readied(descriptor.clone(), false)),
+        Answer::Busy,
+    )
+    .await;
+    let network = Arc::new(MeshToolsState::new());
+    let artist = Member::start(
+        &network,
+        "artist",
+        Some(readied(descriptor, true)),
+        Answer::Busy,
+    )
+    .await;
+    let before_restart = {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
+    };
+    mesh.agent_addresses
+        .write()
+        .await
+        .insert("artist".into(), before_restart);
+    let looks = Arc::new(Mutex::new(0));
+    let discover: Discover = {
+        let (network, mesh, looks) = (network.clone(), mesh.clone(), looks.clone());
+        Arc::new(move || {
+            let (network, mesh, looks) = (network.clone(), mesh.clone(), looks.clone());
+            Box::pin(async move {
+                *looks.lock().unwrap() += 1;
+                let found = network.agent_addresses.read().await.clone();
+                mesh.agent_addresses.write().await.extend(found);
+            })
+        })
+    };
+    let own_plane = transport().await;
+    let delegate =
+        commander(mesh, own_plane.clone(), Duration::from_mins(5)).with_discovery(discover);
+
+    let error = delegate
+        .generate(&coin(), Instant::now() + Duration::from_secs(30), &|_| {})
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(*looks.lock().unwrap(), 1);
+    let offered_artist = error.find("artist refused").expect(&error);
+    let offered_laptop = error.find("laptop refused").expect(&error);
+    assert!(
+        offered_artist < offered_laptop,
+        "the ready artist goes first: {error}"
+    );
+    for member in [artist, laptop] {
+        member.stop().await;
+    }
+    own_plane.shutdown().await.unwrap();
+}
+
 /// ASSET-009: a member whose task stops moving is reported as stalled.
 #[spec("ASSET-009")]
 #[tokio::test]
