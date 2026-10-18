@@ -13,6 +13,7 @@ function connect() {
         reconnectAttempts = 0;
         wsSend({ type: 'requestFleetSnapshot' });
         wsSend({ type: 'requestTaskList' });
+        wsSend({ type: 'requestNotices' });
         activateView(AppState.activeView);
     };
 

@@ -117,8 +117,9 @@ async fn replies_list_references_after_their_text() {
     provider.shutdown().await.unwrap();
 }
 
-/// ASSET-008: a generation that fails is reported, not delivered.
-#[spec("ASSET-008")]
+/// ASSET-008, SRV-016: a generation that fails is reported, not delivered,
+/// and brought to the operator.
+#[spec("ASSET-008", "SRV-016")]
 #[tokio::test]
 async fn a_failed_generation_is_reported_in_text() {
     let provider = transport().await;
@@ -140,6 +141,18 @@ async fn a_failed_generation_is_reported_in_text() {
     assert!(
         content.contains("a silver coin") && content.contains("busy"),
         "{content}"
+    );
+    // SRV-016: the operator hears of it too, pointed at this agent.
+    let notices = crate::server::operator_notices::OperatorNotices::global().open();
+    let failed = notices
+        .iter()
+        .find(|n| n.key == "image-generation-failed")
+        .expect("a notice for the failed image");
+    assert!(failed.text.contains("queue is full"), "{}", failed.text);
+    assert_eq!(failed.details[0].value, "busy");
+    assert_eq!(
+        failed.focus.as_ref().map(|f| f.view.as_str()),
+        Some("agents")
     );
     provider.shutdown().await.unwrap();
 }

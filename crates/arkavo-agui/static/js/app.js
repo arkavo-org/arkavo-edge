@@ -32,6 +32,18 @@ function routeEvent(event) {
         case 'taskDetail':
             handleTaskDetail(event);
             break;
+        case 'operatorNotice':
+            handleOperatorNotice(event);
+            break;
+        case 'operatorNoticeResolved':
+            handleNoticeResolved(event);
+            break;
+        case 'noticeList':
+            handleNoticeList(event);
+            break;
+        case 'noticeActionResult':
+            handleNoticeActionResult(event);
+            break;
         case 'taskStatusChanged':
             handleTaskStatusChanged(event);
             break;
@@ -257,5 +269,6 @@ if (taskSubmitBtn) taskSubmitBtn.addEventListener('click', submitTask);
 
 // Initialize
 initializeOperations();
+initializeNotices();
 connect();
 initializeRoutes();

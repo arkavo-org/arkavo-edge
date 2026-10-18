@@ -1093,6 +1093,8 @@ impl A2aServer {
         // Until now the endpoint was the configured address, port 0
         // included. The agent card must name an address a client can use.
         self.agent_metadata.write().await.endpoint = endpoint_url(actual_addr);
+        super::operator_notices::OperatorNotices::global()
+            .identify(&self.agent_metadata.read().await.name);
 
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
         let metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));

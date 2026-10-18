@@ -654,6 +654,41 @@ pub enum AgUiEvent {
         asset_note: Option<String>,
         timestamp: String,
     },
+    /// An anomaly an agent, or this gateway, brings to the operator (#759).
+    OperatorNotice {
+        notice: arkavo_protocol::operator_notice::OperatorNotice,
+    },
+    /// A notice that closed: acknowledged, expired or replaced.
+    OperatorNoticeResolved {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "noticeId")]
+        notice_id: String,
+    },
+    /// Every notice open now, for a view that just connected.
+    NoticeList {
+        notices: Vec<arkavo_protocol::operator_notice::OperatorNotice>,
+    },
+    /// Ask for the open notices.
+    RequestNotices,
+    /// The operator chose one of a notice's actions.
+    NoticeAction {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "noticeId")]
+        notice_id: String,
+        #[serde(rename = "actionId")]
+        action_id: String,
+    },
+    /// What came of a chosen action, to every view.
+    NoticeActionResult {
+        #[serde(rename = "noticeId")]
+        notice_id: String,
+        #[serde(rename = "actionId")]
+        action_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     /// Ask for one task's output, which the task list leaves out.
     RequestTask {
         #[serde(rename = "taskId")]

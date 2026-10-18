@@ -12,10 +12,6 @@ function addTaskEvent(taskId, evt) {
     if (task._events.length > MAX_TASK_EVENTS) task._events.pop();
 }
 
-function safeTaskKey(key) {
-    if (typeof key !== 'string' || !key || key === '__proto__' || key === 'constructor' || key === 'prototype') return null;
-    return key;
-}
 
 function handleTaskList(event) {
     var previous = AppState.tasks;

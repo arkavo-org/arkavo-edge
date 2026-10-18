@@ -37,6 +37,7 @@ pub(crate) fn app_state() -> AppState {
         arp_handler: Arc::new(crate::arp_handler::ArpHandler::default()),
         swarm_flights: Arc::new(crate::swarm_flight_registry::SwarmFlightRegistry::new()),
         asset_fetcher: None,
+        gateway_notices: Arc::new(tokio::sync::RwLock::new(Vec::new())),
     }
 }
 

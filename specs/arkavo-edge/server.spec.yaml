@@ -262,3 +262,31 @@ scenarios:
       - crates/arkavo-server/src/server/conductor_parallel/answering.rs
     changed: "2026-10-18"
 
+  - id: SRV-016
+    name: An agent brings anomalies to the operator as notices
+    criticality: high
+    given:
+      - An agent running, watched by an arkavo ui workspace through its metrics stream
+    when: It meets an anomaly
+    then:
+      - "Image work a requester waited on that failed raises a warning pointing at this agent, with the error and its code"
+      - "A spent compute budget that refuses a requester raises a warning pointing at Resources"
+      - "Data the egress gate refuses raises a critical notice pointing at Data & Trust, naming the tool and the class of destination, never the destination itself"
+      - "The model can raise one with notify_operator: a severity (a warning unless it says info or critical), a title of at most 80 characters and text of at most 500 (either stands in for the other), and a workspace view by id or label; without a view the workspace has, the notice points at the agent that raised it"
+      - "notify_operator is permitted in every role, whatever its grants: telling the operator something is wrong is never a privilege a kit withholds, and it sends nothing beyond the operator's own gateway"
+      - "Every notice offers Acknowledge, and Inspect where it points somewhere"
+      - "The same anomaly again updates its notice (count, revision, the higher severity) rather than raising another; at most 20 stay open, and one nobody answers closes after 30 minutes"
+      - "Open notices go out in every system.metrics.subscribe snapshot (operator_notices) until operator.notices.respond acknowledges one, so a gateway that reconnects still sees them"
+    edge_cases:
+      - condition: A requester that withdrew its image request
+        expected: No notice
+      - condition: operator.notices.respond naming an action the notice does not offer, or a notice that is not open
+        expected: Refused with the reason
+    refs:
+      - crates/arkavo-server/src/server/operator_notices.rs
+      - crates/arkavo-server/src/server/operator_notices/notify_tool.rs
+      - crates/arkavo-server/src/server/assets.rs
+      - crates/arkavo-server/src/server/egress_guard.rs
+      - crates/arkavo-protocol/src/operator_notice.rs
+    changed: "2026-10-18"
+

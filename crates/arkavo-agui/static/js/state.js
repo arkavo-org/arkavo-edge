@@ -1,6 +1,8 @@
 "use strict";
 
 var AppState = {
+    notices: Object.create(null),
+    noticeActionsPending: Object.create(null),
     agents: Object.create(null),
     tasks: Object.create(null),
     connection: 'reconnecting',
@@ -70,4 +72,10 @@ function formatCost(dollars) {
     if (dollars == null || dollars === 0) return '$0.00';
     if (dollars < 0.01) return '<$0.01';
     return '$' + dollars.toFixed(2);
+}
+
+// A key from the gateway (task or notice id) safe to index a plain object.
+function safeTaskKey(key) {
+    if (typeof key !== 'string' || !key || key === '__proto__' || key === 'constructor' || key === 'prototype') return null;
+    return key;
 }

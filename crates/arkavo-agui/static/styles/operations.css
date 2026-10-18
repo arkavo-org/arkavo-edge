@@ -191,3 +191,30 @@ dialog::backdrop { background: #060c14bb; }
 .task-asset figcaption span, .task-asset figcaption small { color: var(--text-secondary); }
 .task-asset figcaption small { font-size: 11px; overflow-wrap: anywhere; }
 .asset-note { margin: 8px 0 0; color: var(--text-secondary); }
+
+/* Notices agents bring to the operator (#759). */
+.notices-toggle { position: relative; display: inline-flex; align-items: center; gap: 4px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; }
+.notice-count { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--bg-tertiary); font-size: 11px; line-height: 18px; text-align: center; }
+.notice-count.alert { background: var(--warning); color: #1b1408; }
+.notice-banner { position: relative; margin: 0 0 16px; }
+.notice-banner .notice-card { padding-right: 64px; }
+.notice-hide { position: absolute; top: 10px; right: 10px; background: transparent; border: 0; color: var(--text-secondary); cursor: pointer; }
+.notice-card { border: 1px solid var(--border-color); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--bg-secondary); padding: 12px 14px; margin-bottom: 10px; }
+.notice-card.severity-warning { border-left-color: var(--warning); }
+.notice-card.severity-critical { border-left-color: var(--error); }
+.notice-card header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.notice-card.severity-warning header .ui-icon { color: var(--warning); }
+.notice-card.severity-critical header .ui-icon { color: var(--error); }
+.notice-meta { color: var(--text-secondary); font-size: 12px; }
+.notice-card p { margin: 6px 0; }
+.notice-card dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 6px 0; font-size: 12px; }
+.notice-card dt { color: var(--text-secondary); }
+.notice-card dd { margin: 0; overflow-wrap: anywhere; }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.notice-action { padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; }
+.notice-action.quiet { background: transparent; color: var(--text-secondary); }
+.notice-action:disabled { opacity: .5; cursor: default; }
+.notices-dialog { width: min(640px, calc(100vw - 32px)); max-height: 80vh; }
+.notice-setting { display: block; margin: 0 0 12px; color: var(--text-secondary); }
+.notice-setting select { margin-left: 6px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary); }
+.notice-card header { border: 0; padding: 0; margin: 0; background: none; }

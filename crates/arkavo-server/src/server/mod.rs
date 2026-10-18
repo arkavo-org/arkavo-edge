@@ -41,6 +41,7 @@ mod llm_intent_analyzer;
 mod local_engine;
 mod local_only;
 mod mcp_bridge;
+pub mod operator_notices;
 pub mod pipeline;
 mod policy_cache;
 mod rlm_bridge;
@@ -369,6 +370,13 @@ pub trait A2aRpc {
     /// Push-based metrics stream — replaces polling of system.metrics + budget.compute_status
     #[subscription(name = "system.metrics.subscribe", unsubscribe = "system.metrics.unsubscribe", item = serde_json::Value)]
     async fn system_metrics_subscribe(&self) -> SubscriptionResult;
+
+    /// The operator's answer to one of this agent's open notices (#759)
+    #[method(name = "operator.notices.respond")]
+    async fn operator_notices_respond(
+        &self,
+        response: arkavo_protocol::operator_notice::NoticeResponse,
+    ) -> RpcResult<serde_json::Value>;
 
     /// MCP-T: Query full trust score for a subject (Section 7.1)
     #[method(name = "trust/query")]
@@ -1299,6 +1307,17 @@ impl A2aRpcServer for A2aRpcImpl {
         })
     }
 
+    async fn operator_notices_respond(
+        &self,
+        response: arkavo_protocol::operator_notice::NoticeResponse,
+    ) -> RpcResult<serde_json::Value> {
+        self.rate_limiter.check_rate_limit()?;
+        operator_notices::OperatorNotices::global()
+            .respond(&response)
+            .map(|()| serde_json::json!({ "accepted": true }))
+            .map_err(|reason| ErrorObjectOwned::owned(-32602, reason, None::<()>))
+    }
+
     async fn system_metrics(&self) -> RpcResult<serde_json::Value> {
         use sysinfo::{Pid, System};
         let pid = std::process::id();
@@ -1595,6 +1614,9 @@ impl A2aRpcServer for A2aRpcImpl {
                     "subsystem_timing": subsystem_timing,
                     "iroh_active": iroh_active,
                     "compute_budget": budget_snapshot,
+                    // Open until acknowledged, so a gateway that reconnects
+                    // still sees them (#759).
+                    "operator_notices": operator_notices::OperatorNotices::global().open(),
                     "context_topology": {
                         "toolMemory": tool_memory_snap,
                         "gossip": gossip_snap,

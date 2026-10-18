@@ -209,3 +209,15 @@ async fn a_denied_call_is_reported_to_the_model() {
     assert!(!reported.success);
     assert!(reported.result.contains("(Denied)"), "{}", reported.result);
 }
+
+/// Regression (SRV-016): a role's grants listed the tools its kit gave it,
+/// so a model in the artist role that called notify_operator was refused
+/// and the operator never heard. Telling the operator is in every role.
+#[arkavo_test_macros::spec("SRV-016")]
+#[test]
+fn the_operator_tool_is_permitted_in_every_role() {
+    let granted = std::collections::HashSet::from(["generate_image".to_string()]);
+
+    assert!(tool_call_permitted("notify_operator", Some(&granted)));
+    assert!(!tool_call_permitted("shell_exec", Some(&granted)));
+}

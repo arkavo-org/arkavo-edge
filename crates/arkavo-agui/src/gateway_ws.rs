@@ -33,6 +33,7 @@ pub async fn websocket_handler(
             state.arp_handler,
             state.swarm_flights,
             state.asset_fetcher,
+            state.gateway_notices,
         )
     })
 }
@@ -56,6 +57,7 @@ async fn handle_websocket(
     arp_handler: Arc<ArpHandler>,
     swarm_flights: Arc<crate::swarm_flight_registry::SwarmFlightRegistry>,
     asset_fetcher: Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
+    gateway_notices: crate::gateway_notices::GatewayNotices,
 ) {
     use futures::sink::SinkExt;
     use futures::stream::StreamExt;
@@ -116,6 +118,7 @@ async fn handle_websocket(
             &arp_handler,
             &swarm_flights,
             &asset_fetcher,
+            &gateway_notices,
             &tx,
         )
         .await
@@ -147,6 +150,7 @@ async fn handle_websocket(
                         &arp_handler,
                         &swarm_flights,
                         &asset_fetcher,
+                        &gateway_notices,
                         &tx,
                     )
                     .await
@@ -201,6 +205,7 @@ async fn dispatch_event(
     arp_handler: &Arc<ArpHandler>,
     swarm_flights: &Arc<crate::swarm_flight_registry::SwarmFlightRegistry>,
     asset_fetcher: &Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
+    gateway_notices: &crate::gateway_notices::GatewayNotices,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tracing::debug!("AG-UI: Received {:?}", std::mem::discriminant(&event));
@@ -344,8 +349,60 @@ async fn dispatch_event(
                 lesson_tx,
                 lesson_store,
                 asset_fetcher.clone(),
+                gateway_notices.clone(),
             )
             .await?;
+        }
+        AgUiEvent::RequestNotices => {
+            let notices =
+                crate::gateway_notices::all_open(gateway_notices, agent_connections).await;
+            tx.send(AgUiEvent::NoticeList { notices }).await?;
+        }
+        AgUiEvent::NoticeAction {
+            agent_id,
+            notice_id,
+            action_id,
+        } => {
+            // Every answer is on the record, whoever gave it and whatever
+            // came of it.
+            tracing::info!(target: "audit", session = %session_id, %agent_id, %notice_id, %action_id, "operator chose a notice action");
+            let acted = crate::gateway_notices::act(
+                gateway_notices,
+                agent_connections,
+                task_store,
+                connections,
+                &agent_id,
+                &notice_id,
+                &action_id,
+            )
+            .await;
+            if let Ok(crate::gateway_notices::Acted::Retry(objective)) = &acted {
+                gateway_task_dispatch::handle_submit_task(
+                    objective.clone(),
+                    Some(uuid::Uuid::new_v4().to_string()),
+                    None,
+                    agents,
+                    agent_connections,
+                    task_store,
+                    connections,
+                    learning_module,
+                    routing_history,
+                    lesson_tx,
+                    lesson_store,
+                    asset_fetcher.clone(),
+                    gateway_notices.clone(),
+                )
+                .await?;
+            }
+            crate::gateway_routing::broadcast_event(
+                &AgUiEvent::NoticeActionResult {
+                    notice_id,
+                    action_id,
+                    error: acted.err(),
+                },
+                connections,
+            )
+            .await;
         }
         AgUiEvent::RequestContextTopology { selected_agent } => {
             crate::gateway_context::handle_request_context_topology(

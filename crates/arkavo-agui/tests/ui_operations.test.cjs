@@ -49,7 +49,8 @@ function environment(...files) {
         evidenceFilter: '', evidenceDisplayed: null,
         crypto: { randomUUID: () => 'request-123' }, CSS: { escape: value => value },
         WebSocket: class { static OPEN = 1; constructor() { this.readyState = 1; } send(data) { sent.push(JSON.parse(data)); } },
-        showToast() {}, renderTaskDetail() {}, renderTasks() {}, renderAgents() {},
+        showToast(text) { context.toasts.push(text); }, toasts: [], scheduleViewRender() {},
+        renderTaskDetail() {}, renderTasks() {}, renderAgents() {},
         addTelemetry() {}, updateStats() {}, switchView() {},
         activateView(view) { context.AppState.activeView = view; },
         renderOverview() {}, renderDecisions() {}, getTaskAgent: task => task.targetAgent,
@@ -57,7 +58,7 @@ function environment(...files) {
         bindAgentChatListeners() {}, updateComposerAvailability() {}, markSubmissionUnknown() {},
         acceptTaskSubmission() {}, agentChats: {}
     });
-    for (const file of ['state.js', 'icons.js', 'lexicon.js', 'inspection.js', 'routes.js', 'task-assets.js', ...files]) {
+    for (const file of ['state.js', 'icons.js', 'lexicon.js', 'inspection.js', 'routes.js', 'task-assets.js', 'notices.js', ...files]) {
         vm.runInContext(readFileSync(join(root, file), 'utf8'), context, { filename: join(root, file) });
     }
     return { context, element, listeners, documentListeners, timers, sent, historyEntries };
@@ -101,6 +102,73 @@ test('no shipped script renders an inline event handler', () => {
         }
     }
     assert.doesNotMatch(readFileSync(join(root, '..', 'index.html'), 'utf8'), /\son[a-z]+="/);
+});
+
+function notice(id, severity, extra) {
+    return Object.assign({
+        id, key: 'k-' + id, agentId: 'artist', severity, title: 'Image generation failed', text: 'The GPU ran out of memory.',
+        focus: { view: 'agents', agent: 'artist' }, count: 1, revision: 1, raisedAt: '2026-10-18T00:00:00Z',
+        actions: [
+            { id: 'inspect', label: 'Inspect agent', kind: 'focus', focus: { view: 'agents', agent: 'artist' } },
+            { id: 'acknowledge', label: 'Acknowledge', kind: 'acknowledge' }
+        ]
+    }, extra || {});
+}
+
+// AGUI-027: a critical notice takes the view where it points; a warning
+// waits in the banner for the operator to open it.
+test('a critical notice opens where it points; a warning waits', () => {
+    const e = environment('websocket.js');
+    e.context.AppState.activeView = 'tasks';
+    e.context.handleOperatorNotice({ notice: notice('w1', 'warning') });
+    assert.equal(e.historyEntries.length, 0);
+    assert.match(e.element('notice-banner').innerHTML, /Image generation failed/);
+    e.context.handleOperatorNotice({ notice: notice('c1', 'critical') });
+    assert.deepEqual(e.historyEntries, ['#/agents?agent=artist']);
+    assert.match(e.element('notices-toggle').innerHTML, /notice-count alert">2</);
+});
+
+// AGUI-027: nothing moves the view while the operator types or has a dialog
+// open; the notice waits and says so.
+test('a notice that arrives while the operator types waits', () => {
+    const e = environment('websocket.js');
+    e.context.AppState.activeView = 'tasks';
+    e.context.document.activeElement = { tagName: 'TEXTAREA' };
+    e.context.handleOperatorNotice({ notice: notice('c1', 'critical') });
+    assert.equal(e.historyEntries.length, 0);
+    assert.match(e.context.toasts[0], /waiting until you finish/);
+    assert.match(e.element('notice-banner').innerHTML, /Image generation failed/);
+});
+
+// AGUI-027: what an agent writes is shown as text, never as markup.
+test('notice text is escaped', () => {
+    const e = environment('websocket.js');
+    e.context.AppState.activeView = 'tasks';
+    e.context.handleOperatorNotice({ notice: notice('w1', 'warning', { title: '<img src=x onerror=alert(1)>', details: [{ label: '<b>', value: '"x"' }] }) });
+    const html = e.element('notice-banner').innerHTML;
+    assert.doesNotMatch(html, /<img src=x/);
+    assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+    assert.match(html, /&lt;b&gt;/);
+});
+
+// AGUI-029: acknowledging goes to the gateway, which answers the agent;
+// opening where a notice points happens here and is recorded there too.
+test('notice actions go to the gateway; focus opens here', () => {
+    const e = environment('websocket.js');
+    e.context.AppState.activeView = 'tasks';
+    ready(e);
+    e.context.handleOperatorNotice({ notice: notice('w1', 'warning') });
+    e.context.chooseNoticeAction({ dataset: { notice: 'w1', noticeAction: 'acknowledge' } });
+    assert.deepEqual(e.sent.at(-1), { type: 'noticeAction', agentId: 'artist', noticeId: 'w1', actionId: 'acknowledge' });
+    assert.match(e.element('notices-list').innerHTML, /Sending/);
+    e.context.handleNoticeActionResult({ noticeId: 'w1', actionId: 'acknowledge' });
+    e.context.handleNoticeResolved({ agentId: 'artist', noticeId: 'w1' });
+    assert.doesNotMatch(e.element('notice-banner').innerHTML, /Image generation failed/);
+
+    e.context.handleOperatorNotice({ notice: notice('w2', 'warning') });
+    e.context.chooseNoticeAction({ dataset: { notice: 'w2', noticeAction: 'inspect' } });
+    assert.deepEqual(e.historyEntries.at(-1), '#/agents?agent=artist');
+    assert.equal(e.sent.at(-1).actionId, 'inspect');
 });
 
 test('untrusted text is escaped in both content and quoted attributes', () => {
@@ -389,7 +457,7 @@ test('empty objective, failed send and malformed socket closure preserve work', 
     assert.match(e.element('task-submission-status').textContent, /Not sent/);
     e.context.connect();
     e.context.ws.onopen();
-    assert.equal(e.sent.length, 2);
+    assert.equal(e.sent.length, 3, 'fleet snapshot, task list and notices on open');
     e.context.ws.onerror();
     e.context.ws.onclose();
     assert.equal(e.context.AppState.connection, 'reconnecting');

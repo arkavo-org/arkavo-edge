@@ -16,6 +16,7 @@
     <header class="operations-header">
         <a class="brand" href="#/overview" aria-label="Arkavo Operations overview"><span class="brand-mark">A</span><span>ARKAVO <small>OPERATIONS</small></span></a>
         <div class="header-scope">Scope <strong>This gateway</strong><span data-info="scope"></span></div>
+        <button type="button" id="notices-toggle" class="notices-toggle" aria-label="Notices"></button>
         <div class="gateway-link"><span id="connection-status" role="status">Connecting</span><span data-info="gateway"></span></div>
         <div id="stats" class="sr-only" aria-hidden="true"><span id="agent-count">0</span><span id="task-count">0</span><span id="event-count">0</span></div>
         <span id="cost-badge" class="cost-badge" hidden>Unknown</span>
@@ -38,6 +39,7 @@
 
             <div class="content-area" id="workspace" tabindex="-1">
                 <div id="connection-notice" class="connection-notice" role="status" hidden></div>
+                <div id="notice-banner" class="notice-banner" role="alert" hidden></div>
                 <section class="view-panel active" id="view-overview" aria-label="Overview">
                     <div class="panel-header"><h1>Overview <span data-info="overview"></span></h1><button type="button" class="add-btn" data-create-task>Create task</button></div>
                     <div id="workspace-subnav" class="workspace-subnav" aria-label="Workspace sections"></div>
@@ -144,6 +146,10 @@
         <p id="task-submission-status" class="submission-status" role="status">Draft · kept until accepted</p>
         <div class="modal-actions"><button type="button" class="btn-cancel" id="task-cancel-btn">Close</button><button type="button" class="btn-submit" id="task-submit-btn">Create task</button></div>
     </dialog>
+    <dialog id="notices-dialog" class="notices-dialog" aria-labelledby="notices-title">
+        <div class="dialog-heading"><h2 id="notices-title">Notices</h2><button type="button" id="notices-close">Close</button></div>
+        <div id="notices-list"></div>
+    </dialog>
     <dialog id="lexicon-dialog" class="lexicon-dialog" aria-labelledby="lexicon-title">
         <div class="dialog-heading"><h2 id="lexicon-title">Lexicon</h2><button type="button" id="lexicon-close">Close</button></div>
         <div id="lexicon-content"></div>
@@ -177,6 +183,7 @@
     <script src="/static/js/panels/operations.js"></script>
     <script src="/static/js/panels/evidence.js"></script>
     <script src="/static/js/task-composer.js"></script>
+    <script src="/static/js/notices.js"></script>
     <script src="/static/js/navigation.js"></script>
     <script src="/static/js/app.js"></script>
 </body>

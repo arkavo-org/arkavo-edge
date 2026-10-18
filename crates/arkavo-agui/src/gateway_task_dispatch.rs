@@ -23,6 +23,7 @@ pub async fn handle_submit_task(
     lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     lesson_store: &Arc<RwLock<Vec<arkavo_router::learning::Lesson>>>,
     asset_fetcher: Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
+    gateway_notices: crate::gateway_notices::GatewayNotices,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // A browser that lost its receipt (a dropped socket, a slow gateway)
     // sends the same request again. It gets the first task's receipt back
@@ -191,6 +192,7 @@ pub async fn handle_submit_task(
                     &history_clone,
                     &lesson_tx_clone,
                     asset_fetcher.as_ref(),
+                    &gateway_notices,
                 )
                 .await;
             });
@@ -270,6 +272,7 @@ async fn poll_agent_task(
     routing_history: &Arc<RwLock<VecDeque<RoutingRecord>>>,
     lesson_tx: &Option<mpsc::Sender<arkavo_router::learning::Lesson>>,
     asset_fetcher: Option<&Arc<dyn crate::gateway_assets::AssetFetcher>>,
+    gateway_notices: &crate::gateway_notices::GatewayNotices,
 ) {
     // Submit task to agent — returns immediately with task_id
     let agent_task_id = match conn.send_request("message/send", request, task_id).await {
@@ -304,6 +307,14 @@ async fn poll_agent_task(
                 learning_module,
                 routing_history,
                 lesson_tx,
+            )
+            .await;
+            crate::gateway_notices::task_failed(
+                gateway_notices,
+                connections,
+                task_id,
+                agent_id,
+                &format!("The agent did not take the task: {e}"),
             )
             .await;
             return;
@@ -404,11 +415,19 @@ async fn poll_agent_task(
                             task_id,
                             "failed",
                             None,
-                            Some(error_msg),
+                            Some(error_msg.clone()),
                             connections,
                             learning_module,
                             routing_history,
                             lesson_tx,
+                        )
+                        .await;
+                        crate::gateway_notices::task_failed(
+                            gateway_notices,
+                            connections,
+                            task_id,
+                            agent_id,
+                            &error_msg,
                         )
                         .await;
                         return;
@@ -469,13 +488,15 @@ async fn poll_agent_task(
         task_id,
         "failed",
         None,
-        Some(quiet),
+        Some(quiet.clone()),
         connections,
         learning_module,
         routing_history,
         lesson_tx,
     )
     .await;
+    crate::gateway_notices::task_failed(gateway_notices, connections, task_id, agent_id, &quiet)
+        .await;
 }
 
 /// The parts of a completed task's answer, as the agent sent them.
@@ -576,6 +597,7 @@ mod tests {
             &state.lesson_tx,
             &state.lesson_store,
             None,
+            state.gateway_notices.clone(),
         )
         .await
         .expect("submitted");

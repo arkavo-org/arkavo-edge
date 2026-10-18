@@ -207,8 +207,17 @@ pub mod mdns {
         let exists = agents_list
             .iter()
             .any(|a| a.get("id") == agent_info.get("id"));
+        // An agent that restarted answers on a new port. The connection to
+        // the old one never comes back, so the moved agent gets a new one,
+        // as a newly found agent does; one named with --agent keeps the
+        // endpoint the operator gave.
+        let moved = agents_list.iter().any(|a| {
+            a.get("id") == agent_info.get("id")
+                && a["discovery"] != "direct"
+                && a.get("endpoint") != agent_info.get("endpoint")
+        });
 
-        if !exists {
+        if !exists || moved {
             tracing::debug!("AG-UI: Adding new agent to list: {}", agent_id);
 
             // Auto-connect to discovered agent
@@ -286,7 +295,14 @@ pub mod mdns {
                 }
             });
 
-            agents_list.push(agent_info);
+            if let Some(existing) = agents_list
+                .iter_mut()
+                .find(|a| a.get("id") == agent_info.get("id"))
+            {
+                *existing = agent_info;
+            } else {
+                agents_list.push(agent_info);
+            }
         } else if let Some(existing) = agents_list
             .iter_mut()
             .find(|a| a.get("id") == agent_info.get("id"))

@@ -109,6 +109,8 @@ pub struct AppState {
     pub swarm_flights: Arc<SwarmFlightRegistry>,
     /// Fetches the images a task's agent delivers, when this process can
     pub asset_fetcher: Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
+    /// Notices this gateway raised about the tasks it dispatched (#759)
+    pub gateway_notices: crate::gateway_notices::GatewayNotices,
 }
 
 pub struct AgUiGateway {
@@ -476,6 +478,7 @@ impl AgUiGateway {
             },
             swarm_flights: Arc::new(SwarmFlightRegistry::new()),
             asset_fetcher: self.asset_fetcher.clone(),
+            gateway_notices: Arc::new(RwLock::new(Vec::new())),
         };
 
         // Peers named with --agent connect in the background, so the

@@ -417,3 +417,61 @@ scenarios:
       - crates/arkavo-agui/src/gateway.rs
     changed: "2026-10-18"
 
+  - id: AGUI-027
+    name: Agents' notices reach every view, and may take the view where they point
+    criticality: high
+    given:
+      - An arkavo ui workspace connected to agents that raise notices (SRV-016)
+    when: A snapshot reports a notice that is new, changed or gone
+    then:
+      - "Each new or changed notice reaches every view once, though every snapshot repeats it; one no longer reported is resolved in every view"
+      - "A view that connects asks for the open notices and gets every one, the gateway's own included"
+      - "The header shows how many are open; warnings and critical notices wait in a banner with their actions, and the notices dialog lists them all"
+      - "A critical notice takes the view to where it points (an agent, a task, a workspace view); the viewer can make that every notice or none, a setting kept in their browser"
+      - "Nothing moves the view while the operator types or has a dialog open: the notice waits, says so, and opens once they stop"
+      - "Titles, text and details are shown as text, never as markup"
+      - "When an agent restarts, on the same port or a new one, the workspace subscribes to it again and its notices keep coming"
+    refs:
+      - crates/arkavo-agui/src/gateway_notices.rs
+      - crates/arkavo-agui/src/agent_connection.rs
+      - crates/arkavo-agui/src/mdns_impl.rs
+      - crates/arkavo-agui/static/js/notices.js
+    changed: "2026-10-18"
+
+  - id: AGUI-028
+    name: A workspace task that fails is a notice with a retry
+    criticality: medium
+    given:
+      - A task submitted from arkavo ui
+    when: The agent refuses it, it fails, or it reports nothing new for five minutes
+    then:
+      - "The gateway raises a warning to every view: what went wrong, the task to open, Retry task and Dismiss"
+      - "Retry task submits the task's objective again as a new task and closes the notice; Dismiss closes it"
+      - "The gateway keeps at most 20 notices of its own; a second failure of the same task replaces the first"
+    refs:
+      - crates/arkavo-agui/src/gateway_notices.rs
+      - crates/arkavo-agui/src/gateway_task_dispatch.rs
+    changed: "2026-10-18"
+
+  - id: AGUI-029
+    name: An operator's answer to a notice reaches the agent, and is on the record
+    criticality: high
+    given:
+      - A notice open in arkavo ui
+    when: The operator chooses one of its actions
+    then:
+      - "Inspect and Open act in the browser; every choice still goes to the gateway, which records it (target audit) with the session, agent, notice and action"
+      - "Acknowledging an agent's notice calls that agent's operator.notices.respond; once it accepts, the notice is resolved in every view"
+      - "Every view hears what came of the choice (noticeActionResult), with the reason when it was not done"
+      - "An answer acts with the agent's own grants and checks: choosing an action grants nothing new"
+    edge_cases:
+      - condition: An action the notice does not offer, a notice no longer open, or an agent no longer connected
+        expected: "Not done, with the reason"
+      - condition: The gateway is disconnected
+        expected: "Acknowledge and Retry are disabled; Inspect still opens"
+    refs:
+      - crates/arkavo-agui/src/gateway_notices.rs
+      - crates/arkavo-agui/src/gateway_ws.rs
+      - crates/arkavo-agui/static/js/notices.js
+    changed: "2026-10-18"
+

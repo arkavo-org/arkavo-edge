@@ -65,6 +65,10 @@ async fn build_full_registry(
         }
     }
     arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
+    super::operator_notices::register(
+        &mut registry,
+        super::operator_notices::OperatorNotices::global(),
+    );
     if let Some(assets) = &config.assets {
         assets.register_tools(&mut registry, outbox.clone());
     }
@@ -96,7 +100,10 @@ async fn derive_filtered_registry(
     granted: &std::collections::HashSet<String>,
 ) -> Arc<arkavo_mcp_tools::ToolRegistry> {
     let mut registry = build_full_registry(config, outbox).await;
-    registry.retain_granted(granted);
+    // Every role can tell the operator something is wrong (SRV-016).
+    let mut granted = granted.clone();
+    granted.insert(super::operator_notices::NOTIFY_OPERATOR.to_string());
+    registry.retain_granted(&granted);
     Arc::new(registry)
 }
 
@@ -253,6 +260,27 @@ pub async fn run_agent_loop(
                     let snapshot = budget.snapshot();
                     if !snapshot.has_remaining {
                         drop(budget);
+                        // Refusing a requester is the anomaly; an idle
+                        // agent with no budget left is not (#759).
+                        if !pending_messages.is_empty() {
+                            super::operator_notices::OperatorNotices::global().raise(
+                                super::operator_notices::Anomaly {
+                                    key: "compute-budget-exhausted".into(),
+                                    severity: arkavo_protocol::operator_notice::NoticeSeverity::Warning,
+                                    title: "Compute budget spent".into(),
+                                    text: "Requests to this agent are refused until its compute budget refreshes.".into(),
+                                    focus: Some(arkavo_protocol::operator_notice::NoticeFocus {
+                                        view: "budget".into(),
+                                        agent: None,
+                                        task: None,
+                                    }),
+                                    details: vec![super::operator_notices::detail(
+                                        "Refused",
+                                        format!("{} request(s)", pending_messages.len()),
+                                    )],
+                                },
+                            );
+                        }
                         reject_pending(
                             &mut pending_messages,
                             CycleId(cycle),

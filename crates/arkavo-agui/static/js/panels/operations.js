@@ -79,11 +79,18 @@ function renderOverview() {
     html += opsMetric('Agent links', 'network', AppState.observations.swarm ? connected + ' / ' + agents.length : 'Unknown', 'Swarm snapshot · ' + receivedAge('swarm'));
     html += opsMetric('Task exceptions', 'octagon-pause', AppState.observations.tasks ? attention.length : 'Unknown', 'Blocked or failed · ' + receivedAge('tasks'));
     html += '</div><div class="ops-grid"><div><section class="ops-section"><div class="ops-section-heading"><h2>Needs attention</h2><button data-navigate="decisions">Review decisions</button></div>';
+    var notices = Object.values(AppState.notices || {});
+    html += overviewNotices();
     if (pending.length) html += '<div class="observation-row"><span>' + uiState('proposed') + '</span><button class="row-action" data-navigate="decisions">' + pending.length + ' policy change' + (pending.length === 1 ? '' : 's') + '</button></div>';
     if (attention.length) html += taskRows(attention.slice(0, 5));
-    if (!attention.length && !pending.length) html += '<div class="ops-empty"><strong>' + (AppState.observations.tasks && AppState.observations.policy ? 'No exceptions reported' : 'Awaiting observations') + '</strong>Task and policy snapshots determine this queue.</div>';
+    if (!attention.length && !pending.length && !notices.length) html += '<div class="ops-empty"><strong>' + (AppState.observations.tasks && AppState.observations.policy ? 'No exceptions reported' : 'Awaiting observations') + '</strong>Task and policy snapshots determine this queue.</div>';
+    // Operators' own tasks lead; the cycles agents run by themselves are
+    // counted, not listed, so they do not bury what people asked for.
+    var ours = tasks.filter(function(t) { return t.source !== 'agent'; });
+    var agentCycles = tasks.length - ours.length;
     html += '</section><section class="ops-section"><div class="ops-section-heading"><h2>Recent tasks ' + uiHelp('task') + '</h2><button data-navigate="tasks">All tasks</button></div>';
-    html += tasks.length ? taskRows(tasks.slice(0, 8)) : '<div class="ops-empty"><strong>No tasks reported</strong>Create a task when an agent is available.</div>';
+    html += ours.length ? taskRows(ours.slice(0, 8)) : '<div class="ops-empty"><strong>No tasks created here yet</strong>Create a task when an agent is available.</div>';
+    if (agentCycles) html += '<div class="observation-row"><span>Agent activity<small>Work agents started themselves</small></span><button class="row-action" data-navigate="tasks">' + agentCycles + ' cycle' + (agentCycles === 1 ? '' : 's') + '</button></div>';
     html += '</section>' + latestImages(tasks) + '</div><aside><section class="ops-section"><div class="ops-section-heading"><h2>Observations ' + uiHelp('freshness') + '</h2></div>';
     html += '<div class="observation-row"><span>Gateway link</span><span>' + uiState(AppState.connection) + '</span></div>';
     [['swarm', 'Swarm'], ['tasks', 'Tasks'], ['policy', 'Runtime policy']].forEach(function(item) {
@@ -93,7 +100,7 @@ function renderOverview() {
     html += '<div class="observation-row"><span>Containment receipt</span><span class="muted">Not reported</span></div></section>';
     html += '<section class="ops-section"><div class="ops-section-heading"><h2>Evidence ' + uiHelp('session') + '</h2><button data-navigate="telemetry">Inspect</button></div><div class="observation-row"><span>Session events</span><span>' + AppState.telemetry.length + ' retained</span></div></section></aside></div>';
     // Ignore snapshot receipt times when deciding whether to rebuild interactive rows.
-    var fingerprint = JSON.stringify([taskListFingerprint(tasks), agents, pending, AppState.connection, AppState.telemetry.length, Object.keys(AppState.observations)]);
+    var fingerprint = JSON.stringify([taskListFingerprint(tasks), agents, pending, notices.map(function(n) { return [n.id, n.revision]; }), AppState.noticeActionsPending, AppState.connection, AppState.telemetry.length, Object.keys(AppState.observations)]);
     if (container.dataset.fingerprint !== fingerprint) {
         container.innerHTML = html;
         container.dataset.fingerprint = fingerprint;
