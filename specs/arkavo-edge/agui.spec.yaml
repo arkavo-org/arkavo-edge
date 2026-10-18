@@ -430,6 +430,7 @@ scenarios:
       - "The header shows how many are open; warnings and critical notices wait in a banner with their actions, and the notices dialog lists them all"
       - "A critical notice takes the view to where it points (an agent, a task, a workspace view); the viewer can make that every notice or none, a setting kept in their browser"
       - "A notice that moved the view stays in the banner, so the operator sees why the view changed"
+      - "A view that connects after a notice was raised shows it in the banner with its actions too, without moving the view; one the viewer hid stays hidden when the view reconnects"
       - "Nothing moves the view while the operator types or has a dialog open: the notice waits, says so, and opens once they stop"
       - "Titles, text and details are shown as text, never as markup"
       - "When an agent restarts, on the same port or a new one, the workspace subscribes to it again and its notices keep coming"
