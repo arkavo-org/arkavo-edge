@@ -33,19 +33,17 @@ impl AgentKeys {
 
         let gossip = subordinate_key::load_or_create(agent, Purpose::Gossip)?;
         let gossip_voucher = vouch(&gossip);
-        let mut vouchers = vec![gossip_voucher.clone()];
         #[cfg(feature = "kas")]
-        let tdf = {
-            let key = subordinate_key::load_or_create(agent, Purpose::Tdf)?;
-            vouchers.push(vouch(&key));
-            Arc::new(key)
-        };
+        let tdf = Arc::new(subordinate_key::load_or_create(agent, Purpose::Tdf)?);
         #[cfg(feature = "iroh")]
-        let iroh = {
-            let key = subordinate_key::load_or_create(agent, Purpose::Iroh)?;
-            vouchers.push(vouch(&key));
-            Arc::new(key)
-        };
+        let iroh = Arc::new(subordinate_key::load_or_create(agent, Purpose::Iroh)?);
+        let vouchers = vec![
+            gossip_voucher.clone(),
+            #[cfg(feature = "kas")]
+            vouch(&tdf),
+            #[cfg(feature = "iroh")]
+            vouch(&iroh),
+        ];
         Ok(Self {
             workload,
             gossip,
