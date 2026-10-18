@@ -1,9 +1,5 @@
-use arkavo_config_encryption::AgentCredential;
 use arkavo_server::server::assets::Hosting;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -472,26 +468,6 @@ pub async fn start_agent_server(
 
     let keys = keys::AgentKeys::load_or_create(&config.name)?;
 
-    // Create AgentCredential for TDF encryption/decryption
-    let mut identity_attributes = HashMap::new();
-    identity_attributes.insert("agent.id".to_string(), config.name.clone());
-    let agent_identity = Arc::new(
-        AgentCredential::new(config.name.clone(), identity_attributes)
-            .map_err(|e| format!("Failed to create AgentCredential: {e}"))?,
-    );
-
-    // Encode public key as base64 for mDNS broadcast
-    let public_key_b64 = BASE64_STANDARD.encode(agent_identity.public_key.as_bytes());
-
-    let debug_mode = std::env::var("ARKAVO_DEBUG").is_ok();
-    if debug_mode {
-        println!(
-            "[Identity] Created AgentIdentity for agent '{}' with public key: {}...",
-            config.name,
-            &public_key_b64[..20.min(public_key_b64.len())]
-        );
-    }
-
     // Create process manager for MCP servers
     let process_manager = McpProcessManager::new();
 
@@ -516,8 +492,6 @@ pub async fn start_agent_server(
 
     let server = A2aServer::new(server_config);
 
-    // Set the public key for TDF encryption (used in agent.capabilities.get RPC)
-    server.set_public_key(public_key_b64.clone()).await;
     keys.install(&server).await;
 
     // Create pain signal channel before LearningBus (lock-free hot path)
@@ -841,7 +815,7 @@ pub async fn start_agent_server(
         let shutdown_flag_clone = shutdown_flag.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let peer_tx_clone = peer_tx.clone();
-        let public_key_clone = public_key_b64.clone();
+        let public_key_clone = server.tdf_public_key().await;
 
         // Use std::thread since zeroconf is not Send
         let handle = std::thread::spawn(move || {
@@ -851,7 +825,7 @@ pub async fn start_agent_server(
                 shutdown_flag_clone,
                 Some(tx),
                 peer_tx_clone,
-                Some(public_key_clone),
+                public_key_clone,
             ) {
                 eprintln!("mDNS broadcast error: {e}");
             }

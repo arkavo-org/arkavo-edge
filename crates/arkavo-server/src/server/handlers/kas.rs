@@ -194,6 +194,16 @@ pub(crate) fn kas_keypair(
         .ok()
 }
 
+/// The public half of a kept KAS key, base64 SEC1, as `kas.publicKey`
+/// serves it.
+pub(crate) fn tdf_public_key(
+    kept: &arkavo_device_identity::subordinate_key::SubordinateKey,
+) -> Option<String> {
+    arkavo_tdf::KasKeypair::from_secret_bytes(kept.secret())
+        .ok()
+        .map(|keypair| keypair.public_key_base64())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +323,21 @@ mod tests {
             assert_eq!(
                 kas_keypair(Some(&before)).unwrap().public_key_base64(),
                 kas_keypair(Some(&after)).unwrap().public_key_base64()
+            );
+        }
+
+        /// The key the agent advertises over mDNS and in
+        /// `agent.capabilities.get` is the one its KAS serves.
+        #[spec("TDFS-017")]
+        #[test]
+        fn the_advertised_tdf_key_is_the_kas_key() {
+            let dir = tempfile::tempdir().unwrap();
+            let kept =
+                subordinate_key::load_or_create_at(&dir.path().join("tdf_key"), Purpose::Tdf)
+                    .unwrap();
+            assert_eq!(
+                super::super::tdf_public_key(&kept),
+                Some(kas_keypair(Some(&kept)).unwrap().public_key_base64())
             );
         }
 
