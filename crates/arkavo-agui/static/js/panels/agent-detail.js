@@ -12,6 +12,20 @@ function agentIdentity(identity) {
         escapeHtml(identity.reason || '');
 }
 
+var KEY_PURPOSES = { gossip: 'Gossip', iroh: 'iroh endpoint', tdf: 'TDF' };
+
+// The keys the agent's identity vouches for in its card, as the gateway
+// checked them.
+function agentKeys(identity) {
+    if (!identity || identity.state !== 'verified') return 'Not reported';
+    var keys = identity.keys || [];
+    if (!keys.length) return 'None vouched for';
+    return keys.map(function(key) {
+        return '<div>' + escapeHtml(KEY_PURPOSES[key.purpose] || key.purpose) +
+            ' <code>' + escapeHtml(key.key) + '</code></div>';
+    }).join('');
+}
+
 function renderAgentDetail() {
     var container = document.getElementById('agent-inspector');
     var id = AppState.selectedAgentId;
@@ -35,6 +49,7 @@ function renderAgentDetail() {
     html += '<dl class="inspection-fields">' + inspectionField('Model', escapeHtml(agent.model || 'Not reported')) +
         inspectionField('Endpoint', escapeHtml(agent.endpoint || 'Not reported')) +
         inspectionField('Identity', agentIdentity(agent.identity)) +
+        inspectionField('Keys', agentKeys(agent.identity)) +
         inspectionField('Authorization ' + uiHelp('grant'), 'Not reported') +
         inspectionField('Snapshot ' + uiHelp('freshness'), receivedAge('swarm')) + '</dl></section>';
     html += '<section class="ops-section"><div class="ops-section-heading"><h2>Assigned tasks</h2><span class="muted">' + receivedAge('tasks') + '</span></div>' +

@@ -4,21 +4,25 @@
 use std::sync::Arc;
 
 use arkavo_crypto::AgentPublicKey;
-use arkavo_device_identity::subordinate_key::{SubordinateKey, Voucher};
-use arkavo_device_identity::workload_key::WorkloadKey;
+use arkavo_device_identity::subordinate_key::Voucher;
 use arkavo_gossip::GossipResult;
 
 use super::learning_bus::LearningBus;
 
 impl LearningBus {
-    /// Have `workload` vouch for this bus's gossip key, which `gossip_key`
-    /// holds. Without it the agent shows peers no key statement, as agents
-    /// from before key statements do.
-    pub fn vouch_with(&self, workload: Arc<WorkloadKey>, gossip_key: &SubordinateKey) {
-        let key = self.keypair.public_key().to_did_key();
-        let _ = self
-            .gossip_voucher
-            .set(Arc::new(Voucher::new(workload, gossip_key, key)));
+    /// Show peers the statement `voucher` signs for this bus's gossip key.
+    /// Without it the agent shows none, as agents from before key statements
+    /// do. A voucher for any other key is refused: its statement would vouch
+    /// for a key this bus does not sign with.
+    pub fn set_gossip_voucher(&self, voucher: Arc<Voucher>) {
+        if voucher.key() != self.keypair.public_key().to_did_key() {
+            tracing::error!(
+                "Not showing peers a statement for {}, which is not this agent's gossip key",
+                voucher.key()
+            );
+            return;
+        }
+        let _ = self.gossip_voucher.set(voucher);
     }
 
     /// The statement to show a peer alongside this agent's gossip key, or

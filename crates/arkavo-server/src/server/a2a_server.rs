@@ -14,6 +14,7 @@ use jsonrpsee::server::{ServerBuilder, ServerHandle};
 // Use JwtAuthBackend or MultiAuthBackend for production
 #[cfg(any(feature = "kas", feature = "iroh"))]
 use arkavo_device_identity::subordinate_key::SubordinateKey;
+use arkavo_device_identity::subordinate_key::Voucher;
 use arkavo_device_identity::workload_key::WorkloadKey;
 use arkavo_protocol::chat_session;
 use arkavo_protocol::config::{BufferConfig, ServerConfig};
@@ -70,6 +71,8 @@ pub struct A2aServer {
     public_key: Arc<tokio::sync::RwLock<Option<String>>>,
     /// The agent's account key (#766), which signs its card
     workload_key: Arc<tokio::sync::RwLock<Option<Arc<WorkloadKey>>>>,
+    /// Sign the statements the card carries for the agent's other keys
+    key_vouchers: Arc<tokio::sync::RwLock<Vec<Arc<Voucher>>>>,
     /// The KAS key the agent keeps across restarts (TDFS-016)
     #[cfg(feature = "kas")]
     kas_key: Arc<tokio::sync::RwLock<Option<Arc<SubordinateKey>>>>,
@@ -143,6 +146,7 @@ impl A2aServer {
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
             public_key: Arc::new(tokio::sync::RwLock::new(None)),
             workload_key: Arc::new(tokio::sync::RwLock::new(None)),
+            key_vouchers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             #[cfg(feature = "kas")]
             kas_key: Arc::new(tokio::sync::RwLock::new(None)),
             #[cfg(feature = "iroh")]
@@ -199,6 +203,12 @@ impl A2aServer {
     /// Set the key the agent's identity is, so its card goes out signed
     pub async fn set_workload_key(&self, key: Arc<WorkloadKey>) {
         *self.workload_key.write().await = Some(key);
+    }
+
+    /// Set the vouchers whose statements the card carries, one for each key
+    /// the agent uses besides its workload key
+    pub async fn set_key_vouchers(&self, vouchers: Vec<Arc<Voucher>>) {
+        *self.key_vouchers.write().await = vouchers;
     }
 
     /// Set the KAS key the agent keeps, so TDFs wrapped to it still open
@@ -1433,6 +1443,7 @@ impl A2aServer {
             assets,
             swarmkit,
             workload_key: self.workload_key.read().await.clone(),
+            key_vouchers: self.key_vouchers.read().await.clone(),
         };
 
         if let Err(e) = self.start_file_watcher().await {

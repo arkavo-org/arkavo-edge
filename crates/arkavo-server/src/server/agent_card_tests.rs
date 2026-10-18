@@ -83,3 +83,81 @@ async fn an_agent_without_a_workload_key_serves_its_card_unsigned() {
     let card = served_card(planner(Some("Plans the work"))).await;
     assert!(card.get("signatures").is_none(), "{card}");
 }
+
+/// The signed card carries the statements in which the workload key vouches
+/// for the agent's gossip, TDF and iroh keys (SRV-018).
+#[arkavo_test_macros::spec("SRV-018")]
+#[tokio::test]
+async fn the_card_carries_a_statement_for_each_of_the_agents_keys() {
+    use arkavo_device_identity::subordinate_key::{self, Purpose, Voucher};
+
+    let dir = tempfile::tempdir().unwrap();
+    let workload = Arc::new(
+        arkavo_device_identity::workload_key::load_or_create_at(&dir.path().join("workload_key"))
+            .unwrap(),
+    );
+    let mut keys = Vec::new();
+    let mut vouchers = Vec::new();
+    for purpose in [Purpose::Gossip, Purpose::Tdf, Purpose::Iroh] {
+        let key =
+            subordinate_key::load_or_create_at(&dir.path().join(format!("{purpose:?}")), purpose)
+                .unwrap();
+        vouchers.push(Arc::new(Voucher::new(workload.clone(), &key)));
+        keys.push((purpose, key.did().to_string()));
+    }
+    let mut rpc = rpc_impl(Arc::new(RwLock::new(planner(Some("Plans the work"))))).await;
+    rpc.workload_key = Some(workload.clone());
+    rpc.key_vouchers = vouchers;
+    let card = rpc
+        .into_rpc()
+        .call::<[(); 0], serde_json::Value>("agent_card", [])
+        .await
+        .expect("the agent card is always served");
+
+    // The statements are inside what the card signature covers.
+    assert_eq!(
+        arkavo_protocol::card_signature::verify(&card),
+        Ok(workload.did().to_string())
+    );
+    let extension = card["extensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["uri"] == arkavo_key_statement::CARD_EXTENSION)
+        .expect("the card carries the key statements extension");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let vouched: Vec<(Purpose, String)> = extension["data"]["statements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|compact| {
+            let statement = arkavo_key_statement::verify(compact.as_str().unwrap(), now).unwrap();
+            assert_eq!(statement.issuer, workload.did());
+            (statement.purpose, statement.key)
+        })
+        .collect();
+    assert_eq!(vouched, keys);
+}
+
+#[tokio::test]
+async fn an_agent_with_no_other_keys_carries_no_statements() {
+    let dir = tempfile::tempdir().unwrap();
+    let key =
+        arkavo_device_identity::workload_key::load_or_create_at(&dir.path().join("workload_key"))
+            .unwrap();
+    let mut rpc = rpc_impl(Arc::new(RwLock::new(planner(Some("Plans the work"))))).await;
+    rpc.workload_key = Some(Arc::new(key));
+    let card = rpc
+        .into_rpc()
+        .call::<[(); 0], serde_json::Value>("agent_card", [])
+        .await
+        .expect("the agent card is always served");
+    assert!(
+        card.get("extensions")
+            .is_none_or(|e| e.as_array().is_some_and(Vec::is_empty)),
+        "{card}"
+    );
+}

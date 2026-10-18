@@ -837,6 +837,28 @@ test('agent inspection links only assigned tasks and proposals for the exact age
     assert.equal(e.element('agent-inspector').innerHTML, '');
 });
 
+test('an agent lists the keys its identity vouches for', () => {
+    const e = environment('panels/task-detail.js', 'panels/operations.js', 'panels/agent-detail.js');
+    const c = e.context;
+    c.AppState.selectedAgentId = 'worker';
+    c.AppState.agents.worker = { id: 'worker', status: 'connected', identity: { state: 'unsigned' } };
+    c.renderAgentDetail();
+    assert.match(e.element('agent-inspector').innerHTML, /<dt>Keys<\/dt><dd>Not reported<\/dd>/);
+    c.AppState.agents.worker.identity = { state: 'verified', did: 'did:key:zDnaeExample' };
+    c.renderAgentDetail();
+    assert.match(e.element('agent-inspector').innerHTML, /<dt>Keys<\/dt><dd>None vouched for<\/dd>/);
+    c.AppState.agents.worker.identity.keys = [
+        { purpose: 'gossip', key: 'did:key:z6MkGossip', validUntil: 1 },
+        { purpose: 'tdf', key: 'did:key:zDnTdf<', validUntil: 1 },
+        { purpose: 'iroh', key: 'did:key:z6MkIroh', validUntil: 1 },
+    ];
+    c.renderAgentDetail();
+    const html = e.element('agent-inspector').innerHTML;
+    assert.match(html, /Gossip <code>did:key:z6MkGossip<\/code>/);
+    assert.match(html, /TDF <code>did:key:zDnTdf&lt;<\/code>/);
+    assert.match(html, /iroh endpoint <code>did:key:z6MkIroh<\/code>/);
+});
+
 test('an agent shows the key its card is signed by, and a card that does not verify as such', () => {
     const e = environment('panels/task-detail.js', 'panels/operations.js', 'panels/agent-detail.js');
     const c = e.context;

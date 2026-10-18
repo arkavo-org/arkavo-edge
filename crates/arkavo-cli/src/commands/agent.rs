@@ -12,6 +12,7 @@ mod discovered;
 mod enlist;
 mod gossip_keys;
 mod gpu_residency;
+mod keys;
 pub mod listen;
 
 /// What a command line asks `arkavo agent` to do.
@@ -469,12 +470,7 @@ pub async fn start_agent_server(
     };
     let device_did = device_keypair.public_key().to_did_key();
 
-    // The key this agent's account is (#766), one per agent name, made in
-    // the Secure Enclave where this Mac has one. It signs the agent card;
-    // the identity provider moves to it with authnz-rs#102.
-    let workload_key = Arc::new(arkavo_device_identity::workload_key::load_or_create(
-        &config.name,
-    )?);
+    let keys = keys::AgentKeys::load_or_create(&config.name)?;
 
     // Create AgentCredential for TDF encryption/decryption
     let mut identity_attributes = HashMap::new();
@@ -522,38 +518,14 @@ pub async fn start_agent_server(
 
     // Set the public key for TDF encryption (used in agent.capabilities.get RPC)
     server.set_public_key(public_key_b64.clone()).await;
-    server.set_workload_key(workload_key.clone()).await;
-    #[cfg(feature = "kas")]
-    server
-        .set_kas_key(Arc::new(
-            arkavo_device_identity::subordinate_key::load_or_create(
-                &config.name,
-                arkavo_device_identity::subordinate_key::Purpose::Tdf,
-            )?,
-        ))
-        .await;
-    #[cfg(feature = "iroh")]
-    server
-        .set_iroh_key(Arc::new(
-            arkavo_device_identity::subordinate_key::load_or_create(
-                &config.name,
-                arkavo_device_identity::subordinate_key::Purpose::Iroh,
-            )?,
-        ))
-        .await;
+    keys.install(&server).await;
 
     // Create pain signal channel before LearningBus (lock-free hot path)
     let (pain_tx, pain_rx) = tokio::sync::mpsc::channel::<arkavo_server::PainSignal>(128);
 
     // Initialize LearningBus FIRST (before set_agent_metadata which initializes router)
     let learning_bus = {
-        // Kept across restarts, so peers that bound it once bind it again
-        // rather than refuse a new key under the same name (INGRESS-017).
-        let gossip_key = arkavo_device_identity::subordinate_key::load_or_create(
-            &config.name,
-            arkavo_device_identity::subordinate_key::Purpose::Gossip,
-        )?;
-        let keypair = Arc::new(AgentKeypair::from_bytes(gossip_key.secret())?);
+        let keypair = Arc::new(AgentKeypair::from_bytes(keys.gossip.secret())?);
         let gossip_config = GossipConfig::default();
         let swarm_id = config.swarm.clone().unwrap_or_else(|| {
             std::env::current_dir()
@@ -563,7 +535,7 @@ pub async fn start_agent_server(
         });
         let mut bus = LearningBus::new(config.name.clone(), swarm_id, keypair, gossip_config);
         bus.set_pain_sender(pain_tx);
-        bus.vouch_with(workload_key.clone(), &gossip_key);
+        bus.set_gossip_voucher(keys.gossip_voucher.clone());
         Arc::new(bus)
     };
     // Initialize persistent learning store (SQLite) for lessons
@@ -1078,7 +1050,11 @@ pub async fn start_agent_server(
     }
 
     if !quiet {
-        println!("Identity {} ({})", workload_key.did(), workload_key.store());
+        println!(
+            "Identity {} ({})",
+            keys.workload.did(),
+            keys.workload.store()
+        );
         // The bound address carries the port the OS assigned when the kit asked for port 0.
         println!("Ready at {bound_addr}");
     }

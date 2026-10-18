@@ -37,6 +37,7 @@ reqwest = { workspace = true }
 # Protocol dependencies
 arkavo-agui-protocol = { path = "../arkavo-agui-protocol" }
 arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-key-statement = { path = "../arkavo-key-statement" }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-dataflow = { path = "../arkavo-dataflow" }
 arkavo-budget = { path = "../arkavo-budget" }

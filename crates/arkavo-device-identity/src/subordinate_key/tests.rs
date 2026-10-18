@@ -29,7 +29,8 @@ fn a_kept_key_is_the_same_after_a_restart() {
 fn a_key_is_made_for_its_purpose_with_the_time_as_its_generation() {
     let before = unix_now();
     let tdf = load_or_create_at(&scratch("tdf"), Purpose::Tdf).unwrap();
-    assert!(P256SigningKeypair::from_bytes(tdf.secret()).is_ok());
+    let keypair = P256SigningKeypair::from_bytes(tdf.secret()).unwrap();
+    assert_eq!(tdf.did(), keypair.public_key().to_did_key());
     assert_eq!(tdf.purpose(), Purpose::Tdf);
     assert!((before..=unix_now()).contains(&tdf.generation()));
 }
@@ -80,7 +81,9 @@ fn the_voucher_signs_a_statement_peers_accept() {
         .unwrap()
         .public_key()
         .to_did_key();
-    let voucher = Voucher::new(workload.clone(), &gossip, key.clone());
+    assert_eq!(gossip.did(), key);
+    let voucher = Voucher::new(workload.clone(), &gossip);
+    assert_eq!(voucher.key(), key);
 
     let now = unix_now();
     let read = arkavo_key_statement::verify(&voucher.statement_at(now).unwrap(), now).unwrap();
@@ -97,11 +100,7 @@ fn the_voucher_signs_a_statement_peers_accept() {
 fn the_voucher_renews_a_statement_before_it_runs_out() {
     let workload = workload("renew_workload");
     let gossip = load_or_create_at(&scratch("renew_gossip"), Purpose::Gossip).unwrap();
-    let key = AgentKeypair::from_bytes(gossip.secret())
-        .unwrap()
-        .public_key()
-        .to_did_key();
-    let voucher = Voucher::new(workload, &gossip, key);
+    let voucher = Voucher::new(workload, &gossip);
 
     let start = 1_800_000_000;
     let first = voucher.statement_at(start).unwrap();

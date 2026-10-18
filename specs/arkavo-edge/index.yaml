@@ -985,7 +985,7 @@ components:
     module: arkavo_server
     description: A2A server and runtime orchestration
     criticality: critical
-    scenario_count: 17
+    scenario_count: 18
     invariants:
       - Server binds localhost by default
       - JSON-RPC 2.0 protocol
