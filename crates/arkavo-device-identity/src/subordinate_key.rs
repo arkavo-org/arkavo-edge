@@ -40,7 +40,7 @@ struct Record {
 pub struct SubordinateKey {
     purpose: Purpose,
     generation: u64,
-    secret: Vec<u8>,
+    secret: [u8; 32],
 }
 
 impl SubordinateKey {
@@ -56,7 +56,7 @@ impl SubordinateKey {
 
     /// The private key: an Ed25519 seed for gossip and iroh, a P-256 scalar
     /// for TDF.
-    pub fn secret(&self) -> &[u8] {
+    pub fn secret(&self) -> &[u8; 32] {
         &self.secret
     }
 }
@@ -98,7 +98,9 @@ pub fn load_or_create_at(path: &Path, purpose: Purpose) -> Result<SubordinateKey
     let secret = match purpose {
         Purpose::Gossip | Purpose::Iroh => AgentKeypair::generate().to_bytes(),
         Purpose::Tdf => P256SigningKeypair::generate().to_bytes(),
-    };
+    }
+    .try_into()
+    .map_err(|_| DeviceIdentityError::WorkloadKey("a new key is not 32 bytes".to_string()))?;
     let key = SubordinateKey {
         purpose,
         generation: unix_now(),
@@ -108,7 +110,7 @@ pub fn load_or_create_at(path: &Path, purpose: Purpose) -> Result<SubordinateKey
         format: FORMAT.to_string(),
         purpose,
         generation: key.generation,
-        key: STANDARD.encode(&key.secret),
+        key: STANDARD.encode(key.secret),
     })
     .map_err(|e| DeviceIdentityError::WorkloadKey(e.to_string()))?;
     if crate::private_file::create_private(path, &record)? {
@@ -147,10 +149,10 @@ fn load(path: &Path, purpose: Purpose) -> Result<Option<SubordinateKey>> {
     if record.purpose != purpose {
         return Err(refuse(&format!("holds the {:?} key", record.purpose)));
     }
-    let secret = STANDARD
+    let secret: [u8; 32] = STANDARD
         .decode(&record.key)
         .ok()
-        .filter(|secret| secret.len() == 32)
+        .and_then(|secret| secret.try_into().ok())
         .ok_or_else(|| refuse("is damaged"))?;
     Ok(Some(SubordinateKey {
         purpose,

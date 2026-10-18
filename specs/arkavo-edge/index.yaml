@@ -383,7 +383,7 @@ components:
     module: arkavo_tdf_iroh
     description: TDF blob transport via Iroh P2P
     criticality: critical
-    scenario_count: 12
+    scenario_count: 13
     invariants:
       - Raw bytes only, no encryption
       - Tickets self-contained

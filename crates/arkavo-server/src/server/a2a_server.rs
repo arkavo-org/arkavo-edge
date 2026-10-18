@@ -12,7 +12,7 @@ use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
 // SECURITY FIX (CRI-001): NoOpAuthBackend removed
 // Use JwtAuthBackend or MultiAuthBackend for production
-#[cfg(feature = "kas")]
+#[cfg(any(feature = "kas", feature = "iroh"))]
 use arkavo_device_identity::subordinate_key::SubordinateKey;
 use arkavo_device_identity::workload_key::WorkloadKey;
 use arkavo_protocol::chat_session;
@@ -73,6 +73,9 @@ pub struct A2aServer {
     /// The KAS key the agent keeps across restarts (TDFS-016)
     #[cfg(feature = "kas")]
     kas_key: Arc<tokio::sync::RwLock<Option<Arc<SubordinateKey>>>>,
+    /// The iroh endpoint key the agent keeps across restarts (IROH-013)
+    #[cfg(feature = "iroh")]
+    iroh_key: Arc<tokio::sync::RwLock<Option<Arc<SubordinateKey>>>>,
     /// Budget manager loaded from SwarmKit config
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
     /// Cached SwarmKit agent config to avoid repeated discovery reads
@@ -142,6 +145,8 @@ impl A2aServer {
             workload_key: Arc::new(tokio::sync::RwLock::new(None)),
             #[cfg(feature = "kas")]
             kas_key: Arc::new(tokio::sync::RwLock::new(None)),
+            #[cfg(feature = "iroh")]
+            iroh_key: Arc::new(tokio::sync::RwLock::new(None)),
             budget_manager: Arc::new(tokio::sync::RwLock::new(None)),
             agent_config: Arc::new(tokio::sync::RwLock::new(
                 arkavo_router::load_agent_config().unwrap_or_default(),
@@ -201,6 +206,13 @@ impl A2aServer {
     #[cfg(feature = "kas")]
     pub async fn set_kas_key(&self, key: Arc<SubordinateKey>) {
         *self.kas_key.write().await = Some(key);
+    }
+
+    /// Set the iroh endpoint key the agent keeps, so its endpoint id
+    /// survives a restart
+    #[cfg(feature = "iroh")]
+    pub async fn set_iroh_key(&self, key: Arc<SubordinateKey>) {
+        *self.iroh_key.write().await = Some(key);
     }
 
     /// Get the agent's public key
@@ -1302,8 +1314,15 @@ impl A2aServer {
         // Start shared Iroh P2P node for TDF blob transport
         #[cfg(feature = "iroh")]
         {
-            match arkavo_tdf_iroh::IrohNode::memory().await {
-                Ok(node) => {
+            let config = match self.iroh_key.read().await.as_deref() {
+                Some(kept) => {
+                    arkavo_tdf_iroh::IrohNodeConfig::default().with_key_seed(kept.secret())
+                }
+                None => arkavo_tdf_iroh::IrohNodeConfig::default(),
+            };
+            let node = Arc::new(arkavo_tdf_iroh::IrohNode::new(config));
+            match node.start().await {
+                Ok(()) => {
                     info!("Iroh P2P node started for TDF blob transport");
                     *self.iroh_node.write().await = Some(node);
                 }
