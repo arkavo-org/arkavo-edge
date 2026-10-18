@@ -75,6 +75,10 @@ pub enum ImageGenError {
     #[error("generated output rejected: {0}")]
     Output(String),
 
+    /// The GPU failed during the run; what sd-cli wrote is discarded.
+    #[error("the GPU failed while generating, most likely out of memory: {stderr}")]
+    GpuFailed { stderr: String },
+
     #[error("delegated generation failed: {0}")]
     Delegation(String),
 
@@ -106,7 +110,9 @@ impl ImageGenError {
                 "fetch_failed"
             }
             Self::RuntimeInstall(_) => "runtime_install_failed",
-            Self::Runtime { .. } | Self::Output(_) | Self::Io(_) => "generation_failed",
+            Self::Runtime { .. } | Self::Output(_) | Self::GpuFailed { .. } | Self::Io(_) => {
+                "generation_failed"
+            }
             Self::Delegation(_) => "delegation_failed",
             Self::Stalled { .. } => "step_stalled",
             Self::Shared { code, .. } => code,

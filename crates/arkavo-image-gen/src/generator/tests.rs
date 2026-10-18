@@ -68,6 +68,49 @@ async fn first_request_fetches_then_generates() {
     drop(f.server);
 }
 
+/// IMG-021: a run the GPU failed runs once more decoding in tiles, which
+/// needs a fraction of the memory, and that run's image is the result.
+#[arkavo_test_macros::spec("IMG-021")]
+#[tokio::test]
+async fn a_gpu_failure_is_retried_with_tiled_decoding() {
+    let f = crate::testing::fake_generator_with(
+        1,
+        Duration::ZERO,
+        crate::testing::Behavior::OutOfMemoryUntilTiled,
+    )
+    .await;
+
+    let generated = f
+        .generator
+        .generate(&request(1), soon(60), &|_| {})
+        .await
+        .unwrap();
+
+    assert_eq!(generated.manifest.assets.len(), 1);
+}
+
+/// IMG-021: when the retry fails too, nothing is delivered and the
+/// requester hears generation_failed rather than receiving garbage.
+#[arkavo_test_macros::spec("IMG-021")]
+#[tokio::test]
+async fn a_gpu_failure_that_persists_delivers_no_image() {
+    let f = crate::testing::fake_generator_with(
+        1,
+        Duration::ZERO,
+        crate::testing::Behavior::OutOfMemory,
+    )
+    .await;
+
+    let err = f
+        .generator
+        .generate(&request(1), soon(60), &|_| {})
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code(), "generation_failed");
+    assert!(matches!(err, ImageGenError::GpuFailed { .. }), "{err}");
+}
+
 /// IMG-007, IMG-019: refusals come before any fetch.
 #[arkavo_test_macros::spec("IMG-007", "IMG-019")]
 #[tokio::test]

@@ -218,9 +218,20 @@ impl Generator {
         // A directory of this run's own: another agent's start or run on
         // this host never touches it.
         let dir = assets_dir("arkavo-image-gen-")?;
-        let result =
-            Box::pin(self.run_job(&job, offer.set, &runtime, &models, &dir, deadline, progress))
-                .await;
+        let mut result = Box::pin(self.run_job(
+            &job, offer.set, &runtime, &models, &dir, deadline, progress, false,
+        ))
+        .await;
+        // A GPU that ran out of memory left garbage where the image should
+        // be. Decoding in tiles needs a fraction of that memory, so the job
+        // runs once more that way before the requester hears of a failure.
+        if matches!(result, Err(ImageGenError::GpuFailed { .. })) {
+            tracing::warn!("the GPU failed generating; trying again with tiled decoding");
+            result = Box::pin(self.run_job(
+                &job, offer.set, &runtime, &models, &dir, deadline, progress, true,
+            ))
+            .await;
+        }
         if result.is_err() {
             let _ = tokio::fs::remove_dir_all(&dir).await;
         }
@@ -237,6 +248,7 @@ impl Generator {
         dir: &Path,
         deadline: Instant,
         progress: &(dyn Fn(Progress) + Send + Sync),
+        low_memory: bool,
     ) -> Result<Generated> {
         let prompts = write_prompts(job, dir).await?;
         let image = AtomicU32::new(1);
@@ -248,10 +260,11 @@ impl Generator {
                 step,
                 steps,
             }),
+            Event::GpuFailed => {}
         };
         let spec = RunSpec {
             cli: runtime.cli(),
-            args: sd_args(job, models, &prompts, dir),
+            args: sd_args(job, models, &prompts, dir, low_memory),
             out_dir: dir,
             steps: job.entry.profile.steps,
             deadline,

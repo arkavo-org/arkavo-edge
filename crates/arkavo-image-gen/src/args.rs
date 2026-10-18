@@ -33,6 +33,7 @@ pub fn sd_args(
     models: &ModelPaths,
     prompts: &PromptFiles,
     out_dir: &Path,
+    low_memory: bool,
 ) -> Vec<OsString> {
     let profile = &job.entry.profile;
     let mut args: Vec<OsString> = Vec::new();
@@ -60,6 +61,11 @@ pub fn sd_args(
     push("-o", out_dir.join(output_pattern(job)).into());
     args.push("--diffusion-fa".into());
     args.push("--disable-image-metadata".into());
+    // Decoding in tiles needs a fraction of the memory a whole-image decode
+    // does; the run after one the GPU failed asks for it.
+    if low_memory {
+        args.push("--vae-tiling".into());
+    }
     if job.tileable {
         args.push("--circular".into());
     }
@@ -141,6 +147,7 @@ mod tests {
             &models(),
             &prompts(false),
             Path::new("/out"),
+            false,
         ));
         assert_eq!(value(&args, "--steps"), Some("8"));
         assert_eq!(value(&args, "--cfg-scale"), Some("1.00"));
@@ -180,7 +187,13 @@ mod tests {
         }
         .validate()
         .unwrap();
-        let args = strings(&sd_args(&job, &models(), &prompts(true), Path::new("/out")));
+        let args = strings(&sd_args(
+            &job,
+            &models(),
+            &prompts(true),
+            Path::new("/out"),
+            false,
+        ));
         assert_eq!(value(&args, "--steps"), Some("40"));
         assert_eq!(value(&args, "--cfg-scale"), Some("4.00"));
         assert_eq!(value(&args, "--sigmas"), None);

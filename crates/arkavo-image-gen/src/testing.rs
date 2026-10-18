@@ -97,16 +97,27 @@ pub enum Behavior {
     Hang,
     /// Writes its environment to env.txt in its working directory.
     DumpEnv,
+    /// Generates, but reports a GPU out of memory unless asked to decode
+    /// in tiles, still exiting 0 as sd-cli does.
+    OutOfMemoryUntilTiled,
+    /// Generates, and reports a GPU out of memory every time.
+    OutOfMemory,
 }
 
 /// Write an executable sd-cli stand-in in `dir` that copies `fixture` for
 /// each image.
 pub fn fake_cli(dir: &Path, fixture: &Path, behavior: Behavior) -> PathBuf {
+    let oom = match behavior {
+        Behavior::OutOfMemoryUntilTiled => "untiled",
+        Behavior::OutOfMemory => "always",
+        _ => "never",
+    };
     let body = match behavior {
-        Behavior::Generate => format!(
-            r#"out=""; batch=1; steps=8; seed=0
+        Behavior::Generate | Behavior::OutOfMemoryUntilTiled | Behavior::OutOfMemory => format!(
+            r#"out=""; batch=1; steps=8; seed=0; tiled=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --vae-tiling) tiled=1; shift;;
     -o) out="$2"; shift 2;;
     -b) batch="$2"; shift 2;;
     --steps) steps="$2"; shift 2;;
@@ -124,6 +135,10 @@ while [ $i -lt $batch ]; do
   cp "{fixture}" "$(printf "$out" $i)"
   i=$((i+1))
 done
+if [ "{oom}" = always ] || {{ [ "{oom}" = untiled ] && [ $tiled = 0 ]; }}; then
+  echo "[E] ggml: ggml_metal_synchronize: error: command buffer 1 failed with status 5" >&2
+  echo "[E] ggml: error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)" >&2
+fi
 echo "[INFO ] generate_image completed""#,
             fixture = fixture.display()
         ),
@@ -234,12 +249,21 @@ pub struct FakeGenerator {
 /// A generator whose runtime is the sd-cli stand-in and whose weights come
 /// from a mock hub, each served `fetches` times.
 pub async fn fake_generator(fetches: u64, delay: Duration) -> FakeGenerator {
+    fake_generator_with(fetches, delay, Behavior::Generate).await
+}
+
+/// [`fake_generator`] with an sd-cli stand-in that behaves as `behavior`.
+pub async fn fake_generator_with(
+    fetches: u64,
+    delay: Duration,
+    behavior: Behavior,
+) -> FakeGenerator {
     let server = MockServer::start().await;
     let tools = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();
     let image = tools.path().join("fixture.png");
     std::fs::write(&image, png(256, 256, true)).unwrap();
-    let script = std::fs::read(fake_cli(tools.path(), &image, Behavior::Generate)).unwrap();
+    let script = std::fs::read(fake_cli(tools.path(), &image, behavior)).unwrap();
 
     let mut zip_bytes = std::io::Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(&mut zip_bytes);

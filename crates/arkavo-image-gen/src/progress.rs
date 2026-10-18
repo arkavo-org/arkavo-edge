@@ -55,6 +55,10 @@ pub enum Event {
     ImageStarted { image: u32, images: u32, seed: u32 },
     /// A progress bar line "|===>  | s/S - 1.23s/it" while sampling.
     Step { step: u32, steps: u32 },
+    /// The GPU failed a command, most often for lack of memory. sd-cli
+    /// carries on and writes an image from whatever the GPU left behind,
+    /// which is garbage, and exits as if it had succeeded.
+    GpuFailed,
 }
 
 /// Turns sd-cli's output, split on `\r` and `\n`, into events. Progress
@@ -75,6 +79,11 @@ impl Parser {
     }
 
     pub fn line(&mut self, line: &str) -> Option<Event> {
+        if (line.contains("command buffer") && line.contains("failed with status"))
+            || line.contains("CommandBufferCallbackErrorOutOfMemory")
+        {
+            return Some(Event::GpuFailed);
+        }
         if let Some(rest) = line.split("generating image: ").nth(1) {
             let (counts, seed) = rest.split_once(" - seed ")?;
             let (image, images) = fraction(counts)?;
@@ -176,5 +185,24 @@ mod tests {
             Progress::Queued.to_string(),
             "waiting for the image generator"
         );
+    }
+
+    /// IMG-021: a failed Metal command buffer is a GPU failure, whatever
+    /// the run prints after it.
+    #[arkavo_test_macros::spec("IMG-021")]
+    #[test]
+    fn a_failed_command_buffer_is_a_gpu_failure() {
+        let mut parser = Parser::new(8);
+        assert_eq!(
+            parser.line(
+                "[E] ggml: ggml_metal_synchronize: error: command buffer 1 failed with status 5"
+            ),
+            Some(Event::GpuFailed)
+        );
+        assert_eq!(
+            parser.line("[E] ggml: error: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)"),
+            Some(Event::GpuFailed)
+        );
+        assert_eq!(parser.line("[I] latent 1 decoded, taking 13.98s"), None);
     }
 }
