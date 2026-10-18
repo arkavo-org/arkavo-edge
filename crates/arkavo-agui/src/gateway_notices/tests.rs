@@ -252,3 +252,33 @@ async fn acknowledging_an_agents_notice_reaches_the_agent() {
     );
     server.stop().unwrap();
 }
+
+/// Regression (AGUI-027): when the gateway dropped an agent whose
+/// discovery record went away, views kept that agent's notices with
+/// nothing left to close them.
+#[spec("AGUI-027")]
+#[tokio::test]
+async fn a_dropped_agents_notices_close_in_every_view() {
+    let (address, _answers, server) = answering_agent().await;
+    let state = crate::test_support::app_state();
+    let (telemetry_tx, _telemetry) = mpsc::channel(64);
+    let connection = Arc::new(AgentConnection::new("artist".into(), address, telemetry_tx));
+    connection.connect().await.unwrap();
+    let (relay_tx, mut relay_rx) = mpsc::channel(64);
+    connection
+        .subscribe_metrics(relay_tx, state.security_handler.clone())
+        .await
+        .unwrap();
+    while !matches!(
+        relay_rx.recv().await,
+        Some(AgUiEvent::OperatorNotice { .. })
+    ) {}
+    let mut rx = view(&state.connections).await;
+
+    connection_removed(&connection, &state.connections).await;
+
+    assert!(
+        matches!(rx.recv().await.unwrap(), AgUiEvent::OperatorNoticeResolved { notice_id, .. } if notice_id == "n1")
+    );
+    server.stop().unwrap();
+}

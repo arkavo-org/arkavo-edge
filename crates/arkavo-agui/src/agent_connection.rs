@@ -1110,11 +1110,18 @@ impl AgentConnection {
         })
     }
 
-    /// Subscribe to push-based metrics stream from agent.
-    /// Replaces polling of system.metrics + budget.compute_status.
     /// The notices the agent reported open in its last snapshot.
     pub async fn open_notices(&self) -> Vec<arkavo_protocol::operator_notice::OperatorNotice> {
         self.notices.read().await.clone()
+    }
+
+    /// Take over the notices `previous` relayed for the same agent, before
+    /// subscribing. The first snapshot then closes the ones the agent no
+    /// longer reports, as after a restart, and leaves the rest as they
+    /// are: without them, views kept notices nothing would report again,
+    /// and a notice still open came back as new.
+    pub async fn inherit_notices(&self, previous: &AgentConnection) {
+        *self.notices.write().await = previous.open_notices().await;
     }
 
     /// Drop a notice the operator closed, before the next snapshot says so.

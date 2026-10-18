@@ -119,12 +119,15 @@ pub async fn connect(
         Some(existing) => *existing = record,
         None => agents.push(record),
     }
-    state
+    let previous = state
         .agent_connections
         .write()
         .await
         .insert(id.clone(), connection.clone());
     drop(agents);
+    if let Some(previous) = previous {
+        connection.inherit_notices(&previous).await;
+    }
 
     let (tx, mut rx) = mpsc::channel::<AgUiEvent>(32);
     match connection

@@ -142,6 +142,24 @@ pub(crate) enum Chosen {
     Agent(Arc<AgentConnection>, NoticeAction),
 }
 
+/// Close in every view the notices of an agent the gateway dropped:
+/// nothing reports them again, and answering one would fail.
+pub(crate) async fn connection_removed(
+    removed: &AgentConnection,
+    connections: &Arc<RwLock<HashMap<String, ConnectionInfo>>>,
+) {
+    for notice in removed.open_notices().await {
+        broadcast_event(
+            &AgUiEvent::OperatorNoticeResolved {
+                agent_id: notice.agent_id,
+                notice_id: notice.id,
+            },
+            connections,
+        )
+        .await;
+    }
+}
+
 /// Find the notice and action the operator chose.
 pub(crate) async fn chosen(
     notices: &GatewayNotices,

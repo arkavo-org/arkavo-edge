@@ -141,6 +141,27 @@ test('a notice that arrives while the operator types waits', () => {
     assert.match(e.element('notice-banner').innerHTML, /Image generation failed/);
 });
 
+// Regression (AGUI-027): a view opened after a task failed showed the
+// notice only in the header count; its Retry waited in no banner.
+test('notices open before the view connected wait in the banner without moving it', () => {
+    const e = environment('websocket.js');
+    e.context.AppState.activeView = 'tasks';
+    e.context.initializeNotices();
+    e.context.handleNoticeList({ notices: [
+        notice('c1', 'critical', { title: 'Data stopped at the egress gate', raisedAt: '2026-10-18T00:00:00Z' }),
+        notice('w1', 'warning', { title: 'Task failed', raisedAt: '2026-10-18T00:05:00Z' }),
+        notice('i1', 'info', { title: 'Model updated', raisedAt: '2026-10-18T00:09:00Z' })
+    ] });
+    assert.equal(e.historyEntries.length, 0);
+    assert.match(e.element('notice-banner').innerHTML, /Task failed/, 'the newest warning or worse is on top');
+    e.documentListeners.focusout();
+    e.timers.splice(0).forEach(run => run());
+    assert.equal(e.historyEntries.length, 0, 'a listed notice never moves the view');
+
+    e.context.handleNoticeList({ notices: [notice('c1', 'critical', { title: 'Data stopped at the egress gate' })] });
+    assert.match(e.element('notice-banner').innerHTML, /Data stopped at the egress gate/, 'a closed notice leaves the banner');
+});
+
 // AGUI-027: what an agent writes is shown as text, never as markup.
 test('notice text is escaped', () => {
     const e = environment('websocket.js');

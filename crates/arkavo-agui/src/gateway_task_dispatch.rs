@@ -25,27 +25,53 @@ pub async fn handle_submit_task(
     asset_fetcher: Option<Arc<dyn crate::gateway_assets::AssetFetcher>>,
     gateway_notices: crate::gateway_notices::GatewayNotices,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // A browser that lost its receipt (a dropped socket, a slow gateway)
-    // sends the same request again. It gets the first task's receipt back
-    // rather than a second task doing the same work.
-    if let Some(request) = request_id.as_deref() {
-        let existing = task_store
-            .read()
-            .await
-            .values()
-            .find(|task| task.request_id.as_deref() == Some(request))
-            .cloned();
-        if let Some(task) = existing {
-            broadcast_event(&receipt(&task), connections).await;
-            return Ok(());
-        }
-    }
     let task_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
     // Classify task by keywords for per-category routing
     let task_category = arkavo_router::classify_task_keywords(&description);
     let category_str = task_category.as_str().to_string();
+
+    // A browser that lost its receipt (a dropped socket, a slow gateway)
+    // sends the same request again. It gets the first task's receipt back
+    // rather than a second task doing the same work. The check and the
+    // insert share one lock: a resend from a reconnected view runs
+    // alongside the first submission, which may still be routing.
+    let tracked = super::gateway::TrackedTask {
+        id: task_id.clone(),
+        description: description.clone(),
+        target_agent: None,
+        status: "submitted".to_string(),
+        progress: Some(0.0),
+        result: None,
+        created_at: now.clone(),
+        completed_at: None,
+        task_category: Some(category_str.clone()),
+        first_working_at: None,
+        source: "ui".to_string(),
+        summary: None,
+        request_id,
+        assets: Vec::new(),
+        asset_note: None,
+    };
+    let existing = {
+        let mut store = task_store.write().await;
+        let existing = tracked.request_id.as_deref().and_then(|request| {
+            store
+                .values()
+                .find(|task| task.request_id.as_deref() == Some(request))
+                .cloned()
+        });
+        if existing.is_none() {
+            store.insert(task_id.clone(), tracked.clone());
+            super::gateway::prune_tasks(&mut store);
+        }
+        existing
+    };
+    if let Some(task) = existing {
+        broadcast_event(&receipt(&task), connections).await;
+        return Ok(());
+    }
 
     // Collect agent IDs for Thompson Sampling
     let agent_ids: Vec<String> = {
@@ -117,32 +143,12 @@ pub async fn handle_submit_task(
         }
     }
 
-    // Store the task
-    let tracked = super::gateway::TrackedTask {
-        id: task_id.clone(),
-        description: description.clone(),
-        target_agent: selected_agent.clone(),
-        status: "submitted".to_string(),
-        progress: Some(0.0),
-        result: None,
-        created_at: now.clone(),
-        completed_at: None,
-        task_category: Some(category_str),
-        first_working_at: None,
-        source: "ui".to_string(),
-        summary: None,
-        request_id,
-        assets: Vec::new(),
-        asset_note: None,
-    };
+    if let Some(task) = task_store.write().await.get_mut(&task_id) {
+        task.target_agent = selected_agent.clone();
+    }
     // Every open view hears the receipt, so one that reconnected after
     // sending still learns its task was accepted.
     broadcast_event(&receipt(&tracked), connections).await;
-    {
-        let mut store = task_store.write().await;
-        store.insert(task_id.clone(), tracked);
-        super::gateway::prune_tasks(&mut store);
-    }
 
     // Forward task to agent via A2A message/send
     if let Some(ref agent_id) = selected_agent {
@@ -678,6 +684,43 @@ mod tests {
             second["taskId"], first["taskId"],
             "the resend gets the same task"
         );
+    }
+
+    /// Regression (AGUI-023): the resend was checked before the first
+    /// submission was stored, so a resend from a reconnected view, sent
+    /// while the first was still telling a stalled view about it, opened a
+    /// second task.
+    #[spec("AGUI-023")]
+    #[tokio::test]
+    async fn a_resend_while_the_first_is_still_being_announced_is_one_task() {
+        let state = crate::test_support::app_state();
+        let (tx, mut stalled) = mpsc::channel(1);
+        let filler = AgUiEvent::OperatorNoticeResolved {
+            agent_id: "artist".into(),
+            notice_id: "n1".into(),
+        };
+        tx.send(filler).await.unwrap();
+        state.connections.write().await.insert(
+            "stalled-view".into(),
+            crate::gateway::ConnectionInfo {
+                _ws_tx: tx,
+                _agent_id: None,
+                subscriptions: Vec::new(),
+                current_plan: None,
+                current_prompt: None,
+            },
+        );
+        let drain = async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            while tokio::time::timeout(Duration::from_millis(50), stalled.recv())
+                .await
+                .is_ok_and(|event| event.is_some())
+            {}
+        };
+
+        tokio::join!(submit(&state, "draft-2"), submit(&state, "draft-2"), drain);
+
+        assert_eq!(state.task_store.read().await.len(), 1);
     }
 
     fn working(step: u32) -> serde_json::Value {

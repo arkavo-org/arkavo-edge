@@ -7,6 +7,8 @@
 
 var NOTICE_FOCUS_KEY = 'arkavo.noticeFocus';
 var noticeQueue = [];
+// Notices this viewer hid from the banner; a reconnect lists them again.
+var hiddenNotices = Object.create(null);
 
 function noticeFocusSetting() {
     try {
@@ -78,11 +80,20 @@ function handleNoticeResolved(event) {
 }
 
 function handleNoticeList(event) {
+    var previous = AppState.notices;
     AppState.notices = Object.create(null);
-    (event.notices || []).forEach(function(notice) {
+    (event.notices || []).slice().sort(function(a, b) {
+        return (Date.parse(a.raisedAt) || 0) - (Date.parse(b.raisedAt) || 0);
+    }).forEach(function(notice) {
         var id = safeTaskKey(notice.id);
-        if (id) AppState.notices[id] = notice;
+        if (!id) return;
+        // A notice raised before this view connected waits in the banner
+        // like one that arrives now, but never moves the view.
+        notice._opened = previous[id] ? !!previous[id]._opened : true;
+        AppState.notices[id] = notice;
+        if (notice.severity !== 'info' && !hiddenNotices[id] && noticeQueue.indexOf(id) < 0) noticeQueue.push(id);
     });
+    noticeQueue = noticeQueue.filter(function(id) { return AppState.notices[id]; });
     renderNotices();
 }
 
@@ -187,6 +198,7 @@ function initializeNotices() {
         if (action) chooseNoticeAction(action);
         var hide = e.target.closest && e.target.closest('[data-notice-hide]');
         if (hide) {
+            hiddenNotices[hide.dataset.noticeHide] = true;
             noticeQueue = noticeQueue.filter(function(n) { return n !== hide.dataset.noticeHide; });
             renderNotices();
         }

@@ -33,6 +33,7 @@ pub mod mdns {
         // Clone Arcs for removal handler before they move into discovery handler
         let remove_agents = agents.clone();
         let remove_connections = agent_connections.clone();
+        let remove_browsers = browser_connections.clone();
 
         // Blocking thread: receive mDNS events, forward resolved/removed services
         tokio::task::spawn_blocking(move || {
@@ -83,7 +84,13 @@ pub mod mdns {
         // Async task: remove agents when mDNS service disappears
         tokio::spawn(async move {
             while let Some(fullname) = remove_rx.recv().await {
-                handle_service_removed(&fullname, &remove_agents, &remove_connections).await;
+                handle_service_removed(
+                    &fullname,
+                    &remove_agents,
+                    &remove_connections,
+                    &remove_browsers,
+                )
+                .await;
             }
         });
 
@@ -100,6 +107,7 @@ pub mod mdns {
         agent_connections: &Arc<
             RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>,
         >,
+        browser_connections: &Arc<RwLock<HashMap<String, crate::gateway::ConnectionInfo>>>,
     ) {
         // Extract agent_id: fullname is like "commander._a2a._tcp.local."
         let agent_id = fullname
@@ -119,11 +127,14 @@ pub mod mdns {
                 || a["discovery"] == "direct"
         });
         let removed = before - agents_list.len();
+        drop(agents_list);
 
         if removed > 0 {
             tracing::debug!("AG-UI: Removed agent from list: {agent_id}");
-            let mut connections = agent_connections.write().await;
-            connections.remove(&agent_id);
+            let connection = agent_connections.write().await.remove(&agent_id);
+            if let Some(connection) = connection {
+                crate::gateway_notices::connection_removed(&connection, browser_connections).await;
+            }
         }
     }
 
@@ -237,6 +248,14 @@ pub mod mdns {
                     endpoint.clone(),
                     telemetry_tx_clone,
                 ));
+                let previous = agent_connections_clone
+                    .read()
+                    .await
+                    .get(&agent_id_clone)
+                    .cloned();
+                if let Some(previous) = previous {
+                    connection.inherit_notices(&previous).await;
+                }
 
                 if let Err(e) = connection.connect().await {
                     tracing::debug!(
@@ -455,14 +474,20 @@ pub mod mdns {
                 agents.clone(),
                 connections.clone(),
                 telemetry_tx,
-                browsers,
+                browsers.clone(),
                 security,
                 topo_cache,
             )
             .await;
             assert_eq!(agents.read().await[0]["endpoint"], "10.0.0.7:7600");
 
-            handle_service_removed("reviewer._a2a._tcp.local.", &agents, &connections).await;
+            handle_service_removed(
+                "reviewer._a2a._tcp.local.",
+                &agents,
+                &connections,
+                &browsers,
+            )
+            .await;
             assert_eq!(agents.read().await.len(), 1, "a goodbye does not remove it");
         }
     }

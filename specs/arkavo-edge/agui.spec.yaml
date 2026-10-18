@@ -348,6 +348,7 @@ scenarios:
     then:
       - "The request id comes from crypto.randomUUID where the browser offers it, and from crypto.getRandomValues otherwise: browsers offer randomUUID only on HTTPS or localhost"
       - "The gateway records the request id on the task it opens and sends the receipt (taskSubmitted with requestId) to every open view, so one that reconnected after sending still hears it"
+      - "The same request sent again while the first is still being routed or announced is still one task: the gateway stores the task before it waits on anything"
       - "A request whose id the gateway already holds opens no second task: the gateway answers it with the first task's receipt"
       - "With no receipt after 15 seconds or a dropped socket, the composer says the outcome is unknown, keeps the draft and offers Send again, which reuses the request id while the draft is unchanged"
       - "Reconnecting sends nothing by itself"
@@ -432,6 +433,7 @@ scenarios:
       - "Nothing moves the view while the operator types or has a dialog open: the notice waits, says so, and opens once they stop"
       - "Titles, text and details are shown as text, never as markup"
       - "When an agent restarts, on the same port or a new one, the workspace subscribes to it again and its notices keep coming"
+      - "A new connection to the same agent closes the notices it no longer reports and does not show again the ones it still does; when discovery drops an agent, its notices close in every view"
     refs:
       - crates/arkavo-agui/src/gateway_notices.rs
       - crates/arkavo-agui/src/agent_connection.rs
