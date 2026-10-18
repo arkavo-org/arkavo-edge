@@ -32,6 +32,21 @@ pub(crate) fn create_private(path: &Path, bytes: &[u8]) -> Result<bool> {
     }
 }
 
+/// Make `dir` and its missing parents, the new ones readable by their owner
+/// only: the directory names which agents a user runs.
+pub(crate) fn create_private_dir(dir: &Path) -> Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir).map_err(|e| {
+        DeviceIdentityError::Storage(format!("Failed to create {}: {e}", dir.display()))
+    })
+}
+
 fn stage(path: &Path, bytes: &[u8]) -> Result<PathBuf> {
     use std::io::Write;
 

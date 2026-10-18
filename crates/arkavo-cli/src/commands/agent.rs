@@ -467,10 +467,12 @@ pub async fn start_agent_server(
     };
     let device_did = device_keypair.public_key().to_did_key();
 
-    // The key the agent's account is (#766), made in the Secure Enclave
-    // where this Mac has one. It signs the agent card; the identity
-    // provider moves to it with authnz-rs#102.
-    let workload_key = Arc::new(arkavo_device_identity::workload_key::load_or_create()?);
+    // The key this agent's account is (#766), one per agent name, made in
+    // the Secure Enclave where this Mac has one. It signs the agent card;
+    // the identity provider moves to it with authnz-rs#102.
+    let workload_key = Arc::new(arkavo_device_identity::workload_key::load_or_create(
+        &config.name,
+    )?);
 
     // Create AgentCredential for TDF encryption/decryption
     let mut identity_attributes = HashMap::new();

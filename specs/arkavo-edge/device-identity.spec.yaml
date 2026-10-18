@@ -137,3 +137,21 @@ scenarios:
         expected: The agent does not start, rather than settle for a software key that would pass for an enclave one
     refs: ["crates/arkavo-device-identity/src/workload_key.rs"]
     changed: "2026-10-18"
+
+  - id: DEVICE-010
+    name: Each agent name has its own workload key
+    criticality: high
+    given: ["Two agents with different names run by one user on one machine"]
+    when: "Each loads its workload key"
+    then:
+      - "Each name has its own key, so each is its own did:key and its own account"
+      - "The same name loads the same key on every start"
+      - "Names that differ only in case are one agent, as their mDNS instance names are"
+      - "An agent's keys live in a directory readable by its owner only"
+    edge_cases:
+      - condition: A name with path characters such as ../ or a slash
+        expected: Encoded into one directory name inside the agents directory
+      - condition: An empty name
+        expected: Refused; no key is made
+    refs: ["crates/arkavo-device-identity/src/workload_key.rs", "crates/arkavo-cli/src/commands/agent.rs"]
+    changed: "2026-10-18"
