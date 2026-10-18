@@ -2,9 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
+mod agent_dir;
 pub mod keypair;
 mod private_file;
 pub mod storage;
+pub mod subordinate_key;
 pub mod workload_key;
 
 /// Where unit tests keep identity files: a directory of the test's own

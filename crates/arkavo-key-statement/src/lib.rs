@@ -241,7 +241,7 @@ fn decode(part: &str) -> Option<Vec<u8>> {
 ///
 /// A statement for an older generation is refused, so a key the agent has
 /// replaced cannot be brought back; a newer one replaces the old key.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Generations {
     latest: HashMap<(String, Purpose), (u64, String)>,
 }
