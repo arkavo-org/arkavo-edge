@@ -29,15 +29,17 @@ function renderTaskDetail() {
     var output = task.result ? escapeHtml(task.result) : task.hasResult ? 'Loading output' : 'Not reported';
     html += inspectionSection('output', 'Output', '<pre class="inspection-text">' + output + '</pre>' + taskGallery(task), true);
     html += renderTaskRouting(taskId, task);
-    html += inspectionSection('policy', 'Agent policy ' + uiHelp('task-policy'),
-        '<dl class="inspection-fields">' + inspectionField('Task policy binding', 'Not reported') +
+    // A help control inside <summary> nests one control in another; it
+    // leads the section's body instead.
+    html += inspectionSection('policy', 'Agent policy',
+        uiHelp('task-policy') + '<dl class="inspection-fields">' + inspectionField('Task policy binding', 'Not reported') +
         inspectionField('Agent snapshot', policy ? (policy.documentValid === true ? 'Document valid' : policy.documentValid === false ? 'Document invalid or absent' : 'Not reported') : 'Not reported') +
         inspectionField('Observed', receivedAge('policy')) + '</dl>' +
         (agent ? routeLink('arp', { agent: agent }, 'Inspect agent policy') : ''), false);
     if (task.metrics) html += renderTaskMetrics(task);
     html += inspectionSection('events', 'Task events · ' + (task._events || []).length, renderTaskTelemetry(taskId, task), false);
-    html += inspectionSection('evidence', 'Session evidence · ' + events.length + ' ' + uiHelp('correlation'),
-        routeLink('telemetry', { task: taskId }, 'Inspect task evidence'), false);
+    html += inspectionSection('evidence', 'Session evidence · ' + events.length,
+        uiHelp('correlation') + routeLink('telemetry', { task: taskId }, 'Inspect task evidence'), false);
     var shown = Object.assign({}, task, { _events: (task._events || []).length });
     updateInspector(container, html, JSON.stringify([taskId, shown, route, agent, policy, events.length, !!AppState.observations.tasks, !!AppState.observations.policy]));
 }
@@ -67,7 +69,7 @@ function renderTaskMetrics(task) {
     html += inspectionField('Inference', formatMetricMs(m.inferenceDurationMs));
     html += inspectionField('Estimated energy ' + uiHelp('energy'), taskMetric(m.energyWh, 'Wh'));
     html += '</dl>';
-    return inspectionSection('metrics', 'Reported metrics ' + uiHelp('task-metrics'), html, false);
+    return inspectionSection('metrics', 'Reported metrics', uiHelp('task-metrics') + html, false);
 }
 
 function renderTaskRouting(taskId, task) {

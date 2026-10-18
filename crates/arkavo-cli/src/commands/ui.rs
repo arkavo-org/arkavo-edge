@@ -80,7 +80,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         Ok(handle) => handle.block_on(run_async),
         Err(_) => {
             let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(run_async)
+            let ended = runtime.block_on(run_async);
+            // Discovery and health monitors block on their own threads and
+            // never return; waiting for them on the way out kept Ctrl+C from
+            // ending the process.
+            runtime.shutdown_background();
+            ended
         }
     }
 }
@@ -1048,7 +1053,26 @@ async fn use_web_gateway(
             println!("Press Ctrl+C to stop.");
         }
     }
-    serving.await
+    // Ctrl+C is handled here rather than left to the default: a process
+    // started in the background of a script inherits SIGINT ignored, and
+    // the line above would then be untrue.
+    tokio::select! {
+        served = &mut serving => served,
+        _ = tokio::signal::ctrl_c() => {
+            // _exit, as `arkavo agent` does: the task summarizer may still
+            // hold a model, and the ggml Metal device's static destructor
+            // asserts on it, printing a backtrace where the operator pressed
+            // Ctrl+C.
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            #[cfg(unix)]
+            // SAFETY: nothing runs after this; skipping destructors is the point.
+            unsafe {
+                libc::_exit(0);
+            }
+            #[cfg(not(unix))]
+            std::process::exit(0);
+        }
+    }
 }
 
 /// Open `url` in the user's default browser.

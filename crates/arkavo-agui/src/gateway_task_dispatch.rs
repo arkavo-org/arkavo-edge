@@ -356,6 +356,36 @@ async fn poll_agent_task(
                     "Completed" | "completed" => {
                         let parts = answer_parts(&poll_response);
                         let result_text = answer_text(&parts);
+                        // A model that wrote its tool call out as text did
+                        // nothing: the operator gets a failure with a retry,
+                        // never control tokens, and routing learns it failed.
+                        if let Some(marker) = unparsed_tool_call(&result_text) {
+                            let why = format!(
+                                "The agent's model wrote a tool call ({marker}) instead of making it, so nothing was done."
+                            );
+                            tracing::warn!(task = %short_id(task_id), agent_id, "{why}");
+                            update_task_status(
+                                task_store,
+                                task_id,
+                                "failed",
+                                None,
+                                Some(why.clone()),
+                                connections,
+                                learning_module,
+                                routing_history,
+                                lesson_tx,
+                            )
+                            .await;
+                            crate::gateway_notices::task_failed(
+                                gateway_notices,
+                                connections,
+                                task_id,
+                                agent_id,
+                                &why,
+                            )
+                            .await;
+                            return;
+                        }
 
                         tracing::debug!(
                             "AG-UI: Task {} completed by {} ({} chars)",
@@ -497,6 +527,19 @@ async fn poll_agent_task(
     .await;
     crate::gateway_notices::task_failed(gateway_notices, connections, task_id, agent_id, &quiet)
         .await;
+}
+
+/// The control tokens a model writes when it spells out a tool call instead
+/// of making it, as Gemma, Qwen, Mistral and Llama do.
+fn unparsed_tool_call(text: &str) -> Option<&'static str> {
+    [
+        "<|tool_call>",
+        "<tool_call>",
+        "[TOOL_CALLS]",
+        "<|python_tag|>",
+    ]
+    .into_iter()
+    .find(|marker| text.contains(marker))
 }
 
 /// The parts of a completed task's answer, as the agent sent them.
@@ -662,6 +705,25 @@ mod tests {
         let quiet = keep_following(&mut watch, "t1", &working(4)).unwrap_err();
         assert!(quiet.contains("Task t1 is still running"), "{quiet}");
         assert!(quiet.contains("tasks/get"), "{quiet}");
+    }
+
+    /// Regression (AGUI-028): the MacBook's model answered a coin request
+    /// with "<|tool_call>call:generate_image prompt: ..." and the workspace
+    /// showed it as the completed output.
+    #[spec("AGUI-028")]
+    #[test]
+    fn a_tool_call_written_out_is_not_an_answer() {
+        let leaked =
+            "<|tool_call>call:generate_image\nprompt: A transparent sprite of a gold coin.";
+        assert_eq!(unparsed_tool_call(leaked), Some("<|tool_call>"));
+        assert_eq!(
+            unparsed_tool_call("[TOOL_CALLS][{\"name\": \"x\"}]"),
+            Some("[TOOL_CALLS]")
+        );
+        assert_eq!(
+            unparsed_tool_call("Your gold coin sprite is attached."),
+            None
+        );
     }
 
     /// AGUI-022: a report the gateway cannot read, like a poll the agent

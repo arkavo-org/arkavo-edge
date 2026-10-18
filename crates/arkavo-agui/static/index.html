@@ -14,7 +14,7 @@
 <body>
     <a href="#workspace" class="skip-link">Skip to workspace</a>
     <header class="operations-header">
-        <a class="brand" href="#/overview" aria-label="Arkavo Operations overview"><span class="brand-mark">A</span><span>ARKAVO <small>OPERATIONS</small></span></a>
+        <a class="brand" href="#/overview"><span class="brand-mark" aria-hidden="true">A</span><span class="brand-name">Arkavo <small>Operations</small></span><span class="sr-only"> overview</span></a>
         <div class="header-scope">Scope <strong>This gateway</strong><span data-info="scope"></span></div>
         <button type="button" id="notices-toggle" class="notices-toggle" aria-label="Notices"></button>
         <div class="gateway-link"><span id="connection-status" role="status">Connecting</span><span data-info="gateway"></span></div>
@@ -56,7 +56,7 @@
                     <p class="scope-line">Gateway snapshot · <span data-observation="swarm">Unknown</span><span data-info="freshness"></span></p>
                     <div id="agent-inspector"></div>
                     <div id="agents-container">
-                        <div class="empty-state"><h3>No agents discovered</h3><p>Awaiting agent discovery</p></div>
+                        <div class="empty-state"><h2>No agents discovered</h2><p>Awaiting agent discovery</p></div>
                     </div>
                 </div>
 
@@ -67,35 +67,35 @@
                     </div>
                     <div class="scope-line">Missions <span class="scope-separator">/</span> Standalone tasks <span data-info="tasks"></span> · Snapshot <span data-observation="tasks">Unknown</span></div>
                     <div id="tasks-container">
-                        <div class="empty-state"><h3>No tasks</h3><p>Create a task to begin</p></div>
+                        <div class="empty-state"><h2>No tasks</h2><p>Create a task to begin</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-budget">
                     <div class="panel-header"><h1>Resources</h1></div>
                     <div id="budget-container">
-                        <div class="empty-state"><h3>Resources not reported</h3><p>Awaiting gateway snapshot</p></div>
+                        <div class="empty-state"><h2>Resources not reported</h2><p>Awaiting gateway snapshot</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-health">
                     <div class="panel-header"><h1>Health</h1></div>
                     <div id="health-container">
-                        <div class="empty-state"><h3>Status not reported</h3><p>Awaiting gateway snapshot</p></div>
+                        <div class="empty-state"><h2>Status not reported</h2><p>Awaiting gateway snapshot</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-security">
                     <div class="panel-header"><h1>Data &amp; Trust</h1></div>
                     <div id="security-container">
-                        <div class="empty-state"><h3>Security data not reported</h3><p>Awaiting gateway snapshot</p></div>
+                        <div class="empty-state"><h2>Security data not reported</h2><p>Awaiting gateway snapshot</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-router">
                     <div class="panel-header"><h1>Routing</h1></div>
                     <div id="router-container">
-                        <div class="empty-state"><h3>No routing decisions</h3><p>Awaiting routing events</p></div>
+                        <div class="empty-state"><h2>No routing decisions</h2><p>Awaiting routing events</p></div>
                     </div>
                 </div>
 
@@ -115,21 +115,21 @@
                 <div class="view-panel" id="view-learning">
                     <div class="panel-header"><h1>Adaptation</h1></div>
                     <div id="learning-container">
-                        <div class="empty-state"><h3>No adaptation data</h3><p>Awaiting routing observations</p></div>
+                        <div class="empty-state"><h2>No adaptation data</h2><p>Awaiting routing observations</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-context">
                     <div class="panel-header"><h1>Context</h1></div>
                     <div id="context-container">
-                        <div class="empty-state"><h3>Context not reported</h3><p>Awaiting context snapshot</p></div>
+                        <div class="empty-state"><h2>Context not reported</h2><p>Awaiting context snapshot</p></div>
                     </div>
                 </div>
 
                 <div class="view-panel" id="view-arp">
                     <div class="panel-header"><h1>Runtime policy</h1></div>
                     <div id="arp-container">
-                        <div class="empty-state"><h3>Policy not reported</h3><p>Awaiting policy snapshot</p></div>
+                        <div class="empty-state"><h2>Policy not reported</h2><p>Awaiting policy snapshot</p></div>
                     </div>
                 </div>
 

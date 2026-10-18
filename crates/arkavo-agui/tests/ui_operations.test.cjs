@@ -123,8 +123,9 @@ test('a critical notice opens where it points; a warning waits', () => {
     e.context.handleOperatorNotice({ notice: notice('w1', 'warning') });
     assert.equal(e.historyEntries.length, 0);
     assert.match(e.element('notice-banner').innerHTML, /Image generation failed/);
-    e.context.handleOperatorNotice({ notice: notice('c1', 'critical') });
+    e.context.handleOperatorNotice({ notice: notice('c1', 'critical', { title: 'Data stopped at the egress gate' }) });
     assert.deepEqual(e.historyEntries, ['#/agents?agent=artist']);
+    assert.match(e.element('notice-banner').innerHTML, /Data stopped at the egress gate/, 'the banner says why the view moved');
     assert.match(e.element('notices-toggle').innerHTML, /notice-count alert">2</);
 });
 

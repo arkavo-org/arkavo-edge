@@ -358,6 +358,7 @@ scenarios:
       - "It serves the Arkavo Operations workspace and opens it in the default browser (open on macOS, xdg-open on Linux, start on Windows)"
       - "The terminal shows where the workspace is and how to stop it, and nothing else; gateway activity goes to the log, which RUST_LOG turns up"
       - "llama.cpp's continuation lines follow the level of the message they continue, so no stray text or blank lines reach the terminal"
+      - "Ctrl+C stops it at once and prints nothing more, also when it was started from a script that left SIGINT ignored and after the task summarizer loaded a model"
     edge_cases:
       - condition: "--no-open, or no browser opener on the host"
         expected: "It prints the address only"

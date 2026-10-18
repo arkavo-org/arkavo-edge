@@ -48,16 +48,20 @@ function handleOperatorNotice(event) {
     var id = notice && safeTaskKey(notice.id);
     if (!id) return;
     var isNew = !AppState.notices[id];
+    // An update to a notice that already moved the view does not move it again.
+    if (!isNew && AppState.notices[id]._opened) notice._opened = true;
     AppState.notices[id] = notice;
     if (isNew && notice.severity !== 'info') {
         noticeQueue = noticeQueue.filter(function(n) { return n !== id; });
         noticeQueue.push(id);
         if (takesFocus(notice)) {
+            // The notice stays in the banner after it moves the view, so the
+            // operator sees why the view changed.
             if (noticeBusy()) {
                 showToast(notice.title + ' · waiting until you finish', 'warning');
             } else {
+                notice._opened = true;
                 openNoticeFocus(notice.focus);
-                noticeQueue = noticeQueue.filter(function(n) { return n !== id; });
             }
         }
     }
@@ -196,10 +200,10 @@ function initializeNotices() {
     document.addEventListener('focusout', function() {
         setTimeout(function() {
             if (noticeBusy()) return;
-            var waiting = noticeQueue.map(function(id) { return AppState.notices[id]; }).filter(function(n) { return n && takesFocus(n); });
+            var waiting = noticeQueue.map(function(id) { return AppState.notices[id]; }).filter(function(n) { return n && takesFocus(n) && !n._opened; });
             var next = waiting[waiting.length - 1];
             if (!next) return;
-            noticeQueue = noticeQueue.filter(function(n) { return n !== next.id; });
+            next._opened = true;
             openNoticeFocus(next.focus);
             renderNotices();
         }, 0);

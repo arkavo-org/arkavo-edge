@@ -115,7 +115,7 @@ button:not(.nav-btn):not(.info-button):not(.task-row-button) { border-radius: 5p
 .agent-chat-input { min-width: 0; }
 .chat-toggle-btn { padding: 5px 8px; width: auto; }
 .empty-state { padding: 40px 20px; }
-.empty-state h3 { font-size: 15px; font-weight: 500; }
+.empty-state h2, .empty-state h3 { font-size: 15px; font-weight: 500; }
 .empty-state p { font-size: 13px; }
 dialog { color: var(--text-primary); background: #141e29; border: 1px solid #4b6077; border-radius: 8px; margin: auto; padding: 24px; max-height: calc(100dvh - 32px); overflow-y: auto; box-shadow: 0 24px 100px #000a; }
 dialog::backdrop { background: #060c14bb; }
@@ -218,3 +218,6 @@ dialog::backdrop { background: #060c14bb; }
 .notice-setting { display: block; margin: 0 0 12px; color: var(--text-secondary); }
 .notice-setting select { margin-left: 6px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary); }
 .notice-card header { border: 0; padding: 0; margin: 0; background: none; }
+/* The wordmark reads in capitals; the markup keeps the name's own case so
+   its accessible name matches what is shown. */
+.brand-name { text-transform: uppercase; }
