@@ -765,6 +765,9 @@ pub struct MeshAgentInfo {
     pub purpose: String,
     pub model: String,
     pub status: String,
+    /// What the agent's signed card proves, once it has been read
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<crate::agent_connection::CardIdentity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
