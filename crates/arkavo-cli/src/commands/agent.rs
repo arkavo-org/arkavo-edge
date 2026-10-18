@@ -523,6 +523,15 @@ pub async fn start_agent_server(
     // Set the public key for TDF encryption (used in agent.capabilities.get RPC)
     server.set_public_key(public_key_b64.clone()).await;
     server.set_workload_key(workload_key.clone()).await;
+    #[cfg(feature = "kas")]
+    server
+        .set_kas_key(Arc::new(
+            arkavo_device_identity::subordinate_key::load_or_create(
+                &config.name,
+                arkavo_device_identity::subordinate_key::Purpose::Tdf,
+            )?,
+        ))
+        .await;
 
     // Create pain signal channel before LearningBus (lock-free hot path)
     let (pain_tx, pain_rx) = tokio::sync::mpsc::channel::<arkavo_server::PainSignal>(128);

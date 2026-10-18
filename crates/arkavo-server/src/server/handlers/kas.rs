@@ -178,6 +178,22 @@ pub async fn handle_kas_public_key(
     }
 }
 
+/// The KAS keypair the agent's handler rewraps with. A kept key survives
+/// restarts, so TDFs wrapped to it still open (TDFS-016); a server whose
+/// embedder keeps none gets one for this process. A kept key that cannot be
+/// read leaves the KAS without a key, refusing rewraps, rather than switch
+/// to a key no TDF was wrapped to.
+pub(crate) fn kas_keypair(
+    kept: Option<&arkavo_device_identity::subordinate_key::SubordinateKey>,
+) -> Option<arkavo_tdf::KasKeypair> {
+    let Some(kept) = kept else {
+        return Some(arkavo_tdf::KasKeypair::generate());
+    };
+    arkavo_tdf::KasKeypair::from_secret_bytes(kept.secret())
+        .inspect_err(|e| tracing::error!("The agent's kept KAS key cannot be used: {e}"))
+        .ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +296,33 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code(), -32603);
+    }
+
+    mod kept_key {
+        use super::super::kas_keypair;
+        use arkavo_device_identity::subordinate_key::{self, Purpose};
+        use arkavo_test_macros::spec;
+
+        #[spec("TDFS-017")]
+        #[test]
+        fn a_kept_kas_key_is_the_same_key_after_a_restart() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("tdf_key");
+            let before = subordinate_key::load_or_create_at(&path, Purpose::Tdf).unwrap();
+            let after = subordinate_key::load_or_create_at(&path, Purpose::Tdf).unwrap();
+            assert_eq!(
+                kas_keypair(Some(&before)).unwrap().public_key_base64(),
+                kas_keypair(Some(&after)).unwrap().public_key_base64()
+            );
+        }
+
+        #[spec("TDFS-017")]
+        #[test]
+        fn without_a_kept_key_each_server_makes_its_own() {
+            assert_ne!(
+                kas_keypair(None).unwrap().public_key_base64(),
+                kas_keypair(None).unwrap().public_key_base64()
+            );
+        }
     }
 }
