@@ -10,6 +10,19 @@ use std::time::{Duration, Instant};
 use tokio::time::interval;
 use tracing::debug;
 
+/// The code of a request the rate limiter turned away.
+pub const RATE_LIMITED: i32 = -32001;
+
+/// The message that goes with [`RATE_LIMITED`]. Other errors share the
+/// code, so a client tells a refusal by the two together.
+pub const RATE_LIMITED_MESSAGE: &str = "Rate limit exceeded";
+
+/// Whether an error answer is the rate limiter turning a request away: the
+/// request can be made again once the limiter has room.
+pub fn is_rate_limited(code: i32, message: &str) -> bool {
+    code == RATE_LIMITED && message == RATE_LIMITED_MESSAGE
+}
+
 /// Configuration for rate limiting
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimitConfig {
@@ -104,8 +117,8 @@ impl RateLimiter {
         match self.limiter.check() {
             Ok(_) => Ok(()),
             Err(_) => Err(ErrorObjectOwned::owned(
-                -32001,
-                "Rate limit exceeded",
+                RATE_LIMITED,
+                RATE_LIMITED_MESSAGE,
                 Some("Too many requests. Please try again later.".to_string()),
             )),
         }
@@ -127,8 +140,8 @@ impl RateLimiter {
                     ));
                 tokio::time::sleep(delay).await;
                 Err(ErrorObjectOwned::owned(
-                    -32001,
-                    "Rate limit exceeded",
+                    RATE_LIMITED,
+                    RATE_LIMITED_MESSAGE,
                     Some(format!(
                         "Too many requests. Retry after {} ms",
                         delay.as_millis()
@@ -205,8 +218,8 @@ impl IpRateLimiter {
                 return match entry.limiter.check() {
                     Ok(_) => Ok(()),
                     Err(_) => Err(ErrorObjectOwned::owned(
-                        -32001,
-                        "Rate limit exceeded",
+                        RATE_LIMITED,
+                        RATE_LIMITED_MESSAGE,
                         Some(format!(
                             "Too many requests from IP {ip}. Please try again later."
                         )),
@@ -248,8 +261,8 @@ impl IpRateLimiter {
         match limiter.check() {
             Ok(_) => Ok(()),
             Err(_) => Err(ErrorObjectOwned::owned(
-                -32001,
-                "Rate limit exceeded",
+                RATE_LIMITED,
+                RATE_LIMITED_MESSAGE,
                 Some(format!(
                     "Too many requests from IP {ip}. Please try again later."
                 )),

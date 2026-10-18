@@ -23,7 +23,6 @@ pub mod pack_seal;
 pub mod pack_semantic;
 #[cfg(feature = "knowledge-pack")]
 pub mod pack_wrap;
-pub mod poll;
 pub mod rlm_integration;
 pub mod security_audit;
 pub mod task;

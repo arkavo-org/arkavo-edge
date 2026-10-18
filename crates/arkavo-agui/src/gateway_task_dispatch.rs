@@ -2,6 +2,8 @@ use crate::agent_connection::AgentConnection;
 use crate::gateway_events::short_id;
 use crate::gateway_routing::{broadcast_event, build_routing_candidates, update_task_status};
 use crate::types::*;
+use arkavo_protocol::task_watch::Watch;
+use arkavo_protocol::types::TaskGetResponse;
 use arkavo_router::learning::LearningModule;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -294,11 +296,13 @@ async fn poll_agent_task(
     )
     .await;
 
-    // Poll tasks/get until terminal status
+    // Poll tasks/get until terminal status, for as long as the task reports
+    // change (CLI-019): a delegated image job can take far longer than
+    // five minutes and still be moving.
     let mut progress = 0.15_f32;
     let poll_interval = std::time::Duration::from_secs(2);
-    let max_polls = 150; // 5 minutes max
-    for _ in 0..max_polls {
+    let mut watch = Watch::default();
+    let quiet = loop {
         tokio::time::sleep(poll_interval).await;
 
         let poll_request = serde_json::json!({ "task_id": agent_task_id });
@@ -396,6 +400,11 @@ async fn poll_agent_task(
                         return;
                     }
                     _ => {
+                        if let Err(quiet) =
+                            keep_following(&mut watch, &agent_task_id, &poll_response)
+                        {
+                            break quiet;
+                        }
                         // Still working — update progress
                         if progress < 0.9 {
                             progress += 0.05;
@@ -413,28 +422,43 @@ async fn poll_agent_task(
                 }
             }
             Err(e) => {
+                // A poll the agent turned away, its rate limiter included,
+                // is no change: the task goes on.
                 eprintln!("AG-UI: Task {} poll error: {}", short_id(task_id), e);
+                if let Err(quiet) = watch.unanswered(&agent_task_id) {
+                    break quiet;
+                }
             }
         }
-    }
+    };
 
-    // Timeout after max polls
-    eprintln!(
-        "AG-UI: Task {} timed out after 5 minutes",
-        short_id(task_id)
-    );
+    eprintln!("AG-UI: Task {}: {quiet}", short_id(task_id));
     update_task_status(
         task_store,
         task_id,
         "failed",
         None,
-        Some("Task timed out after 5 minutes".to_string()),
+        Some(quiet),
         connections,
         learning_module,
         routing_history,
         lesson_tx,
     )
     .await;
+}
+
+/// Note a poll that found the task still going: `Err` once it has
+/// reported nothing new for the limit. A report this gateway cannot read
+/// counts as no change.
+fn keep_following(
+    watch: &mut Watch,
+    agent_task_id: &str,
+    report: &serde_json::Value,
+) -> Result<(), String> {
+    match serde_json::from_value::<TaskGetResponse>(report.clone()) {
+        Ok(task) => watch.observe(&task).map(drop),
+        Err(_) => watch.unanswered(agent_task_id),
+    }
 }
 
 async fn select_target_agent(
@@ -468,4 +492,52 @@ async fn select_target_agent(
         .and_then(|a| a.get("id"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use arkavo_test_macros::spec;
+    use serde_json::json;
+
+    use super::*;
+
+    fn working(step: u32) -> serde_json::Value {
+        json!({
+            "task_id": "t1",
+            "status": "working",
+            "progress": {"message": format!("image 1 of 1: step {step} of 8")}
+        })
+    }
+
+    /// Regression (AGUI-022): the gateway stopped polling five minutes
+    /// after a task was submitted and marked it failed, while a delegated
+    /// image job was still reporting steps. It follows a task for as long
+    /// as the task reports change.
+    #[spec("AGUI-022")]
+    #[test]
+    fn a_task_is_followed_while_it_reports_change() {
+        let mut watch = Watch::with_limit(Duration::from_millis(50));
+        for step in 1..=4 {
+            std::thread::sleep(Duration::from_millis(20));
+            assert_eq!(keep_following(&mut watch, "t1", &working(step)), Ok(()));
+        }
+
+        std::thread::sleep(Duration::from_millis(60));
+        let quiet = keep_following(&mut watch, "t1", &working(4)).unwrap_err();
+        assert!(quiet.contains("Task t1 is still running"), "{quiet}");
+        assert!(quiet.contains("tasks/get"), "{quiet}");
+    }
+
+    /// AGUI-022: a report the gateway cannot read, like a poll the agent
+    /// turned away, is no change.
+    #[spec("AGUI-022")]
+    #[test]
+    fn an_unreadable_report_is_no_change() {
+        let mut watch = Watch::with_limit(Duration::from_millis(50));
+        assert_eq!(keep_following(&mut watch, "t1", &json!({})), Ok(()));
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(keep_following(&mut watch, "t1", &json!({})).is_err());
+    }
 }

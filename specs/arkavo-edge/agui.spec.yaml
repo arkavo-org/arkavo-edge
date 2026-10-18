@@ -320,3 +320,21 @@ scenarios:
         expected: Admitted, since an address literal cannot be rebound; a host name such as box.local is refused
       - condition: HTTP/2 request with no Host header
         expected: The request authority is checked instead
+
+  - id: AGUI-022
+    name: A task submitted from the UI is followed while it reports change
+    criticality: high
+    given:
+      - A task submitted in arkavo ui has gone to an agent
+    when: The gateway polls the agent's task with tasks/get
+    then:
+      - "Polling goes on while the task's status, progress message or percentage changes, as for arkavo task and arkavo chat (CLI-019)"
+      - "A poll the agent turns away, its rate limiter included, or whose report the gateway cannot read, is no change"
+      - "After 5 minutes with no change the task is marked failed with the agent's task id and how to read its result with tasks/get"
+    edge_cases:
+      - condition: "A delegated image job that downloads weights and generates for longer than 5 minutes, reporting each step"
+        expected: "It is followed to its result, not marked failed at 5 minutes as before"
+    refs:
+      - crates/arkavo-agui/src/gateway_task_dispatch.rs
+      - crates/arkavo-protocol/src/task_watch.rs
+    changed: "2026-10-17"

@@ -17,7 +17,7 @@ use arkavo_image_gen::{
     ASSET_REQUEST_SCHEMA, AssetRequest, Descriptor, Generated, ImageGenError, ImageRequest, Need,
     Progress, assets_dir, rank,
 };
-use arkavo_mcp_mesh::{Member, MeshToolsState, Patience, Peer};
+use arkavo_mcp_mesh::{Member, MeshToolsState, Patience, Peer, Reports};
 use arkavo_protocol::types::{Message, MessagePart, TaskGetResponse, TaskStatus};
 use arkavo_tdf_iroh::{FetchPolicy, IrohTransport};
 use async_trait::async_trait;
@@ -91,23 +91,27 @@ impl MeshDelegate {
         self
     }
 
-    /// Members that report image generation, other than this agent. With
-    /// none known it looks once more: the agent loop's last look may
+    /// Members that report image generation, other than this agent. It
+    /// looks once more when none is known: the agent loop's last look may
     /// predate a member that has just started, and an agent whose role has
-    /// no purpose runs no loop to look at all.
+    /// no purpose runs no loop to look at all. It looks once more, too, when
+    /// a member it knows did not answer: one that restarted answers on a new
+    /// port only a new look finds, and left out, it lost the job to whoever
+    /// else reported the capability, however far from ready.
     async fn capable(&self) -> Vec<(Member, Descriptor)> {
-        let known = self.reporting().await;
-        if !known.is_empty() {
+        let reports = self.mesh.member_reports().await;
+        let silent = !reports.silent.is_empty();
+        let known = self.reporting(reports);
+        if !known.is_empty() && !silent {
             return known;
         }
         (self.discover)().await;
-        self.reporting().await
+        self.reporting(self.mesh.member_reports().await)
     }
 
-    async fn reporting(&self) -> Vec<(Member, Descriptor)> {
-        self.mesh
-            .member_reports()
-            .await
+    fn reporting(&self, reports: Reports) -> Vec<(Member, Descriptor)> {
+        reports
+            .members
             .into_iter()
             .filter(|m| m.agent_id != self.identity.agent_id)
             .filter_map(|m| {

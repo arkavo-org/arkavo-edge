@@ -31,6 +31,16 @@ pub struct TaskResult {
     pub commit_oid: Option<String>,
     /// Number of files changed
     pub changes_count: usize,
+    /// What a mesh agent answered, for the assets it references
+    pub answer: Option<MeshAnswer>,
+}
+
+/// A mesh agent's answer to a task, as its task's result.
+#[derive(Debug, Clone)]
+pub struct MeshAnswer {
+    /// The agent's id for the task
+    pub task_id: String,
+    pub message: arkavo_protocol::types::Message,
 }
 
 impl TaskResult {
@@ -40,6 +50,7 @@ impl TaskResult {
             message: message.into(),
             commit_oid: None,
             changes_count: 0,
+            answer: None,
         }
     }
 
@@ -49,7 +60,13 @@ impl TaskResult {
             message: message.into(),
             commit_oid: None,
             changes_count: 0,
+            answer: None,
         }
+    }
+
+    pub fn with_answer(mut self, answer: MeshAnswer) -> Self {
+        self.answer = Some(answer);
+        self
     }
 
     pub fn with_commit(mut self, oid: String) -> Self {
