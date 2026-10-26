@@ -1,6 +1,6 @@
 # A2A Spec Realignment — Scope of Work & Suggested Architecture
 
-**Status:** scoping (2026-06-17) · **Owner:** A2A realignment · **Decisions locked:** CWT/DID-only auth · big-bang cutover · edge is both server & client · "more standard the better."
+**Status:** scoping (2026-06-17) · **Owner:** A2A realignment · **Decisions locked:** agent-to-agent auth by the TDF-JSON binding's envelope (DEC-7) · big-bang cutover · edge is both server & client · "more standard the better."
 
 ## Problem
 
@@ -17,10 +17,10 @@ This document scopes the changes required and proposes the target architecture. 
 ```
                          ┌─────────────────────────── arkavo-edge process ───────────────────────────┐
    A2A peers / Swift     │                                                                            │
-   clients (CWT/DID) ───▶│  Transports          Spec middleware            Integration seam           │
+   clients (TDF-JSON) ──▶│  Transports          Spec middleware            Integration seam           │
                          │  ┌───────────┐        ┌──────────────────┐      ┌──────────────────────┐   │
-   WS  (arkavo/a2a) ────▶│  │A2AWsServer│──┐     │ CwtAuthLayer     │      │ ArkavoRequestHandler │   │
-   iroh(arkavo/a2a)────▶ │  │A2AIrohSrv │──┼────▶│ (verify CWT/DID) │─────▶│  (impl a2a-lf        │   │
+   WS  (arkavo/a2a) ────▶│  │A2AWsServer│──┐     │ EnvelopeLayer    │      │ ArkavoRequestHandler │   │
+   iroh(arkavo/a2a)────▶ │  │A2AIrohSrv │──┼────▶│ (open TDF-JSON)  │─────▶│  (impl a2a-lf        │   │
    HTTP(jsonrpc) ──────▶ │  │jsonrpc_rtr│──┘     │ GatedDispatcher  │      │   RequestHandler)    │   │
                          │  └───────────┘        │ (TØR-G policy)   │      └──────────┬───────────┘   │
                          │  AgentCard producer   │ rate-limit layer │                 │ delegates to  │
@@ -53,7 +53,7 @@ This document scopes the changes required and proposes the target architecture. 
 
 3. **Streaming adapter.** Today streaming is jsonrpsee subscription sinks fed by tokio `broadcast` channels (`handlers::streaming`, via a broadcast→mpsc forwarder). The spec stack returns `BoxStream<Result<StreamResponse>>`. A thin adapter wraps the receiver as a `BoxStream` — delta *production* is untouched; only the egress shape changes. **Lag is a correctness hazard:** `broadcast` drops on lag, and the current forwarder (`while let Ok(d) = broadcast_rx.recv()`, `chat_session.rs:424`+) silently exits on `RecvError::Lagged` — a slow subscriber gets a *truncated* stream that looks like normal completion, not an error. The adapter MUST map `Lagged` to an explicit stream error (or a resync); WS2 carries a backpressure acceptance test, not just round-trip.
 
-4. **Auth: P-256 CWT/DID, minted from device identity.** See "Identity" below — this is the single biggest *new* behavior, because agent identity is currently **Ed25519** and CWT mandates **P-256**.
+4. **Auth: the TDF-JSON binding, signed by the P-256 workload key.** Every agent-to-agent message is one TDF-JSON document on a custom protocol binding ([the TDF-JSON binding](tdf-json-binding.md)); the sender's workload key signs its envelope assertion, and the receiver verifies sender and standing before it unwraps the unmodified A2A JSON-RPC inside. No CWT crosses between agents (DEC-7); a CWT minted from the workload key remains toward the network KAS and authnz-rs. See WS3.
 
 5. **Policy: a new `PolicyEvaluator` adapter over existing circuits.** See "Policy" below — arkavo-edge has the circuit-eval building blocks but **no async request-gate evaluator** today; one must be built.
 
@@ -67,24 +67,25 @@ This document scopes the changes required and proposes the target architecture. 
 
 ## Capability disposition matrix
 
-Codes: **STANDARD** = native `a2a-lf` op · **EXT** = `arkavo-a2a-rs` extension · **MSG** = standard A2A message + AgentCard skill · **OFF-WIRE** = arkavo-edge non-A2A surface · **DROP** = removed.
+Codes: **STANDARD** = native `a2a-lf` op · **BINDING** = carried by the TDF-JSON custom protocol binding · **EXT** = `arkavo-a2a-rs` extension · **MSG** = standard A2A message + AgentCard skill · **OFF-WIRE** = arkavo-edge non-A2A surface · **DROP** = removed.
 
 | Bespoke surface | Disp. | Target |
 |---|---|---|
+| (every operation on the agent-to-agent wire) | BINDING | sealed TDF-JSON documents on `https://arkavo.com/a2a/bindings/tdf-json/v1`; standard A2A JSON-RPC inside |
 | `message/send`, `message/stream` | STANDARD | `send_message` / `send_streaming_message` |
 | `tasks/get` · `tasks/list` · `tasks/cancel` · (subscribe) | STANDARD | `get_task` / `list_tasks` / `cancel_task` / `subscribe_to_task` |
 | `chat/open` · `chat/send` · `chat/close` | MSG | `send_streaming_message`; session via `Message.contextId`; teaching events via `Message.metadata` |
 | `rpc.discover` · `discover_features_*` · `agent_capabilities_get` | DROP→STANDARD | AgentCard + `get_extended_agent_card` |
 | `agent_discover` | EXT/OFF-WIRE | AgentCard + `arkavo-a2a-iroh` discovery |
-| `agent.specialize` · `agent.config.*` | MSG | unified bundle transport: `SendMessage` + TDF-encrypted `Part` (`arkavo-a2a-tdf`) + AgentCard skill, delivered via `arkavo-config-transport` |
+| `agent.specialize` · `agent.config.*` | MSG | unified bundle transport: `SendMessage` + TDF-JSON `Part` (`application/tdf+json`) + AgentCard skill, delivered via `arkavo-config-transport` |
 | `system.metrics` · `system.metrics.subscribe` | OFF-WIRE | AG-UI `/metrics` + SSE `/metrics/subscribe` |
 | `budget.compute_status` · `arp/get` | OFF-WIRE | AG-UI `/budget/status` + `/arp/{agent}/document` (handlers already exist) |
 | `kas.publicKey` · `kas.rewrap` | OFF-WIRE | standalone KAS service (`arkavo-tdf::KasA2aHandler`) |
-| `tdf/offer` · `tdf/share` | EXT | `arkavo-a2a-tdf` Part-level NanoTDF |
-| `challenge_request` · `challenge_verify` | DROP | superseded by CWT minting |
+| `tdf/offer` · `tdf/share` | EXT | TDF-JSON `url` Part naming the Iroh blob (`https://arkavo.com/a2a/tdf-json-part/v1` profile extension) |
+| `challenge_request` · `challenge_verify` | DROP | superseded by the envelope's per-message signature |
 | file upload/transfer (chunked) | STANDARD | A2A `FilePart`/artifacts in messages |
 | `A2aMcpBridge` | OFF-WIRE | re-homed; MCP tools → A2A skills |
-| OAuth2 / JWT / mTLS-identity | DROP | CWT/COSE + DID:key |
+| OAuth2 / JWT / mTLS-identity | DROP | envelope signed by the workload `did:key` between agents; CWT/COSE + DID:key only toward services outside the mesh |
 | `A2aPolicy` (allow/deny) | EXT | `arkavo-a2a-policy::GatedDispatcher` + new `PolicyEvaluator` |
 | rate limiting | OFF-WIRE/EXT | tower layer (already exists) |
 | DLP / data-classification | OFF-WIRE | new `CallInterceptor`/tower layer (**security-critical**) |
@@ -118,17 +119,18 @@ Front-loads integration risk and produces the *evidence* for every upstream deci
 ### WS2 — RequestHandler & server bring-up · **L** (WS1)
 - **Create** `arkavo-a2a-edge/src/handler.rs` (`ArkavoRequestHandler` impl of the 11 ops, delegating per the table above), `src/server.rs` (bind `A2AWsServer` + shared-endpoint `A2AIrohServer` + `jsonrpc_router`), `src/card.rs` (`AgentCardProducer` advertising extensions + MCP-tool skills), `src/stream.rs` (broadcast→`BoxStream` adapter).
 - **Modify** `crates/arkavo-cli/src/commands/agent.rs::start_agent_server` (~1160) and `crates/arkavo-server/src/server/a2a_server.rs` (`A2aServer::new`/`start_with_port`) to construct the same dependency set (conductor, router, task store, learning bus, mcp registry, iroh) and hand them to `arkavo-a2a-edge::serve()` instead of the jsonrpsee `#[rpc]` server.
+- **Serve the binding** ([the TDF-JSON binding](tdf-json-binding.md)): each transport carries sealed documents; an `EnvelopeLayer` opens them (verify sender and standing, then unwrap) ahead of `GatedDispatcher`, and seals replies and stream events. `src/card.rs` lists the binding in `supportedInterfaces` and emits the 1.0 card shape (`capabilities.extensions[].params`), keeping the workload-key signature and key statements #781 added.
 - **Reuse** `arkavo-tasks::TaskStore` (trait already matches: `create/get/update_status/list/result`).
 - **Swift-reachable ingress:** `A2AWsServer` (WS) is the primary transport Swift agents use (`URLSessionWebSocketTask`); bind it on a stable, externally reachable address. (See Cross-language parity.)
 - **Risk:** orchestrator-vs-specialist dual path must be preserved inside `send_message`.
 - **Risk (streaming backpressure):** the broadcast→`BoxStream` adapter must handle `RecvError::Lagged` explicitly — today's forwarder exits silently on lag (latent truncation bug, `chat_session.rs:424`+). Add a backpressure/lag acceptance test across **both** delegation paths, not just a happy-path round-trip.
 
-### WS3 — Identity: P-256 CWT/DID · **L** (WS2)
-- **The core change:** agent identity is **Ed25519** today (`arkavo-crypto::AgentKeypair`, used at `welcome.rs`/`agent.rs`); CWT requires **P-256**. `arkavo-crypto::P256SigningKeypair`/`P256VerifyingKey` **already exist with DID:key support** (`to_did_key`, multicodec 0x1200) but are currently only used for iOS registration.
-- **Modify** agent startup to provision a **P-256 identity** (persist via `arkavo-device-identity::keypair`), set `AgentIdentity.did = P256VerifyingKey::to_did_key()`.
-- **Create** `arkavo-a2a-edge/src/identity.rs`: build `ConfirmationKey{x,y}` from the SEC1 public bytes; construct `CwtCredential::new(p256_signing_key, iss, sub=agent_did, aud, cnf)`; attach `CwtCallInterceptor` on clients and `CwtAuthLayer` on the server.
-- **Decision required (DEC-1):** existing agents hold Ed25519 identities. Options: (a) **migrate** agent identity to P-256 (cleanest, one identity); (b) **dual-key** — keep Ed25519 for legacy, add P-256 for A2A CWT. Recommend (a) for new agents + a one-time re-provision for existing; flag any external system that pinned the Ed25519 DID. Ties into [[project_hardware_attestation_p0]] (HATT hardware root should issue the P-256 key).
-- **Replaces** the `mtls_integration` / `oauth2` / `onboarding_integration` behaviors with CWT/DID regression tests (valid passes; expired/replayed/forbidden-issuer rejected per `aia-identity-v1`).
+### WS3 — Identity & auth: workload key + TDF-JSON binding · **L** (WS2)
+- **Identity is built (DEC-1, #766):** a P-256 workload key per agent name, in the Secure Enclave where there is one, with key statements for its gossip, iroh and TDF keys and a signed card carrying them (#772–#784).
+- **Create** the seal/open crate ([the TDF-JSON binding](tdf-json-binding.md)): bytes in, verified sender and inner JSON-RPC out, no A2A dependency, over `opentdf::jsonrpc::TdfJson`, `arkavo-key-statement` and `arkavo-crypto`. Then `arkavo-a2a-edge/src/envelope.rs`: the server `EnvelopeLayer` and a sealing client transport, both keyed by the workload key.
+- **No CWT between agents (DEC-7).** `CwtAuthLayer`/`CwtCallInterceptor` are not attached to agent-to-agent interfaces. A CWT minted from the workload key remains toward the network KAS and authnz-rs.
+- **Replaces** the `mtls_integration` / `oauth2` / `onboarding_integration` behaviors with envelope regression tests: every step of the binding's receive order refuses before unwrap (bad signature, wrong audience, expiry, replayed nonce, non-member), a re-signed ciphertext is refused, and replies and stream events are sealed to the requester (INGRESS-009–011).
+- **Risk:** every envelope and stream event is signed by the workload key, a few milliseconds in the Secure Enclave; the crate benchmarks seal and open against the 50 ms routing budget.
 
 ### WS4 — Policy: TØR-G gate evaluator · **L** (WS2)
 - **Finding:** there is **no async request-gate evaluator** today. `arkavo-torg` is LLM constrained-decoding; `arkavo-torg-circuits::CompiledCircuit::evaluate(input) -> Option<usize>` is a boolean-circuit evaluator; `arkavo-arp-runtime` records outcomes. The building blocks exist; the gate does not.
@@ -137,8 +139,9 @@ Front-loads integration risk and produces the *evidence* for every upstream deci
 - **Confirm at build time:** the TØR-G circuit source (compiled artifact + feature map). *Taint feed is settled (verified):* `GateContext.taint` arrives on the inbound `Message.metadata` (`GatedDispatcher` → `Taint::from_message`, `arkavo-a2a-policy/src/server.rs:61`); arkavo-edge has no internal DLP/SEQ provenance in the request path today (types/tripwire only), so the gate is server-boundary middleware with **no conductor plumbing**.
 - **Proof:** message ops deny → `TASK_STATE_REJECTED`; task ops deny → JSON-RPC −32099 with `arkavo.torg.v1.Rejection`.
 
-### WS5 — TDF parts + KAS split · **M** (WS2)
-- **Replace** `tdf/offer`+`tdf/share` wire methods with `arkavo-a2a-tdf` Part-level NanoTDF (`encrypt_inline`/`decrypt_inline`/`make_b3_url_part`) carried inside A2A messages.
+### WS5 — TDF-JSON parts + KAS split · **M** (WS2)
+- **Replace** `tdf/offer`+`tdf/share` wire methods with TDF-JSON Parts (`mediaType: application/tdf+json`; inline `data`, or a `url` Part naming an Iroh blob) carried inside A2A messages and declared by the `https://arkavo.com/a2a/tdf-json-part/v1` profile extension. A Part has its own key access and policy, so an orchestrator or relay carries it unopened. `arkavo-a2a-tdf` gains the TDF-JSON Part helpers; Edge does not use its NanoTDF Parts (DEC-8).
+- **Move** `OpenTdfService` off the deprecated `TdfJsonRpc` to `opentdf::jsonrpc::TdfJson`.
 - **Extract** KAS (`kas.publicKey`/`kas.rewrap`, backed by `arkavo-tdf::KasA2aHandler`) into a **standalone HTTPS service** surface (`/kas/public-key`, `/kas/rewrap`) — off the A2A wire, minimizing key-op attack surface.
 
 ### WS6 — iroh / discovery reconciliation · **M** (WS2)
@@ -152,7 +155,7 @@ Good news: AG-UI already has the handlers for most of these.
 - **Metrics** (`arkavo-server/.../mod.rs:1172-1220,1332-1488`) → AG-UI HTTP `/metrics` + SSE `/metrics/subscribe` (`arkavo-agui` gateway_events; `MetricsCollector` stays).
 - **Budget** (`mod.rs:1155`) → AG-UI `/budget/status` (`BudgetAgUiEvent` exists in `arkavo-budget`, `budget_handler.rs`).
 - **ARP** (`handlers/arp.rs`) → AG-UI `/arp/{agent}/document` (`arp_handler.rs` exists; per-agent keyed — see [[project_arp_per_agent]]).
-- **Config + Specialize — unified bundle transport (DEC-4).** `handlers/config.rs` and `handlers/specialization.rs` (`BundleDecryptor`) collapse into one path: an encrypted bundle delivered orchestrator→agent as a **standard A2A `SendMessage`** carrying a TDF-encrypted `Part` (`arkavo-a2a-tdf`), advertised as an AgentCard skill, with `arkavo-config-transport` as the bundle-delivery layer. No bespoke `/config*` or `/specialize` side-channel. (This row is **MSG**, not off-wire — it is legitimately agent↔agent, just expressed in the standard message shape.)
+- **Config + Specialize — unified bundle transport (DEC-4).** `handlers/config.rs` and `handlers/specialization.rs` (`BundleDecryptor`) collapse into one path: an encrypted bundle delivered orchestrator→agent as a **standard A2A `SendMessage`** carrying a TDF-JSON `Part`, advertised as an AgentCard skill, with `arkavo-config-transport` as the bundle-delivery layer. No bespoke `/config*` or `/specialize` side-channel. (This row is **MSG**, not off-wire — it is legitimately agent↔agent, just expressed in the standard message shape.)
 - **MCP bridge** (`a2a_mcp_bridge.rs`) → re-home into `arkavo-a2a-edge`; tools advertised as AgentCard skills.
 
 ### WS8 — Middlewares (rate-limit + DLP) · **L** (WS2) · **security-critical, net-new**
@@ -166,13 +169,13 @@ Good news: AG-UI already has the handlers for most of these.
 - **Mitigations (address the review's no-green-tree concern):** WS0 de-risks the seam; land WS3–WS8 as **independently-tested commits** — each relocation's own unit/integration + security suites pass *before* the consumer sweep, so only the mechanical consumer-wiring is deferred to merge, not the relocations' correctness. Keep the branch **short-lived**; conformance matrix (WS10) + security suites are the merge gate.
 
 ### WS10 — Conformance CI (the Swift↔Rust sync gate) · **M** (WS9)
-- **Create** an `a2a-conformance` adapter wrapping `arkavo-a2a-edge::serve()` + client, mirroring `adapters/arkavo-ext-rust`. Run the rs↔swift matrix (ws / transport-equivalence / identity / policy / tdf / discovery) in CI so interop with `arkavo-a2a-swift` is continuously proven. **A green matrix is the definition of "in sync"** — it gates both the `arkavo-a2a-rs` and `arkavo-a2a-swift` tags.
+- **Create** an `a2a-conformance` adapter wrapping `arkavo-a2a-edge::serve()` + client, mirroring `adapters/arkavo-ext-rust`. Run the rs↔swift matrix (ws / transport-equivalence / identity / tdf-json binding / policy / tdf / discovery) in CI so interop with `arkavo-a2a-swift` is continuously proven. **A green matrix is the definition of "in sync"** — it gates both the `arkavo-a2a-rs` and `arkavo-a2a-swift` tags.
 
 ### WS11 — Swift agent interop & lockstep · **L** (WS0 tag + WS2/WS6; partly sibling-repo)
 - **Parallelize early:** needs only the WS0 tag + a reachable WS2/WS6 server — **does NOT wait for the WS9 sweep.** Starting Swift here gives the "real round-trip" deliverable maximum runway and surfaces interop bugs while the Rust side is still malleable.
 - **Co-version & tag** `arkavo-a2a-swift` to the same spec rev as the WS0 `arkavo-a2a-rs` tag; keep the `a2a-swift` fork bug-fix-only (parity with the Rust fork policy).
 - **Reachability:** confirm Edge binds WS ingress + the `RelayGateway` so SwiftAgentKit agents connect over `URLSessionWebSocketTask` / HTTPS-SSE (no native iroh on Swift).
-- **Build out the Swift agents** (sibling repos): SwiftAgentKit agent on `arkavo-a2a-swift` (CWT/DID mint, rejection honoring, TDF Parts, relay discovery), on-device inference via `mlx-swift-lm`. Prove a real Swift agent ↔ Edge round-trip beyond the conformance harness (message/task lifecycle, streaming).
+- **Build out the Swift agents** (sibling repos): SwiftAgentKit agent on `arkavo-a2a-swift` (TDF-JSON binding seal + open, rejection honoring, TDF-JSON Parts, relay discovery), on-device inference via `mlx-swift-lm`. Prove a real Swift agent ↔ Edge round-trip beyond the conformance harness (message/task lifecycle, streaming).
 - **Deliverable:** a SwiftAgentKit agent that completes a task against Edge, green across the matrix it exercises.
 
 ---
@@ -195,23 +198,26 @@ Goal: **Swift agents (SwiftAgentKit + `arkavo-a2a-swift`, on-device inference vi
 - **Transport reachability (architecture, not a fork).** Swift's transports are asymmetric to Rust's: WS via `URLSessionWebSocketTask` (Apple — full), but **no native iroh** (Rust-only). So Edge must offer Swift-reachable ingress:
   - **WS (`A2AWsServer`)** — primary Swift↔Edge transport (Apple platforms; WS2).
   - **`RelayGateway` (HTTPS+SSE)** — lets Swift agents reach iroh-discovered Rust agents without native iroh (WS6).
-  - Plain HTTPS JSON-RPC for vanilla A2A peers.
-- **Feature parity = the wire features Edge requires.** Every extension Edge mandates must be implemented + conformance-green on Swift: CWT/DID identity (mint + present), TØR-G **rejection honoring** on the client, TDF Parts, discovery via relay. `arkavo-a2a-swift` has all four targets; WS0/WS10 produce the parity-gap + matrix-skip list (native-iroh cells = skip on Swift, relay cells = run).
+  - The public agent card for vanilla A2A peers; member operations need the TDF-JSON binding.
+- **Feature parity = the wire features Edge requires.** Every extension Edge mandates must be implemented + conformance-green on Swift: the TDF-JSON binding (seal + open, signed by the agent's P-256 key), TØR-G **rejection honoring** on the client, TDF-JSON Parts, discovery via relay. `arkavo-a2a-swift` has targets for the last three, and the binding is new in both languages; WS0/WS10 produce the parity-gap + matrix-skip list (native-iroh cells = skip on Swift, relay cells = run).
 - **Boundary.** The Swift *agent runtime* (SwiftAgentKit + mlx) lives in **sibling repos**, not arkavo-edge. Edge owns the reachable, conformance-tested A2A server surface; the Swift agent owns speaking it. SwiftAgentKit already supports A2A **and** MCP, dovetailing with MCP-tools-as-skills.
 
 ## Outstanding decisions
 
-- **DEC-1 (identity): RESOLVED — migrate Ed25519→P-256, held in hardware.** Agent identity becomes a single P-256 key from the hardware root. (WS3) As built (#766, 2026-10-18): each agent name has its own P-256 workload key, made by CryptoKit in the Secure Enclave and used there without a prompt. HATT's Security.framework path in `arkavo-attestation` cannot keep an enclave key for a command-line binary, so it does not issue it. Linux and Windows get TPM 2.0 later, and a software key that says so until then.
+- **DEC-1 (identity): RESOLVED — migrate Ed25519→P-256, held in hardware.** Agent identity becomes a single P-256 key from the hardware root. (WS3) As built (#766, 2026-10-18): each agent name has its own P-256 workload key, made by CryptoKit in the Secure Enclave and used there without a prompt. HATT's Security.framework path in `arkavo-attestation` cannot keep an enclave key for a command-line binary, so it does not issue it. Linux and Windows get TPM 2.0 later, and a software key that says so until then. The workload key also signs every envelope with ES256, so it is the sender the binding verifies (DEC-7).
 - **DEC-2 (policy): RESOLVED — stays in this repo, out of the protocol layer.** The `PolicyEvaluator` lives in `arkavo-a2a-edge` (A2A glue) delegating to `arkavo-torg-circuits`; `arkavo-protocol::a2a_policy` is **deleted**. Not pushed upstream to `arkavo-a2a-rs`. (WS4) — **taint plumbing verified wire-carried** (`GatedDispatcher` reads `Message.metadata`; no internal DLP/SEQ provenance exists in the request path today), so the gate is server-boundary middleware with no conductor change. Residual unknown is only the **circuit artifact + feature map** (a data input the evaluator loads), not internal threading.
-- **DEC-3 (external auth): RESOLVED (2026-06-17) — no OAuth2/JWT clients today.** CWT/DID-only is clean; WS9 deletes the OAuth2/JWT/mTLS-identity modules outright. No edge gateway required.
-- **DEC-4 (specialize): RESOLVED — unified bundle transport, expressed as a standard A2A message.** Specialize and `agent.config.*` are the same pattern (encrypted bundle, orchestrator→agent). Both ride **one** transport (`arkavo-config-transport`), expressed as `SendMessage` carrying a TDF-encrypted bundle `Part` (`arkavo-a2a-tdf`) + an AgentCard skill — no side-channel. (WS5/WS7)
+- **DEC-3 (external auth): RESOLVED (2026-06-17) — no OAuth2/JWT clients today.** CWT/DID-only is clean; WS9 deletes the OAuth2/JWT/mTLS-identity modules outright. No edge gateway required. Since DEC-7, CWT does not cross between agents either; it remains toward services outside the mesh.
+- **DEC-4 (specialize): RESOLVED — unified bundle transport, expressed as a standard A2A message.** Specialize and `agent.config.*` are the same pattern (encrypted bundle, orchestrator→agent). Both ride **one** transport (`arkavo-config-transport`), expressed as `SendMessage` carrying a TDF-JSON bundle `Part` + an AgentCard skill — no side-channel. (WS5/WS7)
 - **DEC-5 (source-of-truth remote): RESOLVED — pin tracks the `arkavo-ai/a2a-rs` fork, which is BUG-FIX-ONLY.** The fork exists solely to carry upstream `a2a-lf` bug fixes not yet in LF; no feature accretion. Keep the diff minimal + rebasable onto `a2aproject/a2a-rs`; retire fork patches as LF merges them. Missing *capabilities* go to `arkavo-a2a-rs`, never the fork.
 - **DEC-6 (fork-feature fallback): RESOLVED — hard-block on LF governance.** An a2a-lf-feature-only gap never touches the fork; it blocks on an LF contribution. Accepted critical-path risk — WS0 surfaces any such gap first.
+- **DEC-7 (agent-to-agent auth): RESOLVED (2026-10-26) — the envelope authenticates.** Every message between agents is a TDF-JSON document on the TDF-JSON custom protocol binding ([the TDF-JSON binding](tdf-json-binding.md)), signed by the sender's workload key and verified, with the sender's standing, before it is unwrapped. A binding rather than an extension, because A2A extensions may not change the message body. No CWT is sent between agents; CWT remains toward the network KAS and authnz-rs. Replaces the "CWT/DID-only auth" lock for agent-to-agent traffic. (WS2/WS3)
+- **DEC-8 (message format and binding identifier): RESOLVED (2026-10-26) — TDF-JSON, identified on arkavo.com, offered to A2A.** Messages and Parts use TDF-JSON (`opentdf::jsonrpc::TdfJson`), not NanoTDF; a TDF-CBOR binding can be listed ahead of it later. The binding is `https://arkavo.com/a2a/bindings/tdf-json/v1` and is proposed to a2aproject as an experimental custom binding; if the project assigns an identifier, cards list both interfaces until peers move. (WS5/WS10)
 - **Sequencing (WS9): big-bang, reaffirmed (2026-06-17)** despite the review's incremental-coexistence case; rationale + mitigations captured in WS9.
 
 ## Risks
 
 - **P-256 identity migration** is real behavior change, not cosmetic (DEC-1).
+- **Per-message signing cost:** every envelope and stream event is signed by the workload key, a few milliseconds in the Secure Enclave (WS3).
 - **DLP middleware must be built and proven** — types exist, the interceptor does not; security suites gate the merge (WS8).
 - **Big-bang broken window** across 254 sites — mitigate with seam-first sequencing and merge-time CI gate.
 - **iroh sharing** needs the upstream injected-endpoint change, else two iroh nodes blow the binary/port budget (WS6).
@@ -225,9 +231,9 @@ Goal: **Swift agents (SwiftAgentKit + `arkavo-a2a-swift`, on-device inference vi
 | 0 | Upstream-gap spike (→ tag arkavo-a2a-rs) | S–M |
 | 1 | Dependency intake & integration crate | M |
 | 2 | RequestHandler & server bring-up | L |
-| 3 | Identity: P-256 CWT/DID | L |
+| 3 | Identity & auth: workload key + TDF-JSON binding | L |
 | 4 | Policy: TØR-G gate evaluator | L |
-| 5 | TDF parts + KAS split | M |
+| 5 | TDF-JSON parts + KAS split | M |
 | 6 | iroh / discovery reconciliation | M |
 | 7 | Off-wire relocations | L |
 | 8 | Middlewares (rate-limit + **net-new** DLP interceptor) | L |
