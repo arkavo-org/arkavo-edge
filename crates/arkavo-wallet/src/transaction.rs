@@ -3,7 +3,7 @@ use crate::error::Result;
 use crate::keypair::EvmKeypair;
 use crate::rlp;
 use crate::signature::Signature;
-use alloy_primitives::U256;
+use ruint::aliases::U256;
 use sha3::{Digest, Keccak256};
 
 /// EVM transaction (legacy format for maximum compatibility)
@@ -206,7 +206,7 @@ impl SignedTransaction {
     pub fn recover_signer(&self) -> Result<EvmAddress> {
         let hash = self.tx.signing_hash();
         let pubkey = self.signature.recover_public_key(&hash)?;
-        let encoded = pubkey.to_encoded_point(false);
+        let encoded = pubkey.to_sec1_point(false);
         EvmAddress::from_public_key(&encoded.as_bytes()[1..])
     }
 }

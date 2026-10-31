@@ -2,6 +2,7 @@ use crate::address::EvmAddress;
 use crate::error::{Result, WalletError};
 use crate::signature::Signature;
 use k256::ecdsa::{SigningKey, VerifyingKey};
+use k256::elliptic_curve::Generate;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 use std::fmt;
@@ -15,7 +16,7 @@ pub struct EvmKeypair {
 impl EvmKeypair {
     /// Generate a new random keypair
     pub fn generate() -> Self {
-        let signing_key = SigningKey::random(&mut rand::rngs::OsRng);
+        let signing_key = SigningKey::generate();
         Self { signing_key }
     }
 
@@ -62,14 +63,8 @@ impl EvmKeypair {
     }
 
     /// Sign a message hash (32 bytes, already hashed)
-    ///
-    /// # Panics
-    /// This function should not panic with a valid key.
     pub fn sign_prehash(&self, hash: &[u8; 32]) -> Signature {
-        let (sig, recovery_id) = self
-            .signing_key
-            .sign_prehash_recoverable(hash)
-            .expect("signing should not fail with valid key");
+        let (sig, recovery_id) = self.signing_key.sign_prehash_recoverable(hash);
         Signature::from_k256(&sig, recovery_id)
     }
 
@@ -136,7 +131,7 @@ impl EvmPublicKey {
 
     /// Get uncompressed public key bytes (64 bytes, without 0x04 prefix)
     pub fn to_bytes(&self) -> [u8; 64] {
-        let encoded = self.verifying_key.to_encoded_point(false);
+        let encoded = self.verifying_key.to_sec1_point(false);
         let bytes = encoded.as_bytes();
         let mut result = [0u8; 64];
         result.copy_from_slice(&bytes[1..65]);
@@ -145,7 +140,7 @@ impl EvmPublicKey {
 
     /// Get compressed public key bytes (33 bytes)
     pub fn to_compressed_bytes(&self) -> [u8; 33] {
-        let encoded = self.verifying_key.to_encoded_point(true);
+        let encoded = self.verifying_key.to_sec1_point(true);
         let bytes = encoded.as_bytes();
         let mut result = [0u8; 33];
         result.copy_from_slice(bytes);

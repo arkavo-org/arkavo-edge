@@ -1,6 +1,6 @@
 //! RLP (Recursive Length Prefix) encoding utilities for EVM transactions
 
-use alloy_primitives::U256;
+use ruint::aliases::U256;
 
 /// Encode a u64 value in RLP format
 pub fn encode_u64(val: u64, out: &mut Vec<u8>) {

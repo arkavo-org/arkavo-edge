@@ -268,6 +268,7 @@ mod tests {
     use super::*;
     use coset::CoseKeyBuilder;
     use p256::ecdsa::SigningKey;
+    use p256::elliptic_curve::Generate;
 
     /// A structurally valid COSE_Key whose `x` (or `y`) coordinate is 31 bytes
     /// — the shape a leading-zero-stripped coordinate produces — must be
@@ -283,8 +284,8 @@ mod tests {
     }
 
     fn valid_coordinates() -> (Vec<u8>, Vec<u8>) {
-        let vk = *SigningKey::random(&mut rand::rngs::OsRng).verifying_key();
-        let point = vk.to_encoded_point(false);
+        let vk = *SigningKey::generate().verifying_key();
+        let point = vk.to_sec1_point(false);
         (
             point.x().expect("x coordinate").to_vec(),
             point.y().expect("y coordinate").to_vec(),

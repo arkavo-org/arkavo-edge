@@ -164,7 +164,7 @@ impl ExtendedKey {
         } else {
             let sk = SigningKey::from_bytes((&self.key).into())
                 .map_err(|e| WalletError::CryptoError(e.to_string()))?;
-            let pk = sk.verifying_key().to_encoded_point(true);
+            let pk = sk.verifying_key().to_sec1_point(true);
             data.extend_from_slice(pk.as_bytes());
         }
         data.extend_from_slice(&child.to_be_bytes());
