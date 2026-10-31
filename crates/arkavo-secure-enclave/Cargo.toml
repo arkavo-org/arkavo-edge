@@ -1,0 +1,19 @@
+[package]
+name = "arkavo-secure-enclave"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "P-256 signing keys held in the Apple Secure Enclave, through CryptoKit"
+repository.workspace = true
+keywords = ["secure-enclave", "p256", "cryptokit", "identity"]
+categories = ["cryptography", "os::macos-apis"]
+build = "build.rs"
+
+[dependencies]
+
+[dev-dependencies]
+p256 = { workspace = true }
+
+[lints]
+workspace = true

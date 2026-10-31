@@ -2,8 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
+mod agent_dir;
 pub mod keypair;
+mod private_file;
 pub mod storage;
+pub mod subordinate_key;
+pub mod workload_key;
 
 /// Where unit tests keep identity files: a directory of the test's own
 /// process, never the developer's. The real files hold the device ID and the
@@ -27,6 +31,8 @@ pub enum DeviceIdentityError {
     InvalidFormat(String),
     #[error("Platform not supported: {0}")]
     UnsupportedPlatform(String),
+    #[error("Workload key: {0}")]
+    WorkloadKey(String),
 }
 
 pub type Result<T> = std::result::Result<T, DeviceIdentityError>;
