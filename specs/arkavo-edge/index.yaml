@@ -55,7 +55,7 @@ components:
     module: arkavo_server
     description: Signed, sealed agent envelopes, one workload key, minimal mDNS announcement, --trust enrollment and membership
     criticality: critical
-    scenario_count: 16
+    scenario_count: 17
     invariants:
       - Transport and discovery are untrusted
       - Every message is a signed, sealed envelope verified before unwrap
@@ -90,7 +90,7 @@ components:
     module: arkavo_crypto
     description: Cryptographic primitives and key management
     criticality: critical
-    scenario_count: 11
+    scenario_count: 12
     invariants:
       - Ed25519: 32-byte keys, 64-byte signatures
       - P-256 SEC1: 65-byte uncompressed keys
@@ -194,9 +194,9 @@ components:
   - name: device-identity
     file: device-identity.spec.yaml
     module: arkavo_device_identity
-    description: Device ID management and secure storage
+    description: Device ID, agent identity keys and each agent's Secure Enclave workload key
     criticality: high
-    scenario_count: 7
+    scenario_count: 10
     invariants:
       - Device ID unique per installation
       - Persists across restarts
@@ -383,7 +383,7 @@ components:
     module: arkavo_tdf_iroh
     description: TDF blob transport via Iroh P2P
     criticality: critical
-    scenario_count: 12
+    scenario_count: 13
     invariants:
       - Raw bytes only, no encryption
       - Tickets self-contained
@@ -817,7 +817,7 @@ components:
     module: arkavo_tdf::security
     description: TDF control plane protection and format security
     criticality: critical
-    scenario_count: 16
+    scenario_count: 17
     invariants:
       - Control plane commands TDF-encrypted
       - TDF-JSON and TDF-CBOR equivalent security
@@ -985,7 +985,7 @@ components:
     module: arkavo_server
     description: A2A server and runtime orchestration
     criticality: critical
-    scenario_count: 16
+    scenario_count: 18
     invariants:
       - Server binds localhost by default
       - JSON-RPC 2.0 protocol
@@ -1054,7 +1054,7 @@ components:
     module: arkavo_cwt
     description: COSE_Sign1/ES256 verification of the agent CWT against the published COSE key set
     criticality: critical
-    scenario_count: 3
+    scenario_count: 4
     invariants:
       - ES256 only
       - Keys matched on raw kid bytes from the published COSE key set

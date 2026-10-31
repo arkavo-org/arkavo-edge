@@ -32,10 +32,14 @@ mod event_loop;
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod exchange_keys_tests;
+#[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+mod exchange_keys_vouched_tests;
 mod gossip_transport;
 pub mod handlers;
 mod learning_bus;
 mod learning_bus_gossip;
+mod learning_bus_keys;
 mod learning_bus_synthesis;
 mod llm_intent_analyzer;
 mod local_engine;
@@ -294,6 +298,7 @@ pub trait A2aRpc {
         recipient: String,
         challenge: String,
         signature: String,
+        statement: Option<String>,
     ) -> RpcResult<arkavo_gossip::key_exchange::KeyExchangeResponse>;
 
     /// Check behavior policy for a sector based on learned lessons
@@ -482,6 +487,10 @@ pub struct A2aRpcImpl {
     pub(crate) assets: Option<Arc<AssetService>>,
     /// Roles an orchestrator assigns, for an agent set up to take them
     pub(crate) swarmkit: Option<Arc<swarmkit::SpecialistService>>,
+    /// The agent's account key (#766), which signs its card
+    pub(crate) workload_key: Option<Arc<arkavo_device_identity::workload_key::WorkloadKey>>,
+    /// Sign the statements the card carries for the agent's other keys
+    pub(crate) key_vouchers: Vec<Arc<arkavo_device_identity::subordinate_key::Voucher>>,
 }
 
 impl A2aRpcImpl {
@@ -920,6 +929,7 @@ impl A2aRpcServer for A2aRpcImpl {
         recipient: String,
         challenge: String,
         signature: String,
+        statement: Option<String>,
     ) -> RpcResult<arkavo_gossip::key_exchange::KeyExchangeResponse> {
         use arkavo_gossip::key_exchange::{KeyExchangeRequest, sign_response, verify_request};
 
@@ -948,6 +958,7 @@ impl A2aRpcServer for A2aRpcImpl {
             recipient,
             challenge,
             signature,
+            statement,
         };
         let refused = |reason: String| {
             tracing::warn!(peer = %request.peer_id, "Key exchange refused: {reason}");
@@ -964,16 +975,28 @@ impl A2aRpcServer for A2aRpcImpl {
                 return Err(refused(e.to_string()));
             }
         };
-        if let Err(e) = bus
-            .register_peer_key(request.peer_id.clone(), peer_key)
+        let vouched_by = match bus
+            .bind_peer_key(
+                request.peer_id.clone(),
+                peer_key,
+                request.statement.as_deref(),
+            )
             .await
         {
-            timer.error();
-            return Err(refused(e.to_string()));
-        }
+            Ok(did) => did,
+            Err(e) => {
+                timer.error();
+                return Err(refused(e.to_string()));
+            }
+        };
         match sign_response(bus.keypair(), bus.agent_id(), &request) {
-            Ok(response) => {
-                tracing::info!("Key exchange completed with peer: {}", request.peer_id);
+            Ok(mut response) => {
+                response.statement = bus.gossip_statement().await;
+                tracing::info!(
+                    peer = %request.peer_id,
+                    agent = vouched_by.as_deref().unwrap_or("unvouched"),
+                    "Key exchange completed"
+                );
                 timer.success();
                 Ok(response)
             }
@@ -1280,7 +1303,11 @@ impl A2aRpcServer for A2aRpcImpl {
                 .as_ref()
                 .is_some_and(|a| a.descriptor().is_some()),
         };
-        let card = well_known::build_agent_card(&state).await;
+        let mut card = well_known::build_agent_card(&state).await;
+        if let Some(key) = self.workload_key.clone() {
+            card = well_known::with_key_statements(card, &self.key_vouchers).await;
+            card = well_known::signed(card, key).await;
+        }
         serde_json::to_value(card).map_err(|e| {
             ErrorObjectOwned::owned(-32603, format!("Serialization error: {e}"), None::<()>)
         })

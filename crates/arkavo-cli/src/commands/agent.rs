@@ -1,15 +1,14 @@
-use arkavo_config_encryption::AgentCredential;
 use arkavo_server::server::assets::Hosting;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
 mod advertise;
+mod discovered;
 mod enlist;
+mod gossip_keys;
 mod gpu_residency;
+mod keys;
 pub mod listen;
 
 /// What a command line asks `arkavo agent` to do.
@@ -467,25 +466,7 @@ pub async fn start_agent_server(
     };
     let device_did = device_keypair.public_key().to_did_key();
 
-    // Create AgentCredential for TDF encryption/decryption
-    let mut identity_attributes = HashMap::new();
-    identity_attributes.insert("agent.id".to_string(), config.name.clone());
-    let agent_identity = Arc::new(
-        AgentCredential::new(config.name.clone(), identity_attributes)
-            .map_err(|e| format!("Failed to create AgentCredential: {e}"))?,
-    );
-
-    // Encode public key as base64 for mDNS broadcast
-    let public_key_b64 = BASE64_STANDARD.encode(agent_identity.public_key.as_bytes());
-
-    let debug_mode = std::env::var("ARKAVO_DEBUG").is_ok();
-    if debug_mode {
-        println!(
-            "[Identity] Created AgentIdentity for agent '{}' with public key: {}...",
-            config.name,
-            &public_key_b64[..20.min(public_key_b64.len())]
-        );
-    }
+    let keys = keys::AgentKeys::load_or_create(&config.name)?;
 
     // Create process manager for MCP servers
     let process_manager = McpProcessManager::new();
@@ -511,15 +492,14 @@ pub async fn start_agent_server(
 
     let server = A2aServer::new(server_config);
 
-    // Set the public key for TDF encryption (used in agent.capabilities.get RPC)
-    server.set_public_key(public_key_b64.clone()).await;
+    keys.install(&server).await;
 
     // Create pain signal channel before LearningBus (lock-free hot path)
     let (pain_tx, pain_rx) = tokio::sync::mpsc::channel::<arkavo_server::PainSignal>(128);
 
     // Initialize LearningBus FIRST (before set_agent_metadata which initializes router)
     let learning_bus = {
-        let keypair = Arc::new(AgentKeypair::generate());
+        let keypair = Arc::new(AgentKeypair::from_bytes(keys.gossip.secret())?);
         let gossip_config = GossipConfig::default();
         let swarm_id = config.swarm.clone().unwrap_or_else(|| {
             std::env::current_dir()
@@ -529,6 +509,7 @@ pub async fn start_agent_server(
         });
         let mut bus = LearningBus::new(config.name.clone(), swarm_id, keypair, gossip_config);
         bus.set_pain_sender(pain_tx);
+        bus.set_gossip_voucher(keys.gossip_voucher.clone());
         Arc::new(bus)
     };
     // Initialize persistent learning store (SQLite) for lessons
@@ -834,7 +815,7 @@ pub async fn start_agent_server(
         let shutdown_flag_clone = shutdown_flag.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let peer_tx_clone = peer_tx.clone();
-        let public_key_clone = public_key_b64.clone();
+        let public_key_clone = server.tdf_public_key().await;
 
         // Use std::thread since zeroconf is not Send
         let handle = std::thread::spawn(move || {
@@ -844,7 +825,7 @@ pub async fn start_agent_server(
                 shutdown_flag_clone,
                 Some(tx),
                 peer_tx_clone,
-                Some(public_key_clone),
+                public_key_clone,
             ) {
                 eprintln!("mDNS broadcast error: {e}");
             }
@@ -904,106 +885,20 @@ pub async fn start_agent_server(
         // Start peer discovery handler (receives from mDNS thread, updates LearningBus)
         let learning_bus_peers = learning_bus.clone();
         gossip_handles.push(tokio::spawn(async move {
-            use arkavo_protocol::http::HttpTransport;
-            use arkavo_protocol::transport::{
-                A2aEndpoint, A2aRequest, A2aTransport, TransportConfig,
-            };
-
             while let Some((peer_id, is_add, address)) = peer_rx.recv().await {
                 if is_add {
                     learning_bus_peers
                         .add_peer_discovered(peer_id.clone(), address.clone())
                         .await;
-
-                    // Initiate key exchange with the peer
-                    if let Some(addr) = address {
-                        // Prove we hold our key, addressed to this peer, and
-                        // keep the challenge its reply must sign.
-                        let (exchange, challenge) = arkavo_gossip::key_exchange::sign_request(
-                            learning_bus_peers.keypair(),
-                            learning_bus_peers.agent_id(),
-                            &peer_id,
-                        );
-                        let params = match serde_json::to_value(&exchange) {
-                            Ok(params) => params,
+                    if let Some(address) = address {
+                        match gossip_keys::exchange(&learning_bus_peers, &peer_id, &address).await {
+                            Ok(vouched_by) => tracing::info!(
+                                peer = %peer_id,
+                                agent = vouched_by.as_deref().unwrap_or("unvouched"),
+                                "Key exchange completed"
+                            ),
                             Err(e) => {
-                                tracing::warn!("Failed to encode key exchange: {}", e);
-                                continue;
-                            }
-                        };
-                        let request = A2aRequest::new("agent/exchangeKeys", params);
-
-                        let mut config = TransportConfig::default();
-                        config.tls_config.require_tls = false;
-                        let transport = match HttpTransport::new(config) {
-                            Ok(t) => t,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to create transport for key exchange: {}",
-                                    e
-                                );
-                                continue;
-                            }
-                        };
-
-                        let endpoint = A2aEndpoint {
-                            url: addr.clone(),
-                            agent_id: peer_id.clone(),
-                            public_key: None,
-                        };
-
-                        if let Err(e) = transport.connect(&endpoint).await {
-                            tracing::warn!(
-                                "Failed to connect for key exchange with {}: {}",
-                                peer_id,
-                                e
-                            );
-                            continue;
-                        }
-
-                        match transport.send_request(request).await {
-                            Ok(response) => {
-                                use arkavo_gossip::key_exchange::{
-                                    KeyExchangeResponse, verify_response,
-                                };
-                                use arkavo_protocol::transport::A2aResponse;
-                                // Bind their key only once their reply proves
-                                // they hold it.
-                                if let A2aResponse::Success { result, .. } = response {
-                                    let proven =
-                                        serde_json::from_value::<KeyExchangeResponse>(result)
-                                            .map_err(|e| e.to_string())
-                                            .and_then(|reply| {
-                                                verify_response(
-                                                    &reply,
-                                                    &peer_id,
-                                                    learning_bus_peers.agent_id(),
-                                                    &challenge,
-                                                )
-                                                .map_err(|e| e.to_string())
-                                            });
-                                    let bound = match proven {
-                                        Ok(their_key) => learning_bus_peers
-                                            .register_peer_key(peer_id.clone(), their_key)
-                                            .await
-                                            .map_err(|e| e.to_string()),
-                                        Err(e) => Err(e),
-                                    };
-                                    match bound {
-                                        Ok(()) => tracing::info!(
-                                            "Key exchange completed with peer: {}",
-                                            peer_id
-                                        ),
-                                        Err(e) => tracing::warn!(
-                                            "Key exchange with {} refused: {}",
-                                            peer_id,
-                                            e
-                                        ),
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Key exchange failed with {}: {}", peer_id, e);
+                                tracing::warn!("Key exchange with {} failed: {}", peer_id, e);
                             }
                         }
                     }
@@ -1129,6 +1024,11 @@ pub async fn start_agent_server(
     }
 
     if !quiet {
+        println!(
+            "Identity {} ({})",
+            keys.workload.did(),
+            keys.workload.store()
+        );
         // The bound address carries the port the OS assigned when the kit asked for port 0.
         println!("Ready at {bound_addr}");
     }
@@ -1257,11 +1157,9 @@ fn broadcast_agent_mdns_sync(
         // Spawn a thread to handle discovered services
         let discovery_thread = thread::spawn(move || {
             use mdns_sd::ServiceEvent;
-            use std::collections::HashSet;
             println!("Starting discovery of other agents...");
 
-            // Track discovered peers to avoid duplicates
-            let mut discovered_peers: HashSet<String> = HashSet::new();
+            let mut discovered_peers = discovered::DiscoveredPeers::default();
 
             loop {
                 match receiver.recv_timeout(Duration::from_secs(1)) {
@@ -1280,19 +1178,16 @@ fn broadcast_agent_mdns_sync(
                                 if let Some(purpose) = info.get_property_val_str("purpose") {
                                     println!("  - Purpose: {purpose}");
                                 }
-                                // Get peer address
-                                let peer_addr = info
-                                    .get_addresses()
-                                    .iter()
-                                    .next()
-                                    .map(|addr| format!("http://{}:{}", addr, info.get_port()));
+                                let peer_addr =
+                                    discovered::peer_address(info.get_addresses(), info.get_port());
 
                                 if let Some(ref addr) = peer_addr {
                                     println!("  - Address: {addr}");
                                 }
 
-                                // Notify LearningBus of new peer (only once per agent_id)
-                                if discovered_peers.insert(agent_id.to_string()) {
+                                // Tell gossip of a new peer, or of one back at a
+                                // new address after a restart.
+                                if discovered_peers.resolved(agent_id, peer_addr.clone()) {
                                     let _ = peer_tx.blocking_send((
                                         agent_id.to_string(),
                                         true,
@@ -1305,7 +1200,7 @@ fn broadcast_agent_mdns_sync(
                             println!("Agent disconnected: {fullname}");
                             // Extract agent_id from fullname (e.g., "rover-beta._a2a._tcp.local.")
                             if let Some(agent_id) = fullname.split("._a2a._tcp.local.").next()
-                                && discovered_peers.remove(agent_id)
+                                && discovered_peers.removed(agent_id)
                             {
                                 let _ = peer_tx.blocking_send((agent_id.to_string(), false, None));
                             }

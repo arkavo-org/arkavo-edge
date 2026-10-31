@@ -7,9 +7,20 @@
 //! challenge; the recipient over its id, its key and that challenge. A replayed
 //! request can only re-assert a key the replayer does not hold, and the
 //! registry refuses to replace a bound key, so no nonce state is kept.
+//!
+//! Each side may also carry the key statement in which its workload key
+//! vouches for its gossip key (INGRESS-006), so a peer learns which agent,
+//! not only which name, the key speaks for. The statement stands outside the
+//! signed bytes: agents from before key statements check the `/v1` fields
+//! and ignore a field they do not know, and the statement is signed by the
+//! workload key and names the gossip key itself, so it cannot be moved to
+//! another key. An on-path host can strip it, which makes the agent look
+//! like one from before key statements, but once a peer has bound a vouched
+//! key under a name it refuses an unvouched one there.
 
 use crate::{GossipError, GossipResult};
 use arkavo_crypto::{AgentKeypair, AgentPublicKey};
+use arkavo_key_statement::{KeyStatement, Purpose};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +37,9 @@ pub struct KeyExchangeRequest {
     pub recipient: String,
     pub challenge: String,
     pub signature: String,
+    /// The caller's key statement for `public_key`, a compact JWS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statement: Option<String>,
 }
 
 /// What the recipient returns: its key and its signature over the caller's
@@ -34,6 +48,9 @@ pub struct KeyExchangeRequest {
 pub struct KeyExchangeResponse {
     pub public_key: String,
     pub signature: String,
+    /// The recipient's key statement for `public_key`, a compact JWS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statement: Option<String>,
 }
 
 /// Fields joined with their lengths, so no two field lists sign the same bytes.
@@ -82,6 +99,7 @@ pub fn sign_request(
         recipient: recipient.to_string(),
         challenge: hex::encode(&challenge),
         signature: hex::encode(signature),
+        statement: None,
     };
     (request, challenge)
 }
@@ -136,6 +154,7 @@ pub fn sign_response(
     Ok(KeyExchangeResponse {
         public_key,
         signature: hex::encode(signature),
+        statement: None,
     })
 }
 
@@ -162,6 +181,33 @@ pub fn verify_response(
         &signature,
     )?;
     Ok(key)
+}
+
+/// The statement vouching for `key`, a gossip key its holder has just proven
+/// it holds, checked at `now` (Unix seconds). No statement is an agent from
+/// before key statements; a statement that does not hold is refused rather
+/// than ignored, or a damaged statement would pass for no statement.
+pub fn vouched_by(
+    statement: Option<&str>,
+    key: &AgentPublicKey,
+    now: u64,
+) -> GossipResult<Option<KeyStatement>> {
+    let Some(statement) = statement else {
+        return Ok(None);
+    };
+    let statement = arkavo_key_statement::verify(statement, now)?;
+    if statement.purpose != Purpose::Gossip {
+        return Err(GossipError::Verification(format!(
+            "the key statement is for a {:?} key, not a gossip key",
+            statement.purpose
+        )));
+    }
+    if statement.ed25519_key()?.to_bytes() != key.to_bytes() {
+        return Err(GossipError::Verification(
+            "the key statement vouches for another key".into(),
+        ));
+    }
+    Ok(Some(statement))
 }
 
 #[cfg(test)]
@@ -243,5 +289,62 @@ mod tests {
         let (_, other_challenge) = sign_request(&caller, "alpha", "beta");
         assert!(verify_response(&response, "beta", "alpha", &other_challenge).is_err());
         assert!(verify_response(&response, "delta", "alpha", &challenge).is_err());
+    }
+
+    #[spec("INGRESS-017")]
+    #[test]
+    fn a_statement_beside_the_proof_names_the_agent() {
+        use crate::test_support::{NOW, Workload};
+        let workload = Workload::new();
+        let gossip = AgentKeypair::generate();
+        let (compact, statement) = workload.vouch(&gossip.public_key(), 0);
+        let (mut request, _) = sign_request(&gossip, "alpha", "beta");
+        request.statement = Some(compact);
+
+        let proven = verify_request(&request, "beta").unwrap();
+        let vouched = vouched_by(request.statement.as_deref(), &proven, NOW).unwrap();
+        assert_eq!(vouched, Some(statement));
+        assert_eq!(vouched.unwrap().issuer, workload.did);
+    }
+
+    /// Agents from before key statements send no `statement` field; they
+    /// still bind, as unvouched peers.
+    #[spec("INGRESS-017")]
+    #[test]
+    fn a_request_in_the_shape_before_key_statements_still_verifies() {
+        use crate::test_support::NOW;
+        let caller = AgentKeypair::generate();
+        let (request, _) = sign_request(&caller, "alpha", "beta");
+        let mut old_shape = serde_json::to_value(&request).unwrap();
+        assert!(old_shape.get("statement").is_none());
+        old_shape.as_object_mut().unwrap().remove("statement");
+
+        let request: KeyExchangeRequest = serde_json::from_value(old_shape).unwrap();
+        let proven = verify_request(&request, "beta").unwrap();
+        assert_eq!(vouched_by(None, &proven, NOW).unwrap(), None);
+    }
+
+    #[spec("INGRESS-017")]
+    #[test]
+    fn a_statement_that_does_not_hold_is_refused_not_ignored() {
+        use crate::test_support::{NOW, Workload};
+        let workload = Workload::new();
+        let gossip = AgentKeypair::generate().public_key();
+        let other = AgentKeypair::generate().public_key();
+        let (for_other, _) = workload.vouch(&other, 0);
+        let (current, statement) = workload.vouch(&gossip, 0);
+        let (for_iroh, _) = workload.sign(KeyStatement {
+            purpose: Purpose::Iroh,
+            ..statement.clone()
+        });
+
+        for (why, presented, now) in [
+            ("another key", for_other.as_str(), NOW),
+            ("an iroh key", for_iroh.as_str(), NOW),
+            ("expired", current.as_str(), statement.not_after),
+            ("garbage", "not.a.statement", NOW),
+        ] {
+            assert!(vouched_by(Some(presented), &gossip, now).is_err(), "{why}");
+        }
     }
 }
