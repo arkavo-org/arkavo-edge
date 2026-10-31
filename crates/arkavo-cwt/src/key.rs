@@ -139,10 +139,28 @@ fn bytes_param<'a>(key: &'a CoseKey, label: i64, name: &str) -> Result<&'a [u8],
 /// label 3). When it does, it must be the algorithm its key type signs with:
 /// honouring a key that names something else would let a publisher's stated
 /// restriction be ignored.
+/// The polymorphic algorithm `alg` fully specifies, if it is one of RFC
+/// 9864's: ESP256 is ES256 over P-256, and Ed25519 is EdDSA over Ed25519.
+/// This edge's keys are only those curves, so each pair signs and verifies
+/// alike. Tokens and keys are read under either identifier; what this edge
+/// writes keeps the polymorphic one until the identity provider and KAS that
+/// read it accept the new ones (#766).
+pub(crate) fn polymorphic(alg: Algorithm) -> Algorithm {
+    match alg {
+        Algorithm::ESP256 => Algorithm::ES256,
+        Algorithm::Ed25519 => Algorithm::EdDSA,
+        other => other,
+    }
+}
+
 fn expect_algorithm(key: &CoseKey, expected: Algorithm) -> Result<(), CwtError> {
     match &key.alg {
         None => Ok(()),
-        Some(coset::RegisteredLabelWithPrivate::Assigned(actual)) if *actual == expected => Ok(()),
+        Some(coset::RegisteredLabelWithPrivate::Assigned(actual))
+            if polymorphic(*actual) == expected =>
+        {
+            Ok(())
+        }
         Some(actual) => Err(CwtError::Key(format!(
             "COSE key declares alg {actual:?}, which is not {expected:?}"
         ))),
@@ -238,6 +256,46 @@ mod tests {
         // A key that declares nothing is used as its type describes it.
         cose.alg = None;
         assert!(VerifyingKey::from_cose_key(&cose).is_ok());
+    }
+
+    /// A key published under RFC 9864's fully-specified identifier is read
+    /// as its type describes it; one naming the other curve is refused.
+    #[arkavo_test_macros::spec("ACWT-004")]
+    #[test]
+    fn a_key_declaring_a_fully_specified_algorithm_is_read() {
+        let ed25519 = VerifyingKey::Ed25519(
+            ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng).verifying_key(),
+        );
+        let p256 = VerifyingKey::P256(*p256::ecdsa::SigningKey::generate().verifying_key());
+        for (key, declared, refused) in [
+            (&ed25519, Algorithm::Ed25519, Algorithm::ESP256),
+            (&p256, Algorithm::ESP256, Algorithm::Ed25519),
+        ] {
+            let mut cose = key.to_cose_key();
+            cose.alg = Some(coset::RegisteredLabelWithPrivate::Assigned(declared));
+            let read = VerifyingKey::from_cose_key(&cose).unwrap();
+            assert_eq!(read.public_key_bytes(), key.public_key_bytes());
+
+            cose.alg = Some(coset::RegisteredLabelWithPrivate::Assigned(refused));
+            assert!(VerifyingKey::from_cose_key(&cose).is_err(), "{refused:?}");
+        }
+    }
+
+    /// What this edge writes keeps the polymorphic identifiers, which the
+    /// identity provider and KAS that read it accept.
+    #[arkavo_test_macros::spec("ACWT-004")]
+    #[test]
+    fn keys_this_edge_writes_keep_the_polymorphic_identifiers() {
+        let ed25519 = VerifyingKey::Ed25519(
+            ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng).verifying_key(),
+        );
+        let p256 = VerifyingKey::P256(*p256::ecdsa::SigningKey::generate().verifying_key());
+        for (key, written) in [(ed25519, Algorithm::EdDSA), (p256, Algorithm::ES256)] {
+            assert_eq!(
+                key.to_cose_key().alg,
+                Some(coset::RegisteredLabelWithPrivate::Assigned(written))
+            );
+        }
     }
 
     /// `key_ops` says what the key may be used for. One published for signing

@@ -1,5 +1,31 @@
 "use strict";
 
+// What the agent's signed card proves (SRV-017): the key that speaks for the
+// agent, never where the key is kept, which a card cannot show.
+function agentIdentity(identity) {
+    if (!identity) return 'Not reported';
+    if (identity.state === 'verified') {
+        return '<code>' + escapeHtml(identity.did) + '</code> <span class="muted">Card signed by this key</span>';
+    }
+    if (identity.state === 'unsigned') return 'Card not signed';
+    return '<span class="state state-bad">' + uiIcon('ban') + 'Card signature does not verify</span> ' +
+        escapeHtml(identity.reason || '');
+}
+
+var KEY_PURPOSES = { gossip: 'Gossip', iroh: 'iroh endpoint', tdf: 'TDF' };
+
+// The keys the agent's identity vouches for in its card, as the gateway
+// checked them.
+function agentKeys(identity) {
+    if (!identity || identity.state !== 'verified') return 'Not reported';
+    var keys = identity.keys || [];
+    if (!keys.length) return 'None vouched for';
+    return keys.map(function(key) {
+        return '<div>' + escapeHtml(KEY_PURPOSES[key.purpose] || key.purpose) +
+            ' <code>' + escapeHtml(key.key) + '</code></div>';
+    }).join('');
+}
+
 function renderAgentDetail() {
     var container = document.getElementById('agent-inspector');
     var id = AppState.selectedAgentId;
@@ -22,6 +48,8 @@ function renderAgentDetail() {
     html += '<section class="ops-section"><div class="ops-section-heading"><h2>Agent <code>' + escapeHtml(id) + '</code></h2>' + uiState(agent.status) + '</div>';
     html += '<dl class="inspection-fields">' + inspectionField('Model', escapeHtml(agent.model || 'Not reported')) +
         inspectionField('Endpoint', escapeHtml(agent.endpoint || 'Not reported')) +
+        inspectionField('Identity', agentIdentity(agent.identity)) +
+        inspectionField('Keys', agentKeys(agent.identity)) +
         inspectionField('Authorization ' + uiHelp('grant'), 'Not reported') +
         inspectionField('Snapshot ' + uiHelp('freshness'), receivedAge('swarm')) + '</dl></section>';
     html += '<section class="ops-section"><div class="ops-section-heading"><h2>Assigned tasks</h2><span class="muted">' + receivedAge('tasks') + '</span></div>' +

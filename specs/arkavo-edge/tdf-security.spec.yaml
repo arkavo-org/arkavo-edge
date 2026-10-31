@@ -271,7 +271,7 @@ scenarios:
     name: KAS key custody and rotation
     criticality: critical
     wip: true
-    issue: "The agent server generates a new KAS keypair on every start (a2a_server.rs) and persists nothing, so a restart orphans every key wrapped to the old one. There is no HSM or enclave custody and no rotation."
+    issue: "The agent keeps its KAS key across restarts (TDFS-017), but as a software key in an owner-only file: there is no HSM or enclave custody and no rotation."
     given:
       - An agent runs the A2A KAS capability
       - TDFs are wrapped to its KAS public key
@@ -284,3 +284,27 @@ scenarios:
       - crates/arkavo-tdf/src/a2a_handler.rs
       - crates/arkavo-server/src/server/a2a_server.rs
     changed: "2026-10-09"
+
+  - id: TDFS-017
+    name: The agent's KAS key survives a restart
+    criticality: critical
+    given:
+      - An agent running the A2A KAS capability
+      - TDFs wrapped to its KAS public key
+    when: The agent restarts
+    then:
+      - It loads the same KAS key, kept in the agent's directory as its TDF key, so those TDFs still rewrap
+      - Each agent name keeps its own KAS key, in an owner-only file
+      - "The public key its mDNS announcement (public_key) and agent.capabilities.get give is that KAS key, as kas.publicKey serves it; the agent makes no other TDF key on start"
+    edge_cases:
+      - condition: The kept key file cannot be read as a TDF key
+        expected: The agent does not start, and names the file
+      - condition: A server whose embedder keeps no KAS key
+        expected: It makes one for the process, as before
+    refs:
+      - crates/arkavo-server/src/server/handlers/kas.rs
+      - crates/arkavo-server/src/server/a2a_server.rs
+      - crates/arkavo-device-identity/src/subordinate_key.rs
+      - crates/arkavo-cli/src/commands/agent.rs
+      - crates/arkavo-cli/src/commands/agent/keys.rs
+    changed: "2026-10-18"

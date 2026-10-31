@@ -12,6 +12,10 @@ use jsonrpsee::server::{ServerBuilder, ServerHandle};
 
 // SECURITY FIX (CRI-001): NoOpAuthBackend removed
 // Use JwtAuthBackend or MultiAuthBackend for production
+#[cfg(any(feature = "kas", feature = "iroh"))]
+use arkavo_device_identity::subordinate_key::SubordinateKey;
+use arkavo_device_identity::subordinate_key::Voucher;
+use arkavo_device_identity::workload_key::WorkloadKey;
 use arkavo_protocol::chat_session;
 use arkavo_protocol::config::{BufferConfig, ServerConfig};
 use arkavo_protocol::error::{A2aError, Result};
@@ -63,8 +67,16 @@ pub struct A2aServer {
     agent_memory: Arc<tokio::sync::RwLock<ToolMemory>>,
     /// Learning bus for gossip-based learning propagation
     learning_bus: Arc<tokio::sync::RwLock<Option<Arc<LearningBus>>>>,
-    /// Base64-encoded ECDSA P-256 public key for TDF encryption
-    public_key: Arc<tokio::sync::RwLock<Option<String>>>,
+    /// The agent's account key (#766), which signs its card
+    workload_key: Arc<tokio::sync::RwLock<Option<Arc<WorkloadKey>>>>,
+    /// Sign the statements the card carries for the agent's other keys
+    key_vouchers: Arc<tokio::sync::RwLock<Vec<Arc<Voucher>>>>,
+    /// The KAS key the agent keeps across restarts (TDFS-016)
+    #[cfg(feature = "kas")]
+    kas_key: Arc<tokio::sync::RwLock<Option<Arc<SubordinateKey>>>>,
+    /// The iroh endpoint key the agent keeps across restarts (IROH-013)
+    #[cfg(feature = "iroh")]
+    iroh_key: Arc<tokio::sync::RwLock<Option<Arc<SubordinateKey>>>>,
     /// Budget manager loaded from SwarmKit config
     budget_manager: Arc<tokio::sync::RwLock<Option<Arc<arkavo_budget::BudgetManager>>>>,
     /// Cached SwarmKit agent config to avoid repeated discovery reads
@@ -130,7 +142,12 @@ impl A2aServer {
             planning_completed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             agent_memory: Arc::new(tokio::sync::RwLock::new(ToolMemory::new(10))),
             learning_bus: Arc::new(tokio::sync::RwLock::new(None)),
-            public_key: Arc::new(tokio::sync::RwLock::new(None)),
+            workload_key: Arc::new(tokio::sync::RwLock::new(None)),
+            key_vouchers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            #[cfg(feature = "kas")]
+            kas_key: Arc::new(tokio::sync::RwLock::new(None)),
+            #[cfg(feature = "iroh")]
+            iroh_key: Arc::new(tokio::sync::RwLock::new(None)),
             budget_manager: Arc::new(tokio::sync::RwLock::new(None)),
             agent_config: Arc::new(tokio::sync::RwLock::new(
                 arkavo_router::load_agent_config().unwrap_or_default(),
@@ -175,14 +192,43 @@ impl A2aServer {
         &self.role_specialization
     }
 
-    /// Set the agent's public key for TDF encryption
-    pub async fn set_public_key(&self, key: String) {
-        *self.public_key.write().await = Some(key);
+    /// Set the key the agent's identity is, so its card goes out signed
+    pub async fn set_workload_key(&self, key: Arc<WorkloadKey>) {
+        *self.workload_key.write().await = Some(key);
     }
 
-    /// Get the agent's public key
-    pub async fn public_key(&self) -> Option<String> {
-        self.public_key.read().await.clone()
+    /// Set the vouchers whose statements the card carries, one for each key
+    /// the agent uses besides its workload key
+    pub async fn set_key_vouchers(&self, vouchers: Vec<Arc<Voucher>>) {
+        *self.key_vouchers.write().await = vouchers;
+    }
+
+    /// Set the KAS key the agent keeps, so TDFs wrapped to it still open
+    /// after a restart
+    #[cfg(feature = "kas")]
+    pub async fn set_kas_key(&self, key: Arc<SubordinateKey>) {
+        *self.kas_key.write().await = Some(key);
+    }
+
+    /// Set the iroh endpoint key the agent keeps, so its endpoint id
+    /// survives a restart
+    #[cfg(feature = "iroh")]
+    pub async fn set_iroh_key(&self, key: Arc<SubordinateKey>) {
+        *self.iroh_key.write().await = Some(key);
+    }
+
+    /// The public key the agent gives for TDF, base64 SEC1: the one its KAS
+    /// rewraps with, kept across restarts. None until a KAS key is set.
+    pub async fn tdf_public_key(&self) -> Option<String> {
+        #[cfg(feature = "kas")]
+        return self
+            .kas_key
+            .read()
+            .await
+            .as_deref()
+            .and_then(super::handlers::kas::tdf_public_key);
+        #[cfg(not(feature = "kas"))]
+        None
     }
 
     pub fn mcp_registry(&self) -> Arc<McpRegistry> {
@@ -1279,8 +1325,15 @@ impl A2aServer {
         // Start shared Iroh P2P node for TDF blob transport
         #[cfg(feature = "iroh")]
         {
-            match arkavo_tdf_iroh::IrohNode::memory().await {
-                Ok(node) => {
+            let config = match self.iroh_key.read().await.as_deref() {
+                Some(kept) => {
+                    arkavo_tdf_iroh::IrohNodeConfig::default().with_key_seed(kept.secret())
+                }
+                None => arkavo_tdf_iroh::IrohNodeConfig::default(),
+            };
+            let node = Arc::new(arkavo_tdf_iroh::IrohNode::new(config));
+            match node.start().await {
+                Ok(()) => {
                     info!("Iroh P2P node started for TDF blob transport");
                     *self.iroh_node.write().await = Some(node);
                 }
@@ -1350,7 +1403,7 @@ impl A2aServer {
             conductor: self.conductor.read().await.clone(),
             router,
             learning_bus: learning_bus_for_rpc,
-            public_key: self.public_key.read().await.clone(),
+            public_key: self.tdf_public_key().await,
             budget_manager: self.budget_manager.read().await.clone(),
             orchestrator_tick: self.orchestrator_tick.clone(),
             compute_budget: self.compute_budget.clone(),
@@ -1375,7 +1428,11 @@ impl A2aServer {
                     None => (arkavo_tdf::KasA2aConfig::default(), Vec::new()),
                 };
                 let mut handler = KasA2aHandler::new(trusted_roots, kas_config);
-                handler.set_keypair(arkavo_tdf::KasKeypair::generate());
+                if let Some(keypair) =
+                    super::handlers::kas::kas_keypair(self.kas_key.read().await.as_deref())
+                {
+                    handler.set_keypair(keypair);
+                }
                 Some(Arc::new(handler))
             },
             #[cfg(feature = "kas")]
@@ -1386,6 +1443,8 @@ impl A2aServer {
             iroh_node: self.iroh_node.read().await.clone(),
             assets,
             swarmkit,
+            workload_key: self.workload_key.read().await.clone(),
+            key_vouchers: self.key_vouchers.read().await.clone(),
         };
 
         if let Err(e) = self.start_file_watcher().await {

@@ -186,6 +186,8 @@ pub struct LearningBus {
     pain_tx: Option<mpsc::Sender<PainSignal>>,
     /// Lock-free bridge for patchlet message forwarding (set once at startup)
     patchlet_bridge: OnceLock<Arc<GossipNetworkBridge>>,
+    /// Signs the statement in which the workload key vouches for `keypair`
+    pub(super) gossip_voucher: OnceLock<Arc<arkavo_device_identity::subordinate_key::Voucher>>,
     /// Task completions received via gossip (pushed by specialists)
     pub(super) task_completions: Arc<RwLock<Vec<arkavo_gossip::TaskCompletionNotice>>>,
     /// Peer GPU inference state (updated via gossip broadcasts)
@@ -273,6 +275,7 @@ impl LearningBus {
             last_event_at: Arc::new(RwLock::new(None)),
             pain_tx: None,
             patchlet_bridge: OnceLock::new(),
+            gossip_voucher: OnceLock::new(),
             task_completions: Arc::new(RwLock::new(Vec::new())),
             peer_inference_state: Arc::new(RwLock::new(HashMap::new())),
             tasks_since_consolidation: Arc::new(AtomicU64::new(0)),
