@@ -1,6 +1,6 @@
 use crate::error::{Result, UcpError};
-use alloy_primitives::U256;
 use chrono::{DateTime, Utc};
+use ruint::aliases::U256;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

@@ -9,7 +9,7 @@ ignore = [
     { id = "RUSTSEC-2023-0089", reason = "atomic-polyfill in iroh -> postcard -> heapless" },
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error in iroh transitive deps" },
     # Transitive unmaintained crates with no alternatives
-    { id = "RUSTSEC-2024-0436", reason = "paste in alloy-primitives (no replacement available)" },
+    { id = "RUSTSEC-2024-0436", reason = "paste in ark-ff, macro_rules_attribute and netlink-packet-core (no replacement available)" },
     { id = "RUSTSEC-2025-0141", reason = "bincode in hnsw_rs (transitive, no direct usage)" },
 ]
 

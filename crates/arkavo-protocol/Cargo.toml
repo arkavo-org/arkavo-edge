@@ -139,7 +139,7 @@ tempfile = { workspace = true }
 rcgen = { version = "0.13", features = ["pem"] }
 # Runtime ES256 key generation for delegation-JWT tests — test key material
 # must not be committed to the repo.
-p256 = { version = "0.13", features = ["pem"] }
+p256 = { workspace = true, features = ["pem"] }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-server = { path = "../arkavo-server" }
 arkavo-test-macros = { path = "../arkavo-test-macros" }

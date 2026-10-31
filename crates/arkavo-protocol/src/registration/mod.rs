@@ -2058,8 +2058,9 @@ mod tests {
     /// runtime. Private key material is never committed to the repo — each
     /// test run produces new keys. Returns (private_pem, public_pem).
     fn test_es256_keypair() -> (String, String) {
+        use p256::elliptic_curve::Generate;
         use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
-        let secret = p256::SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let secret = p256::SecretKey::generate();
         let private_pem = secret.to_pkcs8_pem(LineEnding::LF).unwrap().to_string();
         let public_pem = secret
             .public_key()

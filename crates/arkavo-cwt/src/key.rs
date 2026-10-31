@@ -49,15 +49,14 @@ impl VerifyingKey {
                 expect_algorithm(key, Algorithm::ES256)?;
                 let x = bytes_param(key, Ec2KeyParameter::X.to_i64(), "x")?;
                 let y = bytes_param(key, Ec2KeyParameter::Y.to_i64(), "y")?;
-                if x.len() != 32 || y.len() != 32 {
+                let (Ok(x), Ok(y)) = (
+                    <&p256::FieldBytes>::try_from(x),
+                    <&p256::FieldBytes>::try_from(y),
+                ) else {
                     return Err(CwtError::Key("P-256 coordinates must be 32 bytes".into()));
-                }
-                let point = p256::EncodedPoint::from_affine_coordinates(
-                    p256::FieldBytes::from_slice(x),
-                    p256::FieldBytes::from_slice(y),
-                    false,
-                );
-                p256::ecdsa::VerifyingKey::from_encoded_point(&point)
+                };
+                let point = p256::Sec1Point::from_affine_coordinates(x, y, false);
+                p256::ecdsa::VerifyingKey::from_sec1_point(&point)
                     .map(Self::P256)
                     .map_err(|e| CwtError::Key(e.to_string()))
             }
@@ -79,7 +78,7 @@ impl VerifyingKey {
                 .algorithm(Algorithm::EdDSA)
                 .build(),
             Self::P256(key) => {
-                let point = key.to_encoded_point(false);
+                let point = key.to_sec1_point(false);
                 let x = point.x().map(|c| c.to_vec()).unwrap_or_default();
                 let y = point.y().map(|c| c.to_vec()).unwrap_or_default();
                 CoseKeyBuilder::new_ec2_pub_key(EllipticCurve::P_256, x, y)
@@ -117,7 +116,7 @@ impl VerifyingKey {
     pub fn public_key_bytes(&self) -> Vec<u8> {
         match self {
             Self::Ed25519(key) => key.to_bytes().to_vec(),
-            Self::P256(key) => key.to_encoded_point(false).as_bytes().to_vec(),
+            Self::P256(key) => key.to_sec1_point(false).as_bytes().to_vec(),
         }
     }
 }
@@ -180,6 +179,9 @@ mod tests {
     use super::*;
     use coset::iana::Algorithm;
     use ed25519_dalek::Signer as _;
+    // p256 0.14 signs through signature 3; ed25519-dalek 2 is still on 2.
+    use p256::ecdsa::signature::Signer as _;
+    use p256::elliptic_curve::Generate;
 
     #[test]
     fn ed25519_round_trips_through_cose_key() {
@@ -194,7 +196,7 @@ mod tests {
 
     #[test]
     fn p256_round_trips_and_rejects_wrong_algorithm() {
-        let signing = p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng);
+        let signing = p256::ecdsa::SigningKey::generate();
         let key = VerifyingKey::P256(*signing.verifying_key());
         let back = VerifyingKey::from_cose_key(&key.to_cose_key()).unwrap();
         let sig: p256::ecdsa::Signature = signing.sign(b"data");
@@ -242,7 +244,7 @@ mod tests {
     /// only is not a verification key, whatever its coordinates say.
     #[test]
     fn key_ops_must_include_verify_when_present() {
-        let signing = p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng);
+        let signing = p256::ecdsa::SigningKey::generate();
         let mut cose = VerifyingKey::P256(*signing.verifying_key()).to_cose_key();
         cose.key_ops = [RegisteredLabel::Assigned(KeyOperation::Sign)]
             .into_iter()
@@ -263,10 +265,8 @@ mod tests {
 
     #[test]
     fn short_p256_coordinate_is_rejected() {
-        let mut cose = VerifyingKey::P256(
-            *p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng).verifying_key(),
-        )
-        .to_cose_key();
+        let mut cose =
+            VerifyingKey::P256(*p256::ecdsa::SigningKey::generate().verifying_key()).to_cose_key();
         for (label, value) in cose.params.iter_mut() {
             if *label == coset::Label::Int(coset::iana::Ec2KeyParameter::X as i64)
                 && let ciborium::Value::Bytes(bytes) = value
