@@ -1,0 +1,23 @@
+[package]
+name = "arkavo-tap-http"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Axum/Tower middleware that admits Trusted Agent Protocol requests before merchant code runs"
+
+[dependencies]
+arkavo-tap = { path = "../arkavo-tap" }
+axum = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

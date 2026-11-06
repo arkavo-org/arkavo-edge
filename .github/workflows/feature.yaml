@@ -182,7 +182,7 @@ jobs:
       matrix:
         group:
           - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context (32K LOC)
-          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-workspace, arkavo-session, arkavo-critic, arkavo-cwt, arkavo-permit
+          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-workspace, arkavo-session, arkavo-critic, arkavo-cwt, arkavo-permit, arkavo-tap*
           - integrity   # arkavo-titan, arkavo-events, arkavo-validation (sequence-integrity tripwire tests)
           - tools       # arkavo-mcp-tools (24K LOC, I/O heavy)
           - routing     # arkavo-router, arkavo-dataflow (42K LOC)
@@ -272,6 +272,10 @@ jobs:
             cargo test --locked -p arkavo-critic
             cargo test --locked -p arkavo-cwt
             cargo test --locked -p arkavo-permit
+            # Trusted Agent Protocol: core, middleware, and the local acceptance suite (T01 to T30)
+            cargo test --locked -p arkavo-tap
+            cargo test --locked -p arkavo-tap-http
+            cargo test --locked -p arkavo-tap-demo
             cargo test --locked -p arkavo-dispatch-gate
             # Guard against tokio features that dev-dependencies would otherwise mask
             cargo check --locked -p arkavo-mcp-proxy --lib
@@ -397,6 +401,9 @@ jobs:
             cargo clippy --locked -p arkavo-critic --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-cwt --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-permit --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-tap --all-targets -- -D warnings
+            cargo clippy --locked -p arkavo-tap-http --all-targets -- -D warnings
+            cargo clippy --locked -p arkavo-tap-demo --all-targets -- -D warnings
             cargo clippy --locked -p arkavo-dispatch-gate --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-mcp-proxy --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "integrity" ]; then

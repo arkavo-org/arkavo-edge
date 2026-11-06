@@ -228,7 +228,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tracing",
@@ -542,7 +542,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-cli",
  "serde_json",
@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-adaptation"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-arp",
  "rand 0.8.6",
@@ -562,7 +562,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agent"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-crypto",
@@ -575,7 +575,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agent-auth"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-test-macros",
@@ -594,7 +594,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "wiremock",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agui"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-adaptation",
@@ -640,7 +640,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tower 0.5.3",
  "tower-http",
@@ -650,7 +650,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agui-protocol"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
  "chrono",
@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-arp"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
  "serde",
@@ -669,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-arp-runtime"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-adaptation",
  "arkavo-arp",
@@ -685,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-attestation"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-device-identity",
@@ -694,12 +694,12 @@ dependencies = [
  "security-framework-sys",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "arkavo-authorization"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
  "base64 0.22.1",
@@ -709,7 +709,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tonic",
  "tracing",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-autolearn"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-crypto",
@@ -735,7 +735,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "torg-core",
@@ -745,7 +745,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -756,7 +756,7 @@ dependencies = [
  "futures",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "url",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cef"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-observability",
  "async-trait",
@@ -790,14 +790,14 @@ dependencies = [
  "nix 0.29.0",
  "serde",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "arkavo-cli"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-agent-auth",
@@ -881,37 +881,37 @@ dependencies = [
 
 [[package]]
 name = "arkavo-config-bundle"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-config-encryption"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-config-bundle",
  "arkavo-test-macros",
  "base64 0.22.1",
  "chrono",
  "opentdf",
- "p256",
+ "p256 0.13.2",
  "rand 0.8.6",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-config-transport"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-config-bundle",
  "arkavo-config-encryption",
@@ -920,7 +920,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-test",
  "tracing",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-llm",
  "arkavo-tdf",
@@ -945,7 +945,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-critic"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-evofabric",
  "arkavo-llm",
@@ -958,7 +958,7 @@ dependencies = [
  "dashmap",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "torg-core",
@@ -969,41 +969,41 @@ dependencies = [
 
 [[package]]
 name = "arkavo-crypto"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
  "base64 0.22.1",
  "bs58",
  "ed25519-dalek 2.2.0",
  "hex",
- "p256",
+ "p256 0.13.2",
  "proptest",
  "rand 0.8.6",
  "serde",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "arkavo-cwt"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
  "base64 0.22.1",
  "ciborium",
  "coset",
  "ed25519-dalek 2.2.0",
- "p256",
+ "p256 0.13.2",
  "rand 0.8.6",
  "reqwest 0.12.28",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "wiremock",
 ]
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1027,7 +1027,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-debugger"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-events",
  "arkavo-memory",
@@ -1046,7 +1046,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "url",
  "uuid",
@@ -1054,7 +1054,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-test-macros",
@@ -1065,7 +1065,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "url",
@@ -1074,7 +1074,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-device-identity"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-test-macros",
@@ -1084,14 +1084,14 @@ dependencies = [
  "security-framework",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "uuid",
  "windows 0.58.0",
 ]
 
 [[package]]
 name = "arkavo-dispatch-gate"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-permit",
@@ -1102,7 +1102,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ensemble"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-sat",
  "arkavo-sbe",
@@ -1110,7 +1110,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "torg-core",
  "uuid",
@@ -1118,20 +1118,20 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
  "chrono",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-evofabric"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-test-macros",
@@ -1147,7 +1147,7 @@ dependencies = [
  "sha2 0.10.9",
  "syn 2.0.118",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-fingerprint"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-protocol",
  "arkavo-test-macros",
@@ -1164,13 +1164,13 @@ dependencies = [
  "criterion",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "zeroize",
 ]
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
  "base64 0.22.1",
@@ -1180,7 +1180,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
@@ -1192,7 +1192,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gguf-tdf"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
  "base64 0.22.1",
@@ -1203,7 +1203,7 @@ dependencies = [
  "serde_json",
  "subtle",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -1213,18 +1213,18 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-process-env",
  "arkavo-test-macros",
  "git2",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "arkavo-github"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-memory",
@@ -1236,7 +1236,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -1244,7 +1244,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gossip"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-test-macros",
@@ -1254,7 +1254,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -1262,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-hrm"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -1277,7 +1277,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -1285,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-identity"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
  "base64 0.22.1",
@@ -1298,7 +1298,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "url",
@@ -1306,7 +1306,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-image-gen"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-mcp",
  "arkavo-mcp-tools",
@@ -1325,7 +1325,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "wiremock",
@@ -1334,7 +1334,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-test-macros",
@@ -1346,7 +1346,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -1355,7 +1355,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-knowledge-pack"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-fingerprint",
@@ -1371,7 +1371,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tracing",
  "uuid",
  "zeroize",
@@ -1379,7 +1379,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kv-cache"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-llama-cpp",
  "arkavo-test-macros",
@@ -1387,17 +1387,17 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tracing",
 ]
 
 [[package]]
 name = "arkavo-lesson-synthesis"
-version = "0.106.0"
+version = "0.107.0"
 
 [[package]]
 name = "arkavo-llama-cpp"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-gguf-tdf",
  "arkavo-llama-cpp-sys",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llama-cpp-sys"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -1452,7 +1452,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -1463,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-test-macros",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-bench"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-context",
  "arkavo-gemini",
@@ -1494,7 +1494,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1503,7 +1503,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-claude"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anthropic-agent-sdk",
  "anyhow",
@@ -1520,7 +1520,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-code-search"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -1538,7 +1538,7 @@ dependencies = [
  "serde_json",
  "streaming-iterator",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "tree-sitter",
@@ -1551,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-identity"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-device-identity",
@@ -1563,7 +1563,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -1571,7 +1571,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-macos"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -1594,14 +1594,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-mcp-mesh"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-budget",
  "arkavo-mcp",
@@ -1615,14 +1615,14 @@ dependencies = [
  "mdns-sd",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "arkavo-mcp-proxy"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-dispatch-gate",
@@ -1633,7 +1633,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1641,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -1659,7 +1659,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -1668,7 +1668,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -1695,7 +1695,7 @@ dependencies = [
  "serde_json",
  "sntpc",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -1703,7 +1703,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-workspace"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -1711,13 +1711,13 @@ dependencies = [
  "async-trait",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
 [[package]]
 name = "arkavo-memory"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -1732,7 +1732,7 @@ dependencies = [
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -1740,7 +1740,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -1762,7 +1762,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-openclaw"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-protocol",
@@ -1778,7 +1778,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -1788,7 +1788,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-orchestrator"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -1816,7 +1816,7 @@ dependencies = [
  "chrono",
  "dirs 6.0.0",
  "hex",
- "hmac",
+ "hmac 0.12.1",
  "jsonwebtoken",
  "mdns-sd",
  "reqwest 0.12.28",
@@ -1824,7 +1824,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tower-http",
@@ -1834,7 +1834,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-permit"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-cwt",
@@ -1844,15 +1844,15 @@ dependencies = [
  "coset",
  "ed25519-dalek 2.2.0",
  "hex",
- "p256",
+ "p256 0.13.2",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "arkavo-policy-cache"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-arp",
  "dashmap",
@@ -1862,14 +1862,14 @@ dependencies = [
 
 [[package]]
 name = "arkavo-process-env"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-test-macros",
 ]
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -1910,7 +1910,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "notify",
- "p256",
+ "p256 0.13.2",
  "rand 0.8.6",
  "rcgen",
  "regex",
@@ -1922,7 +1922,7 @@ dependencies = [
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
@@ -1935,7 +1935,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-qwen"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1944,7 +1944,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "url",
@@ -1953,7 +1953,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-registration"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-device-identity",
@@ -1962,13 +1962,13 @@ dependencies = [
  "fast_qr",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "unicode-general-category",
 ]
 
 [[package]]
 name = "arkavo-repo"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -1987,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -2024,7 +2024,7 @@ dependencies = [
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "toml 0.8.23",
@@ -2036,7 +2036,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-routines"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -2050,12 +2050,12 @@ dependencies = [
 
 [[package]]
 name = "arkavo-sat"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "lru",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "torg-core",
  "varisat",
@@ -2063,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-sbe"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "async-trait",
@@ -2072,7 +2072,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "torg-core",
  "tracing",
@@ -2081,7 +2081,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-security"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-test-macros",
@@ -2100,7 +2100,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2110,7 +2110,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-sentinel"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-fingerprint",
  "arkavo-gguf-tdf",
@@ -2120,14 +2120,14 @@ dependencies = [
  "governor",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "arkavo-server"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-agent",
@@ -2178,7 +2178,7 @@ dependencies = [
  "governor",
  "hex",
  "hkdf",
- "hmac",
+ "hmac 0.12.1",
  "if-addrs",
  "jsonrpsee",
  "jsonwebtoken",
@@ -2197,7 +2197,7 @@ dependencies = [
  "sqlx",
  "sysinfo",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
@@ -2212,7 +2212,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-session"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -2233,7 +2233,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tiktoken-rs",
  "tokio",
  "tokio-stream",
@@ -2247,7 +2247,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-shadow-consolidation"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-lesson-synthesis",
@@ -2265,20 +2265,20 @@ dependencies = [
 
 [[package]]
 name = "arkavo-snpe"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "libc",
  "libloading",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tracing",
 ]
 
 [[package]]
 name = "arkavo-swarmkit"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-budget",
  "arkavo-process-env",
@@ -2290,12 +2290,12 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "arkavo-swarmkit-delegation"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-swarmkit",
@@ -2307,13 +2307,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-swarmkit-runtime"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-agent-auth",
  "arkavo-agui",
@@ -2330,7 +2330,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "ureq 2.12.1",
@@ -2338,8 +2338,70 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-tap"
+version = "0.107.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "ed25519-dalek 2.2.0",
+ "httpsig",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sfv 0.16.0",
+ "sha2 0.10.9",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "arkavo-tap-demo"
+version = "0.107.0"
+dependencies = [
+ "anyhow",
+ "arkavo-tap",
+ "arkavo-tap-http",
+ "axum",
+ "base64 0.22.1",
+ "clap",
+ "ed25519-dalek 2.2.0",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "arkavo-tap-http"
+version = "0.107.0"
+dependencies = [
+ "arkavo-tap",
+ "axum",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower 0.5.3",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "arkavo-tasks"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-hrm",
@@ -2350,7 +2412,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uuid",
@@ -2358,7 +2420,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "aes-gcm",
  "arkavo-crypto",
@@ -2369,7 +2431,7 @@ dependencies = [
  "futures",
  "hex",
  "hkdf",
- "hmac",
+ "hmac 0.12.1",
  "opentdf",
  "opentdf-kas",
  "reqwest 0.12.28",
@@ -2377,7 +2439,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "url",
@@ -2387,7 +2449,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf-iroh"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-tdf",
  "arkavo-test-macros",
@@ -2398,14 +2460,14 @@ dependencies = [
  "iroh-blobs",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -2431,7 +2493,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test-macros"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2442,12 +2504,12 @@ dependencies = [
 
 [[package]]
 name = "arkavo-titan"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-sbe",
  "arkavo-test-macros",
  "criterion",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "torg-core",
  "uuid",
@@ -2455,11 +2517,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-torg"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-llama-cpp",
  "dirs 6.0.0",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "torg-core",
  "torg-mask",
@@ -2467,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-torg-circuits"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "parking_lot",
  "torg-core",
@@ -2476,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-trust"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
  "arkavo-test-macros",
@@ -2485,13 +2547,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
 [[package]]
 name = "arkavo-ucp"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "alloy-primitives",
  "arkavo-budget",
@@ -2503,14 +2565,14 @@ dependencies = [
  "hex",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-ui-core"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -2526,7 +2588,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ui-generator"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "anyhow",
  "arkavo-browser",
@@ -2552,7 +2614,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-validation"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "arkavo-arp",
  "arkavo-test-macros",
@@ -2566,20 +2628,20 @@ dependencies = [
 
 [[package]]
 name = "arkavo-wallet"
-version = "0.106.0"
+version = "0.107.0"
 dependencies = [
  "alloy-primitives",
  "bip39",
  "bs58",
  "hex",
- "hmac",
+ "hmac 0.12.1",
  "k256",
  "rand 0.8.6",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "sha3 0.10.9",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "zeroize",
 ]
@@ -2749,7 +2811,7 @@ dependencies = [
  "num-traits",
  "pastey 0.1.1",
  "rayon",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "v_frame",
  "y4m",
 ]
@@ -3179,9 +3241,9 @@ checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
 
 [[package]]
 name = "bytes"
-version = "1.12.0"
+version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
+checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 dependencies = [
  "serde",
 ]
@@ -3462,7 +3524,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3670,6 +3732,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cpubits"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15b85f9c39137c3a891689859392b1bd49812121d0d61c9caf00d46ed5ce06ae"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3836,6 +3904,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crypto-bigint"
+version = "0.7.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c035cb64cba03dad2fb921f3e218785e8cf9a41790da5eb3a1400f62fa2be11"
+dependencies = [
+ "cpubits",
+ "ctutils",
+ "hybrid-array",
+ "num-traits",
+ "rand_core 0.10.1",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3877,11 +3960,12 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.2"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+checksum = "261af4dc7a06ea8a527a8717d8cbba3417530d6ea14e1edb3de6b67806be474f"
 dependencies = [
  "cmov",
+ "subtle",
 ]
 
 [[package]]
@@ -4235,7 +4319,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
+ "const-oid 0.10.2",
  "crypto-common 0.2.2",
+ "ctutils",
 ]
 
 [[package]]
@@ -4349,10 +4435,24 @@ checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
 dependencies = [
  "der 0.7.10",
  "digest 0.10.7",
- "elliptic-curve",
- "rfc6979",
+ "elliptic-curve 0.13.8",
+ "rfc6979 0.4.0",
  "signature 2.2.0",
  "spki 0.7.3",
+]
+
+[[package]]
+name = "ecdsa"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0681a4fc24c767085329728d8dfba959af91228aa4610cca4f8ce317ba46ae0"
+dependencies = [
+ "der 0.8.2",
+ "digest 0.11.3",
+ "elliptic-curve 0.14.3",
+ "rfc6979 0.6.0",
+ "signature 3.0.0",
+ "zeroize",
 ]
 
 [[package]]
@@ -4374,6 +4474,15 @@ dependencies = [
  "pkcs8 0.11.0",
  "serdect",
  "signature 3.0.0",
+]
+
+[[package]]
+name = "ed25519-compact"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1454db4f2edb7f0e8fe0c5b375b0c978fc63244cc9f010d160e417eb10139aa8"
+dependencies = [
+ "getrandom 0.4.3",
 ]
 
 [[package]]
@@ -4435,16 +4544,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
 dependencies = [
  "base16ct 0.2.0",
- "crypto-bigint",
+ "crypto-bigint 0.5.5",
  "digest 0.10.7",
- "ff",
+ "ff 0.13.1",
  "generic-array",
- "group",
+ "group 0.13.0",
  "hkdf",
  "pem-rfc7468 0.7.0",
  "pkcs8 0.10.2",
  "rand_core 0.6.4",
- "sec1",
+ "sec1 0.7.3",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "elliptic-curve"
+version = "0.14.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "900f37e7e18d74a2347389af6cd69e3a30d5cc9e697f40004865679aa75e9c7c"
+dependencies = [
+ "base16ct 1.0.0",
+ "crypto-bigint 0.7.10",
+ "crypto-common 0.2.2",
+ "digest 0.11.3",
+ "ff 0.14.0",
+ "group 0.14.0",
+ "hybrid-array",
+ "rand_core 0.10.1",
+ "sec1 0.8.1",
  "subtle",
  "zeroize",
 ]
@@ -4749,6 +4877,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
 dependencies = [
  "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
+name = "ff"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1f686ab92a9fb0eaf188f6c6c87b89490baa6fdb0db4544ba4dc47f7942489f"
+dependencies = [
+ "rand_core 0.10.1",
  "subtle",
 ]
 
@@ -5268,7 +5406,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-test",
  "tracing",
@@ -5304,8 +5442,19 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
- "ff",
+ "ff 0.13.1",
  "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
+name = "group"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fd1a1c7a5206c5b7a3f5a0d7ccd3ff85d0c8f5133d62a02680255b0004af5f4"
+dependencies = [
+ "ff 0.14.0",
+ "rand_core 0.10.1",
  "subtle",
 ]
 
@@ -5352,7 +5501,7 @@ dependencies = [
  "pest_derive",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -5482,7 +5631,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "ureq 3.3.0",
  "windows-sys 0.61.2",
 ]
@@ -5502,7 +5651,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "windows-sys 0.61.2",
 ]
@@ -5513,7 +5662,7 @@ version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
 dependencies = [
- "hmac",
+ "hmac 0.12.1",
 ]
 
 [[package]]
@@ -5523,6 +5672,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
 dependencies = [
  "digest 0.10.7",
+]
+
+[[package]]
+name = "hmac"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
+dependencies = [
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -5611,12 +5769,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
-name = "hybrid-array"
-version = "0.4.12"
+name = "httpsig"
+version = "0.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9155a582abd142abc056962c29e3ce5ff2ad5469f4246b537ed42c5deba857da"
+checksum = "958dd8d277959a426e8a6af3ab368e53d5195a922e57d014dcbbd9e9ccd17fe3"
 dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "ecdsa 0.17.0",
+ "ed25519-compact",
+ "hmac 0.13.0",
+ "indexmap 2.14.0",
+ "p256 0.14.0",
+ "p384 0.14.0",
+ "pkcs8 0.11.0",
+ "rand 0.10.3",
+ "rustc-hash 2.1.3",
+ "sec1 0.8.1",
+ "sfv 0.15.0",
+ "sha2 0.11.0",
+ "spki 0.8.0",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "hybrid-array"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17"
+dependencies = [
+ "subtle",
  "typenum",
+ "zeroize",
 ]
 
 [[package]]
@@ -6080,7 +6265,7 @@ dependencies = [
  "papaya",
  "pin-project",
  "portable-atomic",
- "rand 0.10.1",
+ "rand 0.10.3",
  "reqwest 0.13.4",
  "rustc-hash 2.1.3",
  "rustls",
@@ -6110,7 +6295,7 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "getrandom 0.4.3",
  "n0-error",
- "rand 0.10.1",
+ "rand 0.10.3",
  "serde",
  "url",
  "zeroize",
@@ -6144,7 +6329,7 @@ dependencies = [
  "n0-future",
  "nested_enum_utils",
  "postcard",
- "rand 0.10.1",
+ "rand 0.10.3",
  "range-collections",
  "redb",
  "ref-cast",
@@ -6170,7 +6355,7 @@ dependencies = [
  "n0-error",
  "n0-future",
  "portable-atomic",
- "rand 0.10.1",
+ "rand 0.10.3",
  "rustls",
  "simple-dns",
  "strum",
@@ -6246,7 +6431,7 @@ dependencies = [
  "num_enum",
  "pin-project",
  "postcard",
- "rand 0.10.1",
+ "rand 0.10.3",
  "reqwest 0.13.4",
  "rustls",
  "rustls-pki-types",
@@ -6454,7 +6639,7 @@ dependencies = [
  "jni-sys 0.4.1",
  "log",
  "simd_cesu8",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "walkdir",
  "windows-link",
 ]
@@ -6556,7 +6741,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-platform-verifier 0.5.3",
  "soketto",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
  "tokio-util",
@@ -6584,7 +6769,7 @@ dependencies = [
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tower 0.5.3",
@@ -6609,7 +6794,7 @@ dependencies = [
  "rustls-platform-verifier 0.5.3",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tower 0.5.3",
  "url",
@@ -6647,7 +6832,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soketto",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -6664,7 +6849,7 @@ dependencies = [
  "http",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6747,8 +6932,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b"
 dependencies = [
  "cfg-if",
- "ecdsa",
- "elliptic-curve",
+ "ecdsa 0.16.9",
+ "elliptic-curve 0.13.8",
  "once_cell",
  "sha2 0.10.9",
  "signature 2.2.0",
@@ -6762,7 +6947,7 @@ checksum = "bde5057d6143cc94e861d90f591b9303d6716c6b9602309150bd068853c10899"
 dependencies = [
  "hashbrown 0.16.1",
  "portable-atomic",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -7257,7 +7442,7 @@ dependencies = [
  "mach2",
  "nix 0.30.1",
  "sysctl",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "widestring",
  "windows 0.48.0",
 ]
@@ -7307,7 +7492,7 @@ dependencies = [
  "n0-error",
  "n0-future",
  "ndk-context",
- "rand 0.10.1",
+ "rand 0.10.3",
  "reqwest 0.13.4",
  "rustc-hash 2.1.3",
  "rustls",
@@ -7488,7 +7673,7 @@ dependencies = [
  "log",
  "netlink-packet-core",
  "netlink-sys",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -7640,7 +7825,7 @@ dependencies = [
  "rustc-hash 2.1.3",
  "rustls",
  "socket2 0.6.4",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -7661,14 +7846,14 @@ dependencies = [
  "getrandom 0.4.3",
  "identity-hash",
  "lru-slab",
- "rand 0.10.1",
+ "rand 0.10.3",
  "rand_pcg",
  "rustc-hash 2.1.3",
  "rustls",
  "rustls-pki-types",
  "slab",
  "sorted-index-buffer",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tinyvec",
  "tracing",
  "web-time",
@@ -8086,7 +8271,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "url",
  "uuid",
@@ -8104,11 +8289,11 @@ dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
  "hkdf",
- "hmac",
+ "hmac 0.12.1",
  "k256",
  "opentdf-protocol",
- "p256",
- "p384",
+ "p256 0.13.2",
+ "p384 0.13.1",
  "p521",
  "pem",
  "pkcs8 0.10.2",
@@ -8119,7 +8304,7 @@ dependencies = [
  "sha2 0.10.9",
  "spki 0.7.3",
  "subtle",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "typenum",
  "zeroize",
 ]
@@ -8133,12 +8318,12 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "hkdf",
- "p256",
+ "p256 0.13.2",
  "pem",
  "rand 0.8.6",
  "serde",
  "sha2 0.10.9",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -8151,7 +8336,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "uuid",
 ]
 
@@ -8215,10 +8400,23 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
 dependencies = [
- "ecdsa",
- "elliptic-curve",
- "primeorder",
+ "ecdsa 0.16.9",
+ "elliptic-curve 0.13.8",
+ "primeorder 0.13.6",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "p256"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2c9239b2dbc807adbbe147e8cf72ea7450c3a0aabe62cb8e75ff4ec22e1f72a"
+dependencies = [
+ "ecdsa 0.17.0",
+ "elliptic-curve 0.14.3",
+ "primefield",
+ "primeorder 0.14.0",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -8227,10 +8425,24 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6"
 dependencies = [
- "ecdsa",
- "elliptic-curve",
- "primeorder",
+ "ecdsa 0.16.9",
+ "elliptic-curve 0.13.8",
+ "primeorder 0.13.6",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "p384"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d17b851e6b3e378ab4ecb07fa2ed23f4d15f075735f8fec9fa1e7bdce5f8301f"
+dependencies = [
+ "ecdsa 0.17.0",
+ "elliptic-curve 0.14.3",
+ "fiat-crypto 0.3.0",
+ "primefield",
+ "primeorder 0.14.0",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -8240,9 +8452,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fc9e2161f1f215afdfce23677034ae137bbd45016a880c2eb3ba8eb95f085b2"
 dependencies = [
  "base16ct 0.2.0",
- "ecdsa",
- "elliptic-curve",
- "primeorder",
+ "ecdsa 0.16.9",
+ "elliptic-curve 0.13.8",
+ "primeorder 0.13.6",
  "rand_core 0.6.4",
  "sha2 0.10.9",
 ]
@@ -8392,7 +8604,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
 dependencies = [
  "digest 0.10.7",
- "hmac",
+ "hmac 0.12.1",
 ]
 
 [[package]]
@@ -8784,12 +8996,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "primefield"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c555a6e4eb7d4e158fcb028c835c3b8642206ddc279b5c6b202ef9a8bdb592f4"
+dependencies = [
+ "crypto-bigint 0.7.10",
+ "crypto-common 0.2.2",
+ "ff 0.14.0",
+ "rand_core 0.10.1",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "primeorder"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
 dependencies = [
- "elliptic-curve",
+ "elliptic-curve 0.13.8",
+]
+
+[[package]]
+name = "primeorder"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c9f42978c78a00e3d68f69fc03e57a234debae69da4020a4fb588fcdcd07b06"
+dependencies = [
+ "elliptic-curve 0.14.3",
+ "primefield",
+ "wnaf",
 ]
 
 [[package]]
@@ -8993,7 +9230,7 @@ dependencies = [
  "rustc-hash 2.1.3",
  "rustls",
  "socket2 0.6.4",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "web-time",
@@ -9008,14 +9245,14 @@ dependencies = [
  "bytes",
  "getrandom 0.4.3",
  "lru-slab",
- "rand 0.10.1",
+ "rand 0.10.3",
  "rand_pcg",
  "ring",
  "rustc-hash 2.1.3",
  "rustls",
  "rustls-pki-types",
  "slab",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tinyvec",
  "tracing",
  "web-time",
@@ -9085,9 +9322,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.10.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2e8e8bcc7961af1fdac401278c6a831614941f6164ee3bf4ce61b7edb162207"
+checksum = "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af"
 dependencies = [
  "chacha20",
  "getrandom 0.4.3",
@@ -9229,7 +9466,7 @@ dependencies = [
  "palette",
  "serde",
  "strum",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width",
@@ -9328,7 +9565,7 @@ dependencies = [
  "rand 0.9.4",
  "rand_chacha 0.9.0",
  "simd_helpers",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "v_frame",
  "wasm-bindgen",
 ]
@@ -9453,7 +9690,7 @@ checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
 dependencies = [
  "getrandom 0.2.17",
  "libredox",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -9624,8 +9861,18 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
 dependencies = [
- "hmac",
+ "hmac 0.12.1",
  "subtle",
+]
+
+[[package]]
+name = "rfc6979"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4a459cddafb3fe76b31fd8f1108007566c40301feb64dc7b54656eb7388172b"
+dependencies = [
+ "crypto-bigint 0.7.10",
+ "hmac 0.13.0",
 ]
 
 [[package]]
@@ -9675,7 +9922,7 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -10063,6 +10310,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sec1"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56d437c2f19203ce5f7122e507831de96f3d2d4d3be5af44a0b0a09d8a80e4d"
+dependencies = [
+ "base16ct 1.0.0",
+ "ctutils",
+ "der 0.8.2",
+ "hybrid-array",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "secp256k1"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10316,6 +10577,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sfv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "890ef0e5532daf21fdaa3dbaf991417187f3a87ab69231fe69be942495746480"
+dependencies = [
+ "base64 0.22.1",
+ "indexmap 2.14.0",
+ "ref-cast",
+]
+
+[[package]]
+name = "sfv"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "459c6f5820787bedb86fee2279ad39e89c31a3ede6354a0f6439a012467c5416"
+dependencies = [
+ "base64 0.22.1",
+ "indexmap 2.14.0",
+ "ref-cast",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10452,6 +10735,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
 dependencies = [
+ "digest 0.11.3",
  "rand_core 0.10.1",
 ]
 
@@ -10503,7 +10787,7 @@ checksum = "0d585997b0ac10be3c5ee635f1bab02d512760d14b7c468801ac8a01d9ae5f1d"
 dependencies = [
  "num-bigint",
  "num-traits",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "time",
 ]
 
@@ -10722,7 +11006,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "smallvec",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -10791,7 +11075,7 @@ dependencies = [
  "generic-array",
  "hex",
  "hkdf",
- "hmac",
+ "hmac 0.12.1",
  "itoa 1.0.18",
  "log",
  "md-5",
@@ -10806,7 +11090,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tracing",
  "uuid",
  "whoami",
@@ -10831,7 +11115,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hkdf",
- "hmac",
+ "hmac 0.12.1",
  "home",
  "itoa 1.0.18",
  "log",
@@ -10845,7 +11129,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tracing",
  "uuid",
  "whoami",
@@ -10871,7 +11155,7 @@ dependencies = [
  "serde",
  "serde_urlencoded",
  "sqlx-core",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "tracing",
  "url",
  "uuid",
@@ -11206,11 +11490,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.18"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
+checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
 dependencies = [
- "thiserror-impl 2.0.18",
+ "thiserror-impl 2.0.21",
 ]
 
 [[package]]
@@ -11226,13 +11510,13 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.18"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
+checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.118",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -11368,7 +11652,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spm_precompiled",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "unicode-normalization-alignments",
  "unicode-segmentation",
  "unicode_categories",
@@ -11480,7 +11764,7 @@ dependencies = [
  "getrandom 0.4.3",
  "http",
  "httparse",
- "rand 0.10.1",
+ "rand 0.10.3",
  "rustls-pki-types",
  "sha1_smol",
  "simdutf8",
@@ -11618,7 +11902,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1f1dd3f897d364485320fa135e2492f99fe00c6ef5dfc32f6814b90895a3474"
 dependencies = [
  "serde",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -11638,7 +11922,7 @@ checksum = "d610935ac72046cad8f91f298b8a222ab91522ac447f9749edb566859029c167"
 dependencies = [
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "torg-core",
 ]
 
@@ -13287,9 +13571,21 @@ dependencies = [
  "futures",
  "log",
  "serde",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "windows 0.62.2",
  "windows-core 0.62.2",
+]
+
+[[package]]
+name = "wnaf"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "795ca18b3fdb5e62bf982199278341ddcf7ebf7d32e25e212ad05d496e95f6fa"
+dependencies = [
+ "ff 0.14.0",
+ "group 0.14.0",
+ "hybrid-array",
+ "primefield",
 ]
 
 [[package]]
@@ -13311,7 +13607,7 @@ dependencies = [
  "pharos",
  "rustc_version 0.4.1",
  "send_wrapper",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

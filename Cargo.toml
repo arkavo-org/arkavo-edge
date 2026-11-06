@@ -4,6 +4,9 @@ members = [
     "crates/arkavo-cli",
     "crates/arkavo-wallet",
     "crates/arkavo-ucp",
+    "crates/arkavo-tap",
+    "crates/arkavo-tap-http",
+    "crates/arkavo-tap-demo",
     "crates/arkavo-terminal",
     "crates/arkavo-repo",
     "crates/arkavo-git",
@@ -176,7 +179,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.106.0"
+version = "0.107.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -221,6 +224,8 @@ cfg-if = "1.0"
 libc = "0.2"
 notify = "8.0"
 sha2 = "0.10"
+# RFC 9651 Structured Fields, for HTTP Message Signatures (arkavo-tap)
+sfv = "0.16"
 blake3 = "1.5"
 dirs = "6.0"
 toml = "0.8"
