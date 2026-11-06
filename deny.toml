@@ -30,6 +30,7 @@ deny = [
     { name = "native-tls" },
     { name = "hyper-tls" },
     { name = "tokio-native-tls" },
+    { crate = "zip:<9.0.5", reason = "GHSA-m665-v7pm-7grj: inconsistent ZIP headers can bypass archive inspection" },
 ]
 
 # Skip expected duplicates that cannot be easily resolved
