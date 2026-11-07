@@ -136,6 +136,10 @@ fn extract(archive: &Path, staging: &Path, members: &[&str]) -> Result<()> {
     std::fs::create_dir_all(staging)?;
     let mut zip = zip::ZipArchive::new(std::fs::File::open(archive)?)
         .map_err(|e| fail(format!("unreadable archive: {e}")))?;
+    // Validate even unlisted entries before writing any executable: ZIP
+    // parsers must agree on the local and central headers' names and metadata.
+    zip.validate_header_consistency()
+        .map_err(|e| fail(format!("inconsistent archive headers: {e}")))?;
     let mut found = Vec::new();
     for index in 0..zip.len() {
         let mut entry = zip

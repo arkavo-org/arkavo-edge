@@ -102,13 +102,14 @@ mod tests {
         HeaderBuilder,
     };
     use p256::ecdsa::{Signature, SigningKey, VerifyingKey, signature::Signer};
+    use p256::elliptic_curve::Generate;
     use std::time::Duration;
 
     const ISS: &str = "https://identity.arkavo.net";
     const NOW: i64 = 1_800_000_000;
 
     fn new_key() -> SigningKey {
-        SigningKey::random(&mut rand::rngs::OsRng)
+        SigningKey::generate()
     }
 
     /// Mint a token shaped exactly like an authnz-rs agent CWT: tag 61 wrapped
@@ -230,7 +231,7 @@ mod tests {
         let keys = entries
             .iter()
             .map(|(kid, vk)| {
-                let point = vk.to_encoded_point(false);
+                let point = vk.to_sec1_point(false);
                 CoseKeyBuilder::new_ec2_pub_key(
                     coset::iana::EllipticCurve::P_256,
                     point.x().expect("x coordinate").to_vec(),

@@ -145,6 +145,29 @@ async fn entries_with_paths_fail_the_install() {
 }
 
 #[arkavo_test_macros::spec("IMG-003")]
+#[test]
+fn inconsistent_zip_headers_are_rejected_before_extracting_any_member() {
+    let mut body = archive(&[("sd-cli", b"legitimate"), ("hidden", b"other")]);
+    let central = body
+        .windows(4)
+        .rposition(|bytes| bytes == b"PK\x01\x02")
+        .expect("central directory header");
+    // Keep the local filename intact while changing the central directory's
+    // same-length name, so parsers would disagree about the unlisted entry.
+    body[central + 46..central + 52].copy_from_slice(b"benign");
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("runtime.zip");
+    let staging = dir.path().join("staging");
+    std::fs::write(&archive, body).unwrap();
+
+    let err = extract(&archive, &staging, &["sd-cli"]).unwrap_err();
+    assert_eq!(err.code(), "runtime_install_failed");
+    assert!(!staging.join("sd-cli").exists());
+    assert!(!staging.join("benign").exists());
+    assert!(!staging.join("hidden").exists());
+}
+
+#[arkavo_test_macros::spec("IMG-003")]
 #[tokio::test]
 async fn missing_members_fail_the_install() {
     let body = archive(&[("sd-cli", b"x"), ("ggml.txt", b"z")]);

@@ -612,8 +612,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-audit
         run: cargo install cargo-audit
-      - name: Run cargo audit
-        run: cargo audit
+      - name: Audit every tracked Cargo lockfile
+        shell: bash
+        run: |
+          while IFS= read -r -d '' lockfile; do
+            cargo audit --deny warnings --file "$lockfile"
+          done < <(git ls-files -z Cargo.lock '**/Cargo.lock')
 
   build-linux:
     name: Build Linux (${{ matrix.target || matrix.device }})

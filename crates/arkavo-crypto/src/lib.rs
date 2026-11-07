@@ -1,6 +1,7 @@
 use base64::{Engine as _, engine::general_purpose};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::Generate;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::{PublicKey as P256PublicKey, SecretKey as P256SecretKey};
 use std::fmt;
 use thiserror::Error;
@@ -189,7 +190,7 @@ pub struct KasEcKeypair {
 impl KasEcKeypair {
     /// Generate a new random EC P-256 keypair.
     pub fn generate() -> Self {
-        let secret_key = P256SecretKey::random(&mut rand::rngs::OsRng);
+        let secret_key = P256SecretKey::generate();
         let public_key = secret_key.public_key();
         Self {
             secret_key,
@@ -215,12 +216,12 @@ impl KasEcKeypair {
 
     /// Get the public key in SEC1 uncompressed format.
     pub fn public_key_sec1(&self) -> Vec<u8> {
-        self.public_key.to_encoded_point(false).as_bytes().to_vec()
+        self.public_key.to_sec1_point(false).as_bytes().to_vec()
     }
 
     /// Get the public key in SEC1 compressed format.
     pub fn public_key_sec1_compressed(&self) -> Vec<u8> {
-        self.public_key.to_encoded_point(true).as_bytes().to_vec()
+        self.public_key.to_sec1_point(true).as_bytes().to_vec()
     }
 
     /// Get the public key as base64-encoded SEC1 uncompressed.
@@ -272,7 +273,7 @@ impl KasEcPublicKey {
 
     /// Get as SEC1 uncompressed bytes.
     pub fn to_sec1_bytes(&self) -> Vec<u8> {
-        self.public_key.to_encoded_point(false).as_bytes().to_vec()
+        self.public_key.to_sec1_point(false).as_bytes().to_vec()
     }
 
     /// Get as base64-encoded SEC1 uncompressed.
@@ -306,13 +307,18 @@ pub struct P256SigningKeypair {
 impl P256SigningKeypair {
     /// Generate a new random P-256 signing keypair.
     pub fn generate() -> Self {
-        let signing_key = p256::ecdsa::SigningKey::random(&mut rand::rngs::OsRng);
+        let signing_key = p256::ecdsa::SigningKey::generate();
         Self { signing_key }
     }
 
     /// Create from raw secret key bytes (32 bytes).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
-        let signing_key = p256::ecdsa::SigningKey::from_bytes(bytes.into())
+        // Exactly 32 bytes: `SigningKey::from_slice` would also zero-pad
+        // shorter input into a different key.
+        let field_bytes = <&p256::FieldBytes>::try_from(bytes).map_err(|_| {
+            CryptoError::InvalidKeyFormat(format!("Expected 32 bytes, got {}", bytes.len()))
+        })?;
+        let signing_key = p256::ecdsa::SigningKey::from_bytes(field_bytes)
             .map_err(|e| CryptoError::InvalidKeyFormat(format!("Invalid P-256 secret key: {e}")))?;
         Ok(Self { signing_key })
     }
@@ -373,10 +379,7 @@ impl P256VerifyingKey {
 
     /// Get as SEC1 uncompressed bytes (65 bytes).
     pub fn to_sec1_bytes(&self) -> Vec<u8> {
-        self.verifying_key
-            .to_encoded_point(false)
-            .as_bytes()
-            .to_vec()
+        self.verifying_key.to_sec1_point(false).as_bytes().to_vec()
     }
 
     /// Get as base64-encoded SEC1 uncompressed.
@@ -407,11 +410,7 @@ impl P256VerifyingKey {
         // P-256 public key multicodec prefix (varint encoded 0x1200)
         const P256_MULTICODEC: [u8; 2] = [0x80, 0x24];
 
-        let pk_bytes = self
-            .verifying_key
-            .to_encoded_point(true)
-            .as_bytes()
-            .to_vec();
+        let pk_bytes = self.verifying_key.to_sec1_point(true).as_bytes().to_vec();
         let mut prefixed = Vec::with_capacity(2 + pk_bytes.len());
         prefixed.extend_from_slice(&P256_MULTICODEC);
         prefixed.extend_from_slice(&pk_bytes);
@@ -1019,6 +1018,22 @@ mod tests {
             let result = P256VerifyingKey::from_sec1_bytes(&bad_bytes);
             assert!(result.is_err(), "SEC1 length {len} should be rejected");
         }
+    }
+
+    /// A secret of the wrong length is an error rather than a panic, and a
+    /// short one is not zero-padded into a different key.
+    #[test]
+    fn test_p256_secret_must_be_32_bytes() {
+        for len in [0, 24, 31, 33, 64] {
+            assert!(
+                matches!(
+                    P256SigningKeypair::from_bytes(&vec![7u8; len]),
+                    Err(CryptoError::InvalidKeyFormat(_))
+                ),
+                "secret length {len} should be rejected"
+            );
+        }
+        assert!(P256SigningKeypair::from_bytes(&[7u8; 32]).is_ok());
     }
 
     /// TDD Test: Keypair serialization with all-zero bytes should fail

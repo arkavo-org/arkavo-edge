@@ -173,22 +173,54 @@ mod tests {
     #[spec("PDG-012")]
     #[test]
     fn an_absent_passthrough_name_is_warned_about_by_name_only() {
+        const PROBE: &str = "ARKAVO_MCP_PROXY_LOG_PROBE";
+        if std::env::var_os(PROBE).is_none() {
+            // A scoped subscriber can lose this shared callsite's first event
+            // to another test thread. Isolate a global subscriber so every
+            // thread agrees on its interest without changing other tests.
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "env::tests::an_absent_passthrough_name_is_warned_about_by_name_only",
+                    "--nocapture",
+                ])
+                .env(PROBE, "1")
+                .output()
+                .expect("run isolated warning capture");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
         let captured = Captured::default();
         let subscriber = tracing_subscriber::fmt()
             .with_writer(captured.clone())
             .with_ansi(false)
             .finish();
-        tracing::subscriber::with_default(subscriber, || {
-            let parent = vec![(OsString::from("HELD"), OsString::from("held-value"))];
-            resolve_from(
-                parent,
-                &spec_of(&[("SET", "set-value")], &["HELD", "MISSING"]),
-            )
-            .unwrap();
-        });
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+        // Register the warning on another thread first, reproducing the
+        // ordering that poisoned the scoped subscriber's callsite cache.
+        std::thread::spawn(|| {
+            resolve_from(Vec::new(), &spec_of(&[], &["ABSENT"])).unwrap();
+        })
+        .join()
+        .unwrap();
+        let parent = vec![(OsString::from("HELD"), OsString::from("held-value"))];
+        resolve_from(
+            parent,
+            &spec_of(&[("SET", "set-value")], &["HELD", "SET", "MISSING"]),
+        )
+        .unwrap();
         let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
-        assert!(log.contains("MISSING"), "{log}");
-        assert!(!log.contains("HELD") && !log.contains("-value"), "{log}");
+        assert!(log.contains("MISSING") && log.contains("ABSENT"), "{log}");
+        assert!(
+            !log.contains("HELD") && !log.contains("SET") && !log.contains("-value"),
+            "{log}"
+        );
     }
 
     #[cfg(unix)]

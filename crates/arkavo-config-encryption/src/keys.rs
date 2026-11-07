@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use p256::ecdsa::{
     SigningKey, VerifyingKey, signature::SignatureEncoding, signature::Signer, signature::Verifier,
 };
+use p256::elliptic_curve::Generate;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,11 +66,11 @@ pub struct KeyPair {
 
 impl KeyPair {
     pub fn generate() -> Result<Self> {
-        let signing_key = SigningKey::random(&mut rand::rngs::OsRng);
+        let signing_key = SigningKey::generate();
         let verifying_key = VerifyingKey::from(&signing_key);
 
         let private_bytes = signing_key.to_bytes().to_vec();
-        let public_bytes = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+        let public_bytes = verifying_key.to_sec1_point(false).as_bytes().to_vec();
 
         Ok(Self {
             private_key: PrivateKey::from_bytes(private_bytes),
