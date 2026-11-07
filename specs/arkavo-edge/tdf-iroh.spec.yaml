@@ -219,3 +219,21 @@ scenarios:
     refs:
       - crates/arkavo-tdf-iroh/src/reference.rs
     changed: "2026-10-12"
+
+  - id: IROH-013
+    name: An agent's iroh endpoint id survives a restart
+    criticality: high
+    given:
+      - An agent whose iroh endpoint key is kept in its directory (INGRESS-005)
+    when: The agent restarts
+    then:
+      - Its node binds with the kept key, so its endpoint id is the same as before
+      - Each agent name keeps its own endpoint key, in an owner-only file
+    edge_cases:
+      - condition: A node started with no kept key, as the CLI's short-lived asset commands start one
+        expected: It makes a key for that node
+    refs:
+      - crates/arkavo-tdf-iroh/src/node.rs
+      - crates/arkavo-server/src/server/a2a_server.rs
+      - crates/arkavo-device-identity/src/subordinate_key.rs
+    changed: "2026-10-18"

@@ -23,6 +23,8 @@ mod lesson_consensus;
 mod lesson_handlers;
 mod message;
 mod protocol;
+#[cfg(test)]
+mod test_support;
 mod verification;
 
 pub use consensus::{

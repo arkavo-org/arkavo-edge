@@ -8,6 +8,7 @@ description = "Gossip protocol for decentralized patch and lesson propagation"
 
 [dependencies]
 arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-key-statement = { path = "../arkavo-key-statement" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }

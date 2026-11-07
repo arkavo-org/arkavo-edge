@@ -6,7 +6,7 @@ version: 0.101.1
 
 # Design: docs/swarm-trust-model.md, "Agent ingress, discovery and enrollment".
 # Scenarios marked wip are not implemented; their refs name the code at
-# 9f5faf03 that they change. INGRESS-001 and INGRESS-004 are implemented. The workload key is the agent key #728 adds.
+# 9f5faf03 that they change. INGRESS-001, INGRESS-004 and INGRESS-017 are implemented. The workload key is the P-256 key #766 adds, one per agent name.
 
 invariants:
   - "The transport and discovery are untrusted: no bind address, announcement or connection grants anything"
@@ -97,19 +97,21 @@ scenarios:
         expected: Re-asserts a key the replayer does not hold; harmless since bound keys are not replaced, so no nonce is stored
       - condition: Peer restarted cleanly with a new gossip key
         expected: Its goodbye unbinds the old key and the new one is accepted
-      - condition: Peer crashed and came back with a new gossip key
-        expected: Refused with a warning until the receiver restarts; the gossip key is new on every start (INGRESS-005)
+      - condition: Peer crashed and came back on a new port, with no goodbye
+        expected: Discovery reports it again at its new address, so gossip follows it there. Its kept gossip key binds again (INGRESS-017). A peer from before kept gossip keys makes a new key on every start and is refused with a warning until the receiver restarts
       - condition: A host on the link spoofing mDNS announcements
         expected: Can still add a peer id and vote under it; membership (INGRESS-015) closes this
       - condition: A host on the link sends a spoofed mDNS goodbye for a peer, or races a real restart
-        expected: "The receiver forgets the peer's key, and the host can bind its own key under that id with a valid proof: a takeover of the peer id. Goodbyes are unauthenticated; only a persistent workload key (INGRESS-005) closes this"
+        expected: "The receiver forgets the peer's key. If a workload key vouched for the peer, its id takes no other key but one that workload vouches for (INGRESS-017); an unvouched peer's id can be taken by a host binding its own key with a valid proof"
     refs:
       - crates/arkavo-gossip/src/key_exchange.rs
-      - crates/arkavo-gossip/src/verification.rs:37-56
+      - crates/arkavo-gossip/src/verification.rs
       - crates/arkavo-gossip/src/protocol.rs:163-179
       - crates/arkavo-server/src/server/mod.rs
+      - crates/arkavo-cli/src/commands/agent/gossip_keys.rs
+      - crates/arkavo-cli/src/commands/agent/discovered.rs
       - crates/arkavo-cli/src/commands/agent/advertise.rs
-    changed: "2026-10-04"
+    changed: "2026-10-18"
 
   - id: INGRESS-005
     name: One persistent workload identity across channels and restarts
@@ -136,20 +138,26 @@ scenarios:
     criticality: critical
     wip: true
     given:
-      - A TDF or iroh key the agent uses
+      - A gossip, iroh or TDF key the agent uses
     when: A peer is asked to use that key
     then:
-      - The peer requires a statement signed by the workload key naming purpose, key, validity window and generation
-      - A statement with a lower generation than one already seen is refused
-      - The workload key itself is never used as a TLS or TDF key
+      - "The peer requires a statement signed by the workload key naming purpose, key, validity window and generation: a compact JWS, ES256, typ key-statement+jwt, whose kid is the workload did:key"
+      - The key is named by its canonical did:key and is of the purpose's kind (Ed25519 for gossip and iroh, P-256 for TDF)
+      - A statement with a lower generation than one already seen is refused, and so is a second key for a generation already seen
+      - The workload key itself is never used as a TLS or TDF key, nor named as its own subordinate
     edge_cases:
       - condition: Statement signed after the workload's quarantine generation
         expected: Refused; quarantine covers every key the workload signs
       - condition: Statement past its validity window
         expected: Refused
+      - condition: Another token the workload key signs, such as its agent card signature
+        expected: Not read as a statement; its typ differs
+      - condition: A statement signed by one workload key in another's name
+        expected: Refused
     refs:
+      - crates/arkavo-key-statement/src/lib.rs
       - docs/swarm-trust-model.md
-    changed: "2026-10-02"
+    changed: "2026-10-18"
 
   - id: INGRESS-007
     name: Minimal announcement with no DID before enrollment
@@ -338,3 +346,32 @@ scenarios:
     refs:
       - crates/arkavo-server/src/server/mod.rs:1089-1115
     changed: "2026-10-02"
+
+  - id: INGRESS-017
+    name: Gossip keys kept across restarts and bound through the agent's key statement
+    criticality: critical
+    given:
+      - An agent with a workload key and a gossip key kept in its directory
+    when: It exchanges gossip keys with a peer (INGRESS-004)
+    then:
+      - Each side shows, beside its proof, the key statement in which its workload key vouches for its gossip key (INGRESS-006), and the other side binds the key through it and records which did:key the peer is
+      - The gossip key and its generation are kept across restarts, so a peer that bound it binds the same key again
+      - An id a workload key has vouched for takes no unvouched key and no other workload's statement while the receiver runs, even after the peer's goodbye; the refusal names the agent and says a new agent needs a new name
+      - A newer generation from the same workload replaces the bound key; an older one, or a second key for one generation, is refused
+      - The agent renews its statement before it runs out, so it never shows an expired one however long it runs
+    edge_cases:
+      - condition: A peer from before key statements, which sends none
+        expected: Bound unvouched, as by INGRESS-004; it ignores the statement this agent shows
+      - condition: A statement present but not holding (another key, another purpose, expired, malformed)
+        expected: Refused, never bound as unvouched, so damaging a statement does not downgrade the peer
+      - condition: An on-path host strips the statement from a first exchange
+        expected: The peer is bound unvouched; once a peer has bound a vouched key under a name it refuses an unvouched one there
+      - condition: The receiver restarts
+        expected: Which workload owns each id and the generations seen are kept in memory only, so they start over
+    refs:
+      - crates/arkavo-gossip/src/key_exchange.rs
+      - crates/arkavo-gossip/src/verification.rs
+      - crates/arkavo-server/src/server/learning_bus_keys.rs
+      - crates/arkavo-cli/src/commands/agent/gossip_keys.rs
+      - crates/arkavo-device-identity/src/subordinate_key.rs
+    changed: "2026-10-18"

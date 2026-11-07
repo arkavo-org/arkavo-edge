@@ -110,7 +110,6 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-registration = { path = "../arkavo-registration" }
 arkavo-agent-auth = { path = "../arkavo-agent-auth" }
-arkavo-config-encryption = { path = "../arkavo-config-encryption" }
 arkavo-config-bundle = { path = "../arkavo-config-bundle" }
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 arkavo-swarmkit-delegation = { path = "../arkavo-swarmkit-delegation" }

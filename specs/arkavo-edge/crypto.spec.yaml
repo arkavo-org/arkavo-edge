@@ -131,6 +131,19 @@ scenarios:
       - Uses compressed public key
     refs: [crates/arkavo-crypto/src/lib.rs:381-396]
 
+  - id: CRYPTO-012
+    name: A P-256 did:key key id names its DID's one key
+    criticality: high
+    given:
+      - A key id such as a JWS kid naming a P-256 did:key
+    when: from_did_key_id() is called
+    then:
+      - "did:key:<multibase>#<multibase> yields the key and its DID"
+      - Any other fragment, a bare DID or another DID method is refused
+      - A DID in uncompressed form is refused, so one key answers to one DID
+    refs: [crates/arkavo-crypto/src/lib.rs, crates/arkavo-protocol/src/card_signature.rs, crates/arkavo-key-statement/src/lib.rs]
+    changed: "2026-10-18"
+
   - id: CRYPTO-011
     name: ECDH key agreement for KAS operations
     criticality: high

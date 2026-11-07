@@ -244,9 +244,10 @@ pub struct AgentCard {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extensions: Vec<AgentExtension>,
 
-    /// Optional signature for card verification (A2A v0.3+)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<AgentCardSignature>,
+    /// JWS signatures over the card's canonical form (A2A v1.0 §8.4); see
+    /// [`crate::card_signature`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signatures: Vec<AgentCardSignature>,
 }
 
 /// Information about the agent provider/organization
@@ -365,19 +366,18 @@ pub struct AgentExtension {
     pub data: Option<serde_json::Value>,
 }
 
-/// Signature for Agent Card verification (A2A v0.3+)
+/// One JWS over an Agent Card, in A2A v1.0's flattened form.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
 pub struct AgentCardSignature {
-    /// Signature algorithm used
-    pub algorithm: String,
+    /// Base64url-encoded JWS protected header (`alg`, `typ`, `kid`)
+    pub protected: String,
 
-    /// Base64-encoded signature
-    pub value: String,
+    /// Base64url-encoded signature
+    pub signature: String,
 
-    /// Key ID for verification
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_id: Option<String>,
+    /// JWS unprotected header
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<serde_json::Value>,
 }
 
 /// Agent capability description (used in broadcasts)
