@@ -86,13 +86,17 @@ scenarios:
     issue: "No matching implementation file exists in the codebase"
     given:
       - Two agents communicating via A2A
-      - Each supports different TDF formats
-    when: Connection is established
+      - Each lists the TDF bindings it supports in its card's supportedInterfaces, in preference order
+    when: A client picks an interface from the agent card
     then:
-      - Agents negotiate common TDF format
-      - TDF-JSON is default fallback
-      - TDF-CBOR used when both support it
+      - It takes the first listed binding it supports, as A2A negotiates bindings
+      - The TDF-JSON binding is always listed, as the fallback
+      - A TDF-CBOR binding is listed ahead of it when the agent supports it
+      - The TDF-JSON Part extension's params.formats lists the formats the agent opens in Parts
       - Format choice logged for audit
+    refs:
+      - docs/a2a/tdf-json-binding.md
+    changed: "2026-10-26"
 
   - id: TDFS-006
     name: Policy binding prevents policy tampering
@@ -308,3 +312,28 @@ scenarios:
       - crates/arkavo-cli/src/commands/agent.rs
       - crates/arkavo-cli/src/commands/agent/keys.rs
     changed: "2026-10-18"
+
+  - id: TDFS-018
+    name: TDF-JSON Part carries content sealed for another audience
+    criticality: high
+    wip: true
+    issue: "Specialization bundles travel by the agent.specialize method as an Iroh ticket or base64 (swarmkit_transport.rs), shares by tdf.share, and OpenTdfService writes the deprecated TdfJsonRpc."
+    given:
+      - An orchestrator sending a role bundle, or an agent sharing sealed content, inside an A2A message
+    when: The content goes in the message
+    then:
+      - It is a Part whose data is a TDF-JSON document and whose mediaType is application/tdf+json, or a url Part naming the Iroh blob that holds one
+      - The Part has its own key access and policy, independent of the envelope's; a recipient outside that policy forwards it unopened
+      - The message lists https://arkavo.com/a2a/tdf-json-part/v1 in Message.extensions
+      - agent.specialize and tdf.share are replaced by SendMessage carrying the Part
+    edge_cases:
+      - condition: A recipient that does not list the extension
+        expected: The sender does not send it the Part
+      - condition: A Part whose policy binding or AES-GCM tag fails
+        expected: Refused without releasing any plaintext
+    refs:
+      - crates/arkavo-orchestrator/src/swarmkit_transport.rs
+      - crates/arkavo-tdf/src/opentdf_impl.rs
+      - crates/arkavo-server/src/server/handlers/tdf_share.rs
+      - docs/a2a/tdf-json-binding.md
+    changed: "2026-10-26"

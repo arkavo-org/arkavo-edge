@@ -197,13 +197,20 @@ scenarios:
     when: The receiver processes it
     then:
       - Size is bounded before parsing
-      - The COSE_Sign1 signature verifies against the iss did:key
+      - The document is TDF-JSON 1.0.0 with an inline payload and exactly one a2a-envelope assertion
+      - The assertion's JWS (ES256, typ a2a-envelope) verifies against the iss did:key and its digest matches the canonical document as received, ciphertext included
       - aud names this agent or its swarm, exp has not passed, iat is within the clock bound and the nonce is unseen
       - Sender standing (membership, state, deny latch) is established before the body is unwrapped; a member envelope from a non-member is refused there
       - The admitted call carries a TaskSecurityContext built from the verified sender
     edge_cases:
       - condition: Bad signature
         expected: Refused before unwrap
+      - condition: Any byte of the document changed after signing, including the ciphertext or a key access object
+        expected: The digest does not match; refused before unwrap
+      - condition: No envelope assertion, two of them, or a JWS whose typ or alg differs
+        expected: Refused before unwrap
+      - condition: Any refusal
+        expected: One unsealed JSON-RPC error with id null that does not say which check failed; the reason is logged locally
       - condition: Wrong audience
         expected: Refused before unwrap
       - condition: Expired or iat outside the clock bound
@@ -219,7 +226,8 @@ scenarios:
     refs:
       - crates/arkavo-server/src/server/handlers/messaging.rs
       - docs/swarm-trust-model.md
-    changed: "2026-10-02"
+      - docs/a2a/tdf-json-binding.md
+    changed: "2026-10-26"
 
   - id: INGRESS-010
     name: Re-signed ciphertext refused
@@ -243,10 +251,16 @@ scenarios:
     when: The agent replies
     then:
       - The reply is an envelope signed by the responder, addressed to the requester and sealed to that key
+      - The reply names the request's nonce in re; a reply whose re matches no outstanding request is dropped
+      - Each stream event is its own envelope with re and a seq rising from 0
       - No method result crosses the wire in plaintext
+    edge_cases:
+      - condition: A stream event arrives with a gap or a repeat in seq
+        expected: The stream fails with an error; it never ends as if complete
     refs:
       - docs/swarm-trust-model.md
-    changed: "2026-10-02"
+      - docs/a2a/tdf-json-binding.md
+    changed: "2026-10-26"
 
   - id: INGRESS-012
     name: Pairing enrolls the owner with a single-use secret
@@ -375,3 +389,27 @@ scenarios:
       - crates/arkavo-cli/src/commands/agent/gossip_keys.rs
       - crates/arkavo-device-identity/src/subordinate_key.rs
     changed: "2026-10-18"
+
+  - id: INGRESS-018
+    name: The agent card offers peers only the TDF-JSON binding
+    criticality: critical
+    wip: true
+    issue: "The agent card is the pre-1.0 shape: extensions sit at the top level with a data field and there is no supportedInterfaces, and the listener answers plaintext JSON-RPC."
+    given:
+      - An enrolled agent serving its signed card at /.well-known/agent-card.json
+    when: A peer reads the card to choose an interface
+    then:
+      - supportedInterfaces lists the binding https://arkavo.com/a2a/bindings/tdf-json/v1 with protocolVersion 1.0, and no unsealed A2A interface
+      - capabilities.extensions carries the key statements (https://arkavo.com/a2a/key-statements/v1) in params, and the TDF-JSON Part extension when the agent opens Parts
+      - The card declares no securitySchemes for the binding, and the agent sends peers no CWT; the envelope signature is the credential
+      - The card stays signed by the workload key (A2A signatures, RFC 8785 form)
+    edge_cases:
+      - condition: Before enrollment
+        expected: The card leaves out the key statements, so it names no DID
+      - condition: A TDF-CBOR binding is supported
+        expected: It is listed ahead of TDF-JSON, which stays listed
+    refs:
+      - crates/arkavo-protocol/src/types.rs
+      - crates/arkavo-server/src/server/well_known.rs
+      - docs/a2a/tdf-json-binding.md
+    changed: "2026-10-26"
