@@ -136,6 +136,9 @@ pub async fn process_with_tools(
     )));
     arkavo_ucp::register_tools(&mut tool_registry, ucp_state);
 
+    // Asking the market for a purchase the owner then pays
+    arkavo_market::register_tools(&mut tool_registry);
+
     // Register Claude Agent SDK tools (entitlement-gated, requires OAuth)
     #[cfg(feature = "claude-agent")]
     {

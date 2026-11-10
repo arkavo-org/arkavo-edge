@@ -294,6 +294,9 @@ jobs:
           elif [ "${{ matrix.group }}" = "tools" ]; then
             cargo test --locked -p arkavo-mcp-tools
             cargo test --locked -p arkavo-mcp-mesh
+            # The market ask and the agent token it presents (#792).
+            cargo test --locked -p arkavo-agent-auth
+            cargo test --locked -p arkavo-market
             cargo test --locked -p arkavo-image-gen
             # The data plane's retention and references (IROH-010 to IROH-012).
             cargo test --locked -p arkavo-tdf-iroh --test retention_test --test reference_test
@@ -347,6 +350,9 @@ jobs:
             cargo test --locked -p arkavo-server --features taint,kas --lib llm_intent_analyzer
             # Asset requests, delegation and data-plane delivery, on the same build.
             cargo test --locked -p arkavo-server --features taint,kas --lib assets
+            # The market ask is offered where a person's message lands, and a
+            # role without the grant does not get it (#792), on the same build.
+            cargo test --locked -p arkavo-server --features taint,kas --lib own_tools
             # KAS delegation regression (trusted roots from kit runtime.kas). Same
             # taint,kas feature set as the two lines above so it shares their
             # arkavo-server build instead of a new feature unification.

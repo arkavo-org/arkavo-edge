@@ -75,6 +75,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "task" => commands::task::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),
         "mcp" => commands::mcp_proxy::execute(&args[1..]),
+        "market" => commands::market::execute(&args[1..]),
         command @ ("login" | "logout") => commands::login::execute(command, &args[1..]),
         "security" => security_command::execute(&args[1..]),
         #[cfg(feature = "knowledge-pack")]
@@ -202,6 +203,7 @@ fn usage_text() -> String {
         commands.push("    pack           Build sealed knowledge-pack components");
     }
     commands.push("    mcp proxy      Permit-gated stdio MCP relay");
+    commands.push(commands::market::market_help());
     commands.push(security_command::help_line());
     commands.push(commands::login::login_help());
 
@@ -393,7 +395,9 @@ mod tests {
     #[test]
     fn usage_still_lists_the_other_commands() {
         let listed = listed_commands();
-        for command in ["chat", "kit", "task", "ui", "mcp", "login", "logout"] {
+        for command in [
+            "chat", "kit", "task", "ui", "mcp", "market", "login", "logout",
+        ] {
             assert!(
                 listed.contains(&command.to_string()),
                 "{command} missing from {listed:?}"

@@ -20,4 +20,11 @@ ignore = [
     "RUSTSEC-2024-0436",
     # proc-macro-error unmaintained — widely used transitive proc-macro crate.
     "RUSTSEC-2024-0370",
+    # Bundled SQLite before 3.54.0 can return uninitialized memory when it
+    # opens a database beside a crafted `-wal` file (CVE-2026-119375, local).
+    # Fixed in libsqlite3-sys 0.39.0, which no sqlx release accepts yet:
+    # sqlx-sqlite 0.9.0 requires `<0.38.0`. Every database opened here is one
+    # this program created in the user's own data directory; none comes from
+    # another party. Remove when sqlx allows libsqlite3-sys >= 0.39.
+    "RUSTSEC-2026-0459",
 ]

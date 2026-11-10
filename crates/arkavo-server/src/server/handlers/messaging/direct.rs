@@ -127,6 +127,7 @@ impl DirectExecution {
             if let (Some(assets), Some(outbox)) = (&self.assets, &request.outbox) {
                 assets.register_tools(&mut registry, outbox.clone());
             }
+            arkavo_market::register_tools(&mut registry);
             if specialized {
                 registry.retain_granted(&granted);
             }

@@ -1,0 +1,33 @@
+[package]
+name = "arkavo-market"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Asks market.arkavo.com for a purchase on the owner's behalf"
+repository.workspace = true
+
+[dependencies]
+arkavo-agent-auth = { path = "../arkavo-agent-auth" }
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-registration = { path = "../arkavo-registration" }
+
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"
+
+[lints]
+workspace = true

@@ -20,6 +20,9 @@ pub enum AgentAuthError {
     #[error("Agent not authorized: scan QR code with mobile app first")]
     NotAuthorized,
 
+    #[error("Identity will not issue this agent a token: {0}")]
+    Refused(String),
+
     #[error("Token expired")]
     TokenExpired,
 
