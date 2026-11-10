@@ -765,6 +765,9 @@ impl A2aServer {
             }
         }
 
+        // Asking the market for a purchase the owner then pays
+        arkavo_market::register_tools(&mut tool_registry);
+
         // Register Claude Agent SDK tools (entitlement-gated, requires OAuth)
         #[cfg(feature = "claude-agent")]
         {

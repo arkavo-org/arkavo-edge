@@ -35,6 +35,43 @@ struct RunOptions {
     name: Option<String>,
     /// The orchestrator an agent without a kit takes roles from.
     orchestrator: Option<String>,
+    /// Ask the owner to let this agent ask the market for purchases.
+    market_requests: bool,
+}
+
+impl RunOptions {
+    fn link(&self) -> AuthorizationLink {
+        AuthorizationLink {
+            trust: self.trust,
+            market_requests: self.market_requests,
+        }
+    }
+}
+
+/// When the authorization link is shown, and what it asks the owner for.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct AuthorizationLink {
+    trust: bool,
+    market_requests: bool,
+}
+
+impl AuthorizationLink {
+    /// Shown on a verbose start, and whenever a flag that is about the link
+    /// was given: `--market-requests` changes nothing but what it asks for.
+    fn shown(self, quiet: bool) -> bool {
+        !quiet || self.trust || self.market_requests
+    }
+
+    /// The entitlements the link asks for. An authorize replaces what the
+    /// agent was delegated before, so the market's is added to the ones
+    /// every agent asks for, never sent alone.
+    fn entitlements(self) -> Vec<String> {
+        let mut entitlements = arkavo_registration::default_entitlements();
+        if self.market_requests {
+            entitlements.push(arkavo_market::REQUEST_ENTITLEMENT.to_string());
+        }
+        entitlements
+    }
 }
 
 /// Read the command line. Nothing is resolved or started here, so a
@@ -93,6 +130,7 @@ fn parse_args(args: &[String]) -> Result<Invocation, Box<dyn std::error::Error>>
             },
             "-v" | "--verbose" => options.verbose = true,
             "--trust" => options.trust = true,
+            "--market-requests" => options.market_requests = true,
             "-h" | "--help" | "help" => return Ok(Invocation::Help),
             "init" => {
                 subcommand = Some("init");
@@ -180,6 +218,9 @@ OPTIONS:
     -n, --name <NAME>   Select a role by id from a multi-role kit (default: the first role)
     -v, --verbose       Show startup messages and status
     --trust             Show the agent authorization QR code (DID:key) on startup
+    --market-requests   Show that QR code asking the owner to also let this agent
+                        ask the Arkavo market for purchases, which the owner
+                        then pays (see `arkavo market --help`)
     --orchestrator <DID>
                         Take kit roles only from this orchestrator's did:key
                         (the one `arkavo kit apply` prints); remembered
@@ -293,7 +334,7 @@ fn run_agent_with_options(options: &RunOptions) -> Result<(), Box<dyn std::error
     let cwd = std::env::current_dir()?;
     let cli_config_path = options.config_path.as_deref().map(Path::new);
     let verbose = options.verbose;
-    let trust = options.trust;
+    let link = options.link();
     let orchestrator = options.orchestrator.as_deref();
 
     // Resolve config from a SwarmKit kit: -c/--config > discovery > the
@@ -338,13 +379,12 @@ fn run_agent_with_options(options: &RunOptions) -> Result<(), Box<dyn std::error
     // A failed start is final. Retrying with a different configuration would
     // put the agent on an address and persona the operator never asked for.
     match tokio::runtime::Handle::try_current() {
-        Ok(handle) => handle.block_on(async {
-            agent::start_agent_server(&agent_config, trust, orchestrator).await
-        }),
+        Ok(handle) => handle
+            .block_on(async { agent::start_agent_server(&agent_config, link, orchestrator).await }),
         Err(_) => {
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async {
-                agent::start_agent_server(&agent_config, trust, orchestrator).await
+                agent::start_agent_server(&agent_config, link, orchestrator).await
             })
         }
     }
@@ -430,7 +470,7 @@ fn has_required_args(schema: &serde_json::Value) -> bool {
 #[allow(clippy::missing_panics_doc)]
 pub async fn start_agent_server(
     config: &AgentConfig,
-    trust: bool,
+    link: AuthorizationLink,
     orchestrator: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::mcp_spawner::McpProcessManager;
@@ -779,11 +819,10 @@ pub async fn start_agent_server(
 
     // Generate and display QR code for registration. Shown in verbose runs, or on demand
     // via `--trust` (which surfaces only the QR, without the rest of the verbose output).
-    if !quiet || trust {
+    if link.shown(quiet) {
         use arkavo_device_identity::get_or_create_device_id;
         use arkavo_registration::{
-            AgentDescriptor, default_entitlements, load_or_create_agent_keypair,
-            qr::display_authorization_qr,
+            AgentDescriptor, load_or_create_agent_keypair, qr::display_authorization_qr,
         };
 
         // Get or create device ID (needed for system initialization)
@@ -812,7 +851,7 @@ pub async fn start_agent_server(
 
         let descriptor = AgentDescriptor::new(public_key, endpoint, mdns_service, folder_id)
             .with_name(&config.name)
-            .with_entitlements(default_entitlements());
+            .with_entitlements(link.entitlements());
 
         // Display authorization QR code with DID:key
         println!("\n{}", "=".repeat(60));
@@ -1616,6 +1655,91 @@ mod tests {
         }
     }
 
+    /// `--market-requests` exists only to change what the authorization
+    /// link asks for, so it shows the link as `--trust` does.
+    #[test]
+    fn market_requests_asks_for_the_entitlement_in_the_link() {
+        let options = run_options(&["--market-requests"]);
+        assert_eq!(
+            options,
+            RunOptions {
+                market_requests: true,
+                ..RunOptions::default()
+            }
+        );
+        assert!(options.link().shown(true));
+
+        let asked = options.link().entitlements();
+        assert!(asked.contains(&arkavo_market::REQUEST_ENTITLEMENT.to_string()));
+        // An authorize replaces the delegation's entitlements, so the link
+        // still has to carry the ones every agent asks for.
+        for default in arkavo_registration::default_entitlements() {
+            assert!(asked.contains(&default), "{default}");
+        }
+    }
+
+    /// What the app receives: identity matches each entitlement byte for
+    /// byte, so the link has to give every name back exactly, and the QR code
+    /// has to render with the third name and the longest agent name in it.
+    #[test]
+    fn the_link_a_market_start_shows_gives_each_entitlement_back_exactly() {
+        let link = run_options(&["--market-requests"]).link();
+        let descriptor = arkavo_registration::AgentDescriptor::new(
+            arkavo_crypto::AgentKeypair::generate().public_key(),
+            "http://192.168.100.200:65535".to_string(),
+            Some("agent._a2a._tcp.local.".to_string()),
+            "folder".to_string(),
+        )
+        .with_name("n".repeat(64))
+        .with_entitlements(link.entitlements());
+
+        let url = descriptor.to_authorization_url();
+        let sent = url
+            .split('&')
+            .find_map(|part| part.strip_prefix("entitlements="))
+            .expect("the link names entitlements");
+        let mut decoded = Vec::new();
+        let mut bytes = sent.bytes();
+        while let Some(byte) = bytes.next() {
+            if byte == b'%' {
+                let hex = [bytes.next().unwrap(), bytes.next().unwrap()];
+                let hex = std::str::from_utf8(&hex).unwrap();
+                decoded.push(u8::from_str_radix(hex, 16).unwrap());
+            } else {
+                decoded.push(byte);
+            }
+        }
+        let decoded = String::from_utf8(decoded).unwrap();
+        assert_eq!(
+            decoded.split(',').collect::<Vec<_>>(),
+            [
+                "https://arkavo.ai/attr/tdf/value/decrypt",
+                "https://arkavo.ai/attr/action/value/read",
+                "https://arkavo.net/attr/market/value/request",
+            ]
+        );
+
+        let qr = arkavo_registration::qr::generate_authorization_qr_string(&descriptor).unwrap();
+        assert!(!qr.is_empty());
+    }
+
+    /// Asking for purchases in the owner's name is something the owner
+    /// turns on, never what a plain start asks for.
+    #[test]
+    fn a_plain_start_does_not_ask_to_make_market_requests() {
+        for values in [&[][..], &["--trust"][..]] {
+            let link = run_options(values).link();
+            assert_eq!(
+                link.entitlements(),
+                arkavo_registration::default_entitlements(),
+                "{values:?}"
+            );
+        }
+        assert!(!run_options(&[]).link().shown(true));
+        assert!(run_options(&[]).link().shown(false));
+        assert!(run_options(&["--trust"]).link().shown(true));
+    }
+
     /// `--trust` shows the QR code and decides nothing else; in particular
     /// it leaves `bind` unset, so the agent listens where it would without
     /// the flag.
@@ -1981,7 +2105,7 @@ provenance:
             ..AgentConfig::default()
         };
 
-        let err = start_agent_server(&config, false, None)
+        let err = start_agent_server(&config, AuthorizationLink::default(), None)
             .await
             .expect_err("an unparseable listen address must not start a server")
             .to_string();

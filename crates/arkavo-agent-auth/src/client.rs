@@ -24,6 +24,24 @@ fn percent_encode(input: &str) -> String {
     encoded
 }
 
+/// What a failed response becomes.
+///
+/// Identity's 403 bodies are part of its contract (authnz-rs
+/// `docs/agent-credentials-contract.md`, "Refusal bodies"): each names the
+/// state that stops issuance, which is what the owner has to act on, so the
+/// text is kept as sent. Any other status keeps the step it failed at.
+async fn failure(
+    response: reqwest::Response,
+    step: fn(String) -> AgentAuthError,
+) -> AgentAuthError {
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return AgentAuthError::Refused(body);
+    }
+    step(format!("Server returned status {status}: {body}"))
+}
+
 /// Client for agent authentication with the authnz-rs API.
 pub struct AgentAuthClient {
     config: AgentAuthConfig,
@@ -61,10 +79,7 @@ impl AgentAuthClient {
         }
 
         if !response.status().is_success() {
-            return Err(AgentAuthError::ChallengeRequest(format!(
-                "Server returned status {}",
-                response.status()
-            )));
+            return Err(failure(response, AgentAuthError::ChallengeRequest).await);
         }
 
         let challenge: ChallengeResponse = response.json().await?;
@@ -78,19 +93,15 @@ impl AgentAuthClient {
         let response = self.http_client.post(&url).json(request).send().await?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(AgentAuthError::TokenRequest(format!(
-                "Server returned status {}: {}",
-                status, body
-            )));
+            return Err(failure(response, AgentAuthError::TokenRequest).await);
         }
 
         let token: TokenResponse = response.json().await?;
         Ok(token)
     }
 
-    /// Authenticate with the server using the given keypair.
+    /// Authenticate with the server using the given keypair and keep the
+    /// token on disk for later commands.
     ///
     /// This performs the full challenge-response flow:
     /// 1. Request a challenge from the server
@@ -101,6 +112,18 @@ impl AgentAuthClient {
         &self,
         keypair: &AgentKeypair,
     ) -> Result<StoredToken, AgentAuthError> {
+        let token = self.mint(keypair).await?;
+        storage::store_at(&self.token_path()?, &token).await?;
+        Ok(token)
+    }
+
+    /// Run the challenge-response flow and return the token without storing
+    /// it.
+    ///
+    /// For a caller that needs a token minted now, whatever is cached: the
+    /// market wants one no older than the request it authorizes, and a token
+    /// that is spent on one request has no reason to reach the disk.
+    pub async fn mint(&self, keypair: &AgentKeypair) -> Result<StoredToken, AgentAuthError> {
         let public_key = keypair.public_key();
         let did = public_key.to_did_key();
 
@@ -113,14 +136,15 @@ impl AgentAuthClient {
                 tokio::time::sleep(delay).await;
             }
 
-            match self.try_authenticate(keypair, &did).await {
+            match self.try_mint(keypair, &did).await {
                 Ok(token) => {
                     tracing::info!(event = "auth_decision", action = "permit", subject = %did, "Agent authenticated");
                     return Ok(token);
                 }
-                Err(AgentAuthError::NotAuthorized) => {
-                    tracing::info!(event = "auth_decision", action = "deny", subject = %did, "Agent not authorized");
-                    return Err(AgentAuthError::NotAuthorized);
+                // Identity has decided; asking again gets the same answer.
+                Err(e @ (AgentAuthError::NotAuthorized | AgentAuthError::Refused(_))) => {
+                    tracing::info!(event = "auth_decision", action = "deny", subject = %did, reason = %e, "Agent not authorized");
+                    return Err(e);
                 }
                 Err(e) => last_error = Some(e),
             }
@@ -132,7 +156,7 @@ impl AgentAuthClient {
         )))
     }
 
-    async fn try_authenticate(
+    async fn try_mint(
         &self,
         keypair: &AgentKeypair,
         did: &str,
@@ -159,25 +183,19 @@ impl AgentAuthClient {
 
         let token_response = self.request_token(&token_request).await?;
 
-        // Create stored token
-        let stored_token = StoredToken::new(
+        Ok(StoredToken::new(
             token_response.token,
             did.to_string(),
             token_response.expires_at,
             token_response.entitlements,
         )
-        .with_delegation_jwt(token_response.delegation_jwt);
-
-        // Store locally
-        storage::store_token(&stored_token).await?;
-
-        Ok(stored_token)
+        .with_delegation_jwt(token_response.delegation_jwt))
     }
 
     /// Get a valid token, either from cache or by authenticating.
     pub async fn get_token(&self, keypair: &AgentKeypair) -> Result<StoredToken, AgentAuthError> {
         // Check for cached token
-        if let Some(token) = storage::load_token().await?
+        if let Some(token) = storage::load_at(&self.token_path()?).await?
             && !token.is_expired()
         {
             return Ok(token);
@@ -189,12 +207,19 @@ impl AgentAuthClient {
 
     /// Load a cached token without authenticating.
     pub async fn get_cached_token(&self) -> Result<Option<StoredToken>, AgentAuthError> {
-        storage::load_token().await
+        storage::load_at(&self.token_path()?).await
     }
 
     /// Clear the cached token.
     pub async fn clear_token(&self) -> Result<(), AgentAuthError> {
-        storage::delete_token().await
+        storage::delete_at(&self.token_path()?).await
+    }
+
+    fn token_path(&self) -> Result<std::path::PathBuf, AgentAuthError> {
+        match &self.config.token_path {
+            Some(path) => Ok(path.clone()),
+            None => storage::default_token_path(),
+        }
     }
 }
 
@@ -213,8 +238,6 @@ mod tests {
     use wiremock::Respond;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, Request, ResponseTemplate};
-
-    use crate::test_helpers::TEST_LOCK;
 
     #[test]
     fn test_client_creation() {
@@ -288,8 +311,8 @@ mod tests {
     #[spec("AAUTH-001", "AAUTH-005")]
     #[tokio::test]
     async fn test_authenticate_challenge_response_flow() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = storage::delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("agent_token");
 
         let mock_server = MockServer::start().await;
 
@@ -316,7 +339,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let config = AgentAuthConfig::new(mock_server.uri());
+        let config = AgentAuthConfig::new(mock_server.uri()).with_token_path(&token_path);
         let client = AgentAuthClient::with_config(config).unwrap();
 
         let stored = client.authenticate(&keypair).await.unwrap();
@@ -334,12 +357,10 @@ mod tests {
         assert!(!stored.is_expired());
 
         // Verify the token was persisted to storage.
-        let loaded = storage::load_token().await.unwrap();
+        let loaded = storage::load_at(&token_path).await.unwrap();
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(loaded.token, stored.token);
-
-        let _ = storage::delete_token().await;
     }
 
     /// Test AAUTH-001: Request authentication token — credentials rejected.
@@ -350,8 +371,8 @@ mod tests {
     #[spec("AAUTH-001")]
     #[tokio::test]
     async fn test_authenticate_rejects_unauthorized_agent() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = storage::delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("agent_token");
 
         let mock_server = MockServer::start().await;
 
@@ -361,7 +382,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let config = AgentAuthConfig::new(mock_server.uri()).with_max_retries(3);
+        let config = AgentAuthConfig::new(mock_server.uri())
+            .with_max_retries(3)
+            .with_token_path(&token_path);
         let client = AgentAuthClient::with_config(config).unwrap();
 
         let keypair = AgentKeypair::generate();
@@ -370,7 +393,7 @@ mod tests {
         assert!(matches!(result, Err(AgentAuthError::NotAuthorized)));
 
         // No token may be stored for a rejected agent.
-        let loaded = storage::load_token().await.unwrap();
+        let loaded = storage::load_at(&token_path).await.unwrap();
         assert!(loaded.is_none());
     }
 
@@ -381,8 +404,8 @@ mod tests {
     #[spec("AAUTH-005")]
     #[tokio::test]
     async fn test_authenticate_fails_on_rejected_signature() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = storage::delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("agent_token");
 
         let mock_server = MockServer::start().await;
 
@@ -402,7 +425,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let config = AgentAuthConfig::new(mock_server.uri()).with_max_retries(0);
+        let config = AgentAuthConfig::new(mock_server.uri())
+            .with_max_retries(0)
+            .with_token_path(&token_path);
         let client = AgentAuthClient::with_config(config).unwrap();
 
         let keypair = AgentKeypair::generate();
@@ -410,7 +435,7 @@ mod tests {
 
         assert!(matches!(result, Err(AgentAuthError::TokenRequest(_))));
 
-        let loaded = storage::load_token().await.unwrap();
+        let loaded = storage::load_at(&token_path).await.unwrap();
         assert!(loaded.is_none());
     }
 
@@ -424,8 +449,8 @@ mod tests {
     #[spec("AAUTH-004")]
     #[tokio::test]
     async fn test_get_token_replaces_expired_token() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = storage::delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("agent_token");
 
         let expired = StoredToken::new(
             "stale-token".to_string(),
@@ -433,7 +458,7 @@ mod tests {
             chrono::Utc::now() - chrono::Duration::minutes(5),
             vec!["agent.capability.chat".to_string()],
         );
-        storage::store_token(&expired).await.unwrap();
+        storage::store_at(&token_path, &expired).await.unwrap();
 
         let mock_server = MockServer::start().await;
 
@@ -457,7 +482,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let config = AgentAuthConfig::new(mock_server.uri());
+        let config = AgentAuthConfig::new(mock_server.uri()).with_token_path(&token_path);
         let client = AgentAuthClient::with_config(config).unwrap();
 
         let refreshed = client.get_token(&keypair).await.unwrap();
@@ -467,7 +492,7 @@ mod tests {
         assert!(!refreshed.is_expired());
 
         // Old token replaced: storage now holds only the new token.
-        let stored = storage::load_token().await.unwrap().unwrap();
+        let stored = storage::load_at(&token_path).await.unwrap().unwrap();
         assert_eq!(stored.token, refreshed.token);
         assert_eq!(stored.did, refreshed.did);
         assert_eq!(stored.entitlements, refreshed.entitlements);
@@ -475,8 +500,6 @@ mod tests {
         let requests = mock_server.received_requests().await.unwrap();
         let paths: Vec<&str> = requests.iter().map(|r| r.url.path()).collect();
         assert_eq!(paths, ["/agents/challenge", "/agents/token"]);
-
-        let _ = storage::delete_token().await;
     }
 
     /// Test AAUTH-004: Refresh expired token — valid token is not refreshed.
@@ -487,8 +510,8 @@ mod tests {
     #[spec("AAUTH-004")]
     #[tokio::test]
     async fn test_get_token_reuses_valid_token_without_server() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = storage::delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("agent_token");
 
         let valid = StoredToken::new(
             "live-token".to_string(),
@@ -496,10 +519,10 @@ mod tests {
             chrono::Utc::now() + chrono::Duration::hours(1),
             vec!["agent.capability.chat".to_string()],
         );
-        storage::store_token(&valid).await.unwrap();
+        storage::store_at(&token_path, &valid).await.unwrap();
 
         let mock_server = MockServer::start().await;
-        let config = AgentAuthConfig::new(mock_server.uri());
+        let config = AgentAuthConfig::new(mock_server.uri()).with_token_path(&token_path);
         let client = AgentAuthClient::with_config(config).unwrap();
 
         let keypair = AgentKeypair::generate();
@@ -513,8 +536,6 @@ mod tests {
             requests.is_empty(),
             "valid cached token must not trigger a token request"
         );
-
-        let _ = storage::delete_token().await;
     }
 
     /// Test AAUTH-006: Delete token on logout — client-facing path.
@@ -524,8 +545,8 @@ mod tests {
     #[spec("AAUTH-006")]
     #[tokio::test]
     async fn test_clear_token_removes_cached_token() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = storage::delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("agent_token");
 
         let token = StoredToken::new(
             "cached-token".to_string(),
@@ -533,15 +554,14 @@ mod tests {
             chrono::Utc::now() + chrono::Duration::hours(1),
             vec!["agent.capability.chat".to_string()],
         );
-        storage::store_token(&token).await.unwrap();
+        storage::store_at(&token_path, &token).await.unwrap();
 
-        let client = AgentAuthClient::new().unwrap();
+        let config = AgentAuthConfig::default().with_token_path(&token_path);
+        let client = AgentAuthClient::with_config(config).unwrap();
         assert!(client.get_cached_token().await.unwrap().is_some());
 
         client.clear_token().await.unwrap();
 
         assert!(client.get_cached_token().await.unwrap().is_none());
-
-        let _ = storage::delete_token().await;
     }
 }

@@ -1,8 +1,9 @@
 use crate::{error::AgentAuthError, types::StoredToken};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Get the platform-specific token storage path.
-fn get_token_path() -> Result<PathBuf, AgentAuthError> {
+/// Where the token is kept on this platform, unless a client is configured
+/// with another place.
+pub(crate) fn default_token_path() -> Result<PathBuf, AgentAuthError> {
     let base_dir = if cfg!(target_os = "macos") {
         dirs::data_dir()
             .map(|p| p.join("arkavo"))
@@ -26,53 +27,59 @@ fn get_token_path() -> Result<PathBuf, AgentAuthError> {
 
 /// Store a token to disk.
 pub async fn store_token(token: &StoredToken) -> Result<(), AgentAuthError> {
-    let path = get_token_path()?;
+    store_at(&default_token_path()?, token).await
+}
 
+/// Load a token from disk.
+pub async fn load_token() -> Result<Option<StoredToken>, AgentAuthError> {
+    load_at(&default_token_path()?).await
+}
+
+/// Delete the stored token.
+pub async fn delete_token() -> Result<(), AgentAuthError> {
+    delete_at(&default_token_path()?).await
+}
+
+pub(crate) async fn store_at(path: &Path, token: &StoredToken) -> Result<(), AgentAuthError> {
     // Create parent directory if it doesn't exist
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
 
     let json = serde_json::to_string_pretty(token)?;
-    tokio::fs::write(&path, &json).await?;
+    tokio::fs::write(path, &json).await?;
 
     // Set restrictive permissions on Unix
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(0o600);
-        tokio::fs::set_permissions(&path, perms).await?;
+        tokio::fs::set_permissions(path, perms).await?;
     }
 
     Ok(())
 }
 
-/// Load a token from disk.
-pub async fn load_token() -> Result<Option<StoredToken>, AgentAuthError> {
-    let path = get_token_path()?;
-
+pub(crate) async fn load_at(path: &Path) -> Result<Option<StoredToken>, AgentAuthError> {
     if !path.exists() {
         return Ok(None);
     }
 
-    let json = tokio::fs::read_to_string(&path).await?;
+    let json = tokio::fs::read_to_string(path).await?;
     let token: StoredToken = serde_json::from_str(&json)?;
 
     // Auto-cleanup expired tokens
     if token.is_expired() {
-        let _ = delete_token().await;
+        let _ = delete_at(path).await;
         return Ok(None);
     }
 
     Ok(Some(token))
 }
 
-/// Delete the stored token.
-pub async fn delete_token() -> Result<(), AgentAuthError> {
-    let path = get_token_path()?;
-
+pub(crate) async fn delete_at(path: &Path) -> Result<(), AgentAuthError> {
     if path.exists() {
-        tokio::fs::remove_file(&path).await?;
+        tokio::fs::remove_file(path).await?;
     }
 
     Ok(())
@@ -82,17 +89,14 @@ pub async fn delete_token() -> Result<(), AgentAuthError> {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::test_helpers::TEST_LOCK;
     use arkavo_test_macros::spec;
     use chrono::{Duration, Utc};
 
     #[spec("AAUTH-003")]
     #[tokio::test]
     async fn test_token_storage_roundtrip() {
-        let _guard = TEST_LOCK.lock().await;
-
-        // Cleanup before test
-        let _ = delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent_token");
 
         let token = StoredToken::new(
             "test_token".to_string(),
@@ -102,29 +106,27 @@ mod tests {
         );
 
         // Store
-        store_token(&token).await.unwrap();
+        store_at(&path, &token).await.unwrap();
 
         // Load
-        let loaded = load_token().await.unwrap();
+        let loaded = load_at(&path).await.unwrap();
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(loaded.token, token.token);
         assert_eq!(loaded.did, token.did);
 
         // Cleanup
-        delete_token().await.unwrap();
+        delete_at(&path).await.unwrap();
 
         // Verify deleted
-        let loaded = load_token().await.unwrap();
+        let loaded = load_at(&path).await.unwrap();
         assert!(loaded.is_none());
     }
 
     #[tokio::test]
     async fn test_expired_token_cleanup() {
-        let _guard = TEST_LOCK.lock().await;
-
-        // Cleanup before test to ensure no stale tokens
-        let _ = delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent_token");
 
         let token = StoredToken::new(
             "expired_token".to_string(),
@@ -134,14 +136,13 @@ mod tests {
         );
 
         // Store expired token (bypass the is_expired check in store)
-        store_token(&token).await.unwrap();
+        store_at(&path, &token).await.unwrap();
 
         // Loading should return None and delete the file
-        let loaded = load_token().await.unwrap();
+        let loaded = load_at(&path).await.unwrap();
         assert!(loaded.is_none());
 
         // Verify file was actually deleted
-        let path = get_token_path().unwrap();
         assert!(!path.exists());
     }
 
@@ -154,8 +155,8 @@ mod tests {
     #[spec("AAUTH-002")]
     #[tokio::test]
     async fn test_store_token_securely() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent_token");
 
         let expires = Utc::now() + Duration::hours(1);
         let token = StoredToken::new(
@@ -169,12 +170,11 @@ mod tests {
         )
         .with_delegation_jwt(Some("delegation.jwt.value".to_string()));
 
-        store_token(&token).await.unwrap();
+        store_at(&path, &token).await.unwrap();
 
-        let path = get_token_path().unwrap();
         assert!(
             path.exists(),
-            "token file should be written to platform storage"
+            "token file should be written where the client keeps it"
         );
 
         // Verify restrictive permissions on Unix.
@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(parsed.delegation_jwt, token.delegation_jwt);
         assert!(parsed.stored_at <= Utc::now());
 
-        delete_token().await.unwrap();
+        delete_at(&path).await.unwrap();
     }
 
     /// Test AAUTH-003: Load stored token — not-found case.
@@ -207,10 +207,10 @@ mod tests {
     #[spec("AAUTH-003")]
     #[tokio::test]
     async fn test_load_token_not_found_returns_none() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent_token");
 
-        let loaded = load_token().await.unwrap();
+        let loaded = load_at(&path).await.unwrap();
         assert!(loaded.is_none(), "missing token file should load as None");
     }
 
@@ -221,8 +221,8 @@ mod tests {
     #[spec("AAUTH-002")]
     #[tokio::test]
     async fn test_store_token_overwrites_existing() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent_token");
 
         let first = StoredToken::new(
             "first-token".to_string(),
@@ -230,7 +230,7 @@ mod tests {
             Utc::now() + Duration::hours(1),
             vec!["agent.capability.chat".to_string()],
         );
-        store_token(&first).await.unwrap();
+        store_at(&path, &first).await.unwrap();
 
         let second = StoredToken::new(
             "second-token".to_string(),
@@ -238,14 +238,14 @@ mod tests {
             Utc::now() + Duration::hours(2),
             vec!["agent.capability.read".to_string()],
         );
-        store_token(&second).await.unwrap();
+        store_at(&path, &second).await.unwrap();
 
-        let loaded = load_token().await.unwrap().unwrap();
+        let loaded = load_at(&path).await.unwrap().unwrap();
         assert_eq!(loaded.token, "second-token");
         assert_eq!(loaded.did, "did:key:z6MkSecond");
         assert_eq!(loaded.entitlements, vec!["agent.capability.read"]);
 
-        delete_token().await.unwrap();
+        delete_at(&path).await.unwrap();
     }
 
     /// Test AAUTH-006: Delete token on logout.
@@ -256,8 +256,8 @@ mod tests {
     #[spec("AAUTH-006")]
     #[tokio::test]
     async fn test_delete_token_removes_token_and_metadata() {
-        let _guard = TEST_LOCK.lock().await;
-        let _ = delete_token().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent_token");
 
         let token = StoredToken::new(
             "logout-token".to_string(),
@@ -266,21 +266,36 @@ mod tests {
             vec!["agent.capability.chat".to_string()],
         )
         .with_delegation_jwt(Some("delegation.jwt.value".to_string()));
-        store_token(&token).await.unwrap();
+        store_at(&path, &token).await.unwrap();
 
-        let path = get_token_path().unwrap();
         assert!(path.exists());
 
-        delete_token().await.unwrap();
+        delete_at(&path).await.unwrap();
         assert!(!path.exists(), "token file should be removed from storage");
 
-        let loaded = load_token().await.unwrap();
+        let loaded = load_at(&path).await.unwrap();
         assert!(
             loaded.is_none(),
             "subsequent loads must fail to return a token"
         );
 
         // Logout without a stored token is a successful no-op.
-        delete_token().await.unwrap();
+        delete_at(&path).await.unwrap();
+    }
+
+    /// The developer's own token lives at the platform path; every test
+    /// above uses a directory of its own, so none of them can read, replace
+    /// or delete it, and they do not depend on running one at a time.
+    #[test]
+    fn the_platform_path_names_the_token_file_in_an_arkavo_directory() {
+        let path = default_token_path().unwrap();
+        assert_eq!(path.file_name().unwrap(), "agent_token");
+        let dir = path
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy();
+        assert!(dir.ends_with("arkavo"), "{dir}");
     }
 }

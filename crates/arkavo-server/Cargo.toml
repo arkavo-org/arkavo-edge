@@ -103,6 +103,7 @@ arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-autolearn = { path = "../arkavo-autolearn" }
 arkavo-ensemble = { path = "../arkavo-ensemble" }
 arkavo-ucp = { path = "../arkavo-ucp" }
+arkavo-market = { path = "../arkavo-market" }
 arkavo-critic = { path = "../arkavo-critic" }
 arkavo-trust = { path = "../arkavo-trust" }
 arkavo-device-identity = { path = "../arkavo-device-identity" }

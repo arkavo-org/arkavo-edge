@@ -7,6 +7,7 @@ pub mod chat_pack;
 pub mod dataflow;
 pub mod kit;
 pub mod login;
+pub mod market;
 pub mod mcp_proxy;
 pub mod mesh;
 pub mod model;

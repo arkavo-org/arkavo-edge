@@ -102,6 +102,7 @@ arkavo-budget = { path = "../arkavo-budget" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-hrm = { path = "../arkavo-hrm" }
 arkavo-ucp = { path = "../arkavo-ucp" }
+arkavo-market = { path = "../arkavo-market" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
 arkavo-dispatch-gate = { path = "../arkavo-dispatch-gate" }

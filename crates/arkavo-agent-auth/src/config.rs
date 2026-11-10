@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Configuration for the agent authentication client.
@@ -11,15 +12,20 @@ pub struct AgentAuthConfig {
     pub max_retries: u32,
     /// Base delay for exponential backoff (milliseconds).
     pub retry_base_delay_ms: u64,
+    /// Where the token is kept. `None` is the platform's data directory.
+    pub token_path: Option<PathBuf>,
 }
 
 impl Default for AgentAuthConfig {
     fn default() -> Self {
         Self {
-            base_url: "https://100.arkavo.net".to_string(),
+            // The agent endpoints (`/agents/challenge`, `/agents/token`) are
+            // identity's, not the KAS host's.
+            base_url: "https://identity.arkavo.net".to_string(),
             timeout: Duration::from_secs(30),
             max_retries: 3,
             retry_base_delay_ms: 100,
+            token_path: None,
         }
     }
 }
@@ -44,6 +50,13 @@ impl AgentAuthConfig {
     #[must_use]
     pub fn with_max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = max_retries;
+        self
+    }
+
+    /// Keep the token at `path` instead of the platform's data directory.
+    #[must_use]
+    pub fn with_token_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.token_path = Some(path.into());
         self
     }
 }

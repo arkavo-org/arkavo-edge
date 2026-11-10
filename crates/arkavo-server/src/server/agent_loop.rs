@@ -64,11 +64,7 @@ async fn build_full_registry(
             registry.register(&tool_name, Box::new(bridge));
         }
     }
-    arkavo_mcp_mesh::register_tools(&mut registry, config.mesh_state.clone());
-    super::operator_notices::register(
-        &mut registry,
-        super::operator_notices::OperatorNotices::global(),
-    );
+    register_own_tools(&mut registry, &config.mesh_state);
     if let Some(assets) = &config.assets {
         assets.register_tools(&mut registry, outbox.clone());
     }
@@ -93,6 +89,25 @@ async fn build_full_registry(
     registry
 }
 
+/// The tools the agent offers on its own account, beside what its MCP
+/// servers and data plane bring.
+fn register_own_tools(
+    registry: &mut arkavo_mcp_tools::ToolRegistry,
+    mesh_state: &Arc<arkavo_mcp_mesh::MeshToolsState>,
+) {
+    arkavo_mcp_mesh::register_tools(registry, mesh_state.clone());
+    super::operator_notices::register(registry, super::operator_notices::OperatorNotices::global());
+    arkavo_market::register_tools(registry);
+}
+
+/// What a role may call: its grants, and telling the operator something is
+/// wrong, which every role can do (SRV-016).
+fn role_grants(granted: &std::collections::HashSet<String>) -> std::collections::HashSet<String> {
+    let mut granted = granted.clone();
+    granted.insert(super::operator_notices::NOTIFY_OPERATOR.to_string());
+    granted
+}
+
 /// Derive a registry filtered to the SwarmKit grant set.
 async fn derive_filtered_registry(
     config: &AgentLoopConfig,
@@ -100,10 +115,7 @@ async fn derive_filtered_registry(
     granted: &std::collections::HashSet<String>,
 ) -> Arc<arkavo_mcp_tools::ToolRegistry> {
     let mut registry = build_full_registry(config, outbox).await;
-    // Every role can tell the operator something is wrong (SRV-016).
-    let mut granted = granted.clone();
-    granted.insert(super::operator_notices::NOTIFY_OPERATOR.to_string());
-    registry.retain_granted(&granted);
+    registry.retain_granted(&role_grants(granted));
     Arc::new(registry)
 }
 
@@ -1403,5 +1415,49 @@ mod grant_hash_tests {
         let a: HashSet<String> = ["git_diff"].iter().map(|s| s.to_string()).collect();
         let b: HashSet<String> = ["github_pr_create"].iter().map(|s| s.to_string()).collect();
         assert_ne!(hash_of(&a), hash_of(&b));
+    }
+}
+
+#[cfg(test)]
+mod own_tools_tests {
+    use super::*;
+
+    fn names(registry: &arkavo_mcp_tools::ToolRegistry) -> Vec<String> {
+        registry.list_tools().into_iter().map(|t| t.name).collect()
+    }
+
+    /// The loop is where a person's "buy it" reaches the model, so the ask
+    /// has to be among the tools it is offered there.
+    #[test]
+    fn the_loop_offers_the_market_ask() {
+        let mut registry = arkavo_mcp_tools::ToolRegistry::empty();
+        register_own_tools(
+            &mut registry,
+            &Arc::new(arkavo_mcp_mesh::MeshToolsState::new()),
+        );
+
+        let offered = names(&registry);
+        assert!(offered.contains(&arkavo_market::MARKET_REQUEST_TOOL.to_string()));
+        assert!(offered.contains(&super::super::operator_notices::NOTIFY_OPERATOR.to_string()));
+    }
+
+    /// Asking for a purchase in the owner's name is a privilege a role has to
+    /// be granted, unlike telling the operator something is wrong.
+    #[test]
+    fn a_role_without_the_grant_is_not_offered_the_market_ask() {
+        let mesh = Arc::new(arkavo_mcp_mesh::MeshToolsState::new());
+        let mut registry = arkavo_mcp_tools::ToolRegistry::empty();
+        register_own_tools(&mut registry, &mesh);
+        registry.retain_granted(&role_grants(&std::collections::HashSet::new()));
+        assert_eq!(
+            names(&registry),
+            [super::super::operator_notices::NOTIFY_OPERATOR]
+        );
+
+        let mut registry = arkavo_mcp_tools::ToolRegistry::empty();
+        register_own_tools(&mut registry, &mesh);
+        let granted = [arkavo_market::MARKET_REQUEST_TOOL.to_string()].into();
+        registry.retain_granted(&role_grants(&granted));
+        assert!(names(&registry).contains(&arkavo_market::MARKET_REQUEST_TOOL.to_string()));
     }
 }

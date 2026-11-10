@@ -21,6 +21,8 @@ pub struct TokenRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenResponse {
     pub token: String,
+    /// Unix seconds on the wire, as authnz-rs sends it.
+    #[serde(with = "chrono::serde::ts_seconds")]
     pub expires_at: DateTime<Utc>,
     #[serde(default)]
     pub entitlements: Vec<String>,

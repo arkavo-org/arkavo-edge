@@ -130,6 +130,7 @@ Run `arkavo <command> --help` for the options of `agent`, `chat`, `task`, `ui`, 
 | `arkavo mcp proxy` | Permit-gated stdio MCP relay in front of an upstream MCP server: `arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--hash sha256\|blake3] -- <upstream command> [args...]`. A `tools/call` is admitted only with a valid permit and proof of possession. |
 | `arkavo security audit` | Report on the configuration an agent would run with in the current directory, including the address its RPC endpoint would listen on. `--bind <address>` audits the agent as started with `--bind <address>`, `--json` prints JSON. Exits with status 1 when a check fails. |
 | `arkavo login`, `arkavo logout` | Sign in with Arkavo Creator; clear the stored identity token. Both act immediately and take no options. |
+| `arkavo market` | Ask the Arkavo market for a purchase the owner pays: `arkavo market request --offer <offer-id> --term <3\|12>` prints a payment link for a prepaid term, and `arkavo market withdraw <request-id>` withdraws it. The agent never pays. Its owner must have allowed purchase requests: start the agent with `arkavo agent run --market-requests` and approve the authorization link. |
 
 ## Usage Examples
 

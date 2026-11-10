@@ -113,6 +113,9 @@ impl LocalEngine {
             arkavo_ucp::register_tools(&mut registry, ucp_state);
         }
 
+        // Asking the market for a purchase the owner then pays
+        arkavo_market::register_tools(&mut registry);
+
         // Claude Agent SDK tools (feature-gated)
         #[cfg(feature = "claude-agent")]
         {
