@@ -11,6 +11,8 @@ ignore = [
     # Transitive unmaintained crates with no alternatives
     { id = "RUSTSEC-2024-0436", reason = "paste in ark-ff, macro_rules_attribute and netlink-packet-core (no replacement available)" },
     { id = "RUSTSEC-2025-0141", reason = "bincode in hnsw_rs (transitive, no direct usage)" },
+    # Fixed in libsqlite3-sys 0.39.0; sqlx-sqlite 0.9.0, the newest, requires <0.38.0.
+    { id = "RUSTSEC-2026-0459", reason = "bundled SQLite WAL memory exposure (local, crafted db files); only databases this program creates are opened; no sqlx release accepts the fixed libsqlite3-sys yet" },
 ]
 
 [bans]
