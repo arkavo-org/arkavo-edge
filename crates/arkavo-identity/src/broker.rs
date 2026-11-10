@@ -5,14 +5,21 @@ use crate::pkce::Pkce;
 pub const CREATOR_BUNDLE_ID: &str = "com.arkavo.ArkavoCreator";
 pub const CLIENT_ID: &str = "arkavo-edge";
 pub const SCOPE: &str = "openid offline_access";
+/// The scope that lets its bearer authorize agents for the signed-in person.
+pub const DELEGATE_SCOPE: &str = "agents:delegate";
 
-pub fn authorize_url(endpoints: &IdentityEndpoints, pkce: &Pkce, redirect_uri: &str) -> String {
+pub fn authorize_url(
+    endpoints: &IdentityEndpoints,
+    pkce: &Pkce,
+    redirect_uri: &str,
+    scope: &str,
+) -> String {
     // Query encoding must use %20 for space, not form-urlencoded `+`.
     let query = [
         ("response_type", "code"),
         ("client_id", CLIENT_ID),
         ("redirect_uri", redirect_uri),
-        ("scope", SCOPE),
+        ("scope", scope),
         ("code_challenge", pkce.challenge.as_str()),
         ("code_challenge_method", "S256"),
         ("state", pkce.state.as_str()),
@@ -106,7 +113,7 @@ mod tests {
             challenge: "c".into(),
             state: "s".into(),
         };
-        let url = authorize_url(&ep, &pkce, "http://127.0.0.1:52171/cb");
+        let url = authorize_url(&ep, &pkce, "http://127.0.0.1:52171/cb", SCOPE);
         assert!(url.contains("response_type=code"));
         assert!(
             url.contains("scope=openid%20offline_access"),
@@ -141,7 +148,7 @@ mod tests {
             challenge: "c".into(),
             state: "s".into(),
         };
-        let url = authorize_url(&ep, &pkce, "http://127.0.0.1:52171/cb");
+        let url = authorize_url(&ep, &pkce, "http://127.0.0.1:52171/cb", SCOPE);
         let (base, query) = url.split_once('?').expect("query present");
         assert_eq!(base, "https://identity.arkavo.net/oauth/authorize");
         let params: std::collections::HashMap<&str, &str> = query

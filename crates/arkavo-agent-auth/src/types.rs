@@ -70,3 +70,38 @@ impl StoredToken {
         Utc::now() >= self.expires_at
     }
 }
+
+/// What an owner lets one agent do: the body of identity's
+/// `POST /agents/authorize`.
+///
+/// An authorize replaces whatever the agent was delegated before, so
+/// `entitlements` is the whole of what it may carry afterwards. Identity
+/// refuses the call when the owner does not hold one of them.
+#[derive(Debug, Clone, Serialize)]
+pub struct Delegation {
+    /// The agent's `did:key`.
+    pub agent_did: String,
+    /// A label for people; not an identifier.
+    pub name: String,
+    pub entitlements: Vec<String>,
+    /// Caps each token minted under this delegation at five minutes.
+    pub short_lived: bool,
+}
+
+/// Identity's answer to an authorize it accepted.
+#[derive(Debug, Clone)]
+pub struct Authorized {
+    /// The agent can mint tokens until then. After it the owner authorizes
+    /// again, with a fresh passkey sign-in.
+    pub appraised_until: DateTime<Utc>,
+}
+
+/// The wire form of [`Authorized`], with the fields that are checked and
+/// not kept.
+#[derive(Debug, Deserialize)]
+pub(crate) struct AuthorizeResponse {
+    pub(crate) agent: String,
+    pub(crate) state: String,
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub(crate) appraised_until: DateTime<Utc>,
+}

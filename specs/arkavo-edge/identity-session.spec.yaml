@@ -39,7 +39,7 @@ scenarios:
       - store::delete removes the identity_token file; a missing file is not an error
       - The IdP is never contacted; logout is purely local
       - Nothing is printed on success
-    refs: [crates/arkavo-cli/src/commands/login.rs:14-18,crates/arkavo-identity/src/session.rs:178-184,crates/arkavo-identity/src/store.rs:91-97]
+    refs: [crates/arkavo-cli/src/commands/login.rs:14-18,crates/arkavo-identity/src/session.rs:178-184,crates/arkavo-identity/src/store.rs:94-100]
     wip: true
 
   - id: IDS-003
@@ -85,12 +85,12 @@ scenarios:
     criticality: high
     given:
       - A generated Pkce with state
-    when: interactive_login prints the pairing code
+    when: The Creator ceremony prints the pairing code
     then:
       - 'stdout shows "Pairing code: XXXX-XXXX" where the 8 characters are RFC 4648 base32 (alphabet A-Z2-7, no padding) of the first 5 bytes of SHA-256(state)'
       - 'The derivation vector holds: pairing_code("test-state") == "DFRA-BZGI"'
       - The code is printed before the Creator launch so the user can compare it with the consent sheet (Creator spec CRE-102/CRE-157 own the display side)
-    refs: [crates/arkavo-identity/src/pkce.rs:31-35,44-58,crates/arkavo-identity/src/session.rs:237-240]
+    refs: [crates/arkavo-identity/src/pkce.rs:31-35,44-58,crates/arkavo-identity/src/session.rs:239-242]
 
   - id: IDS-007
     name: Build the authorize URL with exact query parameters
@@ -102,7 +102,7 @@ scenarios:
       - Query carries response_type=code, client_id=arkavo-edge, redirect_uri, scope="openid offline_access" (space encoded %20, never form-urlencoded "+"), code_challenge, code_challenge_method=S256, and state
       - Percent-encoding leaves only [A-Za-z0-9-._~] unescaped
       - An authorization_endpoint already containing "?" gets the query appended with "&", otherwise with "?"
-    refs: [crates/arkavo-identity/src/broker.rs:9-46]
+    refs: [crates/arkavo-identity/src/broker.rs:11-53]
 
   - id: IDS-008
     name: Hand off to Arkavo Creator via the arkavocreator URL scheme
@@ -116,7 +116,7 @@ scenarios:
       - A failed open maps to IdentityError::LoginRequired("install Arkavo Creator and run 'arkavo login'")
       - Off macOS the launch always fails with IdentityError::Unsupported
       - The CLI never GETs the authorize endpoint itself; Creator performs that request (Creator spec CRE-156 owns the approve/deny network behavior)
-    refs: [crates/arkavo-identity/src/broker.rs:48-75,crates/arkavo-identity/src/session.rs:61-70,crates/arkavo-identity/tests/bearer_flow.rs:108-112]
+    refs: [crates/arkavo-identity/src/broker.rs:55-82,crates/arkavo-identity/src/session.rs:61-70,crates/arkavo-identity/tests/bearer_flow.rs:108-112]
     wip: true
 
   - id: IDS-009
@@ -159,7 +159,7 @@ scenarios:
     then:
       - wait_for_callback returns IdentityError::TimedOut
       - Display text is "timed out waiting for Arkavo Creator"
-    refs: [crates/arkavo-identity/src/loopback.rs:9,37-46,crates/arkavo-identity/src/session.rs:244-249]
+    refs: [crates/arkavo-identity/src/loopback.rs:9,37-46,crates/arkavo-identity/src/session.rs:246-251]
 
   - id: IDS-012
     name: Exchange code and refresh tokens as a public client
@@ -173,7 +173,7 @@ scenarios:
       - A non-2xx response yields IdentityError::Token containing the raw response body
       - A 2xx response without a non-empty access_token yields IdentityError::Token("missing access_token")
       - expires_at is wall-clock now plus expires_in (missing/invalid expires_in counts as 0); this computation does not use the session's injected Clock
-    refs: [crates/arkavo-identity/src/token.rs:6-100]
+    refs: [crates/arkavo-identity/src/token.rs:6-105]
 
   - id: IDS-013
     name: Interactive login orchestrates the full ceremony
@@ -184,10 +184,11 @@ scenarios:
     then:
       - Order is discover → loopback bind → Pkce::generate → print pairing code → authorize_url → creator_url → launcher.launch (awaited) → wait_for_callback → token exchange → store::save → cache
       - The launcher future is awaited before wait_for_callback begins, so the Launcher must not block on its own callback GET
-      - Callback::Error maps to IdentityError::AccessDenied regardless of the error value (e.g. error=access_denied from a user denial)
+      - Callback::Error with error=access_denied (the person declined, or Creator could not complete the sign-in) maps to IdentityError::AccessDenied
+      - 'Any other error on the redirect is the identity server answering (e.g. invalid_scope) and maps to IdentityError::Token("identity server refused the sign-in: <error>")'
       - On success the tokens are saved to the token file and the access token is cached
       - Any failure before the callback leaves no token file behind
-    refs: [crates/arkavo-identity/src/session.rs:231-266,crates/arkavo-identity/tests/bearer_flow.rs:1-7,92-157]
+    refs: [crates/arkavo-identity/src/session.rs:233-281,crates/arkavo-identity/tests/bearer_flow.rs:1-7,92-157,crates/arkavo-identity/tests/step_up.rs:193-232]
 
   - id: IDS-014
     name: Store tokens atomically at mode 0o600 under the platform data dir
@@ -201,7 +202,7 @@ scenarios:
       - save creates parent directories, writes to a sibling "<path>.tmp" with create_new and unix mode 0o600 (a stale leftover .tmp is removed first so it cannot keep a 0o644 mode), then renames over the destination (on Windows the destination is removed first)
       - A failed open, write, or rename removes the .tmp and never leaves the destination empty
       - 'load returns Ok(None) for a missing file and IdentityError::Store("parse token file: ...") for malformed JSON'
-    refs: [crates/arkavo-identity/src/store.rs:8-97]
+    refs: [crates/arkavo-identity/src/store.rs:8-100]
 
   - id: IDS-015
     name: bearer() resolves cache, store, refresh, then prompt-gated login
@@ -291,3 +292,17 @@ scenarios:
       - Exactly one interactive ceremony runs (one Creator launch, one loopback bind)
       - The second call observes the first call's freshly cached access token and returns it without launching again
     refs: [crates/arkavo-identity/src/session.rs:44-48,crates/arkavo-identity/src/session.rs:122-124,crates/arkavo-identity/tests/bearer_flow.rs:118-137]
+
+  - id: IDS-022
+    name: Step-up for agents:delegate is a fresh ceremony whose token is never kept
+    criticality: critical
+    given:
+      - An owner command needs a token that can authorize agents (scope agents:delegate)
+      - The everyday session may or may not be stored
+    when: step_up(DELEGATE_SCOPE) runs
+    then:
+      - A new Creator ceremony asks for exactly "openid agents:delegate"; offline_access is not asked for, so no refresh token can renew the result
+      - The access token is returned to the caller and is neither written to the token file nor cached; a later bearer() still answers the everyday session
+      - A token response whose scope does not list agents:delegate is refused with IdentityError::Token("identity server did not grant agents:delegate")
+      - The ceremony shares the session's ceremony lock, so it never overlaps a login
+    refs: [crates/arkavo-identity/src/session.rs:281-301,crates/arkavo-identity/src/broker.rs:7-9,crates/arkavo-identity/tests/step_up.rs:152-191]

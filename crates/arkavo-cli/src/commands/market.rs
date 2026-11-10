@@ -20,8 +20,8 @@ COMMANDS:
     withdraw    Withdraw an open request; its link stops working
 
 The request is made as this machine's agent, for the account of the owner who
-authorized it. The owner must have allowed purchase requests: start the agent
-with `arkavo agent run --market-requests` and approve the link it shows.
+authorized it. The owner must have allowed purchase requests: they run
+`arkavo agent authorize --market-requests` and approve it in Arkavo Creator.
 Offer IDs are listed at https://market.arkavo.com/api.
 
 OPTIONS:

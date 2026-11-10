@@ -2,7 +2,10 @@ use crate::{
     config::AgentAuthConfig,
     error::AgentAuthError,
     storage,
-    types::{ChallengeResponse, StoredToken, TokenRequest, TokenResponse},
+    types::{
+        AuthorizeResponse, Authorized, ChallengeResponse, Delegation, StoredToken, TokenRequest,
+        TokenResponse,
+    },
 };
 use arkavo_crypto::AgentKeypair;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
@@ -190,6 +193,51 @@ impl AgentAuthClient {
             token_response.entitlements,
         )
         .with_delegation_jwt(token_response.delegation_jwt))
+    }
+
+    /// Authorize an agent for the owner whose sign-in `owner_token` is.
+    ///
+    /// `owner_token` is an identity access token carrying `agents:delegate`,
+    /// from a passkey sign-in no more than an hour old. It is the owner's
+    /// decision, so this is never retried: a refusal or a stale sign-in needs
+    /// the owner, not another attempt.
+    pub async fn authorize(
+        &self,
+        owner_token: &str,
+        delegation: &Delegation,
+    ) -> Result<Authorized, AgentAuthError> {
+        let url = format!("{}/agents/authorize", self.config.base_url);
+        let response = self
+            .http_client
+            .post(&url)
+            .bearer_auth(owner_token)
+            .json(delegation)
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(match status {
+                reqwest::StatusCode::FORBIDDEN => AgentAuthError::AuthorizeRefused(body),
+                reqwest::StatusCode::UNAUTHORIZED => AgentAuthError::OwnerSignInRejected(body),
+                _ => AgentAuthError::AuthorizeRequest(format!(
+                    "Server returned status {status}: {body}"
+                )),
+            });
+        }
+
+        let answer: AuthorizeResponse = response.json().await?;
+        if answer.agent != delegation.agent_did || answer.state != "eligible" {
+            return Err(AgentAuthError::InvalidResponse(format!(
+                "identity answered for agent {} in state {}",
+                answer.agent, answer.state
+            )));
+        }
+        tracing::info!(event = "auth_decision", action = "permit", subject = %answer.agent, "Agent authorized by its owner");
+        Ok(Authorized {
+            appraised_until: answer.appraised_until,
+        })
     }
 
     /// Get a valid token, either from cache or by authenticating.

@@ -1042,7 +1042,7 @@ components:
     module: arkavo_identity
     description: OIDC login/logout session brokered by Arkavo Creator (PKCE, loopback callback, token store)
     criticality: critical
-    scenario_count: 21
+    scenario_count: 22
     invariants:
       - Public client arkavo-edge; no client_secret ever sent
       - Loopback callback on numeric 127.0.0.1 ports 52171-52178, path /cb, state-matched

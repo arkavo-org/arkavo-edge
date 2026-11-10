@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod advertise;
+mod authorize;
 mod enlist;
 mod gpu_residency;
 pub mod listen;
@@ -170,6 +171,11 @@ fn parse_args(args: &[String]) -> Result<Invocation, Box<dyn std::error::Error>>
 
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // The owner's command takes its own arguments: `--market-requests` here
+    // is a grant, not a start-up option.
+    if args.first().map(String::as_str) == Some("authorize") {
+        return authorize::execute(&args[1..]);
+    }
     match parse_args(args)? {
         Invocation::Help => {
             print_usage();
@@ -200,11 +206,14 @@ const USAGE: &str = r#"Arkavo Agent - Configure and run AI agents
 USAGE:
     arkavo agent [OPTIONS]
     arkavo agent init <name>
+    arkavo agent authorize --market-requests
     arkavo agent release
 
 SUBCOMMANDS:
     init <name>         [DEPRECATED] alias for 'arkavo kit init <name>'; writes .arkavo/<name>.swarmkit.yaml
     run                 Run an agent (alias for default behavior)
+    authorize           Let this machine's agent act for you; approved in Arkavo
+                        Creator (see `arkavo agent authorize --help`)
     release             Forget the orchestrator this agent takes roles from, and its role
     help                Print this help message
 
@@ -220,7 +229,8 @@ OPTIONS:
     --trust             Show the agent authorization QR code (DID:key) on startup
     --market-requests   Show that QR code asking the owner to also let this agent
                         ask the Arkavo market for purchases, which the owner
-                        then pays (see `arkavo market --help`)
+                        then pays. On a Mac with Arkavo Creator, use
+                        `arkavo agent authorize --market-requests` instead
     --orchestrator <DID>
                         Take kit roles only from this orchestrator's did:key
                         (the one `arkavo kit apply` prints); remembered

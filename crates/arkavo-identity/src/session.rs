@@ -42,7 +42,7 @@ pub struct IdentitySession {
     token_path: Option<PathBuf>,
     clock: Arc<dyn Clock>,
     launcher: Arc<dyn Launcher>,
-    ceremony: tokio::sync::Mutex<()>,
+    ceremony_lock: tokio::sync::Mutex<()>,
     cache: Mutex<Option<CachedAccess>>,
     force_refresh: AtomicBool,
 }
@@ -93,7 +93,7 @@ impl IdentitySession {
             token_path: crate::store::token_path().ok(),
             clock: Arc::new(SystemClock),
             launcher: Arc::new(CreatorLauncher),
-            ceremony: tokio::sync::Mutex::new(()),
+            ceremony_lock: tokio::sync::Mutex::new(()),
             cache: Mutex::new(None),
             force_refresh: AtomicBool::new(false),
         }
@@ -107,7 +107,7 @@ impl IdentitySession {
             token_path: Some(cfg.token_path),
             clock: cfg.clock,
             launcher: cfg.launcher,
-            ceremony: tokio::sync::Mutex::new(()),
+            ceremony_lock: tokio::sync::Mutex::new(()),
             cache: Mutex::new(None),
             force_refresh: AtomicBool::new(false),
         }
@@ -121,7 +121,7 @@ impl IdentitySession {
 
     pub async fn bearer(&self, prompt: Prompt) -> Result<String, IdentityError> {
         let path = self.token_file()?;
-        let _guard = self.ceremony.lock().await;
+        let _guard = self.ceremony_lock.lock().await;
         let force = self.force_refresh.load(Ordering::SeqCst);
         if !force && let Some(token) = self.cached_access() {
             return Ok(token);
@@ -177,7 +177,7 @@ impl IdentitySession {
 
     pub async fn logout(&self) -> Result<(), IdentityError> {
         let path = self.token_file()?;
-        let _guard = self.ceremony.lock().await;
+        let _guard = self.ceremony_lock.lock().await;
         self.force_refresh.store(false, Ordering::SeqCst);
         self.clear_cache();
         crate::store::delete(&path)
@@ -228,7 +228,9 @@ impl IdentitySession {
         Ok(tokens.access_token)
     }
 
-    async fn interactive_login(&self) -> Result<String, IdentityError> {
+    /// One Creator ceremony for `scope`: the tokens identity answers with,
+    /// neither stored nor cached.
+    async fn ceremony(&self, scope: &str) -> Result<StoredTokens, IdentityError> {
         let endpoints =
             crate::discovery::discover(&self.http, &self.platform_url, &self.identity_host).await?;
         let bound = crate::loopback::bind()?;
@@ -238,7 +240,7 @@ impl IdentitySession {
             "Pairing code: {}",
             crate::pkce::Pkce::pairing_code(&pkce.state)
         );
-        let authorize = crate::broker::authorize_url(&endpoints, &pkce, &redirect_uri);
+        let authorize = crate::broker::authorize_url(&endpoints, &pkce, &redirect_uri, scope);
         let creator = crate::broker::creator_url(&authorize);
         self.launcher.launch(&creator).await?;
         let callback = crate::loopback::wait_for_callback(
@@ -248,21 +250,54 @@ impl IdentitySession {
         )
         .await?;
         match callback {
-            crate::loopback::Callback::Error { .. } => Err(IdentityError::AccessDenied),
+            crate::loopback::Callback::Error { error, .. } if error == "access_denied" => {
+                Err(IdentityError::AccessDenied)
+            }
+            // Anything else on the redirect is identity's answer, not the
+            // person's: `invalid_scope` when it will not give this client
+            // what was asked for.
+            crate::loopback::Callback::Error { error, .. } => Err(IdentityError::Token(format!(
+                "identity server refused the sign-in: {error}"
+            ))),
             crate::loopback::Callback::Code { code, .. } => {
-                let tokens = crate::token::exchange_code(
+                crate::token::exchange_code(
                     &self.http,
                     &endpoints.token_endpoint,
                     &code,
                     &redirect_uri,
                     &pkce.verifier,
                 )
-                .await?;
-                crate::store::save(&tokens, &self.token_file()?)?;
-                self.remember(&tokens);
-                Ok(tokens.access_token)
+                .await
             }
         }
+    }
+
+    async fn interactive_login(&self) -> Result<String, IdentityError> {
+        let tokens = self.ceremony(crate::broker::SCOPE).await?;
+        crate::store::save(&tokens, &self.token_file()?)?;
+        self.remember(&tokens);
+        Ok(tokens.access_token)
+    }
+
+    /// A fresh Creator ceremony for `openid <scope>`, for one privileged call.
+    ///
+    /// Used for [`crate::DELEGATE_SCOPE`], which lets its bearer authorize
+    /// agents for the person. The token is returned and never stored or
+    /// cached, and `offline_access` is not asked for, so nothing on disk can
+    /// authorize an agent after the command that asked has ended.
+    pub async fn step_up(&self, scope: &str) -> Result<String, IdentityError> {
+        let _guard = self.ceremony_lock.lock().await;
+        let tokens = self.ceremony(&format!("openid {scope}")).await?;
+        let granted = tokens
+            .scope
+            .as_deref()
+            .is_some_and(|granted| granted.split_whitespace().any(|s| s == scope));
+        if !granted {
+            return Err(IdentityError::Token(format!(
+                "identity server did not grant {scope}"
+            )));
+        }
+        Ok(tokens.access_token)
     }
 }
 
@@ -500,6 +535,7 @@ mod tests {
                 access_token: "old".into(),
                 refresh_token: Some("r1".into()),
                 expires_at: 1000,
+                scope: None,
             },
             &path,
         )
@@ -539,6 +575,7 @@ mod tests {
                 access_token: "old".into(),
                 refresh_token: Some("r1".into()),
                 expires_at: 1_000_000_000,
+                scope: None,
             },
             &path,
         )
@@ -619,6 +656,7 @@ mod tests {
                 access_token: "old".into(),
                 refresh_token: Some("r1".into()),
                 expires_at: 1000,
+                scope: None,
             },
             &path,
         )
@@ -667,6 +705,7 @@ mod tests {
                 access_token: "old".into(),
                 refresh_token: Some("r1".into()),
                 expires_at: 1000,
+                scope: None,
             },
             &path,
         )
@@ -793,6 +832,7 @@ mod tests {
                 access_token: "old".into(),
                 refresh_token: Some("r1".into()),
                 expires_at: 1000,
+                scope: None,
             },
             &path,
         )
@@ -871,6 +911,7 @@ mod tests {
                 access_token: "old".into(),
                 refresh_token: None,
                 expires_at: 1_000_000_000,
+                scope: None,
             },
             &path,
         )
