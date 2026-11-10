@@ -9,11 +9,11 @@
 // disallows in the product, where nesting runtimes can panic.
 #![allow(clippy::disallowed_methods)]
 
-use arkavo_agent_auth::{AgentAuthClient, AgentAuthConfig, AgentAuthError};
+use arkavo_agent_auth::{AgentAuthClient, AgentAuthConfig, AgentAuthError, Delegation};
 use arkavo_crypto::AgentKeypair;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::json;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const MARKET_REQUEST: &str = "https://arkavo.net/attr/market/value/request";
@@ -110,4 +110,119 @@ async fn a_refusal_at_the_token_step_is_reported_too() {
         .unwrap_err();
 
     assert!(matches!(&err, AgentAuthError::Refused(text) if text == "Workload quarantined"));
+}
+
+const AGENT: &str = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+
+fn market_delegation() -> Delegation {
+    Delegation {
+        agent_did: AGENT.to_string(),
+        name: "Arkavo Edge".to_string(),
+        entitlements: vec![MARKET_REQUEST.to_string()],
+        short_lived: true,
+    }
+}
+
+/// The owner's authorize, as contract v2 words it: the owner's sign-in token
+/// as a Bearer, and an answer that says until when the agent may mint.
+#[tokio::test]
+async fn authorize_sends_the_delegation_and_reads_identitys_answer() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/agents/authorize"))
+        .and(header("authorization", "Bearer owner-token"))
+        .and(body_json(json!({
+            "agent_did": AGENT,
+            "name": "Arkavo Edge",
+            "entitlements": [MARKET_REQUEST],
+            "short_lived": true,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true,
+            "message": "Agent authorized successfully",
+            "agent": AGENT,
+            "state": "eligible",
+            "state_version": 1,
+            "appraised_until": 1_790_043_200,
+        })))
+        .mount(&server)
+        .await;
+
+    let authorized = client(&server)
+        .authorize("owner-token", &market_delegation())
+        .await
+        .unwrap();
+
+    assert_eq!(authorized.appraised_until.timestamp(), 1_790_043_200);
+}
+
+/// Identity's 403 says what the owner has to change (an entitlement they do
+/// not hold, a quarantined agent), so its words reach the owner.
+#[tokio::test]
+async fn a_refused_authorize_is_reported_in_identity_words() {
+    let server = MockServer::start().await;
+    let refusal =
+        "Entitlement 'https://arkavo.ai/attr/tdf/value/decrypt' is not held by the delegator";
+    Mock::given(method("POST"))
+        .and(path("/agents/authorize"))
+        .respond_with(ResponseTemplate::new(403).set_body_string(refusal))
+        .mount(&server)
+        .await;
+
+    let err = client(&server)
+        .authorize("owner-token", &market_delegation())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(&err, AgentAuthError::AuthorizeRefused(text) if text == refusal));
+    assert!(err.to_string().contains(refusal), "{err}");
+}
+
+/// A 401 means the passkey sign-in behind the token is too old (identity
+/// wants one from the last hour). The owner can fix that; a retry cannot.
+#[tokio::test]
+async fn a_stale_sign_in_is_told_apart_from_a_refusal() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/agents/authorize"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("Unauthorized"))
+        .mount(&server)
+        .await;
+
+    let err = client(&server)
+        .authorize("owner-token", &market_delegation())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, AgentAuthError::OwnerSignInRejected(_)),
+        "{err}"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+/// An answer for a different agent, or one that is not `eligible`, is not the
+/// authorization that was asked for.
+#[tokio::test]
+async fn an_answer_for_another_agent_is_not_taken_as_success() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/agents/authorize"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true,
+            "message": "Agent authorized successfully",
+            "agent": "did:key:z6MkOther",
+            "state": "eligible",
+            "state_version": 1,
+            "appraised_until": 1_790_043_200,
+        })))
+        .mount(&server)
+        .await;
+
+    let err = client(&server)
+        .authorize("owner-token", &market_delegation())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, AgentAuthError::InvalidResponse(_)), "{err}");
 }

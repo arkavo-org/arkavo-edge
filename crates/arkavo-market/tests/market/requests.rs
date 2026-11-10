@@ -1,6 +1,6 @@
 //! `MarketClient`: asking, withdrawing, and what each refusal becomes.
 
-use arkavo_agent_auth::{AgentAuthConfig, AgentAuthError};
+use arkavo_agent_auth::AgentAuthConfig;
 use arkavo_market::{MarketClient, MarketError, Term, Withdrawal};
 use serde_json::json;
 use wiremock::matchers::{method, path};
@@ -67,12 +67,19 @@ async fn without_the_entitlement_the_market_is_never_called() {
         .unwrap_err();
 
     assert!(matches!(err, MarketError::NotDelegated), "{err}");
-    assert!(err.to_string().contains("--market-requests"), "{err}");
+    assert!(
+        err.to_string()
+            .contains("arkavo agent authorize --market-requests"),
+        "{err}"
+    );
     assert!(market_requests(&w).await.is_empty());
 }
 
+/// Regression: an agent with no delegation at all was told to scan a QR code
+/// with a mobile app, which no released app can do. The owner's step is the
+/// same as for an agent that lacks only the market's entitlement.
 #[tokio::test]
-async fn an_agent_nobody_authorized_is_told_so_by_identity() {
+async fn an_agent_nobody_authorized_is_pointed_at_the_owners_step() {
     let w = world(vec![open_request(3)]).await;
     w.identity.reset().await;
     Mock::given(method("GET"))
@@ -87,8 +94,10 @@ async fn an_agent_nobody_authorized_is_told_so_by_identity() {
         .await
         .unwrap_err();
 
+    assert!(matches!(err, MarketError::NotDelegated), "{err}");
     assert!(
-        matches!(err, MarketError::Identity(AgentAuthError::NotAuthorized)),
+        err.to_string()
+            .contains("arkavo agent authorize --market-requests"),
         "{err}"
     );
     assert!(market_requests(&w).await.is_empty());

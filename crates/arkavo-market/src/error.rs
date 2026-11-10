@@ -6,10 +6,9 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum MarketError {
     #[error(
-        "This agent's owner has not let it ask the market for purchases: its token does not \
-         carry {entitlement}. Restart the agent with `--market-requests` and have the owner \
-         approve the new authorization link.",
-        entitlement = crate::REQUEST_ENTITLEMENT
+        "This agent's owner has not let it ask the market for purchases. The owner runs \
+         `arkavo agent authorize --market-requests` on this machine and approves it in Arkavo \
+         Creator."
     )]
     NotDelegated,
 

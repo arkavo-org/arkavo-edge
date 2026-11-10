@@ -123,8 +123,8 @@ scenarios:
       - No key generated per start is an identity
       - Trust-score subject is the workload did:key, not the agent name
     refs:
-      - crates/arkavo-cli/src/commands/agent.rs:479
-      - crates/arkavo-cli/src/commands/agent.rs:509
+      - crates/arkavo-cli/src/commands/agent.rs:489
+      - crates/arkavo-cli/src/commands/agent.rs:519
       - crates/arkavo-server/src/server/a2a_server.rs:1198
       - crates/arkavo-config-encryption/src/lib.rs:175
       - crates/arkavo-server/src/server/trust_sync.rs:63

@@ -3,7 +3,7 @@
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use arkavo_agent_auth::{AgentAuthClient, AgentAuthConfig};
+use arkavo_agent_auth::{AgentAuthClient, AgentAuthConfig, AgentAuthError};
 use arkavo_crypto::AgentKeypair;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, DATE, RETRY_AFTER};
 use reqwest::{Method, Response, StatusCode};
@@ -200,7 +200,12 @@ impl MarketClient {
     /// the one cause that can be seen from here, a delegation without the
     /// entitlement, is reported before the market is asked.
     async fn token(&self, keypair: &AgentKeypair) -> Result<String, MarketError> {
-        let token = self.identity.mint(keypair).await?;
+        let token = match self.identity.mint(keypair).await {
+            // No delegation at all needs the same step from the owner as one
+            // without the market's entitlement.
+            Err(AgentAuthError::NotAuthorized) => return Err(MarketError::NotDelegated),
+            minted => minted?,
+        };
         if !token.entitlements.iter().any(|e| e == REQUEST_ENTITLEMENT) {
             return Err(MarketError::NotDelegated);
         }

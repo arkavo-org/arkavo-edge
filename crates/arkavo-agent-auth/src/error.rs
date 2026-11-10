@@ -23,6 +23,15 @@ pub enum AgentAuthError {
     #[error("Identity will not issue this agent a token: {0}")]
     Refused(String),
 
+    #[error("Identity refused to authorize this agent: {0}")]
+    AuthorizeRefused(String),
+
+    #[error("Identity did not accept the owner's sign-in: {0}")]
+    OwnerSignInRejected(String),
+
+    #[error("Authorize request failed: {0}")]
+    AuthorizeRequest(String),
+
     #[error("Token expired")]
     TokenExpired,
 

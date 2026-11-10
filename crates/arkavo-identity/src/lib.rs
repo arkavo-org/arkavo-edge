@@ -13,7 +13,9 @@ mod session;
 mod store;
 mod token;
 
-pub use broker::{CLIENT_ID, CREATOR_BUNDLE_ID, SCOPE, authorize_url, creator_url, launch_creator};
+pub use broker::{
+    CLIENT_ID, CREATOR_BUNDLE_ID, DELEGATE_SCOPE, SCOPE, authorize_url, creator_url, launch_creator,
+};
 pub use discovery::{
     DEFAULT_IDENTITY_HOST, DEFAULT_PLATFORM_URL, IdentityEndpoints, discover, host_of,
 };

@@ -10,6 +10,9 @@ pub struct StoredTokens {
     pub access_token: String,
     pub refresh_token: Option<String>,
     pub expires_at: i64, // unix seconds
+    /// The scope identity granted, as its token endpoint names it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 pub fn token_path() -> Result<PathBuf, IdentityError> {
@@ -110,6 +113,7 @@ mod tests {
             access_token: "atk".into(),
             refresh_token: Some("rtk".into()),
             expires_at: 1_700_000_000,
+            scope: None,
         };
         save(&tokens, &path).unwrap();
         #[cfg(unix)]
@@ -153,6 +157,7 @@ mod tests {
             access_token: "atk2".into(),
             refresh_token: Some("rtk2".into()),
             expires_at: 1_800_000_000,
+            scope: None,
         };
         save(&tokens, &path).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();

@@ -297,6 +297,8 @@ jobs:
             # The market ask and the agent token it presents (#792).
             cargo test --locked -p arkavo-agent-auth
             cargo test --locked -p arkavo-market
+            # The Creator sign-in the owner authorizes an agent with.
+            cargo test --locked -p arkavo-identity
             cargo test --locked -p arkavo-image-gen
             # The data plane's retention and references (IROH-010 to IROH-012).
             cargo test --locked -p arkavo-tdf-iroh --test retention_test --test reference_test

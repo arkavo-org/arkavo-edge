@@ -85,10 +85,15 @@ fn parse_stored_tokens(text: &str) -> Result<StoredTokens, IdentityError> {
                 .or_else(|| v.as_u64().and_then(|n| i64::try_from(n).ok()))
         })
         .unwrap_or(0);
+    let scope = value
+        .get("scope")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
     Ok(StoredTokens {
         access_token,
         refresh_token,
         expires_at: unix_now().saturating_add(expires_in),
+        scope,
     })
 }
 

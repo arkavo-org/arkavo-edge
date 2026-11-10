@@ -129,8 +129,9 @@ Run `arkavo <command> --help` for the options of `agent`, `chat`, `task`, `ui`, 
 | `arkavo model` | Manage local models: `list`, `download [name]`, `add <path> --name <name>`, `protect <path>` (wrap a GGUF into a KAS-gated `.gguf.tdf` archive). `switch` is accepted but not implemented. |
 | `arkavo mcp proxy` | Permit-gated stdio MCP relay in front of an upstream MCP server: `arkavo mcp proxy --policy-bundle-hash <64 hex> --issuer-key <hex> [--hash sha256\|blake3] -- <upstream command> [args...]`. A `tools/call` is admitted only with a valid permit and proof of possession. |
 | `arkavo security audit` | Report on the configuration an agent would run with in the current directory, including the address its RPC endpoint would listen on. `--bind <address>` audits the agent as started with `--bind <address>`, `--json` prints JSON. Exits with status 1 when a check fails. |
+| `arkavo agent authorize` | Let this machine's agent act for you: `arkavo agent authorize --market-requests` lets it ask the Arkavo market for purchases. Arkavo Creator opens to approve; whoever signs in there becomes the agent's owner, for 12 hours. It replaces whatever the agent was allowed before. |
 | `arkavo login`, `arkavo logout` | Sign in with Arkavo Creator; clear the stored identity token. Both act immediately and take no options. |
-| `arkavo market` | Ask the Arkavo market for a purchase the owner pays: `arkavo market request --offer <offer-id> --term <3\|12>` prints a payment link for a prepaid term, and `arkavo market withdraw <request-id>` withdraws it. The agent never pays. Its owner must have allowed purchase requests: start the agent with `arkavo agent run --market-requests` and approve the authorization link. |
+| `arkavo market` | Ask the Arkavo market for a purchase the owner pays: `arkavo market request --offer <offer-id> --term <3\|12>` prints a payment link for a prepaid term, and `arkavo market withdraw <request-id>` withdraws it. The agent never pays. Its owner must have allowed purchase requests: they run `arkavo agent authorize --market-requests` and approve it in Arkavo Creator. |
 
 ## Usage Examples
 

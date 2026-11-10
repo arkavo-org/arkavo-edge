@@ -8,4 +8,6 @@ pub use client::AgentAuthClient;
 pub use config::AgentAuthConfig;
 pub use error::AgentAuthError;
 pub use storage::{delete_token, load_token, store_token};
-pub use types::{ChallengeResponse, StoredToken, TokenRequest, TokenResponse};
+pub use types::{
+    Authorized, ChallengeResponse, Delegation, StoredToken, TokenRequest, TokenResponse,
+};
