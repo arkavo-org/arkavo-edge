@@ -32,6 +32,12 @@ pub enum AgentAuthError {
     #[error("Authorize request failed: {0}")]
     AuthorizeRequest(String),
 
+    #[error("Identity refused to revoke this agent: {0}")]
+    RevokeRefused(String),
+
+    #[error("Revoke request failed: {0}")]
+    RevokeRequest(String),
+
     #[error("Token expired")]
     TokenExpired,
 
