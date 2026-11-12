@@ -95,7 +95,7 @@ fn explain(err: &AgentAuthError) -> String {
 }
 
 /// A failed Creator sign-in in words the owner can act on.
-fn explain_sign_in(err: &IdentityError) -> String {
+pub(super) fn explain_sign_in(err: &IdentityError) -> String {
     match err {
         IdentityError::AccessDenied => "Arkavo Creator answered that the sign-in was declined. \
              It answers the same way when identity refuses the sign-in it forwards, so if you \

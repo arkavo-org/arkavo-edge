@@ -12,6 +12,7 @@ mod authorize;
 mod enlist;
 mod gpu_residency;
 pub mod listen;
+mod revoke;
 
 /// What a command line asks `arkavo agent` to do.
 #[derive(Debug, PartialEq, Eq)]
@@ -176,6 +177,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.first().map(String::as_str) == Some("authorize") {
         return authorize::execute(&args[1..]);
     }
+    if args.first().map(String::as_str) == Some("revoke") {
+        return revoke::execute(&args[1..]);
+    }
     match parse_args(args)? {
         Invocation::Help => {
             print_usage();
@@ -207,6 +211,7 @@ USAGE:
     arkavo agent [OPTIONS]
     arkavo agent init <name>
     arkavo agent authorize --market-requests
+    arkavo agent revoke
     arkavo agent release
 
 SUBCOMMANDS:
@@ -214,6 +219,8 @@ SUBCOMMANDS:
     run                 Run an agent (alias for default behavior)
     authorize           Let this machine's agent act for you; approved in Arkavo
                         Creator (see `arkavo agent authorize --help`)
+    revoke              End what this machine's agent may do for you; approved in
+                        Arkavo Creator (see `arkavo agent revoke --help`)
     release             Forget the orchestrator this agent takes roles from, and its role
     help                Print this help message
 

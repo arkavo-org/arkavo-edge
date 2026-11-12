@@ -61,13 +61,23 @@ pub fn default_entitlements() -> Vec<String> {
 /// device keypair so that what a person authorizes is the agent, and so that
 /// replacing one identity never silently changes the other.
 pub fn load_or_create_agent_keypair() -> Result<AgentKeypair, RegistrationError> {
-    use arkavo_device_identity::keypair;
-    if let Some(bytes) = keypair::get_agent_keypair()? {
-        return Ok(AgentKeypair::from_bytes(&bytes)?);
+    if let Some(existing) = existing_agent_keypair()? {
+        return Ok(existing);
     }
     let created = AgentKeypair::generate();
-    keypair::store_agent_keypair(&created.to_bytes())?;
+    arkavo_device_identity::keypair::store_agent_keypair(&created.to_bytes())?;
     Ok(created)
+}
+
+/// The agent's identity keypair if this machine already has one.
+///
+/// For callers that must not mint an identity as a side effect: revoking has
+/// nothing to act on when no key was ever created.
+pub fn existing_agent_keypair() -> Result<Option<AgentKeypair>, RegistrationError> {
+    match arkavo_device_identity::keypair::get_agent_keypair()? {
+        Some(bytes) => Ok(Some(AgentKeypair::from_bytes(&bytes)?)),
+        None => Ok(None),
+    }
 }
 
 #[derive(Error, Debug)]

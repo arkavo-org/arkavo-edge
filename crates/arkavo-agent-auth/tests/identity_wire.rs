@@ -226,3 +226,89 @@ async fn an_answer_for_another_agent_is_not_taken_as_success() {
 
     assert!(matches!(err, AgentAuthError::InvalidResponse(_)), "{err}");
 }
+
+/// The owner's revoke, as identity 0.37.0 words it: the owner's sign-in token
+/// as a Bearer on `DELETE /agents/delegations/{did}`, answered 204.
+#[tokio::test]
+async fn revoke_presents_the_owners_sign_in_for_this_agent() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("/agents/delegations/{AGENT}")))
+        .and(header("authorization", "Bearer owner-token"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    client(&server).revoke("owner-token", AGENT).await.unwrap();
+}
+
+/// Only the owner may revoke. Identity's contract does not pin the body of
+/// that refusal (this one is a stand-in), so whatever it says reaches the
+/// owner unchanged.
+#[tokio::test]
+async fn a_refused_revoke_is_reported_in_identity_words() {
+    let server = MockServer::start().await;
+    let refusal = "Forbidden";
+    Mock::given(method("DELETE"))
+        .and(path(format!("/agents/delegations/{AGENT}")))
+        .respond_with(ResponseTemplate::new(403).set_body_string(refusal))
+        .mount(&server)
+        .await;
+
+    let err = client(&server)
+        .revoke("owner-token", AGENT)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(&err, AgentAuthError::RevokeRefused(text) if text == refusal));
+    assert!(err.to_string().contains(refusal), "{err}");
+}
+
+/// Revoking wants the same fresh passkey sign-in as authorizing, and a retry
+/// cannot supply one.
+#[tokio::test]
+async fn a_stale_sign_in_stops_a_revoke_without_a_retry() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("/agents/delegations/{AGENT}")))
+        .respond_with(ResponseTemplate::new(401).set_body_string("Invalid token"))
+        .mount(&server)
+        .await;
+    let client =
+        AgentAuthClient::with_config(AgentAuthConfig::new(server.uri()).with_max_retries(3))
+            .unwrap();
+
+    let err = client.revoke("owner-token", AGENT).await.unwrap_err();
+
+    assert!(
+        matches!(err, AgentAuthError::OwnerSignInRejected(_)),
+        "{err}"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+/// The DID becomes a path segment, so anything that is not a plain `did:key`
+/// is refused before identity is called.
+#[tokio::test]
+async fn a_did_that_would_change_the_path_is_never_sent() {
+    let server = MockServer::start().await;
+
+    for did in [
+        "",
+        "did:web:example.com",
+        "did:key:z6Mk/../../authorize",
+        "did:key:z6Mk?x=1",
+        "did:key:z6Mk abc",
+    ] {
+        let err = client(&server)
+            .revoke("owner-token", did)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, AgentAuthError::RevokeRequest(_)),
+            "{did:?}: {err}"
+        );
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

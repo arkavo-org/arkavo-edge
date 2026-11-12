@@ -240,6 +240,45 @@ impl AgentAuthClient {
         })
     }
 
+    /// Revoke an agent's delegation as its owner.
+    ///
+    /// `owner_token` is the owner's `agents:delegate` sign-in token, as for
+    /// [`Self::authorize`]. Identity answers the same for a delegation that
+    /// was already revoked, so revoking twice is not an error. Never retried:
+    /// a refusal is the owner's to act on.
+    pub async fn revoke(&self, owner_token: &str, agent_did: &str) -> Result<(), AgentAuthError> {
+        // The DID becomes a path segment of a request that carries the
+        // owner's token, so it must be nothing but a `did:key`.
+        let key = agent_did.strip_prefix("did:key:").unwrap_or_default();
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return Err(AgentAuthError::RevokeRequest(format!(
+                "not a did:key: {agent_did:?}"
+            )));
+        }
+
+        let url = format!("{}/agents/delegations/{agent_did}", self.config.base_url);
+        let response = self
+            .http_client
+            .delete(&url)
+            .bearer_auth(owner_token)
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(match status {
+                reqwest::StatusCode::FORBIDDEN => AgentAuthError::RevokeRefused(body),
+                reqwest::StatusCode::UNAUTHORIZED => AgentAuthError::OwnerSignInRejected(body),
+                _ => AgentAuthError::RevokeRequest(format!(
+                    "Server returned status {status}: {body}"
+                )),
+            });
+        }
+        tracing::info!(event = "auth_decision", action = "revoke", subject = %agent_did, "Agent delegation revoked by its owner");
+        Ok(())
+    }
+
     /// Get a valid token, either from cache or by authenticating.
     pub async fn get_token(&self, keypair: &AgentKeypair) -> Result<StoredToken, AgentAuthError> {
         // Check for cached token
