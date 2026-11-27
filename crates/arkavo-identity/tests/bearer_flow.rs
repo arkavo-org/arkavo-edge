@@ -217,10 +217,7 @@ async fn fixture(kind: LaunchKind) -> Fixture {
 }
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .expect("reqwest client")
+    arkavo_tls::http_client(Duration::from_secs(5)).expect("reqwest client")
 }
 
 async fn spawn_idp() -> FakeIdp {

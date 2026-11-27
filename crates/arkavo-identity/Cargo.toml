@@ -19,11 +19,13 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
 tracing = { workspace = true }
 url = { workspace = true }
-opentdf = { version = "0.17.0", default-features = false, features = ["rustls-tls", "kas-client"] }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
+opentdf = { workspace = true, features = ["kas-client"] }
 ciborium = "0.2"
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 reqwest = { workspace = true }

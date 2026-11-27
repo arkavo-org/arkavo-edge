@@ -90,10 +90,8 @@ impl DeepSeekClient {
             config.thinking_mode = true;
         }
 
-        let client = Client::builder()
-            .timeout(config.timeout)
-            .build()
-            .map_err(|e| DeepSeekError::ConfigError {
+        let client =
+            arkavo_tls::http_client(config.timeout).map_err(|e| DeepSeekError::ConfigError {
                 message: format!("Failed to create HTTP client: {e}"),
             })?;
 

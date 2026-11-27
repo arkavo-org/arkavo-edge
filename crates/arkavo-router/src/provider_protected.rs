@@ -27,7 +27,10 @@ pub async fn recover_payload_key(
     platform_url: &str,
 ) -> Result<[u8; 32], ProtectedLoadError> {
     let cfg = OpentdfConfiguration::for_kas_connect(platform_url);
-    let kas = KasClient::new(&cfg, bearer).map_err(|e| classify_kas_error(&e))?;
+    let http = arkavo_tls::kas_http_client(std::time::Duration::from_secs(30))
+        .map_err(|e| ProtectedLoadError::Other(e.to_string()))?;
+    let kas =
+        KasClient::with_http_client(&cfg, bearer, http).map_err(|e| classify_kas_error(&e))?;
     let key = kas
         .rewrap_standard_tdf(manifest)
         .await

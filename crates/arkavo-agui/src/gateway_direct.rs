@@ -42,8 +42,7 @@ fn agent_record(card: &Value, endpoint: SocketAddr) -> Result<Value, String> {
 async fn read_card(
     endpoint: SocketAddr,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+    let client = arkavo_tls::http_client_builder(Duration::from_secs(5))?
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
         .build()?;

@@ -25,6 +25,7 @@ reqwest = { workspace = true, features = ["stream"] }
 tokio-tungstenite = { workspace = true }
 rustls = { workspace = true, features = ["std", "tls12"] }
 webpki-roots = { workspace = true }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 
 # Server dependencies
 governor = { workspace = true, features = ["std", "jitter"] }
@@ -132,11 +133,12 @@ taint = ["dep:regex"]
 
 # For integration tests
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
+jsonrpsee-ws-client = { workspace = true }
 # For examples
 tracing-subscriber = { workspace = true }
 # For tests
 tempfile = { workspace = true }
-rcgen = { version = "0.13", features = ["pem"] }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 # Runtime ES256 key generation for delegation-JWT tests — test key material
 # must not be committed to the repo.
 p256 = { workspace = true, features = ["pem"] }
@@ -144,6 +146,7 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-server = { path = "../arkavo-server" }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf", "testing"] }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 # WS-D data-plane round-trip test: stage on one Iroh node, fetch on another.
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh" }
 # Parity check: AgentSpecializationBundle::to_canonical_json must produce
@@ -153,7 +156,7 @@ arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 # For benchmarks
 criterion = { workspace = true }
 # Self-signed TLS listener for cert-verification regression tests
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"] }
 rustls = { workspace = true, features = ["std", "tls12"] }
 
 [[bench]]

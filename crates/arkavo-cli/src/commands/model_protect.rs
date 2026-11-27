@@ -28,16 +28,12 @@ pub fn default_output(source: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Same posture as the identity client: rustls, no redirects, bounded wait.
+/// Same posture as the identity client: active TLS profile, no redirects, bounded wait.
 /// `validate_kas_url` runs on the URL we dial; following a redirect would
 /// silently move the wrap to a host it never checked.
-pub(crate) fn kas_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .use_rustls_tls()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .expect("reqwest rustls client")
+pub(crate) fn kas_http_client() -> Result<reqwest::Client> {
+    arkavo_tls::kas_http_client(std::time::Duration::from_secs(30))
+        .context("failed to initialize TLS HTTP client for KAS")
 }
 
 pub async fn run(args: ProtectArgs<'_>) -> Result<()> {
@@ -67,7 +63,7 @@ pub async fn run(args: ProtectArgs<'_>) -> Result<()> {
     let endpoints = opentdf::kas_discovery::KasEndpoints::from_config(&config)
         .with_context(|| format!("cannot resolve KAS endpoints for {kas_url}"))?;
 
-    let http = kas_http_client();
+    let http = kas_http_client()?;
     let kas_key = opentdf::kas_key::fetch_kas_public_key_connect(&endpoints.public_key_url, &http)
         .await
         .with_context(|| {
@@ -155,7 +151,7 @@ mod tests {
                 .await;
             let _ = s.shutdown().await;
         });
-        let http = kas_http_client();
+        let http = kas_http_client().unwrap();
         let resp = http
             .get(format!("http://{addr}/kas.AccessService/PublicKey"))
             .send()

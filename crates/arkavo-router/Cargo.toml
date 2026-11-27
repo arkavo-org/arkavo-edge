@@ -47,7 +47,8 @@ arkavo-memory = { path = "../arkavo-memory", default-features = false, optional 
 arkavo-tdf = { path = "../arkavo-tdf", optional = true, features = ["opentdf"] }
 arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf", optional = true, features = ["kas"] }
 arkavo-identity = { path = "../arkavo-identity", optional = true }
-opentdf = { version = "0.17.0", default-features = false, features = ["rustls-tls", "kas-client"], optional = true }
+arkavo-tls = { path = "../arkavo-tls", default-features = false, optional = true }
+opentdf = { workspace = true, features = ["kas-client"], optional = true }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
@@ -56,7 +57,7 @@ default = ["llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai"]
 critic = []
 sentinel = []
 advisor-persistence = ["dep:arkavo-memory"]
-llama-cpp = ["arkavo-llm/llama-cpp", "dep:arkavo-gguf-tdf", "dep:opentdf", "dep:arkavo-identity"]
+llama-cpp = ["arkavo-llm/llama-cpp", "dep:arkavo-gguf-tdf", "dep:opentdf", "dep:arkavo-identity", "dep:arkavo-tls"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 deepseek = ["arkavo-llm/deepseek"]
 kimi = ["arkavo-llm/kimi", "llm-remote"]
@@ -73,6 +74,7 @@ windows = ["gemini", "llm-remote", "deepseek", "kimi", "glm", "xai", "openai"]
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 criterion = { workspace = true }
 tempfile = { workspace = true }
 # Dev-only: grounds the "signature verify is sub-ms" claim in the

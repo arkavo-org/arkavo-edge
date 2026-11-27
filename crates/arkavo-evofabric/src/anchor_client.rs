@@ -68,7 +68,8 @@ impl AnchorClient {
         let payload = serde_json::to_string(record)
             .map_err(|e| Error::AnchorFailed(format!("serialize: {e}")))?;
 
-        let client = reqwest::Client::new();
+        let client = arkavo_tls::http_client(std::time::Duration::from_secs(30))
+            .map_err(|e| Error::AnchorFailed(format!("TLS client: {e}")))?;
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,

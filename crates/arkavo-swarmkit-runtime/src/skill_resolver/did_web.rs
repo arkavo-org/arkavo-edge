@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use base64::Engine;
 use ed25519_dalek::VerifyingKey;
@@ -22,7 +23,7 @@ use super::{PublicKeyResolver, ResolveError};
 #[derive(Default)]
 pub struct DidWebPublicKeyResolver {
     cache: Arc<RwLock<HashMap<String, VerifyingKey>>>,
-    agent: OnceLock<ureq::Agent>,
+    agent: OnceLock<Result<ureq::Agent, String>>,
 }
 
 impl DidWebPublicKeyResolver {
@@ -40,8 +41,28 @@ impl DidWebPublicKeyResolver {
         self.cache.write().clear();
     }
 
-    fn agent(&self) -> &ureq::Agent {
-        self.agent.get_or_init(ureq::Agent::new)
+    fn agent(&self, did: &str) -> Result<&ureq::Agent, ResolveError> {
+        let cached = self.agent.get_or_init(|| {
+            let provider = arkavo_tls::crypto_provider().map_err(|e| e.to_string())?;
+            let tls_config = ureq::tls::TlsConfig::builder()
+                .provider(ureq::tls::TlsProvider::Rustls)
+                .root_certs(ureq::tls::RootCerts::WebPki)
+                .unversioned_rustls_crypto_provider(provider)
+                .build();
+            let config = ureq::Agent::config_builder()
+                .tls_config(tls_config)
+                .timeout_global(Some(Duration::from_secs(30)))
+                .build();
+            Ok(config.new_agent())
+        });
+        cached
+            .as_ref()
+            .map_err(|reason| ResolveError::SignerUnresolvable {
+                id: String::new(),
+                version: String::new(),
+                did: did.to_string(),
+                reason: format!("did:web TLS initialization failed: {reason}"),
+            })
     }
 }
 
@@ -60,7 +81,7 @@ impl PublicKeyResolver for DidWebPublicKeyResolver {
                 })?;
         let url = format!("https://{host}/.well-known/did.json");
         let json: serde_json::Value = self
-            .agent()
+            .agent(did)?
             .get(&url)
             .call()
             .map_err(|e| ResolveError::SignerUnresolvable {
@@ -69,7 +90,8 @@ impl PublicKeyResolver for DidWebPublicKeyResolver {
                 did: did.to_string(),
                 reason: format!("did:web fetch failed: {e}"),
             })?
-            .into_json()
+            .into_body()
+            .read_json()
             .map_err(|e| ResolveError::SignerUnresolvable {
                 id: String::new(),
                 version: String::new(),

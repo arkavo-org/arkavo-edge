@@ -56,7 +56,8 @@ impl AgentAuthClient {
 
     /// Create a new authentication client with custom configuration.
     pub fn with_config(config: AgentAuthConfig) -> Result<Self, AgentAuthError> {
-        let http_client = reqwest::Client::builder().timeout(config.timeout).build()?;
+        let http_client = arkavo_tls::http_client(config.timeout)
+            .map_err(|e| AgentAuthError::TokenRequest(format!("TLS client setup failed: {e}")))?;
 
         Ok(Self {
             config,

@@ -17,13 +17,17 @@ openai = ["arkavo-llm/llm-remote", "arkavo-router/openai", "arkavo-ui-core/opena
 # `llama-cpp`/`snpe`), remote providers only. This is what the root
 # `Dockerfile` and `docs/deploy/container.md` build; keep them in sync with
 # this list rather than repeating it.
-cloud = ["memory", "mdns", "mcp-tools", "llm-remote", "web-ui"]
+cloud = ["memory", "mdns", "mcp-tools", "llm-remote", "web-ui", "fallback-tls"]
 # Full defaults with all providers (cross-platform)
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "kas", "iroh"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "kas", "iroh", "fallback-tls"]
 # Minimal feature set for non-typical use cases
-minimal = ["memory", "mdns", "mcp-tools"]
+minimal = ["memory", "mdns", "mcp-tools", "fallback-tls"]
 # Default features for Windows (no C++ dependencies)
-windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui", "openai"]
+windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui", "openai", "fallback-tls"]
+# Fallback rustls AWS-LC provider for non-crypto-profile builds.
+fallback-tls = ["arkavo-tls/fallback-aws-lc-rs"]
+# Application-layer TLS policy and rustls CryptoProvider over AWS-LC FIPS 4.x.
+crypto-profile = ["arkavo-tls/crypto-profile"]
 # MCP mesh networking and router integration
 mcp-tools = ["dep:arkavo-mcp-mesh", "arkavo-router/gemini"]
 # macOS-specific MCP integration (auto-enabled on macOS when mcp-tools is enabled)
@@ -71,7 +75,8 @@ arkavo-git = { path = "../arkavo-git" }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
 # `arkavo model protect` wraps GGUF weights and needs the RSA-OAEP key wrap.
 arkavo-gguf-tdf = { path = "../arkavo-gguf-tdf", features = ["kas"] }
-opentdf = { version = "0.17.0", default-features = false, features = ["rustls-tls", "kas-client"] }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
+opentdf = { workspace = true, features = ["kas-client"] }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }

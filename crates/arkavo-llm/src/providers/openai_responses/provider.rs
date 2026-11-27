@@ -29,11 +29,9 @@ impl OpenAIResponsesProvider {
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .filter(|key| !key.trim().is_empty())
             .ok_or_else(|| Error::Config("OPENAI_API_KEY is required for GPT-6 Astra".into()))?;
-        let client = Client::builder()
+        let client = arkavo_tls::http_client_builder(config.request_timeout())
+            .map_err(|e| Error::Config(format!("Failed to configure TLS client: {e}")))?
             .connect_timeout(Duration::from_secs(30))
-            // Deeper reasoning legitimately takes longer; a low-effort call
-            // must not inherit the deepest tier's patience.
-            .timeout(config.request_timeout())
             // Never forward credentials through an unexpected redirect.
             .redirect(reqwest::redirect::Policy::none())
             .build()?;

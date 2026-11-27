@@ -53,6 +53,10 @@ routines = ["arkavo-cli/routines"]
 knowledge-pack = ["arkavo-cli/knowledge-pack"]
 fingerprint = ["knowledge-pack"]
 sentinel = ["arkavo-cli/sentinel"]
+# Application-layer TLS policy and rustls CryptoProvider backed by AWS-LC FIPS 4.x.
+# Off in default and windows-default because aws-lc-fips-sys builds from source
+# (requires C/C++, CMake, Go, Perl).
+crypto-profile = ["arkavo-cli/crypto-profile"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }

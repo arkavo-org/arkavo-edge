@@ -147,6 +147,10 @@ impl Store {
 
     /// No token is sent, even one saved in the cache: every pin is public.
     fn api(&self) -> Result<Api> {
+        let _ = arkavo_tls::init_process_tls().map_err(|e| ImageGenError::Download {
+            url: self.hub.clone(),
+            reason: e.to_string(),
+        })?;
         ApiBuilder::from_cache(self.cache.clone())
             .with_endpoint(self.hub.clone())
             .with_token(None)

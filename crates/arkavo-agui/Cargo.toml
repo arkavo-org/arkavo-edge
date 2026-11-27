@@ -54,10 +54,12 @@ arkavo-adaptation = { path = "../arkavo-adaptation" }
 arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 arkavo-swarmkit-runtime = { path = "../arkavo-swarmkit-runtime" }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-jsonrpsee = { workspace = true, features = ["ws-client"] }
+jsonrpsee = { workspace = true }
+jsonrpsee-ws-client = { workspace = true }
 
 # UUID for event IDs
 uuid = { workspace = true }
@@ -79,4 +81,5 @@ chrono = { workspace = true }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-router = { path = "../arkavo-router", default-features = false }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 serial_test = "3"

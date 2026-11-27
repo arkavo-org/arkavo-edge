@@ -22,12 +22,14 @@ uuid = { workspace = true }
 url = { workspace = true }
 dashmap = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 bytes = { workspace = true }
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
 base64 = { workspace = true }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 
 [lints]
 workspace = true

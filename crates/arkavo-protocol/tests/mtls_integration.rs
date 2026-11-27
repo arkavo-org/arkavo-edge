@@ -14,7 +14,9 @@ use std::net::SocketAddr;
 use tokio::time::{Duration, sleep};
 
 fn test_certs_dir() -> tempfile::TempDir {
-    use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose};
+    use rcgen::{
+        BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair, KeyUsagePurpose,
+    };
 
     // Each test owns its files until it finishes. A shared directory let one
     // generator truncate a key while another test was parsing it.
@@ -29,6 +31,7 @@ fn test_certs_dir() -> tempfile::TempDir {
     let ca = ca_params.self_signed(&ca_key).expect("CA certificate");
     fs::write(dir.path().join("ca.crt"), ca.pem()).unwrap();
     fs::write(dir.path().join("ca.key"), ca_key.serialize_pem()).unwrap();
+    let ca_issuer = Issuer::new(ca_params, ca_key);
 
     for name in ["server", "client", "invalid_client"] {
         let names = if name == "server" {
@@ -42,7 +45,7 @@ fn test_certs_dir() -> tempfile::TempDir {
         let cert = if name == "invalid_client" {
             params.self_signed(&key)
         } else {
-            params.signed_by(&key, &ca, &ca_key)
+            params.signed_by(&key, &ca_issuer)
         }
         .expect("fixture certificate");
         fs::write(dir.path().join(format!("{name}.crt")), cert.pem()).unwrap();
@@ -278,13 +281,10 @@ fn is_certificate_verification_error(err: &str) -> bool {
 }
 
 async fn spawn_self_signed_tls_listener() -> (u16, tokio::task::JoinHandle<()>) {
-    use rustls::ServerConfig;
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use std::sync::Arc;
     use tokio_rustls::TlsAcceptor;
-
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let fixture = test_certs_dir();
     let certs_dir = fixture.path();
@@ -294,10 +294,8 @@ async fn spawn_self_signed_tls_listener() -> (u16, tokio::task::JoinHandle<()>) 
         .collect::<std::result::Result<Vec<_>, _>>()
         .expect("parse server cert");
     let key = PrivateKeyDer::from_pem_reader(key_file).expect("parse server key");
-    let server_config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .expect("tls server config");
+    let server_config =
+        arkavo_tls::server_config_no_client_auth(certs, key).expect("tls server config");
     let acceptor = TlsAcceptor::from(Arc::new(server_config));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -429,14 +427,8 @@ fn certificate_fixtures_are_private_and_complete_under_concurrent_use() {
                         .expect("fixture certificate must be complete");
                     let key = PrivateKeyDer::from_pem_file(path.join(format!("{name}.key")))
                         .expect("fixture key must be complete");
-                    rustls::ServerConfig::builder_with_provider(Arc::new(
-                        rustls::crypto::aws_lc_rs::default_provider(),
-                    ))
-                    .with_safe_default_protocol_versions()
-                    .unwrap()
-                    .with_no_client_auth()
-                    .with_single_cert(vec![cert], key)
-                    .expect("fixture certificate must match its key");
+                    arkavo_tls::server_config_no_client_auth(vec![cert], key)
+                        .expect("fixture certificate must match its key");
                 }
                 fixture
             }));

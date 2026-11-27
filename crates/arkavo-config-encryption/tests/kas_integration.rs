@@ -39,7 +39,7 @@ mod kas_tests {
 
         let policy = Policy {
             attributes: vec![PolicyAttribute {
-                attribute: "data/clearance".to_string(),
+                attribute: "data.clearance".to_string(),
                 value: "internal".to_string(),
                 display_name: "Data Clearance".to_string(),
             }],
@@ -79,7 +79,7 @@ mod kas_tests {
 
         let policy = Policy {
             attributes: vec![PolicyAttribute {
-                attribute: "data/clearance".to_string(),
+                attribute: "data.clearance".to_string(),
                 value: "internal".to_string(),
                 display_name: "Data Clearance".to_string(),
             }],
@@ -135,12 +135,12 @@ mod kas_tests {
         let policy = Policy {
             attributes: vec![
                 PolicyAttribute {
-                    attribute: "data/clearance".to_string(),
+                    attribute: "data.clearance".to_string(),
                     value: "internal".to_string(),
                     display_name: "Data Clearance".to_string(),
                 },
                 PolicyAttribute {
-                    attribute: "agent/identity".to_string(),
+                    attribute: "agent.identity".to_string(),
                     value: "autonomous_service".to_string(),
                     display_name: "Agent Identity".to_string(),
                 },
@@ -170,8 +170,10 @@ mod kas_tests {
         let decryptor = ConfigBundleDecryptor::new(credential);
 
         // Create KAS client
+        let kas_cfg =
+            opentdf::kas_discovery::OpentdfConfiguration::for_kas_legacy_rest(kas.rewrap_url());
         let kas_client =
-            opentdf::KasClient::new(kas.rewrap_url(), &token).expect("Failed to create KAS client");
+            opentdf::KasClient::new(&kas_cfg, &token).expect("Failed to create KAS client");
 
         println!("✓ KAS client created");
         println!("  KAS URL: {}", kas.rewrap_url());
@@ -222,12 +224,12 @@ mod kas_tests {
         let policy = Policy {
             attributes: vec![
                 PolicyAttribute {
-                    attribute: "data/clearance".to_string(),
+                    attribute: "data.clearance".to_string(),
                     value: "confidential".to_string(),
                     display_name: "Data Clearance".to_string(),
                 },
                 PolicyAttribute {
-                    attribute: "capability/filesystem".to_string(),
+                    attribute: "capability.filesystem".to_string(),
                     value: "read_content".to_string(),
                     display_name: "Filesystem Capability".to_string(),
                 },

@@ -79,7 +79,7 @@ async fn forward_to_agent(
     endpoint: &str,
     body: serde_json::Value,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let client = reqwest::Client::new();
+    let client = arkavo_tls::http_client(std::time::Duration::from_secs(30))?;
     let url = format!("http://{endpoint}");
 
     let response = client

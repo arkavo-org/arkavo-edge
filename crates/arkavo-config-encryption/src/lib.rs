@@ -227,7 +227,7 @@ mod tests {
 
         let policy = Policy {
             attributes: vec![PolicyAttribute {
-                attribute: "data/clearance".to_string(),
+                attribute: "data.clearance".to_string(),
                 value: "internal".to_string(),
                 display_name: "Data Clearance".to_string(),
             }],
@@ -262,7 +262,7 @@ mod tests {
 
         let policy = Policy {
             attributes: vec![PolicyAttribute {
-                attribute: "data/clearance".to_string(),
+                attribute: "data.clearance".to_string(),
                 value: "internal".to_string(),
                 display_name: "Data Clearance".to_string(),
             }],

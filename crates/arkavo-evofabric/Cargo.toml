@@ -25,10 +25,12 @@ regex = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["process"] }
 reqwest = { workspace = true }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 
 [lints]
 workspace = true

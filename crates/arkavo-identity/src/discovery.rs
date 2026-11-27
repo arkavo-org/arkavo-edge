@@ -116,10 +116,7 @@ mod tests {
             "kas": { "uri": "https://platform.arkavo.net" }
         }))
         .await;
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap();
+        let http = arkavo_tls::http_client(std::time::Duration::from_secs(2)).unwrap();
         let err = discover(&http, &format!("http://{addr}"), "identity.arkavo.net")
             .await
             .expect_err("foreign IdP must be refused");
@@ -139,10 +136,7 @@ mod tests {
             "kas": { "uri": "https://platform.arkavo.net" }
         }))
         .await;
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap();
+        let http = arkavo_tls::http_client(std::time::Duration::from_secs(2)).unwrap();
         let ep = discover(&http, &format!("http://{addr}"), "identity.arkavo.net")
             .await
             .expect("matching host is accepted");
@@ -161,10 +155,7 @@ mod tests {
             "kas": { "uri": "https://platform.arkavo.net" }
         }))
         .await;
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap();
+        let http = arkavo_tls::http_client(std::time::Duration::from_secs(2)).unwrap();
         let err = discover(&http, &format!("http://{addr}"), "identity.arkavo.net")
             .await
             .expect_err("missing idp must fail");
@@ -184,10 +175,7 @@ mod tests {
             "kas": { "uri": "https://platform.arkavo.net" }
         }))
         .await;
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap();
+        let http = arkavo_tls::http_client(std::time::Duration::from_secs(2)).unwrap();
         let ep = discover(&http, &format!("http://{addr}"), "IDENTITY.ARKAVO.NET")
             .await
             .expect("host compare is case-insensitive");
@@ -210,10 +198,7 @@ mod tests {
             "kas": { "uri": "https://platform.arkavo.net" }
         }))
         .await;
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap();
+        let http = arkavo_tls::http_client(std::time::Duration::from_secs(2)).unwrap();
         let err = discover(&http, &format!("http://{addr}"), "identity.arkavo.net")
             .await
             .expect_err("foreign token endpoint must be refused");

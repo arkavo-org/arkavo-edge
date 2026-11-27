@@ -221,11 +221,8 @@ fn weight_set_sizes_match_the_spec() {
 #[tokio::test]
 #[ignore = "requires network access to huggingface.co"]
 async fn pins_match_the_hub() {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .expect("HTTP client");
+    let client =
+        arkavo_tls::kas_http_client(std::time::Duration::from_secs(30)).expect("HTTP client");
     let mut checked = HashSet::new();
     for file in all_files() {
         if !checked.insert(file.sha256) {

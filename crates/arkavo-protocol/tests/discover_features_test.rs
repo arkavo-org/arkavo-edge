@@ -5,7 +5,8 @@
 mod discover_features_tests {
     use arkavo_protocol::config::ServerConfig;
     use arkavo_server::A2aServer;
-    use jsonrpsee::{core::client::ClientT, rpc_params, ws_client::WsClientBuilder};
+    use jsonrpsee::{core::client::ClientT, rpc_params};
+    use jsonrpsee_ws_client::WsClientBuilder;
     use serde_json::json;
 
     #[tokio::test]

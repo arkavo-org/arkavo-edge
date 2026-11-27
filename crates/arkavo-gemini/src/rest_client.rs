@@ -107,12 +107,14 @@ struct Candidate {
 }
 
 impl RestClient {
+    /// Creates a Gemini REST client configured with the active TLS policy.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the TLS HTTP client cannot be initialized.
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
-        let client = Client::builder()
-            .use_rustls_tls()
-            .timeout(Duration::from_mins(2))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let client =
+            arkavo_tls::http_client(Duration::from_mins(2)).expect("arkavo-tls HTTP client");
 
         Self {
             client,
@@ -330,10 +332,10 @@ impl RestClient {
         let url = self.stream_generate_content_url();
 
         // Create a new client with no timeout for streaming (SSE keeps connection open)
-        let streaming_client = Client::builder()
-            .use_rustls_tls()
+        let streaming_client = arkavo_tls::http_client_builder_unbounded()
+            .map_err(|e| GeminiError::ApiError(format!("TLS client config failed: {e}")))?
             .build()
-            .unwrap_or_else(|_| Client::new());
+            .map_err(|e| GeminiError::ApiError(format!("HTTP client build failed: {e}")))?;
 
         let response = self
             .apply_auth(streaming_client.post(&url))

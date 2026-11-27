@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
+use rustls::RootCertStore;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::{ClientConfig, RootCertStore};
 use std::fs;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -74,8 +74,9 @@ impl WebSocketTransport {
             info!("Custom CA certificate added");
         }
 
-        // Build the client config based on whether mTLS is needed
-        let config = if let (Some(cert_path), Some(key_path)) = (
+        // Build the client config through arkavo-tls so the active TLS profile
+        // (and FIPS 4.x provider when compiled with `crypto-profile`) applies.
+        let client_auth = if let (Some(cert_path), Some(key_path)) = (
             &self.config.tls_config.client_cert_path,
             &self.config.tls_config.client_key_path,
         ) {
@@ -96,15 +97,13 @@ impl WebSocketTransport {
 
             info!("Client certificate configured for mTLS");
 
-            ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_client_auth_cert(certs, key)
-                .map_err(|e| A2aError::Tls(format!("Failed to configure client auth: {e}")))?
+            Some(arkavo_tls::ClientAuth { certs, key })
         } else {
-            ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth()
+            None
         };
+
+        let config = arkavo_tls::client_config(root_store, client_auth)
+            .map_err(|e| A2aError::Tls(format!("Failed to configure TLS client: {e}")))?;
 
         if !self.config.tls_config.verify_cert {
             warn!(

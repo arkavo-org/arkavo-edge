@@ -8,7 +8,7 @@ use arkavo_protocol::types::{
 };
 use futures::Stream;
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
-use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
+use jsonrpsee_ws_client::{WsClient, WsClientBuilder};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;

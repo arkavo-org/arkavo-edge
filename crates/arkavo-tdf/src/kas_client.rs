@@ -145,10 +145,9 @@ struct CachedToken {
 impl ArkavoKasClient {
     /// Create a new Arkavo KAS client.
     pub fn new(config: ArkavoKasConfig) -> Result<Self, TdfError> {
-        let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.timeout_secs))
-            .build()
-            .map_err(|e| TdfError::Kas(format!("Failed to create HTTP client: {e}")))?;
+        let http_client =
+            arkavo_tls::kas_http_client(std::time::Duration::from_secs(config.timeout_secs))
+                .map_err(|e| TdfError::Kas(format!("Failed to create HTTP client: {e}")))?;
 
         Ok(Self {
             config,
@@ -278,8 +277,12 @@ impl ArkavoKasClient {
         // This KAS serves the legacy REST paths (`KAS_PUBLIC_KEY_PATH`), not Connect.
         let kas_config =
             opentdf::kas_discovery::OpentdfConfiguration::for_kas_legacy_rest(&self.config.kas_url);
-        let kas_client = opentdf::kas::KasClient::new(&kas_config, &token)
-            .map_err(|e| TdfError::Kas(format!("Failed to create KAS client: {e}")))?;
+        let kas_client = opentdf::kas::KasClient::with_http_client(
+            &kas_config,
+            &token,
+            self.http_client.clone(),
+        )
+        .map_err(|e| TdfError::Kas(format!("Failed to create KAS client: {e}")))?;
 
         // Perform rewrap
         kas_client

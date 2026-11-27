@@ -26,8 +26,10 @@ pub struct OllamaClient {
 
 impl OllamaClient {
     pub fn new(base_url: Option<String>, model: Option<String>) -> Self {
+        let client = arkavo_tls::http_client(std::time::Duration::from_secs(120))
+            .unwrap_or_else(|_| Client::new());
         Self {
-            client: Client::new(),
+            client,
             base_url: base_url.unwrap_or_else(|| "http://localhost:11434".to_string()),
             model: model.unwrap_or_default(), // Empty default, will be selected dynamically
         }

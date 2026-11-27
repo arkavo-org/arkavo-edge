@@ -14,7 +14,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
-opentdf = { version = "0.17.0", default-features = false, features = ["rustls-tls"] }
+opentdf = { workspace = true }
 p256 = { workspace = true }
 base64 = { workspace = true }
 

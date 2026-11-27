@@ -13,6 +13,7 @@ categories = ["multimedia::images"]
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", default-features = false }
 arkavo-process-env = { path = "../arkavo-process-env" }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 async-trait = { workspace = true }
 dirs = { workspace = true }
 futures = { workspace = true }
@@ -42,6 +43,7 @@ libc = { workspace = true }
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 tokio = { workspace = true, features = ["full"] }
 wiremock = "0.6"
 

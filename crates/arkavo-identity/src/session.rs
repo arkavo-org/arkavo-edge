@@ -78,14 +78,10 @@ impl Default for IdentitySession {
 impl IdentitySession {
     /// # Panics
     ///
-    /// Panics if the rustls HTTP client cannot be built (does not happen in practice).
+    /// Panics if the TLS HTTP client cannot be built.
     pub fn new() -> Self {
-        let http = reqwest::Client::builder()
-            .use_rustls_tls()
-            .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("reqwest rustls client");
+        let http = arkavo_tls::kas_http_client(Duration::from_secs(30))
+            .expect("arkavo-tls KAS HTTP client");
         Self {
             http,
             platform_url: env_or("ARKAVO_PLATFORM_URL", DEFAULT_PLATFORM_URL),
@@ -309,10 +305,7 @@ mod tests {
     }
 
     fn http_client() -> reqwest::Client {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap()
+        arkavo_tls::http_client(std::time::Duration::from_secs(2)).unwrap()
     }
 
     fn session(

@@ -54,19 +54,22 @@ impl HttpClientBuilder {
 
     /// Build a configured HTTP client
     pub fn build(&self) -> Result<Client> {
-        let mut builder = ClientBuilder::new()
-            .timeout(Duration::from_secs(self.config.timeout_secs))
-            .use_rustls_tls() // Use rustls instead of native TLS
-            .pool_idle_timeout(Duration::from_secs(90))
-            .pool_max_idle_per_host(10);
-
-        // Add custom root certificates if provided
+        let mut root_store = arkavo_tls::default_root_store();
         if let Some(ref certs) = self.config.root_certificates {
             for cert_der in certs {
-                let cert = reqwest::Certificate::from_der(cert_der)?;
-                builder = builder.add_root_certificate(cert);
+                root_store
+                    .add(rustls::pki_types::CertificateDer::from(cert_der.clone()))
+                    .map_err(|e| crate::Error::Config(format!("Invalid root certificate: {e}")))?;
             }
         }
+        let tls_config = arkavo_tls::client_config(root_store, None)
+            .map_err(|e| crate::Error::Config(format!("Failed to configure TLS client: {e}")))?;
+
+        let mut builder = ClientBuilder::new()
+            .use_preconfigured_tls(tls_config)
+            .timeout(Duration::from_secs(self.config.timeout_secs))
+            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_max_idle_per_host(10);
 
         // Add default headers
         let mut headers = reqwest::header::HeaderMap::new();
