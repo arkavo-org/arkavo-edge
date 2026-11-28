@@ -16,7 +16,7 @@ use crate::{ClientAuth, ProcessTlsReport, TlsError, TlsOptions};
 static RESOLVED: OnceLock<Resolved> = OnceLock::new();
 
 pub(super) fn resolve_options(options: &TlsOptions) -> Result<Resolved, TlsError> {
-    let profile = Profile::from_str(&options.profile).map_err(|e| {
+    let profile = Profile::from_str(options.effective_profile()).map_err(|e| {
         TlsError::InvalidConfig(format!(
             "{e}; supported profiles: {}",
             Profile::ALL
@@ -236,7 +236,7 @@ mod tests {
     fn pq_required_refuses_classical_only_profiles() {
         for profile in ["cnsa1", "bsi", "fips1402"] {
             let opts = TlsOptions {
-                profile: profile.to_string(),
+                profile: Some(profile.to_string()),
                 pq_key_exchange_required: true,
                 ..TlsOptions::default()
             };
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn unknown_profile_is_refused() {
         let opts = TlsOptions {
-            profile: "not-a-profile".to_string(),
+            profile: Some("not-a-profile".to_string()),
             ..TlsOptions::default()
         };
         let err = resolve_options(&opts).expect_err("unknown profile must fail");

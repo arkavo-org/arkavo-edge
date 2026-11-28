@@ -137,6 +137,7 @@ impl Ministral3ModelLoader {
     }
 
     pub async fn load_model(&self, size: Ministral3Size) -> Result<Ministral3ModelPaths> {
+        let _ = arkavo_tls::init_process_tls().context("Failed to initialize TLS")?;
         let api = ApiBuilder::new()
             .with_progress(true)
             .build()

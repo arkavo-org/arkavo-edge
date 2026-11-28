@@ -36,6 +36,7 @@ arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }
 arkavo-validation = { path = "../arkavo-validation" }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 
 # Gherkin parsing
 gherkin = "0.14"
@@ -81,5 +82,6 @@ cc = "1.0"
 [dev-dependencies]
 tempfile = { workspace = true }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 [lints]
 workspace = true

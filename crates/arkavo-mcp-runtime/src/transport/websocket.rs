@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::{Mutex, oneshot};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite::Message};
 use tracing::{debug, error, warn};
 
 type WsStream =
@@ -56,9 +56,20 @@ impl WebSocketTransport {
             TransportError::ConnectionFailed(format!("Failed to build request: {e}"))
         })?;
 
-        let (ws_stream, _) = connect_async(request).await.map_err(|e| {
-            TransportError::ConnectionFailed(format!("WebSocket connect failed: {e}"))
-        })?;
+        let connector = if url.starts_with("wss://") {
+            let tls_config = arkavo_tls::default_client_config().map_err(|e| {
+                TransportError::ConnectionFailed(format!("TLS client config failed: {e}"))
+            })?;
+            Connector::Rustls(Arc::new(tls_config))
+        } else {
+            Connector::Plain
+        };
+
+        let (ws_stream, _) = connect_async_tls_with_config(request, None, false, Some(connector))
+            .await
+            .map_err(|e| {
+                TransportError::ConnectionFailed(format!("WebSocket connect failed: {e}"))
+            })?;
 
         let (write, read) = ws_stream.split();
 

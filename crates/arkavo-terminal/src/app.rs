@@ -419,7 +419,7 @@ impl App {
                 let mut provider_models = Vec::new();
                 for model in models {
                     let full_name = format!("localhost/{model}");
-                    all_models.push(full_name.clone());
+                    all_models.push(full_name);
                     provider_models.push(model);
                 }
 

@@ -168,6 +168,7 @@ arkavo-test-macros = { path = "../arkavo-test-macros" }
 arkavo-image-gen = { path = "../arkavo-image-gen", features = ["testing"] }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-knowledge-pack = { path = "../arkavo-knowledge-pack" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 
 # macOS-only dependencies
 [target.'cfg(target_os = "macos")'.dependencies]

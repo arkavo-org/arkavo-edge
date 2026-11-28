@@ -448,3 +448,27 @@ fn certificate_fixtures_are_private_and_complete_under_concurrent_use() {
         );
     });
 }
+
+#[test]
+fn http_transport_rejects_empty_ca_pem_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let empty_ca = dir.path().join("empty_ca.crt");
+    fs::write(&empty_ca, b"not a pem certificate\n").expect("write empty ca");
+
+    let config = TransportConfig {
+        tls_config: TlsConfig {
+            ca_cert_path: Some(empty_ca.to_string_lossy().into_owned()),
+            ..TlsConfig::default()
+        },
+        ..TransportConfig::default()
+    };
+
+    let err = match HttpTransport::new(config) {
+        Err(err) => err,
+        Ok(_) => panic!("empty CA PEM must be rejected"),
+    };
+    assert!(
+        err.to_string().contains("No PEM certificates found"),
+        "unexpected error: {err}"
+    );
+}

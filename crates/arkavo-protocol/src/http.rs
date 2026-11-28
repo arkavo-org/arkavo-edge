@@ -65,6 +65,12 @@ impl HttpTransport {
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(|e| A2aError::Tls(format!("Failed to parse CA certificate: {e}")))?;
 
+            if ca_certs.is_empty() {
+                return Err(A2aError::Tls(format!(
+                    "No PEM certificates found in CA certificate file: {ca_path}"
+                )));
+            }
+
             for cert in ca_certs {
                 root_store
                     .add(cert)
@@ -89,6 +95,11 @@ impl HttpTransport {
             let certs: Vec<CertificateDer> = CertificateDer::pem_reader_iter(cert_file)
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(|e| A2aError::Tls(format!("Failed to parse client certificate: {e}")))?;
+            if certs.is_empty() {
+                return Err(A2aError::Tls(format!(
+                    "No PEM certificates found in client certificate file: {cert_path}"
+                )));
+            }
             let key: PrivateKeyDer = PrivateKeyDer::from_pem_reader(key_file)
                 .map_err(|e| A2aError::Tls(format!("Failed to parse client key: {e}")))?;
 

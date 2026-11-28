@@ -70,26 +70,22 @@ pub struct ClientAuth {
 }
 
 /// Application-level TLS configuration parsed from environment variables.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TlsOptions {
-    pub profile: String,
+    /// Explicitly configured profile name (`ARKAVO_TLS_PROFILE`), or `None` when unset.
+    pub profile: Option<String>,
     pub pq_key_exchange_required: bool,
     pub peer_certificates_match_profile: bool,
     pub require_module_approval: bool,
 }
 
-impl Default for TlsOptions {
-    fn default() -> Self {
-        Self {
-            profile: DEFAULT_PROFILE_NAME.to_string(),
-            pq_key_exchange_required: false,
-            peer_certificates_match_profile: false,
-            require_module_approval: false,
-        }
-    }
-}
-
 impl TlsOptions {
+    /// Returns the requested profile name or [`DEFAULT_PROFILE_NAME`] when unset.
+    #[must_use]
+    pub fn effective_profile(&self) -> &str {
+        self.profile.as_deref().unwrap_or(DEFAULT_PROFILE_NAME)
+    }
+
     /// Reads TLS policy options from process environment variables.
     ///
     /// Invalid boolean values fail closed instead of silently falling back.
@@ -101,9 +97,7 @@ impl TlsOptions {
     where
         F: Fn(&str) -> Option<String>,
     {
-        let profile = lookup(ENV_TLS_PROFILE)
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string());
+        let profile = lookup(ENV_TLS_PROFILE).filter(|v| !v.is_empty());
         let pq_key_exchange_required =
             parse_bool_env(ENV_TLS_PQ_REQUIRED, lookup(ENV_TLS_PQ_REQUIRED).as_deref())?;
         let peer_certificates_match_profile = parse_bool_env(
@@ -293,7 +287,8 @@ mod tests {
     #[test]
     fn options_defaults_when_env_unset() {
         let opts = TlsOptions::from_lookup(|_| None).expect("default options");
-        assert_eq!(opts.profile, DEFAULT_PROFILE_NAME);
+        assert_eq!(opts.profile, None);
+        assert_eq!(opts.effective_profile(), DEFAULT_PROFILE_NAME);
         assert!(!opts.pq_key_exchange_required);
         assert!(!opts.peer_certificates_match_profile);
         assert!(!opts.require_module_approval);
@@ -309,7 +304,8 @@ mod tests {
         ]);
         let opts = TlsOptions::from_lookup(|k| env.get(k).map(|v| (*v).to_string()))
             .expect("explicit options");
-        assert_eq!(opts.profile, "fips1403");
+        assert_eq!(opts.profile.as_deref(), Some("fips1403"));
+        assert_eq!(opts.effective_profile(), "fips1403");
         assert!(opts.pq_key_exchange_required);
         assert!(opts.peer_certificates_match_profile);
         assert!(opts.require_module_approval);

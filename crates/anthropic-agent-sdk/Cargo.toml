@@ -42,6 +42,7 @@ tracing = { workspace = true }
 sha2 = { workspace = true }
 base64 = { workspace = true }
 reqwest = { workspace = true }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 getrandom = "0.2"
 
 # Optional dependencies
@@ -54,6 +55,7 @@ rmcp = ["dep:rmcp", "dep:schemars"]
 
 [dev-dependencies]
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 

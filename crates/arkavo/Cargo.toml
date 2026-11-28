@@ -22,12 +22,14 @@ cloud = ["arkavo-cli/cloud"]
 # node; without it there is no state broadcast, Iroh tool or image delivery.
 # Workspace release builds already had it through arkavo-cli's defaults, so
 # naming it here makes `cargo build -p arkavo` match them.
-default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "iroh"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "claude-agent", "iroh", "fallback-tls"]
 # Minimal feature set for non-typical use cases
-minimal = ["memory", "mdns", "mcp-tools"]
+minimal = ["memory", "mdns", "mcp-tools", "fallback-tls"]
 # Default features for Windows: every cloud provider the router's own
 # `windows` feature carries, and no llama-cpp (the Windows build is C++-free).
-windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui"]
+windows-default = ["memory", "mdns", "mcp-tools", "llm-remote", "gemini", "deepseek", "kimi", "glm", "xai", "openai", "web-ui", "fallback-tls"]
+# Fallback rustls AWS-LC provider for non-crypto-profile builds.
+fallback-tls = ["arkavo-cli/fallback-tls"]
 memory = ["arkavo-cli/memory"]
 embeddings = ["memory", "arkavo-cli/embeddings"]
 mdns = ["arkavo-cli/mdns"]

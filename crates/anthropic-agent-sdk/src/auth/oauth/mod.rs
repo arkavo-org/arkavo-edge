@@ -149,13 +149,19 @@ impl OAuthClientBuilder {
     }
 
     /// Build the OAuth client
+    ///
+    /// # Panics
+    ///
+    /// Panics if the TLS HTTP client cannot be initialized.
     #[must_use]
     pub fn build(self) -> OAuthClient {
+        let http_client = arkavo_tls::http_client(std::time::Duration::from_secs(30))
+            .expect("arkavo-tls HTTP client");
         OAuthClient {
             config: self.config.unwrap_or_default(),
             storage: self.storage.unwrap_or_default(),
             auto_open_browser: self.auto_open_browser,
-            http_client: reqwest::Client::new(),
+            http_client,
         }
     }
 }
@@ -174,13 +180,15 @@ impl OAuthClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if token storage initialization fails.
+    /// Returns an error if token storage or TLS client initialization fails.
     pub fn new() -> AuthResult<Self> {
+        let http_client = arkavo_tls::http_client(std::time::Duration::from_secs(30))
+            .map_err(|e| OAuthError::Http(format!("TLS client setup failed: {e}")))?;
         Ok(Self {
             config: OAuthConfig::default(),
             storage: TokenStorage::new(),
             auto_open_browser: true,
-            http_client: reqwest::Client::new(),
+            http_client,
         })
     }
 

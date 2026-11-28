@@ -20,6 +20,7 @@ impl Qwen25VLModelLoader {
     }
 
     pub async fn load_model(&self, model_size: ModelSize) -> Result<ModelPaths> {
+        let _ = arkavo_tls::init_process_tls().context("Failed to initialize TLS")?;
         let api = ApiBuilder::new()
             .with_progress(true)
             .build()

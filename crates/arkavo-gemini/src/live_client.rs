@@ -15,7 +15,9 @@ use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::{
+    Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
+};
 use tracing::{debug, error, info, warn};
 use url::Url;
 
@@ -198,9 +200,17 @@ impl LiveSessionClient {
 
     async fn try_connect(&self) -> Result<()> {
         let request = self.connect_request()?;
+        let connector = if self.endpoint_url.starts_with("wss://") {
+            let tls_config = arkavo_tls::default_client_config()
+                .map_err(|e| GeminiError::Config(format!("TLS client config failed: {e}")))?;
+            Connector::Rustls(Arc::new(tls_config))
+        } else {
+            Connector::Plain
+        };
 
         debug!("Connecting to Gemini WebSocket endpoint");
-        let (ws_stream, _) = connect_async(request).await?;
+        let (ws_stream, _) =
+            connect_async_tls_with_config(request, None, false, Some(connector)).await?;
         let (writer, reader) = ws_stream.split();
 
         {
