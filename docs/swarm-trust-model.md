@@ -63,18 +63,19 @@ These versions/statuses were checked on 2026-09-26. Pin concrete protocol and sc
 | Compact credentials | [CWT, RFC 8392](https://www.rfc-editor.org/rfc/rfc8392.html); [COSE, RFC 9052](https://www.rfc-editor.org/rfc/rfc9052.html) | Preserve the existing compact identity path, with explicit issuer, audience, type and proof-of-possession rules. A CWT is not automatically an EAT. |
 | Managed workload identity | [SPIFFE specifications](https://spiffe.io/docs/latest/spiffe-about/overview/) | Optional SVID integration where a workload identity authority exists; not required to run a personal edge swarm. |
 | Data authorization | [OpenTDF Authorization v2](https://opentdf.io/components/authorization), [subject mappings](https://opentdf.io/components/policy/subject_mappings), [KAS](https://opentdf.io/components/key_access) | Attribute values, action-specific subject mappings, authorization decisions, obligations and key release. |
-| Agent interoperability | [A2A 1.0.0](https://a2a-protocol.org/v1.0.0/specification/) | Authenticated operations, scoped task access, declared security schemes and version negotiation. Existing `message/send` is a legacy seam. |
+| Agent interoperability | [A2A 1.0.0](https://a2a-protocol.org/v1.0.0/specification/) | Authenticated operations, scoped task access, declared security schemes and version negotiation. Existing `message/send` is a legacy seam. Agents speak A2A to each other over [the TDF-JSON binding](a2a/tdf-json-binding.md), a custom protocol binding. |
 | Tool interoperability | [MCP 2026-07-28 authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) | Resource-specific credentials, issuer isolation, discovery and scope handling. Do not pass upstream credentials through to tools. |
 | Signed JSON artifacts | [JCS, RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html) | Canonical signed manifests and receipts; reject duplicate/ambiguous keys and define the exact signed envelope. |
+| JSON signatures | [JWS, RFC 7515](https://www.rfc-editor.org/rfc/rfc7515.html) with ES256 ([RFC 7518](https://www.rfc-editor.org/rfc/rfc7518.html)) | Key statements, agent card signatures and envelope assertions, each with its own `typ` so one cannot be read as another. |
 
 [OAuth 2.1 revision 16](https://datatracker.ietf.org/doc/draft-ietf-oauth-v2-1/16/) is still an Internet-Draft. Track it for interoperability without describing it as a finalized RFC. [W3C Verifiable Credentials 2.0](https://www.w3.org/TR/vc-data-model-2.0/) is a Recommendation and can carry external organizational credentials if needed; it is not required in the initial hot path. MCP-T scores and the proposed Arkavo swarm claims remain application-specific profiles.
 
 Standards needed by each delivery (see "Delivery and acceptance"):
 - **Pack provisioning and baseline outbound enforcement:** none beyond those already in use (OpenTDF, CWT/COSE).
-- **Identity and policy contract:** RFC 8693, RFC 8707, RFC 9068, RFC 8725, and RFC 9449 or RFC 8705.
+- **Identity and policy contract:** RFC 8693, RFC 8707, RFC 9068, RFC 8725, and RFC 9449 or RFC 8705; RFC 7515 and RFC 8785 for envelopes.
 - **Guardian containment:** SSF 1.0, CAEP 1.0 and RFC 8935.
 - **Attestation evidence:** RFC 9334 and RFC 9711.
-- **Optional:** SPIFFE, RFC 9396 and VC 2.0 wherever a deployment needs them. JCS is required only once signed JSON receipts are introduced.
+- **Optional:** SPIFFE, RFC 9396 and VC 2.0 wherever a deployment needs them.
 
 ## Principals and authority
 
@@ -207,35 +208,41 @@ Three kinds of traffic reach an agent, and the receiver tells them apart without
 
 | Kind | Carries | Accepted from |
 |---|---|---|
-| Public request | Plain JSON-RPC `agent_card` (public fields only) or `health`; unsigned, unsealed | Anyone; it reveals only what a stranger may know |
+| Public request | The public agent card (A2A's `/.well-known/agent-card.json`; plain JSON-RPC `agent_card` until the A2A realignment) or `health`; unsigned, unsealed | Anyone; it reveals only what a stranger may know |
 | Pairing envelope (`typ: pair`) | The pairing exchange only, signed by the phone's enrollment key | A non-member, while a pairing window is open |
 | Member envelope (`typ: msg`) | Any other request, reply or gossip, signed by the sender's workload key | A verified member; refused from anyone else before unwrapping |
 
 ```text
-Envelope = COSE_Sign1 (EdDSA) by the sender's key over {
-    typ:   "msg" or "pair"
-    iss:   sender did:key
-    aud:   recipient did:key, or a swarm the recipient belongs to (gossip)
-    iat, exp, nonce
-    stmt:  digest of the sender's TDF key statement, for the reply
-    body:  TDF( { iss, nonce, the complete JSON-RPC message } )
+Envelope = one TDF-JSON document {
+    manifest.encryptionInformation:
+        keyAccess:  wrapped to the recipient's TDF key (url = its did:key),
+                    or to the swarm KAS (gossip)
+    manifest.assertions: exactly one, id "a2a-envelope" {
+        statement:  typ ("msg" or "pair"), iss (sender did:key),
+                    aud (recipient did:key, or a swarm it belongs to),
+                    iat, exp, nonce,
+                    stmt (digest of the sender's TDF key statement, for the reply)
+        binding:    JWS ES256 by iss over the canonical document
+    }
+    payload:  TDF( { iss, nonce, the sender's TDF key statement,
+                     A2A service parameters, the complete JSON-RPC message } )
 }
 ```
 
-The whole JSON-RPC message is sealed, so method names, task IDs and parameters are not on the wire; only `typ` says whether it is pairing. The sealed body repeats `iss` and `nonce`; a receiver that finds them different from the signed outer values refuses the message, so a ciphertext cannot be re-signed by someone else. The signature is COSE ([RFC 9052](https://www.rfc-editor.org/rfc/rfc9052.html)) outside the TDF because opentdf-rs 0.15 does not decode ZTDF assertions (`opentdf-0.15.0/src/tdf_cbor.rs:977`); Edge already signs COSE_Sign1 with EdDSA in `arkavo-permit`.
+The whole JSON-RPC message is sealed, so method names, task IDs and parameters are not on the wire; only `typ` says whether it is pairing. The sealed body repeats `iss` and `nonce`; a receiver that finds them different from the signed values refuses the message, so a ciphertext cannot be re-signed by someone else. The envelope is A2A's own message, carried by a custom protocol binding rather than an extension, since an extension may not change the message body; [the TDF-JSON binding](a2a/tdf-json-binding.md) specifies the document, carriers, replies, streams and errors. The signature is a TDF assertion rather than an outer COSE_Sign1: opentdf-rs 0.16.1's `TdfJson` parses `manifest.assertions`, which 0.15 could not, and the workload key is P-256 (#766), so the envelope signs with ES256 as key statements and the agent card do. The JWS covers the whole document, ciphertext included, with that one signature removed.
 
 A receiver processes an envelope in this order and stops at the first failure:
 
 1. Bound the size, then parse.
-2. Verify the signature against `iss`. A `did:key` carries its public key, so this needs no lookup.
+2. Verify the envelope assertion's JWS against `iss` and the document as received. A `did:key` carries its public key, so this needs no lookup.
 3. Check `aud` names this agent or a swarm it belongs to, `exp` has not passed, `iat` is within the clock bound, and the nonce has not been seen within the window.
 4. Establish the sender's standing: enrolled member or not, its state under "State overrides score", and the local deny latch. A member envelope from a non-member is refused here. A pairing envelope passes only while a pairing window is open.
 5. Only then unwrap the body, with the agent's own key for a message addressed to it or through key release for swarm-addressed data, and compare the inner `iss` and `nonce`. A pairing envelope whose body holds anything but the pairing exchange is refused.
 6. Admit the call with a `TaskSecurityContext` built from the verified sender.
 
-A reply is a member envelope from the responder, addressed to the requester and sealed to the key its `stmt` names; the reply to a pairing envelope is sealed to the phone's enrollment key.
+A reply is a member envelope from the responder, addressed to the requester, sealed to the key its `stmt` names and naming the request's nonce; the reply to a pairing envelope is sealed to the phone's enrollment key. Each stream event is its own envelope with a rising sequence number, so a truncated stream is an error rather than a normal end. A refused envelope gets one unsealed error that does not say which check failed.
 
-Cost: an Ed25519 verification is far below the 50 ms routing budget, and a message addressed to the agent unwraps with its own key without a network round trip. A key released through a KAS can be reused across messages only within the status lease (at most 5 s), which bounds how long a demotion can lag. A plaintext transport still exposes traffic patterns and lets an attacker drop, delay or reorder messages; that denial of service is accepted.
+Cost: one ES256 verification and one ECDH per message, and a message addressed to the agent unwraps with its own key without a network round trip. A Secure Enclave signature takes a few milliseconds and every stream event is signed, so the seal/open implementation is measured against the 50 ms routing budget. A key released through a KAS can be reused across messages only within the status lease (at most 5 s), which bounds how long a demotion can lag. A plaintext transport still exposes traffic patterns and lets an attacker drop, delay or reorder messages; that denial of service is accepted.
 
 ### Public operations and the local operator
 
@@ -295,7 +302,8 @@ The agent KAS decides today with a placeholder caller (`crates/arkavo-server/src
 - **How the enrolled owner is tied to an authnz-rs account.** Until it is, the agent gives no server delegation effect.
 - **The link.** A secret in the link reverses arkavo-ios ADR-0034 §5, whose open questions anticipated a one-time value. The app refuses unknown link parameters, so the new fields ship in the app before Edge writes them.
 - **The `web-ui` feature** runs in a browser and cannot open the operator socket; how it authenticates is open.
-- **The message format.** NanoTDF suits messages but needs the in-mesh hardening under "Key access tiers" first.
+
+The message format is decided: TDF-JSON, under [the TDF-JSON binding](a2a/tdf-json-binding.md). NanoTDF is not used for messages, so its in-mesh hardening under "Key access tiers" does not gate envelopes. Between agents the envelope is the credential, and no CWT is sent; a CWT minted from the workload key remains for services outside the mesh, such as the network KAS.
 
 ## Evidence and trust scores
 
@@ -480,7 +488,7 @@ Use existing v2 APIs where they suffice. Signed decision receipts, revocation ep
 
 Keep `opentdf-rs` responsible for standards-compatible container parsing, authenticated encryption, policy/integrity binding, KAS requests and interoperation. Keep role assignment, numerical trust scoring and model-specific egress outside this cryptographic library.
 
-Pin a format/profile and test ZIP TDF, inline JSON and NanoTDF separately; they are not interchangeable wire formats. Validate the exact bytes and fields covered by policy and integrity bindings. Reject unknown mandatory algorithms, invalid attribute FQNs, unsupported critical fields and altered payload/manifest bindings. Never silently drop a malformed security restriction during conversion. The [OpenTDF security concepts](https://github.com/opentdf/spec/blob/main/concepts/security.md) explain policy binding and key splitting; successful parsing alone is not authorization.
+Pin a format/profile and test ZIP TDF, inline JSON and NanoTDF separately; they are not interchangeable wire formats. Agent messages and TDF Parts pin TDF-JSON 1.0.0 with an inline base64 payload, as [the TDF-JSON binding](a2a/tdf-json-binding.md) defines. Validate the exact bytes and fields covered by policy and integrity bindings. Reject unknown mandatory algorithms, invalid attribute FQNs, unsupported critical fields and altered payload/manifest bindings. Never silently drop a malformed security restriction during conversion. The [OpenTDF security concepts](https://github.com/opentdf/spec/blob/main/concepts/security.md) explain policy binding and key splitting; successful parsing alone is not authorization.
 
 For multiple KASs, document whether a configuration provides alternatives or independently required key shares. Multiple URLs do not necessarily imply quorum approval. If owner and operator must both approve, use a supported split arrangement requiring both shares and test its exact reconstruction semantics. Do not invent a threshold scheme in Arkavo.
 

@@ -55,7 +55,7 @@ components:
     module: arkavo_server
     description: Signed, sealed agent envelopes, one workload key, minimal mDNS announcement, --trust enrollment and membership
     criticality: critical
-    scenario_count: 17
+    scenario_count: 18
     invariants:
       - Transport and discovery are untrusted
       - Every message is a signed, sealed envelope verified before unwrap
@@ -817,7 +817,7 @@ components:
     module: arkavo_tdf::security
     description: TDF control plane protection and format security
     criticality: critical
-    scenario_count: 17
+    scenario_count: 18
     invariants:
       - Control plane commands TDF-encrypted
       - TDF-JSON and TDF-CBOR equivalent security
