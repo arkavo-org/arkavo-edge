@@ -131,10 +131,15 @@ mod tests {
             passthrough: Vec::new(),
         };
 
+        // Renamed into place so a poll never reads a half-written dump.
         let transport = create_transport(
             TransportConfig::Stdio {
                 command: "sh".to_string(),
-                args: vec!["-c".to_string(), r#"env > "$ENV_DUMP_OUT""#.to_string()],
+                args: vec![
+                    "-c".to_string(),
+                    r#"env > "$ENV_DUMP_OUT.tmp" && mv "$ENV_DUMP_OUT.tmp" "$ENV_DUMP_OUT""#
+                        .to_string(),
+                ],
                 cwd: None,
             },
             &spec,
