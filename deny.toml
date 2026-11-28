@@ -11,8 +11,10 @@ ignore = [
     # Transitive unmaintained crates with no alternatives
     { id = "RUSTSEC-2024-0436", reason = "paste in ark-ff, macro_rules_attribute and netlink-packet-core (no replacement available)" },
     { id = "RUSTSEC-2025-0141", reason = "bincode in hnsw_rs (transitive, no direct usage)" },
-    # Fixed in libsqlite3-sys 0.39.0; sqlx-sqlite 0.9.0, the newest, requires <0.38.0.
-    { id = "RUSTSEC-2026-0459", reason = "bundled SQLite WAL memory exposure (local, crafted db files); only databases this program creates are opened; no sqlx release accepts the fixed libsqlite3-sys yet" },
+    # Fixed in libsqlite3-sys 0.39.0; sqlx 0.8.x requires <0.31.0 (sqlx 0.9.1 is a breaking major upgrade requiring MSRV 1.94).
+    { id = "RUSTSEC-2026-0459", reason = "bundled SQLite WAL memory exposure (local, crafted db files); only databases this program creates are opened; sqlx 0.8.x cannot accept libsqlite3-sys >= 0.39.0" },
+    # Direct across ~40 workspace crates and transitive via sqlx/schemars; migrating to jiff/time is tracked separately.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; used across workspace and transitively by sqlx and schemars (no drop-in upgrade)" },
 ]
 
 [bans]
@@ -144,9 +146,5 @@ unknown-registry = "warn"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
-    "https://github.com/arkavo-org/opentdf-rs",
     "https://github.com/huggingface/hf-hub",
 ]
-
-[sources.allow-org]
-github = ["arkavo-org"]

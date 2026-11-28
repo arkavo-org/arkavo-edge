@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-arp"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-llm",
  "async-trait",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-critic"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-evofabric",
  "arkavo-llm",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-crypto"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "base64",
  "bs58",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -313,7 +313,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "chrono",
  "serde",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-evofabric"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "bytes",
  "dashmap",
@@ -378,7 +378,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-process-env",
  "git2",
@@ -388,7 +388,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gossip"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-crypto",
  "chrono",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-hrm"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-budget",
  "arkavo-events",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "anyhow",
  "arkavo-deepseek",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -487,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-code-search"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -508,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -525,8 +525,8 @@ dependencies = [
  "async-trait",
  "base64",
  "chrono",
- "chrono-tz",
  "git2",
+ "jiff",
  "regex",
  "reqwest 0.12.28",
  "serde",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-workspace"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-mcp",
  "arkavo-process-env",
@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -590,11 +590,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-process-env"
-version = "0.106.1"
+version = "0.107.1"
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "anyhow",
  "arkavo-arp",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-swarmkit"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-budget",
  "arkavo-process-env",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf-iroh"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-tdf",
  "async-trait",
@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test-macros"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-torg-circuits"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "parking_lot",
  "torg-core",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-validation"
-version = "0.106.1"
+version = "0.107.1"
 dependencies = [
  "arkavo-arp",
  "ipnet",
@@ -1276,28 +1276,6 @@ dependencies = [
  "serde",
  "wasm-bindgen",
  "windows-link",
-]
-
-[[package]]
-name = "chrono-tz"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93698b29de5e97ad0ae26447b344c482a7284c737d9ddc5f9e52b74a336671bb"
-dependencies = [
- "chrono",
- "chrono-tz-build",
- "phf",
-]
-
-[[package]]
-name = "chrono-tz-build"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c088aee841df9c3041febbb73934cfc39708749bf96dc827e3359cd39ef11b1"
-dependencies = [
- "parse-zoneinfo",
- "phf",
- "phf_codegen",
 ]
 
 [[package]]
@@ -2026,7 +2004,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2159,9 +2137,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -2860,7 +2838,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "system-configuration 0.7.0",
  "tokio",
  "tower-service",
@@ -3386,10 +3364,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d89a5b5e10d5a9ad6e5d1f4bd58225f655d6fe9767575a5e8ac5a6fe64e04495"
 dependencies = [
  "jiff-static",
+ "jiff-tzdb",
+ "jiff-tzdb-platform",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3401,6 +3382,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
+]
+
+[[package]]
+name = "jiff-tzdb"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0980fca2cc272465bd60e82397607ba9f33add9e48defd77923301bbd03808f2"
+
+[[package]]
+name = "jiff-tzdb-platform"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
+dependencies = [
+ "jiff-tzdb",
 ]
 
 [[package]]
@@ -3815,9 +3811,9 @@ dependencies = [
 
 [[package]]
 name = "libz-sys"
-version = "1.1.31"
+version = "1.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2"
+checksum = "fee3f59f4321dab0c78d828942e7aa09d0bd8ad6e78a501977e6bf3d02938045"
 dependencies = [
  "cc",
  "libc",
@@ -3833,9 +3829,9 @@ checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.11.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "litemap"
@@ -4254,7 +4250,7 @@ dependencies = [
  "pin-project-lite",
  "rustc-hash 2.1.3",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -4297,7 +4293,7 @@ checksum = "4dc50afea61aff926e150a36c31f06094608848e114a3fe667d76ec233163b1c"
 dependencies = [
  "cfg_aliases",
  "libc",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -4738,15 +4734,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "parse-zoneinfo"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f2a05b18d44e2957b88f96ba460715e295bc1d7510468a2f3d3b44535d26c24"
-dependencies = [
- "regex",
-]
-
-[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4804,44 +4791,6 @@ checksum = "e9567389417feee6ce15dd6527a8a1ecac205ef62c2932bcf3d9f6fc5b78b414"
 dependencies = [
  "futures",
  "rustc_version",
-]
-
-[[package]]
-name = "phf"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
-dependencies = [
- "phf_shared",
-]
-
-[[package]]
-name = "phf_codegen"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a"
-dependencies = [
- "phf_generator",
- "phf_shared",
-]
-
-[[package]]
-name = "phf_generator"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
-dependencies = [
- "phf_shared",
- "rand 0.8.6",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
-dependencies = [
- "siphasher",
 ]
 
 [[package]]
@@ -5133,7 +5082,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5164,16 +5113,16 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.14"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "addec6a0dcad8a8d96a771f815f0eaf55f9d1805756410b39f5fa81332574cbd"
+checksum = "af66907df18639dcf4db56ca65490cabc4b27a97dbadd96f2926cca73298f016"
 dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5599,15 +5548,15 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.3"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "146c9e247ccc180c1f61615433868c99f3de3ae256a30a43b49f67c2d9171f34"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
  "libc",
- "linux-raw-sys 0.11.0",
- "windows-sys 0.59.0",
+ "linux-raw-sys 0.12.1",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5687,7 +5636,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.11",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5820,7 +5769,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6083,12 +6032,6 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
 ]
-
-[[package]]
-name = "siphasher"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
 name = "slab"
@@ -6590,8 +6533,8 @@ dependencies = [
  "fastrand",
  "getrandom 0.3.4",
  "once_cell",
- "rustix 1.1.3",
- "windows-sys 0.59.0",
+ "rustix 1.1.6",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7225,9 +7168,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",
@@ -7574,7 +7517,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
