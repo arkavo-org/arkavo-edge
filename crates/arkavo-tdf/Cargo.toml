@@ -23,13 +23,14 @@ url = { workspace = true }
 tracing = { workspace = true }
 
 # opentdf-rs for real TDF encryption (optional)
-opentdf = { version = "0.17.0", default-features = false, features = ["rustls-tls"], optional = true }
+opentdf = { workspace = true, optional = true }
 
 # KAS server crypto operations from opentdf-rs
-opentdf-kas = { version = "0.17.0", optional = true }
+opentdf-kas = { workspace = true, optional = true }
 
-# HTTP client for KAS (optional)
+# HTTP client and TLS profile for KAS (optional)
 reqwest = { workspace = true, optional = true }
+arkavo-tls = { path = "../arkavo-tls", default-features = false, optional = true }
 
 # A2A KAS capability dependencies (optional)
 arkavo-crypto = { path = "../arkavo-crypto", optional = true }
@@ -44,6 +45,7 @@ zeroize = { version = "1.8", optional = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 # Opens the rewrapped DEK the way a client does, to prove it matches the bound one
 aes-gcm = "0.10"
 
@@ -51,7 +53,7 @@ aes-gcm = "0.10"
 default = []
 testing = []  # Enables mock implementations
 opentdf = ["dep:opentdf"]  # Real TDF encryption via opentdf-rs
-kas = ["opentdf", "opentdf/kas", "dep:reqwest"]  # KAS client support
+kas = ["opentdf", "opentdf/kas", "dep:reqwest", "dep:arkavo-tls"]  # KAS client support
 a2a = ["dep:arkavo-crypto", "dep:opentdf-kas", "dep:schemars", "dep:hkdf", "dep:hmac", "dep:sha2", "dep:hex", "dep:zeroize"]  # A2A KAS capability over JSON-RPC
 
 [lints]

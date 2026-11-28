@@ -54,6 +54,7 @@ struct Args {
 #[allow(clippy::disallowed_methods)] // #[tokio::main] expands to Runtime::block_on
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    arkavo_tls::init_process_tls().context("initializing TLS")?;
     let dry_run = args.dry_run;
     let cfg = Config {
         db_path: args.db,

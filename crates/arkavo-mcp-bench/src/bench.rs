@@ -116,7 +116,10 @@ impl SweBenchTool {
             dataset_name, split
         );
 
-        let response = reqwest::get(&url).await?;
+        let client = arkavo_tls::http_client(std::time::Duration::from_secs(30)).map_err(|e| {
+            BenchError::TaskLoadingFailed(format!("Failed to initialize TLS HTTP client: {e}"))
+        })?;
+        let response = client.get(&url).send().await?;
         let json_response: serde_json::Value = response.json().await.map_err(|e| {
             BenchError::TaskLoadingFailed(format!("Failed to fetch from HuggingFace: {e}"))
         })?;

@@ -138,6 +138,8 @@ where
 }
 
 async fn download_from_hub(repo_id: &str, filename: &str) -> Result<PathBuf, String> {
+    let _ = arkavo_tls::init_process_tls()
+        .map_err(|e| format!("failed to initialize TLS for HuggingFace API: {e}"))?;
     let api = hf_hub::api::tokio::Api::new()
         .map_err(|e| format!("failed to initialize the HuggingFace API: {e}"))?;
     api.repo(hf_hub::Repo::model(repo_id.to_string()))

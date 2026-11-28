@@ -21,6 +21,7 @@ tdf = ["dep:arkavo-tdf", "dep:arkavo-agent-auth"]
 arkavo-swarmkit = { path = "../arkavo-swarmkit" }
 arkavo-arp = { path = "../arkavo-arp" }
 arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf"], optional = true }
 arkavo-agent-auth = { path = "../arkavo-agent-auth", optional = true }
 base64 = { workspace = true }
@@ -28,7 +29,7 @@ blake3 = { workspace = true }
 dirs = { workspace = true }
 ed25519-dalek = { workspace = true }
 parking_lot = { workspace = true }
-ureq = { version = "2.10", features = ["json", "tls"], default-features = false }
+ureq = { version = "3.5", default-features = false, features = ["json", "rustls-no-provider", "rustls-webpki-roots"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -41,6 +42,7 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 arkavo-agui = { path = "../arkavo-agui", default-features = false }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
 arkavo-tdf = { path = "../arkavo-tdf", default-features = false, features = ["opentdf", "testing"] }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 

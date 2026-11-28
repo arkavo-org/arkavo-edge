@@ -13,17 +13,21 @@ pub struct AnalysisEngine {
 impl AnalysisEngine {
     pub fn new() -> Result<Self> {
         let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
+        let client = arkavo_tls::http_client(std::time::Duration::from_secs(60))
+            .map_err(|e| TestError::Ai(format!("Failed to initialize TLS HTTP client: {e}")))?;
 
         Ok(Self {
-            client: reqwest::Client::new(),
+            client,
             api_key,
             model: "claude-3-sonnet-20240229".to_string(),
         })
     }
 
     pub fn with_api_key(api_key: String) -> Self {
+        let client = arkavo_tls::http_client(std::time::Duration::from_secs(60))
+            .expect("arkavo-tls HTTP client");
         Self {
-            client: reqwest::Client::new(),
+            client,
             api_key: Some(api_key),
             model: "claude-3-sonnet-20240229".to_string(),
         }

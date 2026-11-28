@@ -10,7 +10,6 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
-use rustls::{ClientConfig, RootCertStore};
 use serde_json::Value;
 use tokio::net::TcpStream;
 use tokio::sync::{RwLock, broadcast, oneshot};
@@ -132,12 +131,8 @@ impl OpenClawTransport {
     }
 
     fn build_tls_connector(&self) -> Result<Connector, A2aError> {
-        let mut root_store = RootCertStore::empty();
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-        let config = ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
+        let config = arkavo_tls::default_client_config()
+            .map_err(|e| A2aError::Tls(format!("Failed to configure TLS client: {e}")))?;
 
         Ok(Connector::Rustls(Arc::new(config)))
     }

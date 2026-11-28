@@ -25,9 +25,7 @@ impl SseTransport {
         url: String,
         headers: HashMap<String, String>,
     ) -> Result<Self, TransportError> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_mins(1))
-            .build()
+        let client = arkavo_tls::http_client(std::time::Duration::from_mins(1))
             .map_err(|e| TransportError::ConnectionFailed(e.to_string()))?;
 
         let transport = Self {

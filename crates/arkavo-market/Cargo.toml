@@ -13,6 +13,7 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-registration = { path = "../arkavo-registration" }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 
 async-trait.workspace = true
 base64.workspace = true
@@ -28,6 +29,7 @@ tokio = { workspace = true, features = ["time"] }
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6"
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 
 [lints]
 workspace = true

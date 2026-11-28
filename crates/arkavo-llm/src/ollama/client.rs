@@ -25,22 +25,34 @@ pub struct OllamaClient {
 }
 
 impl OllamaClient {
-    pub fn new(base_url: Option<String>, model: Option<String>) -> Self {
-        Self {
-            client: Client::new(),
+    /// Creates an Ollama client configured with the active TLS policy.
+    pub fn try_new(base_url: Option<String>, model: Option<String>) -> Result<Self> {
+        let client = arkavo_tls::http_client(std::time::Duration::from_secs(120))
+            .map_err(|e| Error::Config(format!("Failed to create HTTP client: {e}")))?;
+        Ok(Self {
+            client,
             base_url: base_url.unwrap_or_else(|| "http://localhost:11434".to_string()),
             model: model.unwrap_or_default(), // Empty default, will be selected dynamically
-        }
+        })
+    }
+
+    /// Creates an Ollama client configured with the active TLS policy.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the TLS HTTP client cannot be initialized.
+    pub fn new(base_url: Option<String>, model: Option<String>) -> Self {
+        Self::try_new(base_url, model).expect("arkavo-tls HTTP client")
     }
 
     pub fn from_env() -> Result<Self> {
         let base_url = std::env::var("OLLAMA_BASE_URL").ok();
         let model = std::env::var("OLLAMA_MODEL").ok();
-        Ok(Self::new(base_url, model))
+        Self::try_new(base_url, model)
     }
 
     pub fn from_config(config: &LlmConfig) -> Result<Self> {
-        Ok(Self::new(config.base_url.clone(), config.model.clone()))
+        Self::try_new(config.base_url.clone(), config.model.clone())
     }
 
     pub async fn list_models(&self) -> Result<Vec<String>> {

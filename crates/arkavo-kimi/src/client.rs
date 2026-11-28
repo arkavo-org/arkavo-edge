@@ -116,8 +116,8 @@ pub struct KimiClient {
 impl KimiClient {
     /// Create a new Kimi client
     pub fn new(config: KimiConfig) -> Result<Self> {
-        let http_client = Client::builder()
-            .timeout(config.timeout)
+        let http_client = arkavo_tls::http_client_builder(config.timeout)
+            .map_err(|e| KimiError::Config(format!("Failed to configure TLS client: {e}")))?
             .user_agent(&config.user_agent)
             .build()
             .map_err(|e| KimiError::Config(format!("Failed to build HTTP client: {e}")))?;

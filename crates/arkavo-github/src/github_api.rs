@@ -51,9 +51,9 @@ pub struct GitHubLabel {
 }
 
 fn create_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+    arkavo_tls::http_client_builder(Duration::from_secs(GITHUB_API_TIMEOUT_SECS))
+        .map_err(|e| GitHubError::GitHubApi(format!("Failed to configure TLS client: {e}")))?
         .user_agent(USER_AGENT)
-        .timeout(Duration::from_secs(GITHUB_API_TIMEOUT_SECS))
         .build()
         .map_err(|e| GitHubError::GitHubApi(format!("Failed to create HTTP client: {e}")))
 }

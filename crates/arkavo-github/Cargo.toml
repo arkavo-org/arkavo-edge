@@ -26,9 +26,13 @@ serde_json.workspace = true
 # Workspace crates
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 
 # Additional dependencies
 uuid = { workspace = true }
+
+[dev-dependencies]
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 
 [lints]
 workspace = true

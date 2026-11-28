@@ -59,6 +59,7 @@ members = [
     "crates/arkavo-market",
     "crates/arkavo-tdf",
     "crates/arkavo-tdf-iroh",
+    "crates/arkavo-tls",
     "crates/arkavo-image-gen",
     "crates/arkavo-mcp-mesh",
     "crates/arkavo-config-bundle",
@@ -171,6 +172,7 @@ default-members = [
     "crates/arkavo-mcp-proxy",
     "crates/arkavo-process-env",
     "crates/arkavo-shadow-consolidation",
+    "crates/arkavo-tls",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz", "examples"]
@@ -178,7 +180,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.107.0"
+version = "0.108.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -202,10 +204,10 @@ tokio-util = "0.7.12"
 
 # Consolidated versions to reduce duplicates
 base64 = "0.22.1"
-jsonschema = { version = "0.45", default-features = false, features = ["resolve-http", "resolve-file", "tls-aws-lc-rs"] }
+jsonschema = { version = "0.45", default-features = false, features = ["resolve-file"] }
 thiserror = "2.0.12"
 tempfile = "3.20"
-reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json", "stream", "blocking"] }
+reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls-webpki-roots-no-provider", "json", "stream", "blocking"] }
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.41", default-features = false, features = ["serde", "clock", "std"] }
@@ -263,12 +265,15 @@ ignore = "0.4.23"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "uuid", "chrono", "migrate"] }
 
 # HTTP and networking
-jsonrpsee = { version = "0.25", features = ["client", "server", "ws-client", "macros"] }
+jsonrpsee = { version = "0.25", default-features = false, features = ["server", "async-client", "client-core", "macros"] }
+jsonrpsee-ws-client = { version = "0.25", default-features = false }
 tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 # 0.23.45 and earlier are RUSTSEC-2026-0346 through RUSTSEC-2026-0349.
 rustls = { version = "0.23.46", default-features = false }
 webpki-roots = "0.26"
+opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", rev = "6a54fb94acdf58f9559764c112c442528de9e5ee", default-features = false, features = ["rustls-tls-no-provider"] }
+opentdf-kas = { git = "https://github.com/arkavo-org/opentdf-rs", rev = "6a54fb94acdf58f9559764c112c442528de9e5ee" }
 governor = "0.10"
 dashmap = "6.1"
 crossbeam-queue = "0.3"
@@ -276,7 +281,7 @@ jsonwebtoken = { version = "10", default-features = false, features = ["use_pem"
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }
 if-addrs = "0.14"
 metrics = "0.24"
-metrics-exporter-prometheus = "0.16"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors", "set-header"] }
 mdns-sd = "0.14"
@@ -286,7 +291,7 @@ tokenizers = { version = "0.22.1", default-features = false, features = ["fancy-
 torg-core = { version = "0.2", features = ["serde"] }
 torg-mask = "0.2"
 torg-serde = "0.2"
-hf-hub = { git = "https://github.com/huggingface/hf-hub", rev = "cc015aa814e46ef880b57e6c955674f9fcc5084b", default-features = false, features = ["tokio", "rustls-tls"] }
+hf-hub = { git = "https://github.com/huggingface/hf-hub", rev = "cc015aa814e46ef880b57e6c955674f9fcc5084b", default-features = false, features = ["tokio"] }
 # fastembed defaults to native-tls (openssl) for both ort and hf-hub.
 # Force rustls everywhere — CLAUDE.md forbids OpenSSL.
 fastembed = { version = "5", default-features = false, features = [

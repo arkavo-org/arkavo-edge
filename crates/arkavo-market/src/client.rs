@@ -110,10 +110,8 @@ impl MarketClient {
         identity: AgentAuthConfig,
     ) -> Result<Self, MarketError> {
         let origin = market_origin(market_url)?;
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+        let http = arkavo_tls::kas_http_client(Duration::from_secs(30))
+            .map_err(|e| MarketError::InvalidEndpoint(format!("TLS client setup failed: {e}")))?;
         Ok(Self {
             origin,
             http,

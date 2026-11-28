@@ -15,9 +15,15 @@ workspace = true
 name = "arkavo-shadow-consolidation"
 path = "src/main.rs"
 
+[features]
+default = ["fallback-tls"]
+fallback-tls = ["arkavo-tls/fallback-aws-lc-rs"]
+crypto-profile = ["arkavo-tls/crypto-profile"]
+
 [dependencies]
 anyhow = { workspace = true }
 arkavo-lesson-synthesis = { path = "../arkavo-lesson-synthesis" }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 chrono = { workspace = true }
 clap = { workspace = true }
 reqwest = { workspace = true }

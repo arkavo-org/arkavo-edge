@@ -33,6 +33,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         sentinel_wiring::install();
     });
 
+    arkavo_tls::init_process_tls()?;
+
     // Check for verbose flag
     let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
 

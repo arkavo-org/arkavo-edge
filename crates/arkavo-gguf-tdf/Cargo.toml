@@ -10,7 +10,7 @@ keywords = ["gguf", "opentdf", "tdf", "llama", "encryption"]
 categories = ["cryptography"]
 
 [dependencies]
-opentdf = { version = "0.17.0", default-features = false, features = ["rustls-tls"] }
+opentdf = { workspace = true }
 zip = { version = "9.0.5", default-features = false }
 rand = { workspace = true }
 zeroize = { version = "1.8", features = ["derive"] }

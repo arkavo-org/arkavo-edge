@@ -34,7 +34,13 @@ pub struct Fetcher {
 
 impl Fetcher {
     pub fn new() -> Result<Self> {
+        let tls_config =
+            arkavo_tls::default_client_config().map_err(|e| ImageGenError::Download {
+                url: String::new(),
+                reason: e.to_string(),
+            })?;
         let client = reqwest::Client::builder()
+            .use_preconfigured_tls(tls_config)
             .user_agent(concat!("arkavo-edge/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(30))
             .read_timeout(Duration::from_mins(2))

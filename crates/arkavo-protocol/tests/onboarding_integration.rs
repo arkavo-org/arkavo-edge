@@ -226,7 +226,7 @@ fn test_get_service_ip_returns_ipv4() {
 #[tokio::test]
 async fn test_server_accepts_websocket_connections() {
     use jsonrpsee::core::client::ClientT;
-    use jsonrpsee::ws_client::WsClientBuilder;
+    use jsonrpsee_ws_client::WsClientBuilder;
 
     let config = ServerConfig {
         enabled: true,
@@ -281,7 +281,7 @@ async fn test_server_accepts_websocket_connections() {
 #[tokio::test]
 async fn test_chat_open_rpc_returns_session() {
     use jsonrpsee::core::client::ClientT;
-    use jsonrpsee::ws_client::WsClientBuilder;
+    use jsonrpsee_ws_client::WsClientBuilder;
 
     let config = ServerConfig {
         enabled: true,
@@ -330,7 +330,7 @@ async fn test_chat_open_rpc_returns_session() {
 #[tokio::test]
 async fn test_chat_close_invalid_session_returns_error() {
     use jsonrpsee::core::client::ClientT;
-    use jsonrpsee::ws_client::WsClientBuilder;
+    use jsonrpsee_ws_client::WsClientBuilder;
 
     let config = ServerConfig {
         enabled: true,
@@ -392,7 +392,7 @@ async fn test_server_accepts_http_jsonrpc_requests() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Send JSON-RPC request via HTTP POST
-    let client = reqwest::Client::new();
+    let client = arkavo_tls::http_client(Duration::from_secs(10)).unwrap();
     let url = format!("http://127.0.0.1:{actual_port}");
 
     let jsonrpc_request = serde_json::json!({
@@ -463,7 +463,7 @@ async fn test_chat_open_via_http() {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let client = reqwest::Client::new();
+    let client = arkavo_tls::http_client(Duration::from_secs(10)).unwrap();
     let url = format!("http://127.0.0.1:{actual_port}");
 
     let jsonrpc_request = serde_json::json!({
@@ -510,7 +510,7 @@ async fn test_chat_open_via_http() {
 #[tokio::test]
 async fn test_ios_registration_via_rpc() {
     use jsonrpsee::core::client::ClientT;
-    use jsonrpsee::ws_client::WsClientBuilder;
+    use jsonrpsee_ws_client::WsClientBuilder;
 
     let config = ServerConfig {
         enabled: true,
@@ -631,7 +631,7 @@ async fn test_ios_registration_params_as_object() {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let client = reqwest::Client::new();
+    let client = arkavo_tls::http_client(Duration::from_secs(10)).unwrap();
     let url = format!("http://127.0.0.1:{actual_port}");
 
     // iOS sends params as object, not array - this is what the iOS Swift client does

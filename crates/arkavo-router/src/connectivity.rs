@@ -39,6 +39,10 @@ impl ConnectivityChecker {
     }
 
     async fn check_connectivity(&self) -> bool {
+        let Ok(client) = arkavo_tls::http_client(self.timeout) else {
+            tracing::warn!("Connectivity check skipped: failed to initialize TLS HTTP client");
+            return false;
+        };
         let hosts = vec![
             "https://generativelanguage.googleapis.com",
             "https://www.google.com",
@@ -46,7 +50,7 @@ impl ConnectivityChecker {
         ];
 
         for host in hosts {
-            if let Ok(result) = tokio::time::timeout(self.timeout, reqwest::get(host)).await
+            if let Ok(result) = tokio::time::timeout(self.timeout, client.get(host).send()).await
                 && result.is_ok()
             {
                 tracing::debug!("Online: Connectivity check succeeded to {}", host);
@@ -59,8 +63,14 @@ impl ConnectivityChecker {
     }
 
     pub async fn check_api_availability(&self, api_url: &str) -> bool {
-        match tokio::time::timeout(self.timeout, reqwest::Client::new().head(api_url).send()).await
-        {
+        let Ok(client) = arkavo_tls::http_client(self.timeout) else {
+            tracing::warn!(
+                "API {} availability check skipped: failed to initialize TLS HTTP client",
+                api_url
+            );
+            return false;
+        };
+        match tokio::time::timeout(self.timeout, client.head(api_url).send()).await {
             Ok(Ok(response)) => {
                 let available =
                     response.status().is_success() || response.status().is_redirection();

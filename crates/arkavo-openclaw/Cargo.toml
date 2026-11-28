@@ -16,6 +16,7 @@ tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync"] }
 tokio-tungstenite = { workspace = true }
 rustls = { workspace = true, features = ["std", "tls12"] }
 webpki-roots = { workspace = true }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 async-trait = { workspace = true }
 futures = { workspace = true }
 dashmap = { workspace = true }
@@ -35,3 +36,4 @@ arkavo-protocol = { path = "../arkavo-protocol" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }

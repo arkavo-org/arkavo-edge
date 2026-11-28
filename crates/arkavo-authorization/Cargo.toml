@@ -11,6 +11,7 @@ categories = ["authentication", "web-programming::http-client"]
 
 [dependencies]
 reqwest = { workspace = true, features = ["json"] }
+arkavo-tls = { path = "../arkavo-tls", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
@@ -29,6 +30,7 @@ prost = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["full"] }
 wiremock = "0.6"
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 
 [features]
 default = ["connect"]

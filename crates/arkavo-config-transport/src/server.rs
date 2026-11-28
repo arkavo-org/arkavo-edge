@@ -206,7 +206,7 @@ mod tests {
 
         let mut policy = Policy::new();
         policy.add_attribute(
-            "agent/identity".to_string(),
+            "agent.identity".to_string(),
             "autonomous_service".to_string(),
             "Agent Identity".to_string(),
         );

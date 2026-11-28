@@ -73,10 +73,8 @@ impl QwenClient {
             message: format!("Invalid base URL '{}': {}", config.base_url, e),
         })?;
 
-        let client = Client::builder()
-            .timeout(config.timeout)
-            .build()
-            .map_err(|e| QwenError::ConfigError {
+        let client =
+            arkavo_tls::http_client(config.timeout).map_err(|e| QwenError::ConfigError {
                 message: format!("Failed to create HTTP client: {e}"),
             })?;
 

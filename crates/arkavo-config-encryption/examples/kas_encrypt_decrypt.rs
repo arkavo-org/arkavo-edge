@@ -58,12 +58,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let policy = Policy {
         attributes: vec![
             PolicyAttribute {
-                attribute: "data/clearance".to_string(),
+                attribute: "data.clearance".to_string(),
                 value: "internal".to_string(),
                 display_name: "Data Clearance".to_string(),
             },
             PolicyAttribute {
-                attribute: "agent/identity".to_string(),
+                attribute: "agent.identity".to_string(),
                 value: "autonomous_service".to_string(),
                 display_name: "Agent Identity".to_string(),
             },

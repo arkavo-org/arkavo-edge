@@ -109,10 +109,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn http_client() -> reqwest::Client {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap()
+        arkavo_tls::http_client(std::time::Duration::from_secs(2)).unwrap()
     }
 
     async fn serve_token(

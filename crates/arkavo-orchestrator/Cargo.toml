@@ -51,6 +51,7 @@ mdns-sd = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 arkavo-test-macros = { path = "../arkavo-test-macros" }
+arkavo-tls = { path = "../arkavo-tls", features = ["fallback-aws-lc-rs"] }
 # Only to name the `Stream` type in the substituted provider a strategy test
 # installs on the router; nothing in this crate streams at runtime.
 tokio-stream = { workspace = true }

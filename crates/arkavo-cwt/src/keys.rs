@@ -143,7 +143,8 @@ fn client() -> Result<&'static reqwest::Client, CwtError> {
     static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
     CLIENT
         .get_or_init(|| {
-            reqwest::Client::builder()
+            arkavo_tls::http_client_builder_unbounded()
+                .map_err(|e| e.to_string())?
                 .build()
                 .map_err(|e| e.to_string())
         })

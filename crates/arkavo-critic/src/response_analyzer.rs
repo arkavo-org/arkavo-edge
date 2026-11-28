@@ -118,11 +118,7 @@ pub fn is_simple_query(prompt: &str) -> bool {
 
     // Simple factual questions
     let factual = ["capital of", "who is", "when was", "where is"];
-    if factual.iter().any(|p| prompt.contains(p)) {
-        return true;
-    }
-
-    false
+    factual.iter().any(|p| prompt.contains(p))
 }
 
 /// Check if response contains code fences

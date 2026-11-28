@@ -130,10 +130,7 @@ pub struct FableClient {
 
 impl FableClient {
     pub fn new(cfg: FableConfig) -> anyhow::Result<Self> {
-        let http = reqwest::Client::builder()
-            .use_rustls_tls()
-            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .build()
+        let http = arkavo_tls::http_client(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .context("building HTTP client")?;
         Ok(Self { http, cfg })
     }

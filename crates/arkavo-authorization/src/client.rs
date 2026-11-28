@@ -20,10 +20,7 @@ pub struct AuthorizationClient {
 
 impl AuthorizationClient {
     pub fn new(config: AuthorizationConfig) -> Result<Self> {
-        let http_client = Client::builder()
-            .timeout(config.timeout)
-            .danger_accept_invalid_certs(false)
-            .build()
+        let http_client = arkavo_tls::http_client(config.timeout)
             .map_err(|e| AuthorizationError::ConfigError(e.to_string()))?;
 
         let cache = Arc::new(DecisionCache::new(1000, config.cache_ttl));

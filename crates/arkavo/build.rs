@@ -21,4 +21,14 @@ fn main() {
 
     // Rerun if .git/HEAD changes (if it exists)
     println!("cargo:rerun-if-changed=../../.git/HEAD");
+
+    // On macOS, aws-lc-fips-sys links dynamically against
+    // `@rpath/libaws_lc_fips_0_14_4_crypto.dylib`. Embed executable-relative
+    // rpaths so packaged binaries resolve the bundled FIPS dylib without
+    // requiring DYLD_LIBRARY_PATH.
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "macos" && std::env::var_os("CARGO_FEATURE_CRYPTO_PROFILE").is_some() {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path/../lib");
+    }
 }

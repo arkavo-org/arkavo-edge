@@ -1,0 +1,36 @@
+[package]
+name = "arkavo-tls"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Central application-layer TLS policy and crypto provider initialization for Arkavo Edge"
+keywords = ["tls", "rustls", "fips", "crypto-profile", "security"]
+categories = ["cryptography", "network-programming"]
+
+[features]
+default = []
+# Application-layer TLS policy and rustls CryptoProvider backed by AWS-LC FIPS 4.x.
+# Also enables rustls/custom-provider so rustls never silently installs its stock
+# provider even if a transitive dependency unifies a stock provider feature.
+crypto-profile = ["dep:crypto-profile-awslc4", "rustls/custom-provider"]
+# Fallback provider for non-crypto-profile builds (including Windows C++-free builds
+# and standalone crate tests).
+fallback-aws-lc-rs = ["rustls/aws-lc-rs"]
+
+[dependencies]
+rustls = { workspace = true, features = ["std", "tls12"] }
+webpki-roots = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+crypto-profile-awslc4 = { version = "0.10.2", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "net", "io-util"] }
+opentdf = { workspace = true, features = ["kas-client"] }
+
+[lints]
+workspace = true

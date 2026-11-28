@@ -1,7 +1,9 @@
 use crate::error::{A2aError, Result};
 use crate::transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
 use async_trait::async_trait;
-use reqwest::{Certificate, Client, ClientBuilder, Identity};
+use reqwest::Client;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -44,58 +46,72 @@ impl HttpTransport {
     pub fn new(config: TransportConfig) -> Result<Self> {
         let timeout = Duration::from_millis(config.timeout_ms);
 
-        let mut builder = ClientBuilder::new()
-            .use_rustls_tls()
-            .timeout(timeout)
-            .connect_timeout(timeout)
-            .danger_accept_invalid_certs(false);
-
         if !config.tls_config.verify_cert {
             warn!(
                 "tls_config.verify_cert=false is ignored; TLS certificate verification is always enabled"
             );
         }
 
+        let mut root_store = arkavo_tls::default_root_store();
+
+        // Load CA certificate if provided
+        if let Some(ca_path) = &config.tls_config.ca_cert_path {
+            debug!("Loading CA certificate from: {}", ca_path);
+
+            let ca_file = fs::File::open(ca_path)
+                .map_err(|e| A2aError::Tls(format!("Failed to read CA certificate: {e}")))?;
+
+            let ca_certs: Vec<CertificateDer> = CertificateDer::pem_reader_iter(ca_file)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| A2aError::Tls(format!("Failed to parse CA certificate: {e}")))?;
+
+            if ca_certs.is_empty() {
+                return Err(A2aError::Tls(format!(
+                    "No PEM certificates found in CA certificate file: {ca_path}"
+                )));
+            }
+
+            for cert in ca_certs {
+                root_store
+                    .add(cert)
+                    .map_err(|e| A2aError::Tls(format!("Failed to add CA certificate: {e}")))?;
+            }
+            info!("CA certificate configured");
+        }
+
         // Load client certificates for mTLS
-        if let (Some(cert_path), Some(key_path)) = (
+        let client_auth = if let (Some(cert_path), Some(key_path)) = (
             &config.tls_config.client_cert_path,
             &config.tls_config.client_key_path,
         ) {
             debug!("Loading client certificate from: {}", cert_path);
             debug!("Loading client key from: {}", key_path);
 
-            let cert_pem = fs::read(cert_path)
+            let cert_file = fs::File::open(cert_path)
                 .map_err(|e| A2aError::Tls(format!("Failed to read client certificate: {e}")))?;
-            let key_pem = fs::read(key_path)
+            let key_file = fs::File::open(key_path)
                 .map_err(|e| A2aError::Tls(format!("Failed to read client key: {e}")))?;
 
-            // Combine certificate and key into a single PEM for reqwest
-            let mut combined_pem = cert_pem;
-            combined_pem.extend_from_slice(&key_pem);
+            let certs: Vec<CertificateDer> = CertificateDer::pem_reader_iter(cert_file)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| A2aError::Tls(format!("Failed to parse client certificate: {e}")))?;
+            if certs.is_empty() {
+                return Err(A2aError::Tls(format!(
+                    "No PEM certificates found in client certificate file: {cert_path}"
+                )));
+            }
+            let key: PrivateKeyDer = PrivateKeyDer::from_pem_reader(key_file)
+                .map_err(|e| A2aError::Tls(format!("Failed to parse client key: {e}")))?;
 
-            let identity = Identity::from_pem(&combined_pem)
-                .map_err(|e| A2aError::Tls(format!("Failed to create identity from PEM: {e}")))?;
-
-            builder = builder.identity(identity);
             info!("Client certificate configured for mTLS");
-        }
+            Some(arkavo_tls::ClientAuth { certs, key })
+        } else {
+            None
+        };
 
-        // Load CA certificate if provided
-        if let Some(ca_path) = &config.tls_config.ca_cert_path {
-            debug!("Loading CA certificate from: {}", ca_path);
-
-            let ca_pem = fs::read(ca_path)
-                .map_err(|e| A2aError::Tls(format!("Failed to read CA certificate: {e}")))?;
-
-            let ca_cert = Certificate::from_pem(&ca_pem)
-                .map_err(|e| A2aError::Tls(format!("Failed to parse CA certificate: {e}")))?;
-
-            builder = builder.add_root_certificate(ca_cert);
-            info!("CA certificate configured");
-        }
-
-        let client = builder
-            .build()
+        let tls_config = arkavo_tls::client_config(root_store, client_auth)
+            .map_err(|e| A2aError::Tls(format!("Failed to configure TLS client: {e}")))?;
+        let client = arkavo_tls::http_client_with_tls(tls_config, timeout)
             .map_err(|e| A2aError::Transport(format!("Failed to build HTTP client: {e}")))?;
 
         Ok(Self {

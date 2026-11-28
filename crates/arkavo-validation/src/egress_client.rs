@@ -124,8 +124,10 @@ impl EgressClientBuilder {
             Some(policy) => policy,
             None => EgressPolicy::process()?,
         };
+        let tls_config =
+            arkavo_tls::default_client_config().map_err(|e| EgressError::Client(e.to_string()))?;
         let mut builder = Client::builder()
-            .use_rustls_tls()
+            .use_preconfigured_tls(tls_config)
             .connect_timeout(CONNECT_TIMEOUT)
             .dns_resolver(Arc::new(PolicyResolver {
                 policy: Arc::clone(&policy),
