@@ -290,3 +290,56 @@ scenarios:
       - crates/arkavo-protocol/src/operator_notice.rs
     changed: "2026-10-18"
 
+
+  - id: SRV-017
+    name: The agent card is signed by the agent's workload key
+    criticality: high
+    given:
+      - An agent whose workload key is a P-256 did:key (#766), in the Secure Enclave where the Mac has one
+    when: Its card is served, by the agent_card method or GET /.well-known/agent.json
+    then:
+      - "The card carries one A2A v1.0 signature: a JWS whose protected header is alg ES256, typ JOSE and kid did:key:<multibase>#<multibase>"
+      - "The JWS payload is the card's RFC 8785 canonical form without its signatures member, exactly as served"
+      - "Anyone verifies it from the card alone: the kid's DID is the public key, so no fetch and no key store"
+      - "The arkavo ui gateway reads the card on each connection and shows, on the agent's page, the did:key that signed it"
+      - "The page never says where the key is kept: a card cannot prove a key lives in a Secure Enclave, so only the agent's own startup line (with -v) names its key store"
+    edge_cases:
+      - condition: The card is changed after signing, or signed by a key other than its kid's
+        expected: The gateway shows the card signature as not verifying, with the reason
+      - condition: An agent from before card signing
+        expected: Its card is unsigned and the page says so
+      - condition: The card holds a number that is not an exact integer
+        expected: The card is served unsigned, since RFC 8785's form for it would have to match other implementations digit for digit
+      - condition: The workload key cannot sign
+        expected: The card is served unsigned, with a warning in the agent's log
+    refs:
+      - crates/arkavo-protocol/src/card_signature.rs
+      - crates/arkavo-server/src/server/well_known.rs
+      - crates/arkavo-agui/src/agent_connection/identity.rs
+      - crates/arkavo-agui/static/js/panels/agent-detail.js
+    changed: "2026-10-18"
+
+  - id: SRV-018
+    name: The agent card carries the statements vouching for the agent's other keys
+    criticality: high
+    given:
+      - An agent with a workload key and gossip, TDF and iroh keys kept in its directory (INGRESS-005)
+    when: Its card is served
+    then:
+      - "The card carries an extension with uri https://arkavo.com/a2a/key-statements/v1 whose data holds one key statement (INGRESS-006) for each of those keys, inside what the card signature covers"
+      - Each statement is renewed before it runs out, so a card is never served with an expired one
+      - "The arkavo ui gateway checks each statement against the did:key that signed the card and lists, on the agent's page, the keys that identity vouches for, by purpose"
+    edge_cases:
+      - condition: A statement signed by another workload key, or one that does not hold
+        expected: Not listed; it names no key of this agent's
+      - condition: A key whose statement cannot be signed
+        expected: Left out of the card, with a warning in the agent's log
+      - condition: An agent from before key statements, or whose card is unsigned
+        expected: The page lists no keys for it
+    refs:
+      - crates/arkavo-server/src/server/well_known.rs
+      - crates/arkavo-cli/src/commands/agent/keys.rs
+      - crates/arkavo-key-statement/src/lib.rs
+      - crates/arkavo-agui/src/agent_connection/identity.rs
+      - crates/arkavo-agui/static/js/panels/agent-detail.js
+    changed: "2026-10-18"

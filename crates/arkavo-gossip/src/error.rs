@@ -54,6 +54,23 @@ pub enum GossipError {
     #[error("a different key is already bound to {0}")]
     KeyConflict(String),
 
+    /// The agent id belongs to a workload key, and the key offered for it
+    /// comes without that workload key's statement
+    #[error("{agent_id} is the agent {did}; a key for it needs that agent's key statement")]
+    Unvouched { agent_id: String, did: String },
+
+    /// The agent id belongs to another workload key than the one vouching
+    #[error("{agent_id} is the agent {pinned}, not {presented}; a new agent needs a new name")]
+    IdentityConflict {
+        agent_id: String,
+        pinned: String,
+        presented: String,
+    },
+
+    /// A key statement that does not hold
+    #[error(transparent)]
+    Statement(#[from] arkavo_key_statement::StatementError),
+
     /// Message rejected because it originated from a different swarm
     #[error("swarm mismatch: message from '{0}' rejected")]
     SwarmMismatch(String),

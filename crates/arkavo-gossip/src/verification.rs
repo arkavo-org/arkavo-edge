@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use arkavo_crypto::{AgentKeypair, AgentPublicKey};
+use arkavo_key_statement::{Generations, KeyStatement, Purpose};
 use sha2::{Digest, Sha256};
 
 use crate::advisor_message::AdvisorAdjustmentAnnouncement;
@@ -17,6 +18,12 @@ use crate::message::{PatchAnnouncement, PatchVote};
 pub struct KeyRegistry {
     /// Map of agent ID to public key
     keys: HashMap<String, AgentPublicKey>,
+    /// The workload `did:key` that vouched for each agent id's key
+    /// (INGRESS-006). It outlives the key: mDNS goodbyes are unauthenticated,
+    /// so an id a workload key has claimed stays that workload's while this
+    /// process runs, and a forged goodbye cannot hand it to someone else.
+    identities: HashMap<String, String>,
+    generations: Generations,
 }
 
 impl KeyRegistry {
@@ -31,12 +38,17 @@ impl KeyRegistry {
     pub fn with_key(agent_id: String, pubkey: AgentPublicKey) -> Self {
         let mut keys = HashMap::new();
         keys.insert(agent_id, pubkey);
-        Self { keys }
+        Self {
+            keys,
+            ..Self::default()
+        }
     }
 
     /// Bind a public key to an agent. Binding the same key again is a no-op;
     /// a different key for an id already bound is refused, because replacing
-    /// it would let the new key holder sign gossip as that agent.
+    /// it would let the new key holder sign gossip as that agent. An id a
+    /// workload key has vouched for takes only keys that workload vouches
+    /// for, through [`Self::register_vouched`].
     pub fn register(&mut self, agent_id: String, pubkey: AgentPublicKey) -> GossipResult<()> {
         match self.keys.get(&agent_id) {
             Some(bound) if bound.to_bytes() != pubkey.to_bytes() => {
@@ -44,13 +56,68 @@ impl KeyRegistry {
             }
             Some(_) => Ok(()),
             None => {
+                if let Some(did) = self.identities.get(&agent_id) {
+                    return Err(GossipError::Unvouched {
+                        did: did.clone(),
+                        agent_id,
+                    });
+                }
                 self.keys.insert(agent_id, pubkey);
                 Ok(())
             }
         }
     }
 
-    /// Forget an agent's key, as when the agent leaves the network.
+    /// Bind a key its agent's workload key vouched for. `statement` must
+    /// already have been verified. The id then belongs to that workload: no
+    /// other workload's statement and no unvouched key takes it, and a newer
+    /// generation from the same workload replaces the bound key, so an agent
+    /// that replaces its gossip key is not refused until this peer restarts.
+    pub fn register_vouched(
+        &mut self,
+        agent_id: String,
+        pubkey: AgentPublicKey,
+        statement: &KeyStatement,
+    ) -> GossipResult<()> {
+        if statement.purpose != Purpose::Gossip
+            || statement.ed25519_key()?.to_bytes() != pubkey.to_bytes()
+        {
+            return Err(GossipError::Verification(
+                "the key statement does not vouch for this gossip key".into(),
+            ));
+        }
+        let pinned = self.identities.get(&agent_id);
+        if let Some(pinned) = pinned.filter(|did| **did != statement.issuer) {
+            return Err(GossipError::IdentityConflict {
+                pinned: pinned.clone(),
+                presented: statement.issuer.clone(),
+                agent_id,
+            });
+        }
+        let replaces_unvouched = pinned.is_none()
+            && self
+                .keys
+                .get(&agent_id)
+                .is_some_and(|bound| bound.to_bytes() != pubkey.to_bytes());
+        if replaces_unvouched {
+            return Err(GossipError::KeyConflict(agent_id));
+        }
+        // Last, because it records the generation: nothing may fail after it.
+        self.generations.admit(statement)?;
+        self.identities
+            .insert(agent_id.clone(), statement.issuer.clone());
+        self.keys.insert(agent_id, pubkey);
+        Ok(())
+    }
+
+    /// The workload `did:key` that vouched for `agent_id`'s key, if one did.
+    #[must_use]
+    pub fn identity(&self, agent_id: &str) -> Option<&str> {
+        self.identities.get(agent_id).map(String::as_str)
+    }
+
+    /// Forget an agent's key, as when the agent leaves the network. Which
+    /// workload the id belongs to is kept.
     pub fn unregister(&mut self, agent_id: &str) {
         self.keys.remove(agent_id);
     }
@@ -374,5 +441,141 @@ mod tests {
         let wrong_hash = [0u8; 32];
         let result = verifier.verify_content_hash(content, &wrong_hash);
         assert!(matches!(result, Err(GossipError::Verification(_))));
+    }
+
+    mod vouched {
+        use super::*;
+        use crate::test_support::Workload;
+        use arkavo_test_macros::spec;
+
+        #[spec("INGRESS-017")]
+        #[test]
+        fn a_restarted_agent_rebinds_its_kept_key() {
+            let workload = Workload::new();
+            let gossip = AgentKeypair::generate().public_key();
+            let (_, statement) = workload.vouch(&gossip, 0);
+            let mut registry = KeyRegistry::new();
+            registry
+                .register_vouched("planner".into(), gossip.clone(), &statement)
+                .unwrap();
+            assert_eq!(registry.identity("planner"), Some(workload.did.as_str()));
+
+            registry.unregister("planner");
+            registry
+                .register_vouched("planner".into(), gossip.clone(), &statement)
+                .unwrap();
+            assert!(registry.get("planner").is_some());
+        }
+
+        /// A forged mDNS goodbye unbinds the key; the name must not then go
+        /// to whoever binds next.
+        #[spec("INGRESS-017")]
+        #[test]
+        fn a_vouched_name_takes_no_unvouched_key_even_after_a_goodbye() {
+            let workload = Workload::new();
+            let gossip = AgentKeypair::generate().public_key();
+            let (_, statement) = workload.vouch(&gossip, 0);
+            let mut registry = KeyRegistry::new();
+            registry
+                .register_vouched("planner".into(), gossip, &statement)
+                .unwrap();
+            registry.unregister("planner");
+
+            let intruder = AgentKeypair::generate().public_key();
+            let err = registry.register("planner".into(), intruder).unwrap_err();
+            assert!(matches!(err, GossipError::Unvouched { .. }), "{err}");
+            assert!(registry.get("planner").is_none());
+        }
+
+        #[spec("INGRESS-017")]
+        #[test]
+        fn a_vouched_name_takes_no_other_agents_statement() {
+            let planner = Workload::new();
+            let intruder = Workload::new();
+            let mut registry = KeyRegistry::new();
+            let gossip = AgentKeypair::generate().public_key();
+            let (_, statement) = planner.vouch(&gossip, 0);
+            registry
+                .register_vouched("planner".into(), gossip, &statement)
+                .unwrap();
+            registry.unregister("planner");
+
+            let theirs = AgentKeypair::generate().public_key();
+            let (_, statement) = intruder.vouch(&theirs, 7);
+            let err = registry
+                .register_vouched("planner".into(), theirs, &statement)
+                .unwrap_err();
+            assert!(err.to_string().contains("needs a new name"), "{err}");
+        }
+
+        #[spec("INGRESS-017")]
+        #[test]
+        fn a_newer_generation_replaces_the_key_and_an_older_one_is_refused() {
+            let workload = Workload::new();
+            let first = AgentKeypair::generate().public_key();
+            let second = AgentKeypair::generate().public_key();
+            let (_, old) = workload.vouch(&first, 1);
+            let (_, new) = workload.vouch(&second, 2);
+            let mut registry = KeyRegistry::new();
+            registry
+                .register_vouched("planner".into(), first.clone(), &old)
+                .unwrap();
+            registry
+                .register_vouched("planner".into(), second.clone(), &new)
+                .unwrap();
+            assert_eq!(
+                registry.get("planner").unwrap().to_bytes(),
+                second.to_bytes()
+            );
+
+            assert!(
+                registry
+                    .register_vouched("planner".into(), first, &old)
+                    .is_err()
+            );
+            let (_, rival) = workload.vouch(&AgentKeypair::generate().public_key(), 2);
+            assert!(
+                registry
+                    .register_vouched("planner".into(), rival.ed25519_key().unwrap(), &rival)
+                    .is_err()
+            );
+            assert_eq!(
+                registry.get("planner").unwrap().to_bytes(),
+                second.to_bytes()
+            );
+        }
+
+        #[spec("INGRESS-017")]
+        #[test]
+        fn a_statement_does_not_displace_a_bound_unvouched_key() {
+            let workload = Workload::new();
+            let mut registry = KeyRegistry::new();
+            registry
+                .register("planner".into(), AgentKeypair::generate().public_key())
+                .unwrap();
+            let gossip = AgentKeypair::generate().public_key();
+            let (_, statement) = workload.vouch(&gossip, 0);
+            assert!(matches!(
+                registry.register_vouched("planner".into(), gossip, &statement),
+                Err(GossipError::KeyConflict(_))
+            ));
+            assert_eq!(registry.identity("planner"), None);
+        }
+
+        #[spec("INGRESS-017")]
+        #[test]
+        fn a_statement_for_another_key_binds_nothing() {
+            let workload = Workload::new();
+            let (_, statement) = workload.vouch(&AgentKeypair::generate().public_key(), 0);
+            let mut registry = KeyRegistry::new();
+            let other = AgentKeypair::generate().public_key();
+            assert!(
+                registry
+                    .register_vouched("planner".into(), other, &statement)
+                    .is_err()
+            );
+            assert!(registry.get("planner").is_none());
+            assert_eq!(registry.identity("planner"), None);
+        }
     }
 }

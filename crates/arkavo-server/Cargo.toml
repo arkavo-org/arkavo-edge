@@ -107,6 +107,7 @@ arkavo-market = { path = "../arkavo-market" }
 arkavo-critic = { path = "../arkavo-critic" }
 arkavo-trust = { path = "../arkavo-trust" }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
+arkavo-key-statement = { path = "../arkavo-key-statement" }
 arkavo-arp = { path = "../arkavo-arp" }
 arkavo-arp-runtime = { path = "../arkavo-arp-runtime" }
 ed25519-dalek = { workspace = true }

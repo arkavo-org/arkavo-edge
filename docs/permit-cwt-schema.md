@@ -41,7 +41,7 @@ Untrusted `decode`/`verify` input is rejected if it exceeds 16 KiB
 
 The COSE_Sign1 protected header carries:
 
-- `alg` (1): `EdDSA` (-8) or `ES256` (-7). No other algorithms are accepted.
+- `alg` (1): `EdDSA` (-8) or `ES256` (-7), which permits are written with. RFC 9864's fully-specified `Ed25519` (-19) and `ESP256` (-9) are read as the same algorithms. No other algorithms are accepted.
 - `kid` (4): the issuer's key identifier — SHA-256 over the issuer's raw
   public key bytes (32 bytes for Ed25519, the 65-byte SEC1 uncompressed point
   for P-256), so 32 bytes of digest. `arkavo_permit::issuer_kid` computes it.

@@ -15,8 +15,10 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::time::{Duration, sleep};
 
+mod identity;
 mod kit_config;
 
+pub use identity::CardIdentity;
 pub use kit_config::KitConfigNotServed;
 
 /// Represents a persistent connection to an AI agent
@@ -33,6 +35,7 @@ pub struct AgentConnection {
     context_snapshot: Arc<RwLock<Option<serde_json::Value>>>,
     /// The notices the agent reported open in its last snapshot (#759)
     notices: Arc<RwLock<Vec<arkavo_protocol::operator_notice::OperatorNotice>>>,
+    identity: Arc<RwLock<Option<CardIdentity>>>,
     _stream_ordering: Arc<StreamOrdering>,
     _latency_tracker: Arc<LatencyTracker>,
 }
@@ -106,6 +109,7 @@ impl AgentConnection {
             chat_broadcasts: Arc::new(RwLock::new(HashMap::new())),
             context_snapshot: Arc::new(RwLock::new(None)),
             notices: Arc::new(RwLock::new(Vec::new())),
+            identity: Arc::new(RwLock::new(None)),
             _stream_ordering: Arc::new(StreamOrdering::new()),
             _latency_tracker: Arc::new(LatencyTracker::new()),
         }
@@ -205,6 +209,9 @@ impl AgentConnection {
 
         *self.client.write().await = Some(client);
         *self.status.write().await = ConnectionStatus::Connected;
+        // Every path into a connection comes through here: mDNS discovery
+        // and --agent peers call connect directly.
+        self.read_identity().await;
 
         Ok(())
     }

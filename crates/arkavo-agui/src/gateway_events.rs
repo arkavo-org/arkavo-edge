@@ -168,12 +168,14 @@ pub async fn handle_request_fleet_snapshot(
                 .unwrap_or("")
                 .to_string(),
             status: "disconnected".to_string(),
+            identity: None,
         })
         .collect();
     drop(agents_list);
     let connections = agent_connections.read().await.clone();
     for agent in &mut mesh_agents {
         if let Some(connection) = connections.get(&agent.id) {
+            agent.identity = connection.identity().await;
             agent.status = match connection.get_status().await {
                 crate::agent_connection::ConnectionStatus::Connected => "connected",
                 // An agent that has never answered is not reconnecting.

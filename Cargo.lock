@@ -584,9 +584,11 @@ dependencies = [
  "arkavo-arp-runtime",
  "arkavo-budget",
  "arkavo-cef",
+ "arkavo-crypto",
  "arkavo-dataflow",
  "arkavo-debugger",
  "arkavo-events",
+ "arkavo-key-statement",
  "arkavo-llm",
  "arkavo-mcp-tools",
  "arkavo-memory",
@@ -778,7 +780,6 @@ dependencies = [
  "arkavo-budget",
  "arkavo-cef",
  "arkavo-config-bundle",
- "arkavo-config-encryption",
  "arkavo-context",
  "arkavo-critic",
  "arkavo-crypto",
@@ -1050,7 +1051,10 @@ name = "arkavo-device-identity"
 version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
+ "arkavo-key-statement",
+ "arkavo-secure-enclave",
  "arkavo-test-macros",
+ "base64 0.22.1",
  "dirs 5.0.1",
  "hex",
  "keyring",
@@ -1220,6 +1224,7 @@ name = "arkavo-gossip"
 version = "0.107.0"
 dependencies = [
  "arkavo-crypto",
+ "arkavo-key-statement",
  "arkavo-test-macros",
  "chrono",
  "hex",
@@ -1303,6 +1308,19 @@ dependencies = [
  "tracing",
  "wiremock",
  "zip",
+]
+
+[[package]]
+name = "arkavo-key-statement"
+version = "0.107.0"
+dependencies = [
+ "arkavo-crypto",
+ "arkavo-test-macros",
+ "base64 0.22.1",
+ "bs58",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2075,6 +2093,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-secure-enclave"
+version = "0.107.0"
+dependencies = [
+ "p256",
+]
+
+[[package]]
 name = "arkavo-security"
 version = "0.107.0"
 dependencies = [
@@ -2139,6 +2164,7 @@ dependencies = [
  "arkavo-gossip",
  "arkavo-hrm",
  "arkavo-image-gen",
+ "arkavo-key-statement",
  "arkavo-lesson-synthesis",
  "arkavo-llama-cpp",
  "arkavo-llm",

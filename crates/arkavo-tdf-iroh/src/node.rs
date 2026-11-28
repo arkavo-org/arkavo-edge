@@ -27,6 +27,9 @@ pub struct IrohNodeConfig {
     pub gc_interval: Duration,
     /// Bytes that may be staged for other parties at once (IROH-011).
     pub staged_limit: u64,
+    /// The endpoint's key. An agent keeps it so its endpoint id survives
+    /// restarts (IROH-013); without one the node makes its own.
+    pub secret_key: Option<iroh::SecretKey>,
 }
 
 impl Default for IrohNodeConfig {
@@ -35,6 +38,7 @@ impl Default for IrohNodeConfig {
             relay_mode: true,
             gc_interval: Duration::from_mins(1),
             staged_limit: 1 << 30,
+            secret_key: None,
         }
     }
 }
@@ -46,6 +50,15 @@ impl IrohNodeConfig {
         Self {
             relay_mode: false,
             ..Self::default()
+        }
+    }
+
+    /// Use the Ed25519 key `seed` makes as the endpoint's key.
+    #[must_use]
+    pub fn with_key_seed(self, seed: &[u8; 32]) -> Self {
+        Self {
+            secret_key: Some(iroh::SecretKey::from_bytes(seed)),
+            ..self
         }
     }
 }
@@ -117,7 +130,11 @@ impl IrohNode {
         info!("Starting Iroh node");
 
         // Create endpoint with iroh's default n0.computer relay/DNS preset.
-        let endpoint = Endpoint::builder(N0)
+        let mut builder = Endpoint::builder(N0);
+        if let Some(key) = &self.config.secret_key {
+            builder = builder.secret_key(key.clone());
+        }
+        let endpoint = builder
             .bind()
             .await
             .map_err(|e| IrohError::EndpointInit(e.to_string()))?;
@@ -255,6 +272,22 @@ mod tests {
 
         let direct = IrohNodeConfig::direct_only();
         assert!(!direct.relay_mode);
+    }
+
+    #[spec("IROH-013")]
+    #[tokio::test]
+    async fn a_kept_key_keeps_the_endpoint_id_across_restarts() {
+        let seed = [7u8; 32];
+        let first = IrohNode::new(IrohNodeConfig::default().with_key_seed(&seed));
+        first.start().await.unwrap();
+        let id = first.endpoint_id().await.unwrap();
+        first.stop().await.unwrap();
+
+        let restarted = IrohNode::new(IrohNodeConfig::default().with_key_seed(&seed));
+        restarted.start().await.unwrap();
+        assert_eq!(restarted.endpoint_id().await.unwrap(), id);
+        assert_eq!(id, iroh::SecretKey::from_bytes(&seed).public());
+        restarted.stop().await.unwrap();
     }
 
     #[spec("IROH-005")]

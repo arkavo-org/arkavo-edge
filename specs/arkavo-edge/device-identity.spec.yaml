@@ -103,3 +103,55 @@ scenarios:
     when: "an agent keypair is created"
     then: ["the device keypair is unchanged", "the agent DID differs from the device DID", "deleting the agent keypair leaves the device keypair"]
     refs: ["crates/arkavo-device-identity/src/keypair.rs"]
+
+  - id: DEVICE-008
+    name: The workload key is the agent's account and lives in the Secure Enclave where there is one
+    criticality: high
+    given: ["An agent starting for the first time under this user"]
+    when: "Its workload key is loaded or made"
+    then:
+      - "On a Mac with a Secure Enclave this process can use, the P-256 key is made in the enclave with private-key usage only, so it signs with no prompt, and the file holds only the enclave's wrapped form of it"
+      - "Elsewhere it is a software P-256 key, and the file records which store holds it"
+      - "Its did:key (did:key:zDn…) is the same on every later start"
+      - "The file is readable by its owner only"
+      - "Agents starting at the same moment settle on one key; none replaces another's"
+    refs: ["crates/arkavo-device-identity/src/workload_key.rs", "crates/arkavo-secure-enclave/src/lib.rs"]
+    changed: "2026-10-18"
+
+  - id: DEVICE-009
+    name: A workload key file is never replaced on the agent's behalf
+    criticality: high
+    given: ["A workload key file that cannot be used"]
+    when: "The agent starts"
+    then:
+      - "The agent refuses to start and names the file; moving it aside starts a new agent, which takes a new name because peers know the old name by the old key"
+      - "The file is left as it was"
+    edge_cases:
+      - condition: The file holds the old agent slot's bare 32-byte seed, or anything that is not a workload key
+        expected: Refused, never read as a key
+      - condition: The file names a format this version does not read
+        expected: Refused, naming the format
+      - condition: The file holds a Secure Enclave key from another Mac, or nobody has logged in since this Mac started
+        expected: Refused; a new key would be a different agent under the same file
+      - condition: The Mac has a Secure Enclave that refuses to make a key
+        expected: The agent does not start, rather than settle for a software key that would pass for an enclave one
+    refs: ["crates/arkavo-device-identity/src/workload_key.rs"]
+    changed: "2026-10-18"
+
+  - id: DEVICE-010
+    name: Each agent name has its own workload key
+    criticality: high
+    given: ["Two agents with different names run by one user on one machine"]
+    when: "Each loads its workload key"
+    then:
+      - "Each name has its own key, so each is its own did:key and its own account"
+      - "The same name loads the same key on every start"
+      - "Names that differ only in case are one agent, as their mDNS instance names are"
+      - "An agent's keys live in a directory readable by its owner only"
+    edge_cases:
+      - condition: A name with path characters such as ../ or a slash
+        expected: Encoded into one directory name inside the agents directory
+      - condition: An empty name
+        expected: Refused; no key is made
+    refs: ["crates/arkavo-device-identity/src/workload_key.rs", "crates/arkavo-cli/src/commands/agent.rs"]
+    changed: "2026-10-18"

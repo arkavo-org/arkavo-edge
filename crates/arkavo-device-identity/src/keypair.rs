@@ -10,50 +10,6 @@ const KEYPAIR_FILENAME: &str = "agent_keypair";
 /// short-lived credentials distinct from its host device's identity.
 const AGENT_KEYPAIR_FILENAME: &str = "agent_identity_keypair";
 
-/// Write `bytes` to `path` so the file is never readable by anyone but its
-/// owner, not even for an instant: the content is staged in a sibling file
-/// created with mode 0600 and then renamed over the target. Writing in place
-/// and tightening the mode afterwards leaves a world-readable window over a
-/// private key, and lets a concurrent reader see a half-written file.
-fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let stem = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("keypair");
-    let tmp = path.with_file_name(format!(
-        ".{stem}.{}.{}.tmp",
-        std::process::id(),
-        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    // A leftover from a killed run would defeat `create_new`, which is what
-    // guarantees the mode is applied rather than inherited.
-    let _ = std::fs::remove_file(&tmp);
-
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-
-    let staged = (|| -> std::io::Result<()> {
-        let mut file = options.open(&tmp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&tmp, path)
-    })();
-
-    staged.map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        DeviceIdentityError::Storage(format!("Failed to write file: {}", e))
-    })
-}
-
 #[cfg(target_os = "macos")]
 mod platform {
     use super::*;
@@ -93,7 +49,7 @@ mod platform {
     }
 
     fn write(filename: &str, keypair_bytes: &[u8]) -> Result<()> {
-        super::write_private(&keypair_path(filename)?, keypair_bytes)
+        crate::private_file::write_private(&keypair_path(filename)?, keypair_bytes)
     }
 
     fn remove(filename: &str) -> Result<()> {
@@ -188,7 +144,7 @@ mod platform {
     }
 
     fn write(filename: &str, keypair_bytes: &[u8]) -> Result<()> {
-        super::write_private(&keypair_path(filename)?, keypair_bytes)
+        crate::private_file::write_private(&keypair_path(filename)?, keypair_bytes)
     }
 
     fn remove(filename: &str) -> Result<()> {
@@ -283,7 +239,7 @@ mod platform {
     }
 
     fn write(filename: &str, keypair_bytes: &[u8]) -> Result<()> {
-        super::write_private(&keypair_path(filename)?, keypair_bytes)
+        crate::private_file::write_private(&keypair_path(filename)?, keypair_bytes)
     }
 
     fn remove(filename: &str) -> Result<()> {
@@ -339,6 +295,12 @@ mod platform {
             .map_err(|e| DeviceIdentityError::Storage(format!("Failed to read mtime: {}", e)))?;
         Ok(Some(ts))
     }
+}
+
+/// Where an identity file named `filename` lives, beside the keypair slots
+/// and under the same test override.
+pub(crate) fn slot_path(filename: &str) -> Result<std::path::PathBuf> {
+    platform::slot_path(filename)
 }
 
 /// Filesystem locations of the device and agent keypair slots, in that order.

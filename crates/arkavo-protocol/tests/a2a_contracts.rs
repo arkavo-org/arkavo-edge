@@ -127,7 +127,7 @@ fn contract_agent_card_required_fields() {
         security_schemes: vec![],
         security: vec![],
         extensions: vec![],
-        signature: None,
+        signatures: vec![],
     };
 
     let json_str = serde_json::to_string(&card).expect("Must serialize");
@@ -176,7 +176,7 @@ fn contract_agent_card_roundtrip() {
         security_schemes: vec![],
         security: vec![],
         extensions: vec![],
-        signature: None,
+        signatures: vec![],
     };
 
     let json_str = serde_json::to_string(&original).expect("Must serialize");

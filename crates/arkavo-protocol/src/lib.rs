@@ -26,6 +26,7 @@ pub mod agent_config;
 pub mod agent_registry;
 pub mod agent_specialization;
 pub mod auth;
+pub mod card_signature;
 pub mod chat_cloud_gate;
 pub mod chat_commands;
 pub mod chat_history;
