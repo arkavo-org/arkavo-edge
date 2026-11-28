@@ -22,9 +22,28 @@ ignore = [
     "RUSTSEC-2024-0370",
     # Bundled SQLite before 3.54.0 can return uninitialized memory when it
     # opens a database beside a crafted `-wal` file (CVE-2026-119375, local).
-    # Fixed in libsqlite3-sys 0.39.0, which no sqlx release accepts yet:
-    # sqlx-sqlite 0.9.0 requires `<0.38.0`. Every database opened here is one
-    # this program created in the user's own data directory; none comes from
-    # another party. Remove when sqlx allows libsqlite3-sys >= 0.39.
+    # Fixed in libsqlite3-sys 0.39.0, which sqlx 0.8.x cannot accept
+    # (sqlx 0.9.1 is a breaking major upgrade raising MSRV to 1.94). Every
+    # database opened here is one this program created in the user's own data
+    # directory; none comes from another party. Remove when upgrading to sqlx 0.9+.
     "RUSTSEC-2026-0459",
+    # chrono unmaintained — used directly across workspace crates and
+    # transitively by sqlx and schemars. No drop-in upgrade exists; migration
+    # to jiff/time is tracked separately.
+    "RUSTSEC-2026-0543",
+    # heapless 0.7.17 unsound advisories (fixed only in >= 0.9.4) — transitive
+    # via postcard 1.1.3 -> iroh-blobs / iroh-relay / iroh-tickets / irpc ->
+    # arkavo-tdf-iroh. Blocked on iroh moving to postcard 2.x (still 2.0.0-rc.1).
+    # postcard 1.1.3 only references heapless::Vec and heapless::String (and
+    # iroh enables use-std), not SortedLinkedList, Deque, IndexMap, Spsc,
+    # HistoryBuf, or pool.
+    "RUSTSEC-2026-0574",
+    "RUSTSEC-2026-0575",
+    "RUSTSEC-2026-0576",
+    "RUSTSEC-2026-0577",
+    "RUSTSEC-2026-0578",
+    "RUSTSEC-2026-0579",
+    "RUSTSEC-2026-0580",
+    "RUSTSEC-2026-0581",
+    "RUSTSEC-2026-0582",
 ]

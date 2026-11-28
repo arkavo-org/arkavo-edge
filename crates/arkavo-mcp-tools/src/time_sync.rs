@@ -61,25 +61,27 @@ impl GetAgentTimeTool {
     }
 
     fn format_time(now: DateTime<Utc>, format: &str, timezone_str: &str) -> crate::Result<Value> {
-        use std::str::FromStr;
         let tz = if timezone_str == "UTC" || timezone_str.is_empty() {
-            chrono_tz::UTC
+            jiff::tz::TimeZone::UTC
         } else {
-            chrono_tz::Tz::from_str(timezone_str)
+            jiff::tz::TimeZone::get(timezone_str)
                 .map_err(|e| crate::ToolError::InvalidParams(format!("Invalid timezone: {}", e)))?
         };
 
-        let local_time = now.with_timezone(&tz);
+        let nanos = now.timestamp_subsec_nanos().min(999_999_999).cast_signed();
+        let ts = jiff::Timestamp::new(now.timestamp(), nanos)
+            .map_err(|e| crate::ToolError::Other(format!("Invalid system timestamp: {}", e)))?;
+        let local_time = ts.to_zoned(tz);
 
         // Create human-readable display text
         let display = local_time
-            .format("%A, %B %d, %Y at %I:%M:%S %p %Z")
+            .strftime("%A, %B %d, %Y at %I:%M:%S %p %Z")
             .to_string();
 
         match format {
             "rfc3339" | "" => Ok(json!({
                 "display": format!("The current time is: {}", display),
-                "timestamp": local_time.to_rfc3339(),
+                "timestamp": ts.display_with_offset(local_time.offset()).to_string(),
                 "format": "rfc3339",
                 "timezone": timezone_str,
                 "unix_seconds": now.timestamp(),
@@ -95,7 +97,7 @@ impl GetAgentTimeTool {
             })),
             "iso8601" => Ok(json!({
                 "display": format!("The current time is: {}", display),
-                "timestamp": local_time.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+                "timestamp": local_time.strftime("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
                 "format": "iso8601",
                 "timezone": timezone_str,
                 "unix_seconds": now.timestamp(),
@@ -428,6 +430,41 @@ mod tests {
         assert_eq!(result["format"], "unix");
         assert!(result["unix_seconds"].as_i64().is_some());
         assert!(result["unix_nanos"].as_u64().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_get_agent_time_iana_timezones_and_formats() {
+        let tool = GetAgentTimeTool::new();
+
+        for tz in ["UTC", "", "America/New_York", "Europe/London", "Asia/Tokyo"] {
+            let result = tool
+                .execute(json!({"format": "rfc3339", "timezone": tz}))
+                .await
+                .unwrap();
+            let ts = result["timestamp"].as_str().unwrap();
+            assert!(
+                chrono::DateTime::parse_from_rfc3339(ts).is_ok(),
+                "expected valid RFC 3339 timestamp for {tz}, got {ts}"
+            );
+            assert!(
+                result["display"]
+                    .as_str()
+                    .unwrap()
+                    .contains("The current time is:")
+            );
+        }
+
+        let iso = tool
+            .execute(json!({"format": "iso8601", "timezone": "America/New_York"}))
+            .await
+            .unwrap();
+        assert_eq!(iso["format"], "iso8601");
+        assert!(iso["timestamp"].as_str().unwrap().ends_with('Z'));
+
+        let invalid = tool
+            .execute(json!({"format": "rfc3339", "timezone": "Mars/Olympus_Mons"}))
+            .await;
+        assert!(invalid.is_err());
     }
 
     #[tokio::test]
